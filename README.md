@@ -1,23 +1,21 @@
-Kindelia: an efficient, secure cryptocomputer
+Kindelia: a hack-proof decentralized computer
 =============================================
 
-Decentralized computers, such as Ethereum and Cardano, raise the concept of
-cryptocurrencies to a new level, and promise to be the foundation of a
-completely digitized global economy. To make this viable, however, it is
-necessary to reach a threshold of security and efficiency that none of these
-networks has achieved yet.
-
-By leveraging a new functional virtual machine, the HVM, we're able to massively
-cut the costs of layer-1 transactions, for the same usage level. This, in turn,
-allows formally verified programs to run directly on the blockchain, making
-contracts inherently secure. Finally, there is no premine, because there are no
-tokens to begin with, making the it truly fair. Kindelia isn't a cryptocurrency:
-it is just an efficient and secure cryptocomputer.
+Turing-complete blockchains, such as Ethereum, allow users to host applications
+in a decentralized network (DApps), but continuous security exploits hinder
+their adoption. Formal verification techniques can be used to ensure these
+applications have no exploits before being deployed, but Ethereum's underlying
+processor, the EVM, make these techniques too expensive to be viable. By
+leveraging a pure functional virtual machine, the HVM, Kindelia is able to run
+formally verified programs cheaply and efficiently, letting it host hack-proof
+DApps. Moreover, due to extensive low-level optimizations, Kindelia is able to
+sustain a considerably higher throughput, making its layer-1 transaction costs 2
+order of magnitudes lower than Ethereum's, for the same usage level.
 
 Introduction
 ============
 
-_TODO_
+
 
 ### Efficiency
 
