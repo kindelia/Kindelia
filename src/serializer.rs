@@ -206,6 +206,11 @@ pub fn serialized_message(message: Message) -> BitVec {
   return bits;
 }
 
+pub fn deserialized_message(bits: &BitVec) -> Message {
+  let mut index = 0;
+  deserialize_message(bits, &mut index)
+}
+
 
 // Tests
 // =====

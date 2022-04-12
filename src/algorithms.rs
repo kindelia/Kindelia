@@ -286,12 +286,30 @@ pub fn show_chain(node: &NodeState, lines: usize) -> String {
 // Networking
 // ==========
 
+fn udp_init() -> UdpSocket {
+  UdpSocket::bind("127.0.0.1:21000").expect("Can't bind socket.")
+}
+
 fn udp_send(socket: &mut UdpSocket, address: Address, message: Message) {
   match address {
     Address::IPv4 { val0, val1, val2, val3, port } => {
       let bits = bitvec_to_bytes(&serialized_message(message));
-      let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080);
+      let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
       socket.send_to(bits.as_slice(), addr).ok();
+    }
+  }
+}
+
+fn udp_receive(socket: &mut UdpSocket) -> Option<Message> {
+  let mut buffer = [0; 65536];
+  match socket.recv_from(&mut buffer) {
+    Err(err) => {
+      None
+    }
+    Ok((msg_len, sender_addr)) => {
+      let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
+      let msge = deserialized_message(&bits);
+      Some(msge)
     }
   }
 }
