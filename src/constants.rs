@@ -18,3 +18,9 @@ pub const IPV6_SIZE : usize = 16;
 
 // Size of an IP port, in bytes
 pub const PORT_SIZE : usize = 2;
+
+// How many nodes we gossip an information to?
+pub const GOSSIP_FACTOR : u64 = 16;
+
+// How many nodes we request missing data from?
+pub const REQUEST_FACTOR : u64 = 4;

@@ -207,6 +207,7 @@ dependencies = [
  "num",
  "primitive-types",
  "priority-queue",
+ "rand 0.8.5",
  "sha3",
 ]
 

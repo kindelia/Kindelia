@@ -25,7 +25,7 @@ pub struct Block {
 
 pub type Transaction = Vec<u8>;
 
-pub struct NodeState {
+pub struct Node {
   pub tip      : (U256, U256),                   // current tip work and block hash
   pub block    : U256Map<Block>,                 // block hash -> block information
   pub children : U256Map<Vec<U256>>,             // block hash -> blocks that have this as its parent
@@ -33,11 +33,14 @@ pub struct NodeState {
   pub work     : U256Map<U256>,                  // block hash -> accumulated work
   pub target   : U256Map<U256>,                  // block hash -> this block's target
   pub height   : U256Map<u64>,                   // block hash -> cached height
-  pub seen     : U256Map<bool>,                  // block hash -> have we received it yet?
+  pub seen     : U256Map<()>,                    // block hash -> have we received it yet?
   pub mined    : U256Map<HashSet<Transaction>>,  // block hash -> set of transaction hashes that were already mined
   pub pool     : PriorityQueue<Transaction,u64>, // transactions to be mined
+  pub peer_id  : HashMap<Address, u64>,          // peer address -> peer id
+  pub peers    : HashMap<u64, Peer>,             // peer id -> peer
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Address {
   IPv4 {
     val0: u8,
@@ -48,11 +51,13 @@ pub enum Address {
   }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct Peer {
   pub seen_at: u64,
   pub address: Address,
 }
 
+#[derive(Debug, Clone)]
 pub enum Message {
   PutPeers {
     peers: Vec<Address>

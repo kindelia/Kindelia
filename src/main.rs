@@ -5,33 +5,35 @@
 
 mod algorithms;
 mod constants;
+mod network;
+mod node;
 mod serializer;
 mod types;
 
 use crate::algorithms::*;
 use crate::constants::*;
+use crate::network::*;
 use crate::serializer::*;
 use crate::types::*;
 
-fn main() {
-  serializer::test_serializer_0();
-  serializer::test_serializer_1();
-  serializer::test_serializer_2();
+use primitive_types::U256;
+
+fn node_main_loop(socket: &mut std::net::UdpSocket, port: u16) {
+  loop {
+    let got_msgs = udp_receive(socket);
+    println!("- got: {:?}", got_msgs);
+
+    for i in 0 .. 2 {
+      let addr = ipv4(127, 0, 0, 1, 42000 + i);
+      let msge = Message::AskBlock { bhash: u256(port as u64) };
+      udp_send(socket, addr, &msge);
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+  }
 }
 
-//fn main() -> std::io::Result<()> {
-    //let socket = UdpSocket::bind("127.0.0.1:21000")?;
-    //loop {
-        //// Receives a single datagram message on the socket. If `buf` is too small to hold
-        //// the message, it will be cut off.
-        //let mut buf = [0; 10];
-        //let (amt, src) = socket.recv_from(&mut buf)?;
-
-        //println!("{} {} {:?}", amt, src, buf);
-
-        //// Redeclare `buf` as slice of the received data and send reverse data back to origin.
-        ////let buf = &mut buf[..amt];
-        ////buf.reverse();
-        ////socket.send_to(buf, &src)?;
-    //} // the socket is closed here
-//}
+fn main() {
+  let (mut socket, port) = udp_init(&[42000, 42001, 42002, 42003]).unwrap();
+  node_main_loop(&mut socket, port);
+}

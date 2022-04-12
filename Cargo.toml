@@ -12,5 +12,5 @@ im = "15.0.0"
 num = "0.1.36"
 primitive-types = { version = "0.11.1" }
 priority-queue = "1.2.1"
+rand = "0.8.5"
 sha3 = "0.9.1"
-
