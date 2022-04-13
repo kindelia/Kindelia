@@ -28,7 +28,7 @@ pub fn u64_to_bytes(value: u64) -> Vec<u8> {
 pub fn u256_to_bytes(value: U256) -> Vec<u8> {
   let mut bytes = Vec::new();
   for i in 0 .. 32 {
-    bytes.push(value.byte(i));
+    bytes.push(value.byte(32 - i - 1));
   }
   return bytes;
 }
@@ -41,12 +41,12 @@ pub fn bytes_to_bitvec(bytes: &[u8]) -> BitVec {
   return BitVec::from_bytes(bytes);
 }
 
-pub fn compute_difficulty(target: U256) -> U256 {
+pub fn target_to_difficulty(target: U256) -> U256 {
   let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
   return p256 / (p256 - target);
 }
 
-pub fn compute_target(difficulty: U256) -> U256 {
+pub fn difficulty_to_target(difficulty: U256) -> U256 {
   let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
   return p256 - p256 / difficulty;
 }
@@ -58,9 +58,9 @@ pub fn compute_target(difficulty: U256) -> U256 {
 // - compute_next_target(t, 2n**32n * 2n): difficulty doubles
 pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
   let p32 = U256::from("0x100000000");
-  let last_difficulty = compute_difficulty(last_target);
+  let last_difficulty = target_to_difficulty(last_target);
   let next_difficulty = u256(1) + (last_difficulty * scale - u256(1)) / p32;
-  return compute_target(next_difficulty);
+  return difficulty_to_target(next_difficulty);
 }
 
 pub fn compute_next_target_f64(last_target: U256, scale: f64) -> U256 {
@@ -71,7 +71,7 @@ pub fn get_hash_work(hash: U256) -> U256 {
   if hash == u256(0) {
     return u256(0);
   } else {
-    return compute_difficulty(hash);
+    return target_to_difficulty(hash);
   }
 }
 
@@ -99,16 +99,22 @@ pub fn hash_block(block: &Block) -> U256 {
   }
 }
 
-pub fn mine(block: Block, target: U256, max_attempts: u64) -> Option<Block> {
-  let mut block = block.clone();
-  for _i in 0 .. max_attempts {
-    if hash_block(&block) >= target {
-      return Some(block);
-    } else {
-      block.rand = block.rand + 1;
-    }
+// Converts a string to a body, terminating with a null character.
+// Truncates if the string length is larger than BODY_SIZE-1.
+pub fn string_to_body(text: &str) -> Body {
+  let mut body = Body { value: [0; BODY_SIZE] };
+  let bytes = text.as_bytes();
+  for i in 0 .. std::cmp::min(BODY_SIZE, bytes.len()) {
+    body.value[i] = bytes[i];
   }
-  return None;
+  return body;
+}
+
+pub fn body_to_string(body: &Body) -> String {
+  match std::str::from_utf8(&body.value) {
+    Ok(s)  => s.to_string(),
+    Err(e) => "\n".repeat(BODY_SIZE),
+  }
 }
 
 // System
@@ -130,14 +136,15 @@ pub fn show_address_hostname(address: &Address) -> String {
   }
 }
 
-pub fn show_block(chain: &Node, block: &Block, index: usize) -> String {
-  let zero = u256(0);
-  let bhash = hash_block(block);
-  let work = chain.work.get(&bhash).unwrap_or(&zero);
-  let show_index = format!("{}", index);
-  let show_time = format!("{}", (block.time >> 192));
-  let show_body = format!("{}", hex::encode(block.body.value));
-  let show_hash = format!("{}", bhash);
-  let show_work = format!("{}", work);
-  return format!("{} | {} | {} | {} | {}", show_index, show_time, show_hash, show_body, show_work);
+pub fn show_block(block: &Block) -> String {
+  let hash = hash_block(block);
+  return format!(
+    "time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
+    block.time,
+    block.rand,
+    body_to_string(&block.body),
+    block.prev,
+    hex::encode(u256_to_bytes(hash)),
+    get_hash_work(hash),
+  );
 }

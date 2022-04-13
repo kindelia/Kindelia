@@ -1,3 +1,6 @@
+// UDP port to listen to
+pub const UDP_PORT : u64 = 42000;
+
 // Size of a hash, in bytes
 pub const HASH_SIZE : usize = 32;
 
@@ -24,3 +27,6 @@ pub const GOSSIP_FACTOR : u64 = 16;
 
 // How many nodes we request missing data from?
 pub const REQUEST_FACTOR : u64 = 4;
+
+// How many times the mining thread attempts before unblocking?
+pub const MINE_ATTEMPTS : u64 = 1024;

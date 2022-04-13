@@ -5,6 +5,8 @@ use priority_queue::PriorityQueue;
 use sha3::Digest;
 use std::collections::HashMap;
 use std::net::*;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::algorithms::*;
 use crate::constants::*;
@@ -26,7 +28,7 @@ const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
 
 // initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
-  return compute_target(u256(256));
+  return difficulty_to_target(u256(256));
 }
 
 pub fn ZERO_HASH() -> U256 {
@@ -44,21 +46,29 @@ pub fn ROOT_BLOCK() -> Block {
   }
 }
 
-pub fn INITIAL_NODE_STATE() -> Node {
+pub fn node_init() -> Node {
+  let try_ports = [UDP_PORT as u16, UDP_PORT as u16 + 1, UDP_PORT as u16 + 2];
+  let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
   return Node {
-    block    : HashMap::from([(ZERO_HASH(), ROOT_BLOCK())]),
-    children : HashMap::from([(ZERO_HASH(), vec![])]),
-    waiters  : HashMap::new(),
-    work     : HashMap::from([(ZERO_HASH(), u256(0))]),
-    height   : HashMap::from([(ZERO_HASH(), 0)]),
-    target   : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-    seen     : HashMap::from([]),
-    tip      : (u256(0), ZERO_HASH()),
-    mined    : HashMap::new(),
-    pool     : PriorityQueue::new(),
-    peer_id  : HashMap::new(),
-    peers    : HashMap::new(),
+    socket     : socket,
+    port       : port,
+    block      : HashMap::from([(ZERO_HASH(), ROOT_BLOCK())]),
+    children   : HashMap::from([(ZERO_HASH(), vec![])]),
+    waiters    : HashMap::new(),
+    work       : HashMap::from([(ZERO_HASH(), u256(0))]),
+    height     : HashMap::from([(ZERO_HASH(), 0)]),
+    target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
+    seen       : HashMap::from([]),
+    tip        : (u256(0), ZERO_HASH()),
+    was_mined  : HashMap::new(),
+    pool       : PriorityQueue::new(),
+    peer_id    : HashMap::new(),
+    peers      : HashMap::new(),
   };
+}
+
+pub fn comm_init() -> SharedMinerComm {
+  return Arc::new(Mutex::new(MinerComm::Stop));
 }
 
 pub fn see_peer(node: &mut Node, addr: Address) {
@@ -226,7 +236,6 @@ pub fn request_missing_blocks(socket: &mut UdpSocket, node: &mut Node) {
   }
 }
 
-// Returns ~/.kindelia/blocks
 pub fn get_blocks_dir() -> String {
   let mut dir = dirs::home_dir().unwrap();
   dir.push(".kindelia");
@@ -234,7 +243,7 @@ pub fn get_blocks_dir() -> String {
   return dir.to_str().unwrap().to_string();
 }
 
-pub fn save_longest_chain(node: &mut Node) {
+pub fn do_save_longest_chain(node: &mut Node) {
   for (index, block) in get_longest_chain(node).iter().enumerate() {
     let bdir = get_blocks_dir();
     let path = format!("{}/{}", bdir, index);
@@ -244,7 +253,7 @@ pub fn save_longest_chain(node: &mut Node) {
   }
 }
 
-pub fn load_longest_chain(node: &mut Node) {
+pub fn do_load_longest_chain(node: &mut Node) {
   let bdir = get_blocks_dir();
   std::fs::create_dir_all(&bdir).ok();
   for entry in std::fs::read_dir(&bdir).unwrap() {
@@ -254,19 +263,116 @@ pub fn load_longest_chain(node: &mut Node) {
   }
 }
 
-pub fn display_node(node: &Node, lines: usize) -> String {
+pub fn do_display_node(node: &Node, lines: usize) -> String {
+  pub fn display_block(chain: &Node, block: &Block, index: usize) -> String {
+    let zero = u256(0);
+    let bhash = hash_block(block);
+    let work = chain.work.get(&bhash).unwrap_or(&zero);
+    let show_index = format!("{}", index);
+    let show_time = format!("{}", (block.time >> 192));
+    let show_body = format!("{}", hex::encode(block.body.value));
+    let show_hash = format!("{}", bhash);
+    let show_work = format!("{}", work);
+    return format!("{} | {} | {} | {} | {}", show_index, show_time, show_hash, show_body, show_work);
+  }
   let blocks = get_longest_chain(node);
   let lim = next_power_of_two(blocks.len() as f64) as u64;
   let add = if lim > 32 { lim / 32 } else { 1 };
   let mut text = "       # | time          | hash                                                             | head                                                             | work\n".to_string();
   for i in 0..blocks.len() - 1 {
-    text += &show_block(node, &blocks[i], i);
+    text += &display_block(node, &blocks[i], i);
     if (i as u64) % add == add - 1 {
       text += "\n";
     }
   }
   if blocks.len() > 1 {
-    text += &show_block(node, &blocks[blocks.len() - 1], blocks.len() - 1);
+    text += &display_block(node, &blocks[blocks.len() - 1], blocks.len() - 1);
   }
   return text;
+}
+
+// Mining
+// ======
+
+// Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
+pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u64) -> Option<Block> {
+  let rand = rand::random::<u64>();
+  let time = get_time();
+  let mut block = Block { time, rand, prev, body };
+  for _i in 0 .. max_attempts {
+    if hash_block(&block) >= targ {
+      return Some(block);
+    } else {
+      block.rand = block.rand.wrapping_add(1);
+    }
+  }
+  return None;
+}
+
+// Writes the shared MinerComm object
+pub fn write_miner_comm(comm: &SharedMinerComm, new_value: MinerComm) {
+  let mut value = comm.lock().unwrap();
+  *value = new_value;
+}
+
+// Reads the shared MinerComm object
+pub fn read_miner_comm(comm: &SharedMinerComm) -> MinerComm {
+  return (*comm.lock().unwrap()).clone();
+}
+
+// Main miner loop: if asked, attempts to mine a block
+pub fn miner_loop(comm: &SharedMinerComm) {
+  loop {
+    if let MinerComm::Request { prev, body, targ } = read_miner_comm(comm) {
+      println!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
+      let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
+      if let Some(block) = mined {
+        println!("[miner] mined a block!");
+        write_miner_comm(comm, MinerComm::Answer { block });
+      }
+    }
+  }
+}
+
+// Node
+// ====
+
+pub fn node_loop(node: &mut Node, comm: &SharedMinerComm) {
+  let mut tick = 0;
+
+  //let body = Some(string_to_body("This is a test."));
+
+  loop {
+    tick = tick + 1;
+
+    println!("[knode] tick");
+
+    if let MinerComm::Answer { block } = read_miner_comm(comm) {
+      println!("[knode] got block from miner!\n{}", show_block(&block));
+      write_miner_comm(comm, MinerComm::Stop);
+    }
+
+    //if tick % 100 == 0 {
+      //if let Some(body) = body.clone() {
+        //do_mine(node, body);
+      //}
+    //}
+
+    //if tick % 100 == 0 {
+      
+    //}
+
+    //let got_msgs = udp_receive(socket);
+    //println!("- got: {:?}", got_msgs);
+
+    //for i in 0 .. 2 {
+      //let addr = ipv4(127, 0, 0, 1, 42000 + i);
+      //let msge = Message::AskBlock { bhash: u256(port as u64) };
+      //udp_send(socket, addr, &msge);
+    //}
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+  }
+
 }

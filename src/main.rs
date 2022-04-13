@@ -13,31 +13,36 @@ mod types;
 use crate::algorithms::*;
 use crate::constants::*;
 use crate::network::*;
+use crate::node::*;
 use crate::serializer::*;
 use crate::types::*;
 
 use primitive_types::U256;
 
-fn node_main_loop(socket: &mut std::net::UdpSocket, port: u16) {
-  loop {
-    let got_msgs = udp_receive(socket);
-    println!("- got: {:?}", got_msgs);
-
-    for i in 0 .. 2 {
-      let addr = ipv4(127, 0, 0, 1, 42000 + i);
-      let msge = Message::AskBlock { bhash: u256(port as u64) };
-      udp_send(socket, addr, &msge);
-    }
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-  }
-}
+use std::thread;
 
 fn main() {
-  let buff = [100, 101, 102];
-  std::fs::create_dir_all("./foo/bar").ok();
-  std::fs::write("./foo/bar/test", &buff).ok();
 
-  //let (mut socket, port) = udp_init(&[42000, 42001, 42002, 42003]).unwrap();
-  //node_main_loop(&mut socket, port);
+  let mut node = node_init();
+  let mut comm = comm_init();
+
+  write_miner_comm(&mut comm, MinerComm::Request {
+    prev: u256(0),
+    body: string_to_body("Hello, Kindelia!"),
+    targ: difficulty_to_target(u256(100000)),
+  });
+
+  let a_comm = comm.clone();
+  let miner_thread = thread::spawn(move || {
+    miner_loop(&a_comm);
+  });
+
+  let b_comm = comm.clone();
+  let node_thread = thread::spawn(move || {
+    node_loop(&mut node, &b_comm);
+  });
+
+  miner_thread.join().unwrap();
+  node_thread.join().unwrap();
+
 }
