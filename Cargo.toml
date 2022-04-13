@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 bit-vec = "0.6.3"
+dirs = "4.0.0"
 hex = "0.4"
 im = "15.0.0"
 num = "0.1.36"

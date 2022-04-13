@@ -148,6 +148,17 @@ pub fn deserialize_block(bits: &BitVec, index: &mut u64) -> Block {
   return Block { prev, time, rand, body: Body { value } };
 }
 
+pub fn serialized_block(block: &Block) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_block(block, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_block(bits: &BitVec) -> Block {
+  let mut index = 0;
+  deserialize_block(bits, &mut index)
+}
+
 // A hash
 
 pub fn serialize_hash(hash: &Hash, bits: &mut BitVec) {

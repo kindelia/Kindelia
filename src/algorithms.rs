@@ -37,6 +37,10 @@ pub fn bitvec_to_bytes(bits: &BitVec) -> Vec<u8> {
   return bits.to_bytes();
 }
 
+pub fn bytes_to_bitvec(bytes: &[u8]) -> BitVec {
+  return BitVec::from_bytes(bytes);
+}
+
 pub fn compute_difficulty(target: U256) -> U256 {
   let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
   return p256 / (p256 - target);

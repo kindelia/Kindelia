@@ -226,16 +226,32 @@ pub fn request_missing_blocks(socket: &mut UdpSocket, node: &mut Node) {
   }
 }
 
-pub fn get_blocks_dir() {
-  // TODO: return ~/.kindelia/blocks
+// Returns ~/.kindelia/blocks
+pub fn get_blocks_dir() -> String {
+  let mut dir = dirs::home_dir().unwrap();
+  dir.push(".kindelia");
+  dir.push("blocks");
+  return dir.to_str().unwrap().to_string();
 }
 
 pub fn save_longest_chain(node: &mut Node) {
-  // TODO
+  for (index, block) in get_longest_chain(node).iter().enumerate() {
+    let bdir = get_blocks_dir();
+    let path = format!("{}/{}", bdir, index);
+    let buff = bitvec_to_bytes(&serialized_block(&block));
+    std::fs::create_dir_all(bdir).ok();
+    std::fs::write(path, buff).ok();
+  }
 }
 
 pub fn load_longest_chain(node: &mut Node) {
-  // TODO
+  let bdir = get_blocks_dir();
+  std::fs::create_dir_all(&bdir).ok();
+  for entry in std::fs::read_dir(&bdir).unwrap() {
+    let buffer = std::fs::read(entry.unwrap().path()).unwrap();
+    let block = deserialized_block(&bytes_to_bitvec(&buffer));
+    add_block(node, &block, get_time());
+  }
 }
 
 pub fn display_node(node: &Node, lines: usize) -> String {

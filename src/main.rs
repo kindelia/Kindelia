@@ -34,6 +34,10 @@ fn node_main_loop(socket: &mut std::net::UdpSocket, port: u16) {
 }
 
 fn main() {
-  let (mut socket, port) = udp_init(&[42000, 42001, 42002, 42003]).unwrap();
-  node_main_loop(&mut socket, port);
+  let buff = [100, 101, 102];
+  std::fs::create_dir_all("./foo/bar").ok();
+  std::fs::write("./foo/bar/test", &buff).ok();
+
+  //let (mut socket, port) = udp_init(&[42000, 42001, 42002, 42003]).unwrap();
+  //node_main_loop(&mut socket, port);
 }
