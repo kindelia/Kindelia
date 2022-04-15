@@ -30,3 +30,18 @@ pub const REQUEST_FACTOR : u64 = 4;
 
 // How many times the mining thread attempts before unblocking?
 pub const MINE_ATTEMPTS : u64 = 1024;
+
+// Desired average time between mined blocks is 3 seconds
+pub const TIME_PER_BLOCK : u64 = 3000;
+
+// don't accept blocks from 1 hour in the future
+pub const DELAY_TOLERANCE : u64 = 60 * 60 * 1000;
+  
+// readjusts difficulty every 20 blocks
+pub const BLOCKS_PER_PERIOD : u64 = 20;
+
+// readjusts difficulty every 60 seconds
+pub const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
+
+// initial difficulty of 256 hashes per block
+pub const INITIAL_DIFFICULTY : u64 = 256;

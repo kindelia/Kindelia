@@ -1,5 +1,6 @@
 use bit_vec::BitVec;
 use im::HashSet;
+use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use sha3::Digest;
@@ -14,21 +15,9 @@ use crate::network::*;
 use crate::serializer::*;
 use crate::types::*;
 
-// don't accept blocks from 1 hour in the future
-const DELAY_TOLERANCE : u64 = 60 * 60 * 1000;
-  
-// readjusts difficulty every 20 blocks
-const BLOCKS_PER_PERIOD : u64 = 20;
-
-// 1 second per block
-const TIME_PER_BLOCK : u64 = 1000;
-
-// readjusts difficulty every 60 seconds
-const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
-
 // initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
-  return difficulty_to_target(u256(256));
+  return difficulty_to_target(u256(INITIAL_DIFFICULTY));
 }
 
 pub fn ZERO_HASH() -> U256 {
@@ -110,15 +99,16 @@ pub fn get_random_peers(node: &mut Node, len: u64) -> Option<Vec<Peer>> {
   return Some(result);
 }
 
-pub fn add_block(node: &mut Node, block: &Block, current_time: u64) {
+pub fn add_block(node: &mut Node, block: &Block) {
   // Adding a block might trigger the addition of other blocks
   // that were waiting for it. Because of that, we loop here.
   let mut must_add = vec![block.clone()]; // blocks to be added
+  //println!("- add_block");
   // While there is a block to add...
   while let Some(block) = must_add.pop() {
     let btime = block.time; // the block timestamp
     // If block is too far into the future, ignore it
-    if btime >= current_time + DELAY_TOLERANCE {
+    if btime >= get_time() + DELAY_TOLERANCE {
       continue;
     }
     let bhash = hash_block(&block); // hash of the block
@@ -145,7 +135,7 @@ pub fn add_block(node: &mut Node, block: &Block, current_time: u64) {
         node.work.insert(bhash, node.work[&phash] + work); // sets this block accumulated work
         node.height.insert(bhash, node.height[&phash] + 1); // sets this block accumulated height
         // If this block starts a new period, computes the new target
-        if node.height[&bhash] > 0 && node.height[&bhash] % BLOCKS_PER_PERIOD == 0 {
+        if node.height[&bhash] > 0 && node.height[&bhash] > BLOCKS_PER_PERIOD && node.height[&bhash] % BLOCKS_PER_PERIOD == 1 {
           // Finds the checkpoint hash (hash of the first block of the last period)
           let mut checkpoint_hash = phash;
           for _ in 0 .. BLOCKS_PER_PERIOD - 1 {
@@ -206,7 +196,7 @@ pub fn handle_message(socket: &mut UdpSocket, node: &mut Node, sender: Address, 
       }
     }
     Message::PutBlock { block } => {
-      add_block(node, &block, get_time());
+      add_block(node, &block);
     }
     Message::AskBlock { bhash } => {
       if let Some(block) = node.block.get(&bhash) {
@@ -224,18 +214,6 @@ pub fn gossip(socket: &mut UdpSocket, node: &mut Node, peer_count: u64, message:
   }
 }
 
-pub fn gossip_tip_block(socket: &mut UdpSocket, node: &mut Node, peer_count: u64) {
-  gossip(socket, node, peer_count, &Message::PutBlock { block: node.block[&node.tip.1].clone() });
-}
-
-pub fn request_missing_blocks(socket: &mut UdpSocket, node: &mut Node) {
-  for bhash in node.waiters.keys().cloned().collect::<Vec<U256>>() {
-    if let None = node.seen.get(&bhash) {
-      gossip(socket, node, REQUEST_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
-    }
-  }
-}
-
 pub fn get_blocks_dir() -> String {
   let mut dir = dirs::home_dir().unwrap();
   dir.push(".kindelia");
@@ -243,56 +221,13 @@ pub fn get_blocks_dir() -> String {
   return dir.to_str().unwrap().to_string();
 }
 
-pub fn do_save_longest_chain(node: &mut Node) {
-  for (index, block) in get_longest_chain(node).iter().enumerate() {
-    let bdir = get_blocks_dir();
-    let path = format!("{}/{}", bdir, index);
-    let buff = bitvec_to_bytes(&serialized_block(&block));
-    std::fs::create_dir_all(bdir).ok();
-    std::fs::write(path, buff).ok();
-  }
-}
-
-pub fn do_load_longest_chain(node: &mut Node) {
-  let bdir = get_blocks_dir();
-  std::fs::create_dir_all(&bdir).ok();
-  for entry in std::fs::read_dir(&bdir).unwrap() {
-    let buffer = std::fs::read(entry.unwrap().path()).unwrap();
-    let block = deserialized_block(&bytes_to_bitvec(&buffer));
-    add_block(node, &block, get_time());
-  }
-}
-
-pub fn do_display_node(node: &Node, lines: usize) -> String {
-  pub fn display_block(chain: &Node, block: &Block, index: usize) -> String {
-    let zero = u256(0);
-    let bhash = hash_block(block);
-    let work = chain.work.get(&bhash).unwrap_or(&zero);
-    let show_index = format!("{}", index);
-    let show_time = format!("{}", (block.time >> 192));
-    let show_body = format!("{}", hex::encode(block.body.value));
-    let show_hash = format!("{}", bhash);
-    let show_work = format!("{}", work);
-    return format!("{} | {} | {} | {} | {}", show_index, show_time, show_hash, show_body, show_work);
-  }
-  let blocks = get_longest_chain(node);
-  let lim = next_power_of_two(blocks.len() as f64) as u64;
-  let add = if lim > 32 { lim / 32 } else { 1 };
-  let mut text = "       # | time          | hash                                                             | head                                                             | work\n".to_string();
-  for i in 0..blocks.len() - 1 {
-    text += &display_block(node, &blocks[i], i);
-    if (i as u64) % add == add - 1 {
-      text += "\n";
-    }
-  }
-  if blocks.len() > 1 {
-    text += &display_block(node, &blocks[blocks.len() - 1], blocks.len() - 1);
-  }
-  return text;
-}
-
 // Mining
 // ======
+
+// Get the current target
+pub fn get_tip_target(node: &mut Node) -> U256 {
+  return node.target[&node.tip.1];
+}
 
 // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
 pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u64) -> Option<Block> {
@@ -324,10 +259,10 @@ pub fn read_miner_comm(comm: &SharedMinerComm) -> MinerComm {
 pub fn miner_loop(comm: &SharedMinerComm) {
   loop {
     if let MinerComm::Request { prev, body, targ } = read_miner_comm(comm) {
-      println!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
+      //println!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
-        println!("[miner] mined a block!");
+        //println!("[miner] mined a block!");
         write_miner_comm(comm, MinerComm::Answer { block });
       }
     }
@@ -340,38 +275,123 @@ pub fn miner_loop(comm: &SharedMinerComm) {
 pub fn node_loop(node: &mut Node, comm: &SharedMinerComm) {
   let mut tick = 0;
 
-  //let body = Some(string_to_body("This is a test."));
+  fn do_gossip_tip_block(socket: &mut UdpSocket, node: &mut Node, peer_count: u64) {
+    gossip(socket, node, peer_count, &Message::PutBlock { block: node.block[&node.tip.1].clone() });
+  }
+
+  fn do_request_missing_blocks(socket: &mut UdpSocket, node: &mut Node) {
+    for bhash in node.waiters.keys().cloned().collect::<Vec<U256>>() {
+      if let None = node.seen.get(&bhash) {
+        gossip(socket, node, REQUEST_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
+      }
+    }
+  }
+
+  fn do_save_longest_chain(node: &mut Node) {
+    for (index, block) in get_longest_chain(node).iter().enumerate() {
+      let bdir = get_blocks_dir();
+      let path = format!("{}/{}", bdir, index);
+      let buff = bitvec_to_bytes(&serialized_block(&block));
+      std::fs::create_dir_all(bdir).ok();
+      std::fs::write(path, buff).ok();
+    }
+  }
+
+  fn do_load_longest_chain(node: &mut Node) {
+    let bdir = get_blocks_dir();
+    std::fs::create_dir_all(&bdir).ok();
+    for entry in std::fs::read_dir(&bdir).unwrap() {
+      let buffer = std::fs::read(entry.unwrap().path()).unwrap();
+      let block = deserialized_block(&bytes_to_bitvec(&buffer));
+      add_block(node, &block);
+    }
+  }
+
+  fn do_display_node(node: &Node, lines: usize) {
+    fn display_block(chain: &Node, block: &Block, index: usize) -> String {
+      let zero = u256(0);
+      let bhash = hash_block(block);
+      let work = chain.work.get(&bhash).unwrap_or(&zero);
+      let diff = target_to_difficulty(*chain.target.get(&bhash).unwrap_or(&u256(0)));
+      let show_index = format!("{}", index).pad(8, ' ', Alignment::Right, true);
+      let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
+      let show_body = format!("{}", body_to_string(&block.body).pad(64, ' ', Alignment::Left, true));
+      let show_work = format!("{}", work).pad(13, ' ', Alignment::Left, true);
+      let show_diff = format!("{}", diff).pad(13, ' ', Alignment::Left, true);
+      let show_hash = format!("{}", hex::encode(u256_to_bytes(bhash)));
+      return format!("{} | {} | {} | {} | {} | {}", show_index, show_time, show_work, show_diff, show_hash, show_body);
+    }
+
+    fn display_chain(node: &Node, lines: usize) -> String {
+      let blocks = get_longest_chain(node);
+      let lim = next_power_of_two(blocks.len() as f64) as u64;
+      let add = if lim > 32 { lim / 32 } else { 1 };
+      let mut text = "  #block | time          | work          | diff          | hash                                                             | body                                                             \n".to_string();
+      if blocks.len() > 0 {
+        let mut i : u64 = 0;
+        while i < blocks.len() as u64 - 1 {
+          text += &display_block(node, &blocks[i as usize], i as usize);
+          text += "\n";
+          i = i + add;
+        }
+        if blocks.len() > 1 {
+          text += &display_block(node, &blocks[blocks.len() - 1], blocks.len() - 1);
+        }
+      }
+      return text;
+    }
+
+    let targ = node.target[&node.tip.1];
+    let diff = target_to_difficulty(targ);
+    let rate = diff * u256(1000) / u256(TIME_PER_BLOCK);
+    let mut pending_size = 0;
+    let mut pending_seen = 0;
+    for (bhash, _) in node.waiters.iter() {
+      if node.seen.get(bhash).is_some() {
+        pending_seen += 1;
+      }
+      pending_size += 1;
+    }
+    print!("{esc}c", esc = 27 as char);
+    println!("Kindelia");
+    println!("--------------");
+    println!("| time       : {} UTC", get_time());
+    println!("| connected  : {} peers", node.peers.len());
+    println!("| database   : {} blocks | {} height | {}/{} pending", node.block.len() - 1, node.height[&node.tip.1], pending_size, pending_seen);
+    println!("| network    : {} hashes/second | {} hashes/block", rate, diff);
+    println!("--------------");
+    println!("{}", display_chain(node, 32));
+  }
+
+  fn please_mine(node: &mut Node, comm: &SharedMinerComm, body: Body) {
+    write_miner_comm(comm, MinerComm::Request {
+      prev: node.tip.1,
+      body: body,
+      targ: get_tip_target(node),
+    });
+  }
+
+  let mut mined_count = 0;
+
+  please_mine(node, comm, string_to_body(&format!("Hello, Kindelia! #{}", mined_count)));
 
   loop {
     tick = tick + 1;
 
-    println!("[knode] tick");
-
+    //println!("[knode] tick");
+    
     if let MinerComm::Answer { block } = read_miner_comm(comm) {
-      println!("[knode] got block from miner!\n{}", show_block(&block));
-      write_miner_comm(comm, MinerComm::Stop);
+      //println!("[knode] got block from miner!\n{}", show_block(&block));
+      mined_count += 1;
+      add_block(node, &block);
+      please_mine(node, comm, string_to_body(&format!("Hello, Kindelia! #{}", mined_count)));
     }
 
-    //if tick % 100 == 0 {
-      //if let Some(body) = body.clone() {
-        //do_mine(node, body);
-      //}
-    //}
+    if tick % 30 == 0 {
+      do_display_node(node, 32);
+    }
 
-    //if tick % 100 == 0 {
-      
-    //}
-
-    //let got_msgs = udp_receive(socket);
-    //println!("- got: {:?}", got_msgs);
-
-    //for i in 0 .. 2 {
-      //let addr = ipv4(127, 0, 0, 1, 42000 + i);
-      //let msge = Message::AskBlock { bhash: u256(port as u64) };
-      //udp_send(socket, addr, &msge);
-    //}
-
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_micros(16666));
 
   }
 

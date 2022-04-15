@@ -24,13 +24,7 @@ use std::thread;
 fn main() {
 
   let mut node = node_init();
-  let mut comm = comm_init();
-
-  write_miner_comm(&mut comm, MinerComm::Request {
-    prev: u256(0),
-    body: string_to_body("Hello, Kindelia!"),
-    targ: difficulty_to_target(u256(100000)),
-  });
+  let     comm = comm_init();
 
   let a_comm = comm.clone();
   let miner_thread = thread::spawn(move || {
