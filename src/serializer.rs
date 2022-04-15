@@ -11,7 +11,7 @@ use crate::types::*;
 
 pub fn serialize_fixlen(size: u64, value: &U256, bits: &mut BitVec) {
   for i in 0 .. size {
-    bits.push((value >> i).as_u64() & 1 == 1);
+    bits.push((value >> i).low_u64() & 1 == 1);
   }
 }
 
@@ -30,7 +30,7 @@ pub fn serialize_varlen(value: &U256, bits: &mut BitVec) {
   let mut value : U256 = *value;
   while value > u256(0) {
     bits.push(true);
-    bits.push(value.as_u64() & 1 == 1);
+    bits.push(value.low_u64() & 1 == 1);
     value = value >> u256(1);
   }
   bits.push(false);
@@ -41,7 +41,7 @@ pub fn deserialize_varlen(bits: &BitVec, index: &mut u64) -> U256 {
   let mut add : U256 = u256(1);
   while bits[*index as usize] {
     val = val + if bits[*index as usize + 1] { add } else { u256(0) };
-    add = add * u256(2);
+    add = add.saturating_mul(u256(2));
     *index = *index + 2;
   }
   *index = *index + 1;
@@ -105,11 +105,11 @@ pub fn serialize_address(address: &Address, bits: &mut BitVec) {
 pub fn deserialize_address(bits: &BitVec, index: &mut u64) -> Address {
   if bits[*index as usize] as u64 == 0 {
     *index = *index + 1;
-    let val0 = deserialize_fixlen(8, bits, index).as_u64() as u8;
-    let val1 = deserialize_fixlen(8, bits, index).as_u64() as u8;
-    let val2 = deserialize_fixlen(8, bits, index).as_u64() as u8;
-    let val3 = deserialize_fixlen(8, bits, index).as_u64() as u8;
-    let port = deserialize_fixlen(16, bits, index).as_u64() as u16;
+    let val0 = deserialize_fixlen(8, bits, index).low_u64() as u8;
+    let val1 = deserialize_fixlen(8, bits, index).low_u64() as u8;
+    let val2 = deserialize_fixlen(8, bits, index).low_u64() as u8;
+    let val3 = deserialize_fixlen(8, bits, index).low_u64() as u8;
+    let port = deserialize_fixlen(16, bits, index).low_u64() as u16;
     return Address::IPv4 { val0, val1, val2, val3, port };
   } else {
     panic!("Bad address deserialization.");
@@ -138,8 +138,8 @@ pub fn serialize_block(block: &Block, bits: &mut BitVec) {
 
 pub fn deserialize_block(bits: &BitVec, index: &mut u64) -> Block {
   let prev = deserialize_fixlen(256, bits, index);
-  let time = deserialize_fixlen(64, bits, index).as_u64();
-  let rand = deserialize_fixlen(64, bits, index).as_u64();
+  let time = deserialize_fixlen(64, bits, index).low_u64();
+  let rand = deserialize_fixlen(64, bits, index).low_u64();
   let body = deserialize_bytes(BODY_SIZE as u64, bits, index);
   let mut value : [u8; BODY_SIZE] = [0; BODY_SIZE];
   for i in 0 .. BODY_SIZE {
@@ -180,7 +180,7 @@ pub fn serialize_bytes(size: u64, bytes: &[u8], bits: &mut BitVec) {
 pub fn deserialize_bytes(size: u64, bits: &BitVec, index: &mut u64) -> Vec<u8> {
   let mut result = Vec::new();
   for _ in 0 .. size {
-    result.push(deserialize_fixlen(8, bits, index).as_u64() as u8);
+    result.push(deserialize_fixlen(8, bits, index).low_u64() as u8);
   }
   result
 }
@@ -205,7 +205,7 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
 }
 
 pub fn deserialize_message(bits: &BitVec, index: &mut u64) -> Message {
-  let code = deserialize_fixlen(4, bits, index).as_u64();
+  let code = deserialize_fixlen(4, bits, index).low_u64();
   match code {
     0 => {
       let peers = deserialize_many(deserialize_address, bits, index);

@@ -1,5 +1,5 @@
 // UDP port to listen to
-pub const UDP_PORT : u64 = 42000;
+pub const UDP_PORT : u16 = 42000;
 
 // Size of a hash, in bytes
 pub const HASH_SIZE : usize = 32;

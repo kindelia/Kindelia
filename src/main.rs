@@ -17,26 +17,42 @@ use crate::node::*;
 use crate::serializer::*;
 use crate::types::*;
 
-use primitive_types::U256;
-
 use std::thread;
+use primitive_types::U256;
 
 fn main() {
 
-  let mut node = node_init();
-  let     comm = comm_init();
+  // Node state object
+  let mut node = new_node();
 
-  let a_comm = comm.clone();
+  // Node to Miner communication object
+  let comm     = new_miner_comm();
+  let comm_0   = comm.clone();
+  let comm_1   = comm.clone();
+
+  // User input object
+  let input    = new_input();
+  let input_0  = input.clone();
+  let input_1  = input.clone();
+
+  // Spawns the miner thread
   let miner_thread = thread::spawn(move || {
-    miner_loop(&a_comm);
+    miner_loop(&comm_0);
   });
 
-  let b_comm = comm.clone();
+  // Spawns the input thread
+  let input_thread = thread::spawn(move || {
+    input_loop(&input_0);
+  });
+
+  // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(&mut node, &b_comm);
+    node_loop(&mut node, &input_1, &comm_1);
   });
 
+  // Joins all threads
   miner_thread.join().unwrap();
+  input_thread.join().unwrap();
   node_thread.join().unwrap();
 
 }

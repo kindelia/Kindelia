@@ -32,13 +32,22 @@ pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
   }
 }
 
-pub fn udp_receive(socket: &mut UdpSocket) -> Vec<Message> {
+pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
   let mut buffer = [0; 65536];
   let mut messages = Vec::new();
   while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
     let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
     let msge = deserialized_message(&bits);
-    messages.push(msge);
+    let addr = match sender_addr.ip() {
+      std::net::IpAddr::V4(v4addr) => {
+        let [val0, val1, val2, val3] = v4addr.octets();
+        Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
+      }
+      _ => {
+        panic!("TODO: IPv6")
+      }
+    };
+    messages.push((addr, msge));
   }
   return messages;
 }
