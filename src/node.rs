@@ -363,22 +363,22 @@ fn node_ask_mine(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
   }
 }
 
-fn node_display(node: &Node, input: &SharedInput) {
+fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<String>>, redraw: bool) {
   //─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾
   
   fn bold(text: &str) -> String {
     return format!("{}{}{}", "\x1b[1m", text, "\x1b[0m");
   }
 
-  fn display_block(chain: &Node, block: &Block, index: usize) -> String {
+  fn display_block(chain: &Node, block: &Block, index: usize, width: u16) -> String {
     let zero = u256(0);
     let bhash = hash_block(block);
     let work = chain.work.get(&bhash).unwrap_or(&zero);
     let diff = target_to_difficulty(*chain.target.get(&bhash).unwrap_or(&u256(0)));
     let show_index = format!("{}", index).pad(6, ' ', Alignment::Right, true);
     let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
-    let show_body = format!("{}", body_to_string(&block.body).pad(64, ' ', Alignment::Left, true));
     let show_hash = format!("{}", hex::encode(u256_to_bytes(bhash)));
+    let show_body = format!("{}", body_to_string(&block.body).pad(width as usize - 110, ' ', Alignment::Left, true));
     return format!("{} | {} | {} | {}", show_index, show_time, show_hash, show_body);
   }
 
@@ -437,43 +437,78 @@ fn node_display(node: &Node, input: &SharedInput) {
   let min = std::cmp::max(blocks.len() as i64 - (height as i64 - 5), 0) as usize;
   let max = blocks.len();   
   for i in min .. max {
-    body_lines.push(display_block(node, &blocks[i as usize], i as usize));
+    body_lines.push(display_block(node, &blocks[i as usize], i as usize, width));
   }
-  
-  // Clears screen
-  print!("{esc}c", esc = 27 as char);
+
+  let mut screen = Vec::new();
 
   // Draws top bar
-  print!("  ╻╻           │\n\r");
-  print!(" ╻┣┓  {} │ {}\n\r", bold("Kindelia"), { display_input(&(input.lock().unwrap()).clone()) });
-  print!("╺┛╹┗╸──────────┼{}\n\r", "─".repeat(width as usize - 16));
+  screen.push(format!("  ╻╻           │"));
+  screen.push(format!(" ╻┣┓  {} │ {}", bold("Kindelia"), { display_input(&(input.lock().unwrap()).clone()) }));
+  screen.push(format!("╺┛╹┗╸──────────┼{}", "─".repeat(width as usize - 16)));
 
   // Draws each line
   for i in 0 .. height - 4 {
+    let mut line = String::new();
+
     // Draws menu item
-    print!(" ");
+    line.push_str(&format!(" "));
     if let Some((menu_line, menu_bold)) = menu_lines.get(i as usize) {
       let text = menu_line.pad(menu_width - 4, ' ', Alignment::Left, true);
       let text = if *menu_bold { bold(&text) } else { text };
-      print!("{}", text);
+      line.push_str(&format!("{}", text));
     } else {
-      print!("{}", " ".repeat(menu_width - 4));
+      line.push_str(&format!("{}", " ".repeat(menu_width - 4)));
     }
 
     // Draws separator
-    print!(" │ ");
+    line.push_str(&format!(" │ "));
 
     // Draws body item
-    print!("{}", body_lines.get(i as usize).unwrap_or(&"".to_string()));
+    line.push_str(&format!("{}", body_lines.get(i as usize).unwrap_or(&"".to_string())));
 
     // Draws line break
-    print!("\n\r");
+    screen.push(line);
   }
+
+  render(last_screen, &screen, redraw);
+}
+
+// Prints screen, only re-printing lines that change
+pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>, redraw: bool) {
+  fn redraw(screen: &Vec<String>) {
+    print!("{esc}c", esc = 27 as char); // clear screen
+    for y in 0 .. screen.len() {
+      print!("{}\n\r", screen[y]);
+    }
+  }
+  match old_screen {
+    None => redraw(new_screen),
+    Some(old_screen) => {
+      if old_screen.len() != new_screen.len() {
+        redraw(new_screen);
+      } else {
+        for y in 0 .. new_screen.len() {
+          if let (Some(old_line), Some(new_line)) = (old_screen.get(y), new_screen.get(y)) {
+            if old_line != new_line {
+              print!("{}", termion::cursor::Hide);
+              print!("{}", termion::cursor::Goto(1, (y + 1) as u16));
+              print!("{}", new_line);
+              print!("{}", termion::clear::UntilNewline);
+            }
+          }
+        }
+      }
+    }
+  }
+  std::io::stdout().flush().ok();
+  *old_screen = Some(new_screen.clone());
 }
 
 pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerComm) {
   let mut mined = 0;
   let mut tick = 0;
+  let mut last_screen = None;
 
   loop {
     tick = tick + 1;
@@ -505,8 +540,8 @@ pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
     }
 
     // Displays the UI
-    if tick % 30 == 0 {
-      node_display(node, input);
+    if tick % 2 == 0 {
+      node_display(node, input, &mut last_screen, tick % 120 == 0);
     }
 
     // Sleep for 1/60 seconds

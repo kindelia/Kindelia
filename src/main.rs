@@ -20,7 +20,27 @@ use crate::types::*;
 use std::thread;
 use primitive_types::U256;
 
+use std::io::Write;
+
 fn main() {
+  
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+  //print!("0123456789abcdef\n");
+
+
+  //let mut out = std::io::stdout();
+  
+  //print!("{}", termion::clear::All);
+  //print!("{}", termion::cursor::Goto(4,4));
+  //print!("{}", "XXXX");
+  //print!("{}", "\n\n\n");
+  //out.flush();
 
   // Node state object
   let mut node = new_node();
