@@ -54,16 +54,25 @@ pub fn new_node() -> Node {
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-    seen       : HashMap::from([]),
+    seen       : HashMap::from([(ZERO_HASH(), ())]),
     tip        : (u256(0), ZERO_HASH()),
     was_mined  : HashMap::new(),
     pool       : PriorityQueue::new(),
     peer_id    : HashMap::new(),
     peers      : HashMap::new(),
   };
-  node_see_peer(&mut node, Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 });
-  node_see_peer(&mut node, Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 1 });
-  node_see_peer(&mut node, Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 2 });
+  node_see_peer(&mut node, Peer {
+    address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 },
+    seen_at: get_time(),
+  });
+  node_see_peer(&mut node, Peer {
+    address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 1 },
+    seen_at: get_time(),
+  });
+  node_see_peer(&mut node, Peer {
+    address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 2 },
+    seen_at: get_time(),
+  });
   return node;
 }
 
@@ -75,17 +84,16 @@ pub fn new_input() -> SharedInput {
   return Arc::new(Mutex::new(String::new()));
 }
 
-pub fn node_see_peer(node: &mut Node, addr: Address) {
-  match node.peer_id.get(&addr) {
+pub fn node_see_peer(node: &mut Node, peer: Peer) {
+  match node.peer_id.get(&peer.address) {
     None => {
       let index = node.peers.len() as u64;
-      let peer = Peer { seen_at: get_time(), address: addr.clone() };
-      node.peers.insert(index, peer);
-      node.peer_id.insert(addr, index);
+      node.peers.insert(index, peer.clone());
+      node.peer_id.insert(peer.address, index);
     }
     Some(index) => {
-      let peer = node.peers.get_mut(&index).unwrap();
-      peer.seen_at = get_time();
+      let old_peer = node.peers.get_mut(&index).unwrap();
+      old_peer.seen_at = peer.seen_at;
     }
   }
 }
@@ -107,13 +115,22 @@ pub fn get_random_peer(node: &mut Node) -> Option<Peer> {
   }
 }
 
-pub fn get_random_peers(node: &mut Node, len: u64) -> Option<Vec<Peer>> {
+pub fn get_random_peers_go(node: &mut Node, len: u64) -> Option<Vec<Peer>> {
   let mut result = vec![];
+  let len = std::cmp::max(len, node.peers.len() as u64);
   for i in 0 .. len {
     result.push(get_random_peer(node)?);
   }
   return Some(result);
 }
+
+pub fn get_random_peers(node: &mut Node, len: u64) -> Vec<Peer> {
+  match get_random_peers_go(node, len) {
+    None    => vec![],
+    Some(x) => x,
+  }
+}
+
 
 pub fn node_add_block(node: &mut Node, block: &Block) {
   // Adding a block might trigger the addition of other blocks
@@ -210,30 +227,39 @@ pub fn node_message_receive(node: &mut Node) {
   }
 }
 
+// Sends a block to a target address; also share some random peers
+// FIXME: instead of sharing random peers, share recently active peers
+pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
+  let msg = Message::PutBlock {
+    block: block,
+    peers: get_random_peers(node, 3).clone(),
+  };
+  udp_send(&mut node.socket, addr, &msg);
+}
+
 pub fn node_message_handle(node: &mut Node, addr: Address, msg: &Message) {
+  node_see_peer(node, Peer { address: addr, seen_at: get_time() });
   match msg {
-    Message::PutPeers { peers } => {
-      for address in peers {
-        node_see_peer(node, addr);
-      }
-    }
-    Message::PutBlock { block } => {
-      node_add_block(node, &block);
-    }
+    // Someone asked a block
     Message::AskBlock { bhash } => {
       if let Some(block) = node.block.get(&bhash) {
-        udp_send(&mut node.socket, addr, &Message::PutBlock { block: block.clone() });
+        let block = block.clone();
+        node_send_block_to(node, addr, block);
+      }
+    }
+    // Someone sent us a block
+    Message::PutBlock { block, peers } => {
+      node_add_block(node, &block);
+      for peer in peers {
+        //node_see_peer(node, *peer);
       }
     }
   }
 }
 
 pub fn gossip(node: &mut Node, peer_count: u64, message: &Message) {
-  let peer_count = std::cmp::max(peer_count, node.peers.len() as u64);
-  if let Some(peers) = get_random_peers(node, peer_count) {
-    for peer in peers {
-      udp_send(&mut node.socket, peer.address, message);
-    }
+  for peer in get_random_peers(node, peer_count) {
+    udp_send(&mut node.socket, peer.address, message);
   }
 }
 
@@ -321,13 +347,29 @@ pub fn input_loop(input: &SharedInput) {
 // ====
 
 fn node_gossip_tip_block(node: &mut Node, peer_count: u64) {
-  gossip(node, peer_count, &Message::PutBlock { block: node.block[&node.tip.1].clone() });
+  let random_peers = get_random_peers(node, peer_count);
+  for peer in random_peers {
+    node_send_block_to(node, peer.address, node.block[&node.tip.1].clone());
+  }
 }
 
-fn node_request_missing_blocks(node: &mut Node) {
+fn node_peers_timeout(node: &mut Node) {
+  let mut forget = Vec::new();
+  for (id,peer) in &node.peers {
+    //println!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
+    if peer.seen_at < get_time() - PEER_TIMEOUT {
+      forget.push(peer.address);
+    }
+  }
+  for addr in forget {
+    node_del_peer(node, addr);
+  }
+}
+
+fn node_ask_missing_blocks(node: &mut Node) {
   for bhash in node.waiters.keys().cloned().collect::<Vec<U256>>() {
     if let None = node.seen.get(&bhash) {
-      gossip(node, REQUEST_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
+      gossip(node, MISSING_INFO_ASK_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
     }
   }
 }
@@ -508,7 +550,7 @@ pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>, re
 pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerComm) {
   let mut mined = 0;
   let mut tick = 0;
-  let mut last_screen = None;
+  let mut last_screen : Option<Vec<String>> = None;
 
   loop {
     tick = tick + 1;
@@ -536,7 +578,13 @@ pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
 
     // Requests missing blocks
     if tick % 3 == 0 {
-      node_request_missing_blocks(node);
+      node_ask_missing_blocks(node);
+    }
+
+    // Peer timeout
+    // FIXME: should be less frequent
+    if tick % 60 == 0 {
+      node_peers_timeout(node);
     }
 
     // Displays the UI
@@ -548,4 +596,3 @@ pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
     std::thread::sleep(std::time::Duration::from_micros(16666));
   }
 }
-

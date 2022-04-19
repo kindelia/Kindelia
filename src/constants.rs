@@ -25,23 +25,36 @@ pub const PORT_SIZE : usize = 2;
 // How many nodes we gossip an information to?
 pub const GOSSIP_FACTOR : u64 = 16;
 
-// How many nodes we request missing data from?
-pub const REQUEST_FACTOR : u64 = 4;
+// When we need missing info, how many nodes do we ask?
+pub const MISSING_INFO_ASK_FACTOR : u64 = 3;
 
 // How many times the mining thread attempts before unblocking?
 pub const MINE_ATTEMPTS : u64 = 1024;
 
-// Desired average time between mined blocks is 3 seconds
+// Desired average time between mined blocks, in milliseconds
 pub const TIME_PER_BLOCK : u64 = 3000;
 
-// don't accept blocks from 1 hour in the future
+// Don't accept blocks from N milliseconds in the future
 pub const DELAY_TOLERANCE : u64 = 60 * 60 * 1000;
   
-// readjusts difficulty every 20 blocks
+// Readjust difficulty every N blocks
 pub const BLOCKS_PER_PERIOD : u64 = 20;
 
-// readjusts difficulty every 60 seconds
+// Readjusts difficulty every N seconds
 pub const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
 
-// initial difficulty of 256 hashes per block
+// Initial difficulty, in expected hashes per block
 pub const INITIAL_DIFFICULTY : u64 = 256;
+
+// How many milliseconds without notice until we forget a peer?
+pub const PEER_TIMEOUT : u64 = 10 * 1000;
+
+// How many peers we need to keep minimum?
+pub const PEER_COUNT_MINIMUM : u64 = 256;
+
+// How many peers we send when asked?
+pub const SHARE_PEER_COUNT : u64 = 3;
+
+// How many peers we keep on the last_seen object?
+pub const LAST_SEEN_SIZE : u64 = 2;
+

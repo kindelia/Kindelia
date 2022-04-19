@@ -81,13 +81,11 @@ pub type SharedInput = Arc<Mutex<String>>;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-  PutPeers {
-    peers: Vec<Address>
-  },
   PutBlock {
-    block: Block
+    block: Block,
+    peers: Vec<Peer>,
   },
   AskBlock {
     bhash: Hash
-  }
+  },
 }

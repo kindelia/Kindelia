@@ -127,6 +127,30 @@ pub fn deserialized_address(bits: &BitVec) -> Address {
   deserialize_address(bits, &mut index)
 }
 
+// A peer
+
+pub fn serialize_peer(peer: &Peer, bits: &mut BitVec) {
+  serialize_address(&peer.address, bits);
+  serialize_fixlen(48, &u256(peer.seen_at as u64), bits);
+}
+
+pub fn deserialize_peer(bits: &BitVec, index: &mut u64) -> Peer {
+  let address = deserialize_address(bits, index);
+  let seen_at = deserialize_fixlen(48, bits, index).low_u64();
+  return Peer { address, seen_at };
+}
+
+pub fn serialized_peer(peer: &Peer) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_peer(peer, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_peer(bits: &BitVec) -> Peer {
+  let mut index = 0;
+  deserialize_peer(bits, &mut index)
+}
+
 // A block
 
 pub fn serialize_block(block: &Block, bits: &mut BitVec) {
@@ -189,16 +213,17 @@ pub fn deserialize_bytes(size: u64, bits: &BitVec, index: &mut u64) -> Vec<u8> {
 
 pub fn serialize_message(message: &Message, bits: &mut BitVec) {
   match message {
-    Message::PutPeers { peers } => {
+    //Message::PutPeers { peers } => {
+      //serialize_fixlen(4, &u256(0), bits);
+      //serialize_many(serialize_address, peers, bits);
+    //}
+    Message::PutBlock { block, peers } => {
       serialize_fixlen(4, &u256(0), bits);
-      serialize_many(serialize_address, peers, bits);
-    }
-    Message::PutBlock { block } => {
-      serialize_fixlen(4, &u256(1), bits);
       serialize_block(block, bits);
+      serialize_many(serialize_peer, peers, bits);
     }
     Message::AskBlock { bhash } => {
-      serialize_fixlen(4, &u256(2), bits);
+      serialize_fixlen(4, &u256(1), bits);
       serialize_hash(bhash, bits);
     }
   }
@@ -207,15 +232,16 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
 pub fn deserialize_message(bits: &BitVec, index: &mut u64) -> Message {
   let code = deserialize_fixlen(4, bits, index).low_u64();
   match code {
+    //0 => {
+      //let peers = deserialize_many(deserialize_address, bits, index);
+      //Message::PutPeers { peers }
+    //}
     0 => {
-      let peers = deserialize_many(deserialize_address, bits, index);
-      Message::PutPeers { peers }
+      let block = deserialize_block(bits, index);
+      let peers = deserialize_many(deserialize_peer, bits, index);
+      Message::PutBlock { block, peers }
     }
     1 => {
-      let block = deserialize_block(bits, index);
-      Message::PutBlock { block }
-    }
-    2 => {
       let bhash = deserialize_hash(bits, index);
       Message::AskBlock { bhash }
     }
