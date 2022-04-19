@@ -4,6 +4,7 @@ use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use sha3::Digest;
+use rand::seq::IteratorRandom;
 
 use std::collections::HashMap;
 use std::net::*;
@@ -87,6 +88,8 @@ pub fn new_input() -> SharedInput {
 pub fn node_see_peer(node: &mut Node, peer: Peer) {
   match node.peer_id.get(&peer.address) {
     None => {
+      // FIXME: `index` can't be generated from length as `.peers` is a map and
+      // peers can be deleted
       let index = node.peers.len() as u64;
       node.peers.insert(index, peer.clone());
       node.peer_id.insert(peer.address, index);
@@ -105,32 +108,11 @@ pub fn node_del_peer(node: &mut Node, addr: Address) {
   }
 }
 
-pub fn get_random_peer(node: &mut Node) -> Option<Peer> {
-  let len = node.peers.len() as u64;
-  if len > 0 {
-    let index = rand::random::<u64>() % len;
-    return Some(node.peers[&index]);
-  } else {
-    return None;
-  }
+pub fn get_random_peers(node: &mut Node, amount: u64) -> Vec<Peer> {
+  let amount = amount as usize;
+  let mut rng = rand::thread_rng();
+  node.peers.values().cloned().choose_multiple(&mut rng, amount)
 }
-
-pub fn get_random_peers_go(node: &mut Node, len: u64) -> Option<Vec<Peer>> {
-  let mut result = vec![];
-  let len = std::cmp::max(len, node.peers.len() as u64);
-  for i in 0 .. len {
-    result.push(get_random_peer(node)?);
-  }
-  return Some(result);
-}
-
-pub fn get_random_peers(node: &mut Node, len: u64) -> Vec<Peer> {
-  match get_random_peers_go(node, len) {
-    None    => vec![],
-    Some(x) => x,
-  }
-}
-
 
 pub fn node_add_block(node: &mut Node, block: &Block) {
   // Adding a block might trigger the addition of other blocks
@@ -420,7 +402,7 @@ fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<S
     let show_index = format!("{}", index).pad(6, ' ', Alignment::Right, true);
     let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
     let show_hash = format!("{}", hex::encode(u256_to_bytes(bhash)));
-    let show_body = format!("{}", body_to_string(&block.body).pad(width as usize - 110, ' ', Alignment::Left, true));
+    let show_body = format!("{}", body_to_string(&block.body).pad(std::cmp::max(width as i32 - 110, 0) as usize, ' ', Alignment::Left, true));
     return format!("{} | {} | {} | {}", show_index, show_time, show_hash, show_body);
   }
 
