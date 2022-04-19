@@ -52,9 +52,10 @@ fn main() {
 
 fn output_loop(node: SharedNode) {
   loop {
+    {
     let node = node.lock().unwrap();
-
     display(&node);
+    }
 
     // Sleeps for 2 seconds
     std::thread::sleep(std::time::Duration::from_millis(1000));
