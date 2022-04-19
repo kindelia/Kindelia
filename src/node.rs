@@ -420,7 +420,7 @@ fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<S
     let show_index = format!("{}", index).pad(6, ' ', Alignment::Right, true);
     let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
     let show_hash = format!("{}", hex::encode(u256_to_bytes(bhash)));
-    let show_body = format!("{}", body_to_string(&block.body).pad(width as usize - 110, ' ', Alignment::Left, true));
+    let show_body = format!("{}", body_to_string(&block.body).pad(std::cmp::max(width as i32 - 110, 0) as usize, ' ', Alignment::Left, true));
     return format!("{} | {} | {} | {}", show_index, show_time, show_hash, show_body);
   }
 
