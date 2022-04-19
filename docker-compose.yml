@@ -1,0 +1,6 @@
+
+version: "3.8"
+services:
+  kindelia-node:
+    image: kelvinss/kindelia-node
+    build: .
