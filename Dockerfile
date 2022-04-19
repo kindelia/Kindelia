@@ -19,6 +19,9 @@ RUN cargo build --bin=kindelia-node-headless --release
 from debian:11-slim
 
 WORKDIR /app/
+
 COPY --from=build ./target/release/kindelia-node-headless /app/
+
 CMD ["/app/kindelia-node-headless"]
-CMD ["/bin/bash"]
+
+EXPOSE 42000/udp
