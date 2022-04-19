@@ -305,14 +305,14 @@ pub fn read_miner_comm(miner_comm: &SharedMinerComm) -> MinerComm {
 }
 
 // Main miner loop: if asked, attempts to mine a block
-pub fn miner_loop(miner_comm: &SharedMinerComm) {
+pub fn miner_loop(miner_comm: SharedMinerComm) {
   loop {
-    if let MinerComm::Request { prev, body, targ } = read_miner_comm(miner_comm) {
+    if let MinerComm::Request { prev, body, targ } = read_miner_comm(&miner_comm) {
       //println!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
         //println!("[miner] mined a block!");
-        write_miner_comm(miner_comm, MinerComm::Answer { block });
+        write_miner_comm(&miner_comm, MinerComm::Answer { block });
       }
     }
   }
@@ -321,17 +321,23 @@ pub fn miner_loop(miner_comm: &SharedMinerComm) {
 // Input
 // =====
 
-pub fn input_loop(input: &SharedInput) {
+pub fn input_loop(input: SharedInput) {
   let mut stdout = stdout().into_raw_mode().unwrap();
 
   for key in stdin().keys() {
     //print!("got {:?}\n\r", key);
     if let Ok(Key::Char(chr)) = key {
-      (input.lock().unwrap()).push(chr);
+      {
+        let mut input = input.lock().unwrap();
+        input.push(chr);
+      }
       stdout.flush().unwrap();
     }
     if let Ok(Key::Backspace) = key {
-      (input.lock().unwrap()).pop();
+      {
+        let mut input = input.lock().unwrap();
+        input.pop();
+      }
       stdout.flush().unwrap();
     }
     if let Ok(Key::Ctrl('c')) = key {
@@ -405,7 +411,7 @@ fn node_ask_mine(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
   }
 }
 
-fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<String>>, redraw: bool) {
+pub fn node_display(node: &Node, input: &str, last_screen: &mut Option<Vec<String>>) {
   //─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾
   
   fn bold(text: &str) -> String {
@@ -486,7 +492,7 @@ fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<S
 
   // Draws top bar
   screen.push(format!("  ╻╻           │"));
-  screen.push(format!(" ╻┣┓  {} │ {}", bold("Kindelia"), { display_input(&(input.lock().unwrap()).clone()) }));
+  screen.push(format!(" ╻┣┓  {} │ {}", bold("Kindelia"), { display_input(input) }));
   screen.push(format!("╺┛╹┗╸──────────┼{}", "─".repeat(width as usize - 16)));
 
   // Draws each line
@@ -513,11 +519,11 @@ fn node_display(node: &Node, input: &SharedInput, last_screen: &mut Option<Vec<S
     screen.push(line);
   }
 
-  render(last_screen, &screen, redraw);
+  render(last_screen, &screen);
 }
 
 // Prints screen, only re-printing lines that change
-pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>, redraw: bool) {
+pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
   fn redraw(screen: &Vec<String>) {
     print!("{esc}c", esc = 27 as char); // clear screen
     for y in 0 .. screen.len() {
@@ -547,49 +553,47 @@ pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>, re
   *old_screen = Some(new_screen.clone());
 }
 
-pub fn node_loop(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerComm) {
+pub fn node_loop(node: SharedNode, input: SharedInput, miner_comm: SharedMinerComm) {
   let mut mined = 0;
   let mut tick = 0;
-  let mut last_screen : Option<Vec<String>> = None;
 
   loop {
-    tick = tick + 1;
+    tick += 1;
 
-    // If the miner thread mined a block, gets and registers it
-    if let MinerComm::Answer { block } = read_miner_comm(miner_comm) {
-      mined += 1;
-      node_add_block(node, &block);
-    }
+    {
+      let mut node = node.lock().unwrap();
 
-    // Asks the miner to mine a block
-    if tick % 3 == 0 {
-      node_ask_mine(node, input, miner_comm);
-    }
+      // If the miner thread mined a block, gets and registers it
+      if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
+        mined += 1;
+        node_add_block(&mut node, &block);
+      }
 
-    // Receives and handles incoming messages
-    if tick % 3 == 0 {
-      node_message_receive(node);
-    }
+      // Asks the miner to mine a block
+      if tick % 3 == 0 {
+        node_ask_mine(&mut node, &input, &miner_comm);
+      }
 
-    // Spreads the tip block
-    if tick % 3 == 0 {
-      node_gossip_tip_block(node, 8);
-    }
+      // Receives and handles incoming messages
+      if tick % 3 == 0 {
+        node_message_receive(&mut node);
+      }
 
-    // Requests missing blocks
-    if tick % 3 == 0 {
-      node_ask_missing_blocks(node);
-    }
+      // Spreads the tip block
+      if tick % 3 == 0 {
+        node_gossip_tip_block(&mut node, 8);
+      }
 
-    // Peer timeout
-    // FIXME: should be less frequent
-    if tick % 60 == 0 {
-      node_peers_timeout(node);
-    }
+      // Requests missing blocks
+      if tick % 3 == 0 {
+        node_ask_missing_blocks(&mut node);
+      }
 
-    // Displays the UI
-    if tick % 2 == 0 {
-      node_display(node, input, &mut last_screen, tick % 120 == 0);
+      // Peer timeout
+      // FIXME: should be less frequent
+      if tick % 60 == 0 {
+        node_peers_timeout(&mut node);
+      }
     }
 
     // Sleep for 1/60 seconds
