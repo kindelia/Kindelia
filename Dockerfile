@@ -6,13 +6,13 @@ RUN cargo search --limit=0
 # Cache dependencies
 COPY ./Cargo.toml ./Cargo.lock ./
 RUN mkdir src && touch ./src/lib.rs
-RUN sed -i '/^default-run = /d' Cargo.toml
+# RUN sed -i '/^default-run = /d' Cargo.toml
 RUN cargo build --lib --release
 
 # Build binary
 COPY ./Cargo.toml ./Cargo.lock ./
 COPY ./src/ ./src/
-RUN cargo build --bin=kindelia-node-headless --release
+RUN cargo build --bin=kindelia-node --release
 
 
 # from alpine:3.15
@@ -20,8 +20,8 @@ from debian:11-slim
 
 WORKDIR /app/
 
-COPY --from=build ./target/release/kindelia-node-headless /app/
+COPY --from=build ./target/release/kindelia-node /app/
 
-CMD ["/app/kindelia-node-headless"]
+CMD ["/app/kindelia-node --no-ui"]
 
 EXPOSE 42000/udp

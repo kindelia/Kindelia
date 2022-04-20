@@ -331,6 +331,40 @@ pub fn input_loop(input: SharedInput) {
   }
 }
 
+// Output
+// ======
+
+pub fn output_loop_tui(node: SharedNode, input: SharedInput) {
+  let mut last_screen: Option<Vec<String>> = None;
+
+  loop {
+    let input = {
+      let input = input.lock().unwrap();
+      input.clone()
+    };
+
+    {
+      let node = node.lock().unwrap();
+      node_display_tui(&node, &input, &mut last_screen);
+    }
+
+    // Sleeps for 2 * 1/60 s
+    std::thread::sleep(std::time::Duration::from_micros(13000));
+  }
+}
+
+pub fn output_loop_headless(node: SharedNode) {
+  loop {
+    {
+      let node = node.lock().unwrap();
+      node_display_headless(&node);
+    }
+
+    // Sleeps for 2 seconds
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+  }
+}
+
 // Node
 // ====
 
@@ -393,7 +427,7 @@ fn node_ask_mine(node: &mut Node, input: &SharedInput, miner_comm: &SharedMinerC
   }
 }
 
-pub fn node_display(node: &Node, input: &str, last_screen: &mut Option<Vec<String>>) {
+pub fn node_display_tui(node: &Node, input: &str, last_screen: &mut Option<Vec<String>>) {
   //─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾
   
   fn bold(text: &str) -> String {
@@ -502,6 +536,25 @@ pub fn node_display(node: &Node, input: &str, last_screen: &mut Option<Vec<Strin
   }
 
   render(last_screen, &screen);
+}
+
+pub fn node_display_headless(node: &Node) {
+  println!("{{");
+
+  let time = crate::algorithms::get_time();
+
+  let num_peers = node.peers.len();
+
+  let tip = node.tip;
+  let l_hash = tip.1;
+  let l_height = node.height[&l_hash];
+
+  println!(r#"  "time": "{}","#, time);
+  println!(r#"  "num_peers: {},"#, num_peers);
+  println!(r#"  "tip_hash": "{}","#, l_hash);
+  println!(r#"  "tip_height": {}"#, l_height);
+
+  println!("}}");
 }
 
 // Prints screen, only re-printing lines that change
