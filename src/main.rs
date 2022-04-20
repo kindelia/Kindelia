@@ -4,13 +4,23 @@
 #![allow(unused_variables)]
 
 mod algorithms;
+mod api;
 mod cli;
+mod common;
 mod constants;
+mod frontend;
 mod hvm;
 mod network;
 mod node;
 mod serializer;
 mod types;
+
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+use cli::{Cli, Parser};
+use primitive_types::U256;
 
 use crate::algorithms::*;
 use crate::constants::*;
@@ -19,12 +29,7 @@ use crate::node::*;
 use crate::serializer::*;
 use crate::types::*;
 
-use std::io::Write;
-use std::sync::{Arc, Mutex};
-use std::thread;
-
-use cli::{Cli, Parser};
-use primitive_types::U256;
+use crate::api::Frontend;
 
 fn main() {
   hvm::test_1();
@@ -54,9 +59,11 @@ fn run() {
   let node_0: SharedNode = Arc::new(Mutex::new(new_node()));
   let node_1 = node_0.clone();
 
+  let (node_comm, front_comm) = api::make_node_channels(1);
+
   // Node to Miner communication object
-  let comm_0 = new_miner_comm();
-  let comm_1 = comm_0.clone();
+  let miner_comm_0 = new_miner_comm();
+  let miner_comm_1 = miner_comm_0.clone();
 
   // User input object
   let input_0 = new_input();
@@ -65,23 +72,20 @@ fn run() {
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node_0, input_0, comm_0);
+    node_loop(node_0, input_0, miner_comm_0, node_comm);
   });
 
   // Spawns the miner thread
   let miner_thread = thread::spawn(move || {
-    miner_loop(comm_1);
+    miner_loop(miner_comm_1);
   });
 
   let io_threads = if cli_matches.no_ui {
     // Run headless mode threads
 
-    // Spawns the output thread
-    let output_thread = thread::spawn(move || {
-      node::output_loop_headless(node_1);
-    });
-
-    vec![output_thread]
+    let frontend = crate::frontend::headless::HeadlessFrontend::new();
+    let tasks = frontend.get_tasks(front_comm);
+    tasks.into_iter().map(thread::spawn).collect::<Vec<_>>()
   } else {
     // Run TUI threads
 

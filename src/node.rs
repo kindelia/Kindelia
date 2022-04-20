@@ -23,6 +23,8 @@ use crate::network::*;
 use crate::serializer::*;
 use crate::types::*;
 
+use crate::api;
+
 // initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
   return difficulty_to_target(u256(INITIAL_DIFFICULTY));
@@ -353,18 +355,6 @@ pub fn output_loop_tui(node: SharedNode, input: SharedInput) {
   }
 }
 
-pub fn output_loop_headless(node: SharedNode) {
-  loop {
-    {
-      let node = node.lock().unwrap();
-      node_display_headless(&node);
-    }
-
-    // Sleeps for 2 seconds
-    std::thread::sleep(std::time::Duration::from_millis(1000));
-  }
-}
-
 // Node
 // ====
 
@@ -481,7 +471,7 @@ pub fn node_display_tui(node: &Node, input: &str, last_screen: &mut Option<Vec<S
   menu_lines.push((format!("Difficulty"), true));
   menu_lines.push((format!("{}", diff), false));
   menu_lines.push((format!("{}", "-------------"), false));
-  menu_lines.push((format!("HashRate"), true));
+  menu_lines.push((format!("Hash Rate"), true));
   menu_lines.push((format!("{}", rate), false));
   menu_lines.push((format!("{}", "-------------"), false));
   menu_lines.push((format!("Blocks"), true));
@@ -538,25 +528,6 @@ pub fn node_display_tui(node: &Node, input: &str, last_screen: &mut Option<Vec<S
   render(last_screen, &screen);
 }
 
-pub fn node_display_headless(node: &Node) {
-  println!("{{");
-
-  let time = crate::algorithms::get_time();
-
-  let num_peers = node.peers.len();
-
-  let tip = node.tip;
-  let l_hash = tip.1;
-  let l_height = node.height[&l_hash];
-
-  println!(r#"  "time": "{}","#, time);
-  println!(r#"  "num_peers: {},"#, num_peers);
-  println!(r#"  "tip_hash": "{}","#, l_hash);
-  println!(r#"  "tip_height": {}"#, l_height);
-
-  println!("}}");
-}
-
 // Prints screen, only re-printing lines that change
 pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
   fn redraw(screen: &Vec<String>) {
@@ -588,7 +559,14 @@ pub fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
   *old_screen = Some(new_screen.clone());
 }
 
-pub fn node_loop(node: SharedNode, input: SharedInput, miner_comm: SharedMinerComm) {
+use crate::api::NodeCommEdge;
+
+pub fn node_loop(
+  node: SharedNode,
+  input: SharedInput,
+  miner_comm: SharedMinerComm,
+  node_comm: NodeCommEdge,
+) {
   let mut mined = 0;
   let mut tick = 0;
 
@@ -629,9 +607,64 @@ pub fn node_loop(node: SharedNode, input: SharedInput, miner_comm: SharedMinerCo
       if tick % 60 == 0 {
         node_peers_timeout(&mut node);
       }
+
+      if tick % 6 == 0 {
+        handle_node_comm(&node, &node_comm);
+      }
     }
 
     // Sleep for 1/60 seconds
     std::thread::sleep(std::time::Duration::from_micros(16666));
+  }
+}
+
+fn handle_node_comm(node: &Node, node_comm: &NodeCommEdge) {
+  use api::{NodeAns, NodeAsk};
+  let (tx, rx) = node_comm;
+  match rx.try_recv() {
+    Ok(val) => match val {
+      NodeAsk::Info { max_last_blocks } => {
+        tx.send(
+          NodeAns::NodeInfo(get_node_info(node, max_last_blocks))
+        ).unwrap();
+      },
+      NodeAsk::ToMine(_) => todo!(), // TODO
+    }
+    Err(err) => match err {
+      std::sync::mpsc::TryRecvError::Empty => (),
+      std::sync::mpsc::TryRecvError::Disconnected => panic!("Error: {}", err),
+    }
+  }
+}
+
+fn get_node_info(node: &Node, num_last_blocks: Option<u64>) -> api::NodeInfo {
+  let tip = node.tip.1;
+  let height = *node.height.get(&tip).unwrap();
+  let tip_target = *node.target.get(&tip).unwrap();
+  let difficulty = target_to_difficulty(tip_target);
+  let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
+
+  let mut pending_num = 0;
+  let mut pending_seen_num = 0;
+  for (bhash, _) in node.waiters.iter() {
+    if node.seen.get(bhash).is_some() {
+      pending_seen_num += 1;
+    }
+    pending_num += 1;
+  }
+
+  // TODO: max_last_blocks
+  let last_blocks = get_longest_chain(node);
+
+  api::NodeInfo {
+    time: get_time(),
+    num_peers: node.peers.len() as u64,
+    num_blocks: node.block.len() as u64,
+    num_pending: pending_num as u64,
+    height,
+    difficulty,
+    hash_rate,
+    tip_hash: tip,
+    last_blocks,
   }
 }
