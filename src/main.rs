@@ -4,6 +4,7 @@
 #![allow(unused_variables)]
 
 mod algorithms;
+mod cli;
 mod constants;
 mod network;
 mod node;
@@ -21,9 +22,12 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use cli::{Cli, Parser};
 use primitive_types::U256;
 
 fn main() {
+  let cli_matches = cli::Cli::parse();
+
   //print!("0123456789abcdef\n");
   //print!("0123456789abcdef\n");
   //print!("0123456789abcdef\n");
@@ -59,43 +63,40 @@ fn main() {
     node_loop(node_0, input_0, comm_0);
   });
 
-  // Spawns the input thread
-  let input_thread = thread::spawn(move || {
-    input_loop(input_1);
-  });
-
-  // Spawns the output thread
-  let output_thread = thread::spawn(move || {
-    output_loop(node_1, input_2);
-  });
-
   // Spawns the miner thread
   let miner_thread = thread::spawn(move || {
     miner_loop(comm_1);
   });
 
+  let io_threads = if cli_matches.no_ui {
+    // Run headless mode threads
+
+    // Spawns the output thread
+    let output_thread = thread::spawn(move || {
+      node::output_loop_headless(node_1);
+    });
+
+    vec![output_thread]
+  } else {
+    // Run TUI threads
+
+    // Spawns the input thread
+    let input_thread = thread::spawn(move || {
+      input_loop(input_1);
+    });
+
+    // Spawns the output thread
+    let output_thread = thread::spawn(move || {
+      output_loop_tui(node_1, input_2);
+    });
+
+    vec![input_thread, output_thread]
+  };
+
   // Joins all threads
   node_thread.join().unwrap();
-  input_thread.join().unwrap();
-  output_thread.join().unwrap();
   miner_thread.join().unwrap();
-}
-
-fn output_loop(node: SharedNode, input: SharedInput) {
-  let mut last_screen: Option<Vec<String>> = None;
-
-  loop {
-    let input = {
-      let input = input.lock().unwrap();
-      input.clone()
-    };
-
-    {
-      let node = node.lock().unwrap();
-      node::node_display(&node, &input, &mut last_screen);
-    }
-
-    // Sleeps for 2 * 1/60 s
-    std::thread::sleep(std::time::Duration::from_micros(13000));
+  for thread in io_threads {
+    thread.join().unwrap();
   }
 }
