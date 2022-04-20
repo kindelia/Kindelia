@@ -38,6 +38,7 @@ pub struct NodeInfo {
   pub num_peers: u64,
   pub num_blocks: u64,
   pub num_pending: u64,
+  pub num_pending_seen: u64,
   pub height: u64,
   pub difficulty: U256,
   pub hash_rate: U256,

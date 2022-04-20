@@ -76,9 +76,9 @@ pub enum MinerComm {
   Stop,
 }
 
+pub type Shared<T> = Arc<Mutex<T>>;
 pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
 pub type SharedInput = Arc<Mutex<String>>;
-pub type SharedNode = Arc<Mutex<Node>>;
 
 #[derive(Debug, Clone)]
 pub enum Message {

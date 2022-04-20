@@ -9,10 +9,7 @@ impl HeadlessFrontend {
 }
 
 impl api::Frontend for HeadlessFrontend {
-  fn get_tasks(
-    &self,
-    comm_edge: ClientCommEdge,
-  ) -> Vec<Box<dyn FnOnce() + Send + 'static>> {
+  fn get_tasks(&self, comm_edge: ClientCommEdge) -> Vec<Box<dyn FnOnce() + Send + 'static>> {
     let io_task = move || {
       io_loop(comm_edge);
     };
@@ -24,17 +21,12 @@ fn io_loop(comm: ClientCommEdge) {
   let (tx, rx) = comm;
 
   loop {
-    tx.send(NodeAsk::Info {
-      max_last_blocks: Some(0),
-    })
-    .unwrap();
+    tx.send(NodeAsk::Info { max_last_blocks: Some(0) }).unwrap();
     match rx.recv() {
-      Ok(msg) => match msg {
-        NodeAns::NodeInfo(info) => {
-          display(&info);
-        }
-      },
       Err(err) => panic!("Error: {}", err),
+      Ok(msg) => match msg {
+        NodeAns::NodeInfo(info) => display(&info),
+      },
     }
     std::thread::sleep(std::time::Duration::from_millis(1000));
   }

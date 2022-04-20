@@ -56,8 +56,7 @@ fn run() {
   //out.flush();
 
   // Node state object
-  let node_0: SharedNode = Arc::new(Mutex::new(new_node()));
-  let node_1 = node_0.clone();
+  let node = new_node();
 
   let (node_comm, front_comm) = api::make_node_channels(1);
 
@@ -65,14 +64,9 @@ fn run() {
   let miner_comm_0 = new_miner_comm();
   let miner_comm_1 = miner_comm_0.clone();
 
-  // User input object
-  let input_0 = new_input();
-  let input_1 = input_0.clone();
-  let input_2 = input_0.clone();
-
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node_0, input_0, miner_comm_0, node_comm);
+    node_loop(node, miner_comm_0, node_comm);
   });
 
   // Spawns the miner thread
@@ -80,32 +74,19 @@ fn run() {
     miner_loop(miner_comm_1);
   });
 
-  let io_threads = if cli_matches.no_ui {
-    // Run headless mode threads
-
-    let frontend = crate::frontend::headless::HeadlessFrontend::new();
-    let tasks = frontend.get_tasks(front_comm);
-    tasks.into_iter().map(thread::spawn).collect::<Vec<_>>()
+  // Spawns frontend threads
+  let frontend: Box<dyn Frontend> = if cli_matches.no_ui {
+    Box::new(crate::frontend::headless::HeadlessFrontend::new())
   } else {
-    // Run TUI threads
-
-    // Spawns the input thread
-    let input_thread = thread::spawn(move || {
-      input_loop(input_1);
-    });
-
-    // Spawns the output thread
-    let output_thread = thread::spawn(move || {
-      output_loop_tui(node_1, input_2);
-    });
-
-    vec![input_thread, output_thread]
+    Box::new(crate::frontend::tui::TuiFrontend::new())
   };
+  let tasks = frontend.get_tasks(front_comm);
+  let front_threads = tasks.into_iter().map(thread::spawn).collect::<Vec<_>>();
 
   // Joins all threads
   node_thread.join().unwrap();
   miner_thread.join().unwrap();
-  for thread in io_threads {
+  for thread in front_threads {
     thread.join().unwrap();
   }
 }
