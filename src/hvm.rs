@@ -337,11 +337,9 @@ pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option
   fn bind(mem: &mut Worker, vars: &mut Vec<Option<Lnk>>, loc: u64, name: u64, lnk: Lnk) {
     match vars[name as usize] {
       Some(got) => {
-        println!("some bind {}", name);
         link(mem, got, lnk);
       }
       None => {
-        println!("none bind {}", name);
         vars[name as usize] = Some(lnk);
         link(mem, loc, Era());
       }
@@ -349,7 +347,6 @@ pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option
   }
   match term {
     Term::Var { name } => {
-      println!("var {}", name);
       if (*name as usize) < vars.len() {
         match vars[*name as usize] {
           Some(got) => {
@@ -1078,19 +1075,69 @@ pub fn show_term(
   text
 }
 
-fn hvm_test_0() {
-  let mut mem = hvm::new_worker();
+pub fn read(code: &str) -> Term {
+  fn head(code: &str) -> char {
+    return code.chars().take(1).last().unwrap_or('?');
+  }
+  fn tail(code: &str) -> &str {
+    return &code[head(code).len_utf8()..];
+  }
+  fn skip(code: &str) -> (&str, ()) {
+    let mut code = code;
+    while head(code) == ' ' {
+      code = tail(code);
+    }
+    return (code, ());
+  }
+  fn read_char(code: &str, chr: char) -> (&str, ()) {
+    let (code, ()) = skip(code);
+    if head(code) == chr {
+      return (tail(code), ());
+    } else {
+      panic!("Unexpected char.");
+    }
+  }
+  fn read_numb(code: &str) -> (&str, u64) {
+    let (code, ()) = skip(code);
+    let mut numb = 0;
+    let mut code = code;
+    while head(code) >= '0' && head(code) <= '9' {
+      numb = numb * 10 + head(code) as u64 - 0x30;
+      code = tail(code);
+    }
+    return (code, numb);
+  }
+  fn read_term(code: &str) -> (&str, Term) {
+    let (code, ()) = skip(code);
+    match head(code) {
+      'λ' => {
+        let code         = tail(code);
+        let (code, name) = read_numb(code);
+        let (code, body) = read_term(code);
+        return (code, Term::Lam { name, body: Box::new(body) });
+      },
+      '(' => {
+        let code         = tail(code);
+        let (code, func) = read_term(code);
+        let (code, argm) = read_term(code);
+        let (code, skip) = read_char(code, ')');
+        return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
+      },
+      _ => {
+        let (code, name) = read_numb(code);
+        return (code, Term::Var { name });
+      }
+    }
+  }
+  return read_term(code).1;
+}
 
-  let term = hvm::Term::Lam {
-    name: 0,
-    body: Box::new(hvm::Term::Lam {
-      name: 1,
-      body: Box::new(hvm::Term::Var {
-        name: 1
-      })
-    })
-  };
-  let term = hvm::alloc_term(&mut mem, &term, 0, &mut vec![None; 65536], &mut 0);
+pub fn hvm_test_0() {
+  let mut mem = new_worker();
 
-  println!("oi {:?}", hvm::show_term(&mem, term, None, 0));
+  let term = read("λ0 λ1 (0 (0 1))");
+  println!("term: {:?}", term);
+  let term = alloc_term(&mut mem, &term, 0, &mut vec![None; 65536], &mut 0);
+
+  println!("oi {:?}", show_term(&mem, term, None, 0));
 }

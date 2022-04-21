@@ -6,6 +6,7 @@
 mod algorithms;
 mod cli;
 mod constants;
+mod hvm;
 mod network;
 mod node;
 mod serializer;
@@ -24,6 +25,10 @@ use std::thread;
 
 use cli::{Cli, Parser};
 use primitive_types::U256;
+
+//fn main() {
+  //hvm::hvm_test_0();
+//}
 
 fn main() {
   let cli_matches = cli::Cli::parse();
