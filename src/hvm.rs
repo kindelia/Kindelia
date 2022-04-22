@@ -3,6 +3,8 @@
 #![allow(non_snake_case)]
 
 use std::collections::{hash_map, HashMap};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // Terms
 // -----
@@ -13,7 +15,8 @@ pub enum Term {
   Dup { nam0: u64, nam1: u64, expr: Box<Term>, body: Box<Term> },
   Lam { name: u64, body: Box<Term> },
   App { func: Box<Term>, argm: Box<Term> },
-  Ctr { name: u64, args: Vec<Box<Term>> },
+  Ctr { name: u64, args: Vec<Term> },
+  Fun { name: u64, args: Vec<Term> },
   U32 { numb: u32 },
   Op2 { oper: u64, val0: Box<Term>, val1: Box<Term> },
 }
@@ -38,20 +41,34 @@ pub enum Oper {
   Neq,
 }
 
-// Rule
-// ----
+// Functions
+// ---------
+
+#[derive(Clone, Debug)]
+pub struct Var {
+  pub param: u64,         // in what parameter is this variable located?
+  pub field: Option<u64>, // in what field is this variabled located? (if any)
+  pub erase: bool,        // should this variable be collected (because it is unused)?
+}
 
 #[derive(Clone, Debug)]
 pub struct Rule {
-  pub lhs: Term,
-  pub rhs: Term,
+  pub cond: Vec<Lnk>,        // left-hand side matching conditions
+  pub vars: Vec<Var>,        // left-hand side variable locations
+  pub free: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
+  pub body: Term,            // right-hand side body of rule
 }
 
-// File
-// ----
+#[derive(Clone, Debug)]
+pub struct Func {
+  arity: u64,       // number of arguments
+  redux: Vec<u64>,  // index of strict arguments
+  rules: Vec<Rule>, // vector of rules
+}
 
+#[derive(Clone, Debug)]
 pub struct File {
-  pub rules: Vec<Rule>,
+  pub funcs: Vec<Option<Func>>,
 }
 
 // Constants
@@ -94,7 +111,7 @@ pub const MUL: u64 = 0x2;
 pub const DIV: u64 = 0x3;
 pub const MOD: u64 = 0x4;
 pub const AND: u64 = 0x5;
-pub const OR: u64 = 0x6;
+pub const OR : u64 = 0x6;
 pub const XOR: u64 = 0x7;
 pub const SHL: u64 = 0x8;
 pub const SHR: u64 = 0x9;
@@ -109,14 +126,6 @@ pub const NEQ: u64 = 0xF;
 // -----
 
 pub type Lnk = u64;
-
-pub type Rewriter = Box<dyn Fn(&mut Worker, &mut u64, u64, Lnk) -> bool>;
-
-pub struct Function {
-  pub arity: u64,
-  pub stricts: Vec<u64>,
-  pub rewriter: Rewriter,
-}
 
 pub struct Worker {
   pub node: Vec<Lnk>,
@@ -191,7 +200,7 @@ pub fn Ctr(ari: u64, fun: u64, pos: u64) -> Lnk {
   (CTR * TAG) | (ari * ARI) | (fun * EXT) | pos
 }
 
-pub fn Cal(ari: u64, fun: u64, pos: u64) -> Lnk {
+pub fn Fun(ari: u64, fun: u64, pos: u64) -> Lnk {
   (CAL * TAG) | (ari * ARI) | (fun * EXT) | pos
 }
 
@@ -332,6 +341,9 @@ pub fn inc_cost(mem: &mut Worker) {
   mem.cost += 1;
 }
 
+// Term
+// ----
+
 // Writes a Term represented as a Rust enum on the Runtime's memory.
 pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option<Lnk>>, dups: &mut u64) -> Lnk {
   fn bind(mem: &mut Worker, vars: &mut Vec<Option<Lnk>>, loc: u64, name: u64, lnk: Lnk) {
@@ -387,15 +399,15 @@ pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option
       link(mem, node + 1, argm);
       App(node)
     }
-    //Term::Cal { func, args } => {
-      //let size = args.len() as u64;
-      //let node = alloc(mem, size);
-      //for (i, arg) in args.iter().enumerate() {
-        //let arg_lnk = alloc_term(mem, arg, vars, dups);
-        //link(mem, node + i as u64, arg_lnk);
-      //}
-      //Cal(size, *func, node)
-    //}
+    Term::Fun { name, args } => {
+      let size = args.len() as u64;
+      let node = alloc(mem, size);
+      for (i, arg) in args.iter().enumerate() {
+        let arg_lnk = alloc_term(mem, arg, node + i as u64, vars, dups);
+        link(mem, node + i as u64, arg_lnk);
+      }
+      Fun(size, *name, node)
+    }
     Term::Ctr { name, args } => {
       let size = args.len() as u64;
       let node = alloc(mem, size);
@@ -419,6 +431,102 @@ pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option
   }
 }
 
+// Given a vector of rules (lhs/rhs pairs), builds the Func object
+pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
+  // If there are no rules, return none
+  if lines.len() == 0 {
+    return None;
+  }
+
+  // Find the function arity
+  let arity;
+  if let Term::Fun { args, .. } = &lines[0].0 {
+    arity = args.len() as u64;
+  } else {
+    return None;
+  }
+
+  // The resulting vector
+  let mut rules = Vec::new();
+
+  // A vector with the indices that are strict
+  let mut strict = vec![false; arity as usize];
+
+  // For each rule (lhs/rhs pair)
+  for i in 0 .. lines.len() {
+    let rule = &lines[i];
+
+    let mut cond = Vec::new();
+    let mut vars = Vec::new();
+    let mut free = Vec::new();
+
+    // If the lhs is a Fun
+    if let Term::Fun { ref name, ref args } = rule.0 {
+
+      // If there is an arity mismatch, return None
+      if args.len() as u64 != arity {
+        return None;
+      }
+
+      // For each lhs argument
+      for i in 0 .. args.len() as u64 {
+        
+        match &args[i as usize] {
+          // If it is a constructor...
+          Term::Ctr { name: arg_name, args: arg_args } => {
+            strict[i as usize] = true;
+            cond.push(Ctr(args.len() as u64, *arg_name, 0)); // adds its matching condition
+            free.push((i, args.len() as u64)); // marks its index and arity for freeing
+            // For each of its fields...
+            for j in 0 .. arg_args.len() as u64 {
+              // If it is a variable...
+              if let Term::Var { name } = arg_args[j as usize] {
+                vars.push(Var { param: i, field: Some(j), erase: name == 0 }); // add its location
+              // Otherwise..
+              } else {
+                return None; // return none, because we don't allow nested matches
+              }
+            }
+          }
+          // If it is a number...
+          Term::U32 { numb: arg_numb } => {
+            strict[i as usize] = true;
+            cond.push(U_32(*arg_numb as u64)); // adds its matching condition
+          }
+          // If it is a variable...
+          Term::Var { name: arg_name } => {
+            vars.push(Var { param: i, field: None, erase: *arg_name == 0 }); // add its location
+            cond.push(0); // it has no matching condition
+          }
+          _ => {
+            return None;
+          }
+        }
+      }
+
+    // If lhs isn't a Ctr, return None
+    } else {
+      return None;
+    }
+
+    // Creates the rhs body
+    let body = rule.1.clone();
+
+    // Adds the rule to the result vector
+    rules.push(Rule { cond, vars, free, body });
+  }
+
+  // Builds the redux object, with the index of strict arguments
+  let mut redux = Vec::new();
+  for i in 0 .. strict.len() {
+    if strict[i] {
+      redux.push(i as u64);
+    }
+  }
+
+  return Some(Func { arity, redux, rules });
+}
+
 
 // Reduction
 // ---------
@@ -431,40 +539,15 @@ pub fn subst(mem: &mut Worker, lnk: Lnk, val: Lnk) {
   }
 }
 
-pub fn cal_par(mem: &mut Worker, host: u64, term: Lnk, argn: Lnk, n: u64) -> Lnk {
-  inc_cost(mem);
-  let arit = get_ari(term);
-  let func = get_ext(term);
-  let fun0 = get_loc(term, 0);
-  let fun1 = alloc(mem, arit);
-  let par0 = get_loc(argn, 0);
-  for i in 0..arit {
-    if i != n {
-      let leti = alloc(mem, 3);
-      let argi = ask_arg(mem, term, i);
-      link(mem, fun0 + i, Dp0(get_ext(argn), leti));
-      link(mem, fun1 + i, Dp1(get_ext(argn), leti));
-      link(mem, leti + 2, argi);
-    } else {
-      link(mem, fun0 + i, ask_arg(mem, argn, 0));
-      link(mem, fun1 + i, ask_arg(mem, argn, 1));
-    }
-  }
-  link(mem, par0 + 0, Cal(arit, func, fun0));
-  link(mem, par0 + 1, Cal(arit, func, fun1));
-  let done = Par(get_ext(argn), par0);
-  link(mem, host, done);
-  done
-}
-
 pub fn reduce(
   mem: &mut Worker,
+  file: &File,
   dups: &mut u64,
-  funcs: &[Option<Function>],
   root: u64,
-  _opt_id_to_name: Option<&HashMap<u64, String>>,
+  _i2n: Option<&HashMap<u64, String>>,
   debug: bool,
 ) -> Lnk {
+
   let mut stack: Vec<u64> = Vec::new();
 
   let mut init = 1;
@@ -475,7 +558,7 @@ pub fn reduce(
 
     if debug {
       println!("------------------------");
-      println!("{}", show_term(mem, ask_lnk(mem, 0), _opt_id_to_name, term));
+      println!("{}", show_term(mem, ask_lnk(mem, 0), _i2n, term));
     }
 
     if init == 1 {
@@ -500,18 +583,19 @@ pub fn reduce(
         CAL => {
           let fun = get_ext(term);
           let ari = get_ari(term);
-          if let Some(f) = &funcs[fun as usize] {
-            let len = f.stricts.len() as u64;
-            if ari == f.arity {
-              if len == 0 {
+          //println!("- on call {} {}", fun, ari);
+          if let Some(func) = &file.funcs[fun as usize] {
+            //println!("- calling");
+            if ari == func.arity {
+              if func.redux.len() == 0 {
                 init = 0;
               } else {
                 stack.push(host);
-                for (i, strict) in f.stricts.iter().enumerate() {
-                  if i < f.stricts.len() - 1 {
-                    stack.push(get_loc(term, *strict) | 0x80000000);
+                for (i, redux) in func.redux.iter().enumerate() {
+                  if i < func.redux.len() - 1 {
+                    stack.push(get_loc(term, *redux) | 0x80000000);
                   } else {
-                    host = get_loc(term, *strict);
+                    host = get_loc(term, *redux);
                   }
                 }
               }
@@ -670,14 +754,14 @@ pub fn reduce(
             let a = get_val(arg0);
             let b = get_val(arg1);
             let c = match get_ext(term) {
-              ADD => (a + b) & 0xFFFFFFFF,
-              SUB => (a - b) & 0xFFFFFFFF,
-              MUL => (a * b) & 0xFFFFFFFF,
-              DIV => (a / b) & 0xFFFFFFFF,
-              MOD => (a % b) & 0xFFFFFFFF,
-              AND => (a & b) & 0xFFFFFFFF,
-              OR => (a | b) & 0xFFFFFFFF,
-              XOR => (a ^ b) & 0xFFFFFFFF,
+              ADD => (a + b)  & 0xFFFFFFFF,
+              SUB => (a - b)  & 0xFFFFFFFF,
+              MUL => (a * b)  & 0xFFFFFFFF,
+              DIV => (a / b)  & 0xFFFFFFFF,
+              MOD => (a % b)  & 0xFFFFFFFF,
+              AND => (a & b)  & 0xFFFFFFFF,
+              OR  => (a | b)  & 0xFFFFFFFF,
+              XOR => (a ^ b)  & 0xFFFFFFFF,
               SHL => (a << b) & 0xFFFFFFFF,
               SHR => (a >> b) & 0xFFFFFFFF,
               LTN => u64::from(a < b),
@@ -727,10 +811,124 @@ pub fn reduce(
         }
         CAL => {
           let fun = get_ext(term);
-          let _ari = get_ari(term);
-          if let Some(f) = &funcs[fun as usize] {
-            if (f.rewriter)(mem, dups, host, term) {
-              //unsafe { CALL_COUNT[fun as usize] += 1; } //TODO: uncomment
+          let ari = get_ari(term);
+
+          //println!("- on call 2");
+
+          if let Some(func) = &file.funcs[fun as usize] {
+
+          //println!("- calling");
+
+            let mut cont = false;
+
+            // For each argument, if it is a redex and a PAR, apply the cal_par rule
+            for idx in &func.redux {
+              if get_tag(ask_arg(mem, term, *idx)) == PAR {
+                inc_cost(mem);
+                let argn = ask_arg(mem, term, *idx);
+                let arit = get_ari(term);
+                let func = get_ext(term);
+                let fun0 = get_loc(term, 0);
+                let fun1 = alloc(mem, arit);
+                let par0 = get_loc(argn, 0);
+                for i in 0..arit {
+                  if i != *idx {
+                    let leti = alloc(mem, 3);
+                    let argi = ask_arg(mem, term, i);
+                    link(mem, fun0 + i, Dp0(get_ext(argn), leti));
+                    link(mem, fun1 + i, Dp1(get_ext(argn), leti));
+                    link(mem, leti + 2, argi);
+                  } else {
+                    link(mem, fun0 + i, ask_arg(mem, argn, 0));
+                    link(mem, fun1 + i, ask_arg(mem, argn, 1));
+                  }
+                }
+                link(mem, par0 + 0, Fun(arit, func, fun0));
+                link(mem, par0 + 1, Fun(arit, func, fun1));
+                let done = Par(get_ext(argn), par0);
+                link(mem, host, done);
+                cont = true;
+                break;
+              }
+            }
+
+            // If applied the PAR rule, continue
+            if cont {
+              init = 1;
+              continue;
+            }
+
+            // For each rule condition vector
+            for rule in &func.rules {
+              // Check if the rule matches
+              let mut matched = true;
+
+              // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
+              for i in 0 .. rule.cond.len() as u64 {
+
+                let cond = rule.cond[i as usize];
+                match get_tag(cond) {
+                  U32 => {
+                    //println!("Didn't match because of U32. i={} {} {}", i, get_val(ask_arg(mem, term, i)), get_val(cond));
+                    let same_tag = get_tag(ask_arg(mem, term, i)) == U32;
+                    let same_val = get_val(ask_arg(mem, term, i)) == get_val(cond);
+                    matched = matched && same_tag && same_val;
+                  }
+                  CTR => {
+                    //println!("Didn't match because of CTR. i={} {} {}", i, get_tag(ask_arg(mem, term, i)), get_val(cond));
+                    let same_tag = get_tag(ask_arg(mem, term, i)) == CTR;
+                    let same_ext = get_ext(ask_arg(mem, term, i)) == get_ext(cond);
+                    matched = matched && same_tag && same_ext;
+                  }
+                  _ => {}
+                }
+              }
+
+              // If all conditions are satisfied, the rule matched, so we must apply it
+              if matched {
+                // Increments the gas count
+                inc_cost(mem);
+
+                // Gathers matched variables
+                let mut vars = vec![None; 256]; // FIXME: pre-alloc statically
+                for i in 0 .. rule.vars.len() {
+                  let mut var = term;
+                  var = ask_arg(mem, var, rule.vars[i].param);
+                  if let Some(field) = rule.vars[i].field {
+                    var = ask_arg(mem, var, field);
+                  }
+                  vars[i] = Some(var);
+                }
+
+                // Builds the right-hand side term (ex: `(Succ (Add a b))`)
+                let done = alloc_term(mem, &rule.body, host, &mut vars, dups);
+
+                // Links the host location to it
+                link(mem, host, done);
+
+                // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
+                clear(mem, get_loc(term, 0), func.arity);
+                for (free_index, free_arity) in &rule.free {
+                  clear(mem, get_loc(ask_arg(mem, term, *free_index), 0), *free_arity);
+                }
+
+                // Collects unused variables (none in this example)
+                for i in 0 .. rule.vars.len() {
+                  if rule.vars[i].erase {
+                    if let Some(var) = vars[i] {
+                      collect(mem, var);
+                    }
+                  }
+                }
+
+                cont = true;
+                break;
+              }
+                      
+            }
+
+            // If applied a function, continue
+            if cont {
               init = 1;
               continue;
             }
@@ -762,18 +960,18 @@ pub fn get_bit(bits: &[u64], bit: u64) -> bool {
 
 pub fn normal_go(
   mem: &mut Worker,
+  file: &File,
   dups: &mut u64,
-  funcs: &[Option<Function>],
   host: u64,
   seen: &mut [u64],
-  opt_id_to_name: Option<&HashMap<u64, String>>,
+  i2n: Option<&HashMap<u64, String>>,
   debug: bool,
 ) -> Lnk {
   let term = ask_lnk(mem, host);
   if get_bit(seen, host) {
     term
   } else {
-    let term = reduce(mem, dups, funcs, host, opt_id_to_name, debug);
+    let term = reduce(mem, file, dups, host, i2n, debug);
     set_bit(seen, host);
     let mut rec_locs = Vec::with_capacity(16);
     match get_tag(term) {
@@ -803,7 +1001,7 @@ pub fn normal_go(
       _ => {}
     }
     for loc in rec_locs {
-      let lnk: Lnk = normal_go(mem, dups, funcs, loc, seen, opt_id_to_name, debug);
+      let lnk: Lnk = normal_go(mem, file, dups, loc, seen, i2n, debug);
       link(mem, loc, lnk);
     }
     term
@@ -812,9 +1010,9 @@ pub fn normal_go(
 
 pub fn normal(
   mem: &mut Worker,
+  file: &File,
   host: u64,
-  funcs: &[Option<Function>],
-  opt_id_to_name: Option<&HashMap<u64, String>>,
+  i2n: Option<&HashMap<u64, String>>,
   debug: bool,
 ) -> Lnk {
   let mut done;
@@ -822,14 +1020,14 @@ pub fn normal(
   let mut cost = mem.cost;
   loop {
     let mut seen = vec![0; 4194304];
-    done = normal_go(mem, &mut dups, funcs, host, &mut seen, opt_id_to_name, debug);
+    done = normal_go(mem, file, &mut dups, host, &mut seen, i2n, debug);
     if mem.cost != cost {
       cost = mem.cost;
     } else {
       break;
     }
   }
-  //print_call_counts(opt_id_to_name); // TODO: uncomment
+  //print_call_counts(i2n); // TODO: uncomment
   done
 }
 
@@ -837,11 +1035,11 @@ pub fn normal(
 // -----
 
 // Debug: prints call counts
-fn print_call_counts(opt_id_to_name: Option<&HashMap<u64, String>>) {
+fn print_call_counts(i2n: Option<&HashMap<u64, String>>) {
   unsafe {
     let mut counts : Vec<(String,u64)> = Vec::new();
     for fun in 0..MAX_DYNFUNS {
-      if let Some(id_to_name) = opt_id_to_name {
+      if let Some(id_to_name) = i2n {
         match id_to_name.get(&fun) {
           None => {
             break;
@@ -908,7 +1106,7 @@ pub fn show_mem(worker: &Worker) -> String {
 pub fn show_term(
   mem: &Worker,
   term: Lnk,
-  opt_id_to_name: Option<&HashMap<u64, String>>,
+  i2n: Option<&HashMap<u64, String>>,
   focus: u64,
 ) -> String {
   let mut lets: HashMap<u64, u64> = HashMap::new();
@@ -972,7 +1170,7 @@ pub fn show_term(
     mem: &Worker,
     term: Lnk,
     names: &HashMap<u64, String>,
-    opt_id_to_name: Option<&HashMap<u64, String>>,
+    i2n: Option<&HashMap<u64, String>>,
     focus: u64,
   ) -> String {
     let done = match get_tag(term) {
@@ -987,23 +1185,23 @@ pub fn show_term(
       }
       LAM => {
         let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?d")));
-        format!("λ{} {}", name, go(mem, ask_arg(mem, term, 1), names, opt_id_to_name, focus))
+        format!("λ{} {}", name, go(mem, ask_arg(mem, term, 1), names, i2n, focus))
       }
       APP => {
-        let func = go(mem, ask_arg(mem, term, 0), names, opt_id_to_name, focus);
-        let argm = go(mem, ask_arg(mem, term, 1), names, opt_id_to_name, focus);
+        let func = go(mem, ask_arg(mem, term, 0), names, i2n, focus);
+        let argm = go(mem, ask_arg(mem, term, 1), names, i2n, focus);
         format!("({} {})", func, argm)
       }
       PAR => {
         //let kind = get_ext(term);
-        let func = go(mem, ask_arg(mem, term, 0), names, opt_id_to_name, focus);
-        let argm = go(mem, ask_arg(mem, term, 1), names, opt_id_to_name, focus);
+        let func = go(mem, ask_arg(mem, term, 0), names, i2n, focus);
+        let argm = go(mem, ask_arg(mem, term, 1), names, i2n, focus);
         format!("{{{} {}}}", func, argm)
       }
       OP2 => {
         let oper = get_ext(term);
-        let val0 = go(mem, ask_arg(mem, term, 0), names, opt_id_to_name, focus);
-        let val1 = go(mem, ask_arg(mem, term, 1), names, opt_id_to_name, focus);
+        let val0 = go(mem, ask_arg(mem, term, 0), names, i2n, focus);
+        let val1 = go(mem, ask_arg(mem, term, 1), names, i2n, focus);
         let symb = match oper {
           0x0 => "+",
           0x1 => "-",
@@ -1028,21 +1226,17 @@ pub fn show_term(
       U32 => {
         format!("{}", get_val(term))
       }
-      CTR | CAL => {
+      CTR => {
         let func = get_ext(term);
         let arit = get_ari(term);
-        let args: Vec<String> =
-          (0..arit).map(|i| go(mem, ask_arg(mem, term, i), names, opt_id_to_name, focus)).collect();
-        let name = if let Some(id_to_name) = opt_id_to_name {
-          id_to_name.get(&func).unwrap_or(&String::from("?f")).clone()
-        } else {
-          format!(
-            "{}{}",
-            if get_tag(term) < CAL { String::from("C") } else { String::from("F") },
-            func
-          )
-        };
-        format!("({}{})", name, args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        let args: Vec<String> = (0..arit).map(|i| go(mem, ask_arg(mem, term, i), names, i2n, focus)).collect();
+        format!("(C{}{})", func, args.iter().map(|x| format!(" {}", x)).collect::<String>())
+      }
+      CAL => {
+        let func = get_ext(term);
+        let arit = get_ari(term);
+        let args: Vec<String> = (0..arit).map(|i| go(mem, ask_arg(mem, term, i), names, i2n, focus)).collect();
+        format!("(F{}{})", func, args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
         format!("*")
@@ -1056,7 +1250,7 @@ pub fn show_term(
     }
   }
   find_lets(mem, term, &mut lets, &mut kinds, &mut names, &mut count);
-  let mut text = go(mem, term, &names, opt_id_to_name, focus);
+  let mut text = go(mem, term, &names, i2n, focus);
   for (_key, pos) in lets {
     // todo: reverse
     let what = String::from("?h");
@@ -1069,75 +1263,165 @@ pub fn show_term(
       //kind,
       nam0,
       nam1,
-      go(mem, ask_lnk(mem, pos + 2), &names, opt_id_to_name, focus)
+      go(mem, ask_lnk(mem, pos + 2), &names, i2n, focus)
     ));
   }
   text
 }
 
-pub fn read(code: &str) -> Term {
-  fn head(code: &str) -> char {
-    return code.chars().take(1).last().unwrap_or('?');
-  }
-  fn tail(code: &str) -> &str {
+// Parsing
+// -------
+
+fn head(code: &str) -> char {
+  return code.chars().take(1).last().unwrap_or('\0');
+}
+
+fn tail(code: &str) -> &str {
+  if code.len() > 0 {
     return &code[head(code).len_utf8()..];
+  } else {
+    return "";
   }
-  fn skip(code: &str) -> (&str, ()) {
-    let mut code = code;
-    while head(code) == ' ' {
-      code = tail(code);
-    }
-    return (code, ());
+}
+
+fn skip(code: &str) -> &str {
+  let mut code = code;
+  while head(code) == ' ' || head(code) == '\n' {
+    code = tail(code);
   }
-  fn read_char(code: &str, chr: char) -> (&str, ()) {
-    let (code, ()) = skip(code);
-    if head(code) == chr {
-      return (tail(code), ());
-    } else {
-      panic!("Unexpected char.");
-    }
+  return code;
+}
+
+fn hash(name: &str) -> u64 {
+  let mut hasher = DefaultHasher::new();
+  name.hash(&mut hasher);
+  hasher.finish()
+}
+
+fn is_name_char(chr: char) -> bool {
+  return chr >= 'a' && chr <= 'z'
+      || chr >= 'A' && chr <= 'Z'
+      || chr >= '0' && chr <= '9'
+      || chr == '_' || chr == '.';
+}
+
+fn read_char(code: &str, chr: char) -> (&str, ()) {
+  let code = skip(code);
+  if head(code) == chr {
+    return (tail(code), ());
+  } else {
+    panic!("Expected {}, found {}.", chr, head(code));
   }
-  fn read_numb(code: &str) -> (&str, u64) {
-    let (code, ()) = skip(code);
-    let mut numb = 0;
-    let mut code = code;
-    while head(code) >= '0' && head(code) <= '9' {
-      numb = numb * 10 + head(code) as u64 - 0x30;
-      code = tail(code);
-    }
-    return (code, numb);
+}
+
+fn read_numb(code: &str) -> (&str, u64) {
+  let code = skip(code);
+  let mut numb = 0;
+  let mut code = code;
+  while head(code) >= '0' && head(code) <= '9' {
+    numb = numb * 10 + head(code) as u64 - 0x30;
+    code = tail(code);
   }
-  fn read_term(code: &str) -> (&str, Term) {
-    let (code, ()) = skip(code);
-    match head(code) {
-      'λ' => {
-        let code         = tail(code);
+  return (code, numb);
+}
+
+fn read_name(code: &str) -> (&str, String) {
+  let code = skip(code);
+  let mut text = String::new();
+  let mut code = code;
+  while is_name_char(head(code)) {
+    text.push(head(code));
+    code = tail(code);
+  }
+  return (code, text);
+}
+
+fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
+  let mut elems = Vec::new();
+  let mut code = code;
+  while code.len() > 0 && head(skip(code)) != stop {
+    let (new_code, elem) = read(code);
+    code = new_code;
+    elems.push(elem);
+  }
+  code = tail(skip(code));
+  return (code, elems);
+}
+
+fn read_term(code: &str) -> (&str, Term) {
+  let code = skip(code);
+  match head(code) {
+    'λ' => {
+      let code         = tail(code);
+      let (code, name) = read_numb(code);
+      let (code, body) = read_term(code);
+      return (code, Term::Lam { name, body: Box::new(body) });
+    },
+    '(' => {
+      let code = tail(code);
+      if head(code) == 'C' {
+        let code = tail(code);
         let (code, name) = read_numb(code);
-        let (code, body) = read_term(code);
-        return (code, Term::Lam { name, body: Box::new(body) });
-      },
-      '(' => {
-        let code         = tail(code);
+        let (code, args) = read_until(code, ')', read_term);
+        return (code, Term::Ctr { name, args });
+      } else if head(code) == 'F' {
+        let code = tail(code);
+        let (code, name) = read_numb(code);
+        let (code, args) = read_until(code, ')', read_term);
+        return (code, Term::Fun { name, args });
+      } else {
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
-      },
-      _ => {
-        let (code, name) = read_numb(code);
-        return (code, Term::Var { name });
       }
+    },
+    _ => {
+      let (code, name) = read_numb(code);
+      return (code, Term::Var { name });
     }
   }
-  return read_term(code).1;
 }
+
+fn read_rule(code: &str) -> (&str, (Term,Term)) {
+  let (code, lhs) = read_term(code);
+  let (code, ())  = read_char(code, '=');
+  let (code, rhs) = read_term(code);
+  return (code, (lhs, rhs));
+}
+
+fn read_func(code: &str) -> (&str, Func) {
+  let (code, rules) = read_until(code, '\0', read_rule);
+  if let Some(func) = build_func(rules.as_slice()) {
+    return (code, func);
+  } else {
+    panic!("Couldn't parse function.");
+  }
+}
+
+// Tests
+// -----
 
 pub fn hvm_test_0() {
   let mut mem = new_worker();
 
-  let term = read("λ0 λ1 (0 (0 1))");
-  println!("term: {:?}", term);
-  let term = alloc_term(&mut mem, &term, 0, &mut vec![None; 65536], &mut 0);
+  let func = read_func("
+    (F0 (C0))   = (C0)
+    (F0 (C1 0)) = (C1 (C1 (F0 0)))
+  ").1;
 
-  println!("oi {:?}", show_term(&mem, term, None, 0));
+  let file = File {
+    funcs: vec![Some(func.clone())]
+  };
+
+  let val = read_term("(F0 (C1 (C1 (C0))))").1;
+
+  mem.size    = 1;
+  mem.node[0] = alloc_term(&mut mem, &val, 1, &mut vec![None; 65536], &mut 0);
+
+  println!("term: {:?}", show_term(&mem, mem.node[0], None, 0));
+
+  let term = normal(&mut mem, &file, 0, None, false);
+  println!("term: {:?}", show_term(&mem, term, None, 0));
 }
+
