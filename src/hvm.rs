@@ -6,6 +6,8 @@ use std::collections::{hash_map, HashMap};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use std::time::Instant;
+
 // Terms
 // -----
 
@@ -127,15 +129,39 @@ pub const NEQ: u64 = 0xF;
 
 pub type Lnk = u64;
 
-pub struct Worker {
+// 256 bits + 512 MB
+// -----------------
+//  64 bits : size
+//  64 bits : next
+//  64 bits : cost
+//  64 bits : ????
+//  16 MB   : free[0]
+//  16 MB   : free[1]
+//  16 MB   : free[2]
+//  16 MB   : free[3]
+//  16 MB   : free[4]
+//  16 MB   : free[5]
+//  16 MB   : free[6]
+//  16 MB   : free[7]
+//  16 MB   : free[8]
+//  16 MB   : free[9]
+//  16 MB   : free[10]
+//  16 MB   : free[11]
+//  16 MB   : free[12]
+//  16 MB   : free[13]
+//  16 MB   : free[14]
+//  16 MB   : free[15]
+// 256 MB   : node
+
+pub struct Frame {
   pub node: Vec<Lnk>,
   pub size: u64,
   pub free: Vec<Vec<u64>>,
   pub cost: u64,
 }
 
-pub fn new_worker() -> Worker {
-  Worker {
+pub fn new_worker() -> Frame {
+  Frame {
     node: vec![0; 6 * 0x8000000],
     size: 0,
     free: vec![vec![]; 16],
@@ -234,15 +260,15 @@ pub fn get_loc(lnk: Lnk, arg: u64) -> u64 {
 // Memory
 // ------
 
-pub fn ask_lnk(mem: &Worker, loc: u64) -> Lnk {
+pub fn ask_lnk(mem: &Frame, loc: u64) -> Lnk {
   unsafe { *mem.node.get_unchecked(loc as usize) }
 }
 
-pub fn ask_arg(mem: &Worker, term: Lnk, arg: u64) -> Lnk {
+pub fn ask_arg(mem: &Frame, term: Lnk, arg: u64) -> Lnk {
   ask_lnk(mem, get_loc(term, arg))
 }
 
-pub fn link(mem: &mut Worker, loc: u64, lnk: Lnk) -> Lnk {
+pub fn link(mem: &mut Frame, loc: u64, lnk: Lnk) -> Lnk {
   unsafe {
     *mem.node.get_unchecked_mut(loc as usize) = lnk;
     if get_tag(lnk) <= VAR {
@@ -253,7 +279,7 @@ pub fn link(mem: &mut Worker, loc: u64, lnk: Lnk) -> Lnk {
   lnk
 }
 
-pub fn alloc(mem: &mut Worker, size: u64) -> u64 {
+pub fn alloc(mem: &mut Frame, size: u64) -> u64 {
   if size == 0 {
     0
   } else if let Some(reuse) = mem.free[size as usize].pop() {
@@ -265,11 +291,11 @@ pub fn alloc(mem: &mut Worker, size: u64) -> u64 {
   }
 }
 
-pub fn clear(mem: &mut Worker, loc: u64, size: u64) {
+pub fn clear(mem: &mut Frame, loc: u64, size: u64) {
   mem.free[size as usize].push(loc);
 }
 
-pub fn collect(mem: &mut Worker, term: Lnk) {
+pub fn collect(mem: &mut Frame, term: Lnk) {
   let mut stack : Vec<Lnk> = Vec::new();
   let mut next = term;
   loop {
@@ -337,7 +363,7 @@ pub fn collect(mem: &mut Worker, term: Lnk) {
   }
 }
 
-pub fn inc_cost(mem: &mut Worker) {
+pub fn inc_cost(mem: &mut Frame) {
   mem.cost += 1;
 }
 
@@ -345,8 +371,8 @@ pub fn inc_cost(mem: &mut Worker) {
 // ----
 
 // Writes a Term represented as a Rust enum on the Runtime's memory.
-pub fn alloc_term(mem: &mut Worker, term: &Term, loc: u64, vars: &mut Vec<Option<Lnk>>, dups: &mut u64) -> Lnk {
-  fn bind(mem: &mut Worker, vars: &mut Vec<Option<Lnk>>, loc: u64, name: u64, lnk: Lnk) {
+pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, vars: &mut Vec<Option<Lnk>>, dups: &mut u64) -> Lnk {
+  fn bind(mem: &mut Frame, vars: &mut Vec<Option<Lnk>>, loc: u64, name: u64, lnk: Lnk) {
     match vars[name as usize] {
       Some(got) => {
         link(mem, got, lnk);
@@ -481,7 +507,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
             for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                vars.push(Var { param: i, field: Some(j), erase: name == 0 }); // add its location
+                vars.push(Var { param: i, field: Some(j), erase: name == 0xFFFFFFFFFFFFFFFF }); // add its location
               // Otherwise..
               } else {
                 return None; // return none, because we don't allow nested matches
@@ -495,7 +521,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            vars.push(Var { param: i, field: None, erase: *arg_name == 0 }); // add its location
+            vars.push(Var { param: i, field: None, erase: *arg_name == 0xFFFFFFFFFFFFFFFF }); // add its location
             cond.push(0); // it has no matching condition
           }
           _ => {
@@ -531,7 +557,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
 // Reduction
 // ---------
 
-pub fn subst(mem: &mut Worker, lnk: Lnk, val: Lnk) {
+pub fn subst(mem: &mut Frame, lnk: Lnk, val: Lnk) {
   if get_tag(lnk) != ERA {
     link(mem, get_loc(lnk, 0), val);
   } else {
@@ -540,7 +566,7 @@ pub fn subst(mem: &mut Worker, lnk: Lnk, val: Lnk) {
 }
 
 pub fn reduce(
-  mem: &mut Worker,
+  mem: &mut Frame,
   file: &File,
   dups: &mut u64,
   root: u64,
@@ -824,6 +850,7 @@ pub fn reduce(
             // For each argument, if it is a redex and a PAR, apply the cal_par rule
             for idx in &func.redux {
               if get_tag(ask_arg(mem, term, *idx)) == PAR {
+                //println!("- found PAR");
                 inc_cost(mem);
                 let argn = ask_arg(mem, term, *idx);
                 let arit = get_ari(term);
@@ -862,6 +889,7 @@ pub fn reduce(
             for rule in &func.rules {
               // Check if the rule matches
               let mut matched = true;
+              //println!("- matching rule {:?}", rule);
 
               // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
               for i in 0 .. rule.cond.len() as u64 {
@@ -901,6 +929,8 @@ pub fn reduce(
                 }
 
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
+                //println!("-- alloc {:?}", rule.body);
+                //println!("-- vars: {:?}", vars);
                 let done = alloc_term(mem, &rule.body, host, &mut vars, dups);
 
                 // Links the host location to it
@@ -959,7 +989,7 @@ pub fn get_bit(bits: &[u64], bit: u64) -> bool {
 }
 
 pub fn normal_go(
-  mem: &mut Worker,
+  mem: &mut Frame,
   file: &File,
   dups: &mut u64,
   host: u64,
@@ -1009,7 +1039,7 @@ pub fn normal_go(
 }
 
 pub fn normal(
-  mem: &mut Worker,
+  mem: &mut Frame,
   file: &File,
   host: u64,
   i2n: Option<&HashMap<u64, String>>,
@@ -1092,7 +1122,7 @@ pub fn show_lnk(x: Lnk) -> String {
   }
 }
 
-pub fn show_mem(worker: &Worker) -> String {
+pub fn show_mem(worker: &Frame) -> String {
   let mut s: String = String::new();
   for i in 0..48 {
     // pushes to the string
@@ -1104,7 +1134,7 @@ pub fn show_mem(worker: &Worker) -> String {
 }
 
 pub fn show_term(
-  mem: &Worker,
+  mem: &Frame,
   term: Lnk,
   i2n: Option<&HashMap<u64, String>>,
   focus: u64,
@@ -1114,7 +1144,7 @@ pub fn show_term(
   let mut names: HashMap<u64, String> = HashMap::new();
   let mut count: u64 = 0;
   fn find_lets(
-    mem: &Worker,
+    mem: &Frame,
     term: Lnk,
     lets: &mut HashMap<u64, u64>,
     kinds: &mut HashMap<u64, u64>,
@@ -1167,7 +1197,7 @@ pub fn show_term(
     }
   }
   fn go(
-    mem: &Worker,
+    mem: &Frame,
     term: Lnk,
     names: &HashMap<u64, String>,
     i2n: Option<&HashMap<u64, String>>,
@@ -1224,7 +1254,7 @@ pub fn show_term(
         format!("({} {} {})", symb, val0, val1)
       }
       U32 => {
-        format!("{}", get_val(term))
+        format!("#{}", get_val(term))
       }
       CTR => {
         let func = get_ext(term);
@@ -1359,7 +1389,19 @@ fn read_term(code: &str) -> (&str, Term) {
     },
     '(' => {
       let code = tail(code);
-      if head(code) == 'C' {
+      if head(code) == '+' {
+        let code = tail(code);
+        let (code, val0) = read_term(code);
+        let (code, val1) = read_term(code);
+        let (code, skip) = read_char(code, ')');
+        return (code, Term::Op2 { oper: ADD, val0: Box::new(val0), val1: Box::new(val1) });
+      } else if head(code) == '-' {
+        let code = tail(code);
+        let (code, val0) = read_term(code);
+        let (code, val1) = read_term(code);
+        let (code, skip) = read_char(code, ')');
+        return (code, Term::Op2 { oper: SUB, val0: Box::new(val0), val1: Box::new(val1) });
+      } else if head(code) == 'C' {
         let code = tail(code);
         let (code, name) = read_numb(code);
         let (code, args) = read_until(code, ')', read_term);
@@ -1375,6 +1417,15 @@ fn read_term(code: &str) -> (&str, Term) {
         let (code, skip) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
       }
+    },
+    '#' => {
+      let code = tail(code);
+      let (code, numb) = read_numb(code);
+      return (code, Term::U32 { numb: numb as u32 });
+    },
+    '~' => {
+      let code = tail(code);
+      return (code, Term::Var { name: 0xFFFFFFFFFFFFFFFF });
     },
     _ => {
       let (code, name) = read_numb(code);
@@ -1402,26 +1453,44 @@ fn read_func(code: &str) -> (&str, Func) {
 // Tests
 // -----
 
-pub fn hvm_test_0() {
+pub fn test_0() {
   let mut mem = new_worker();
 
-  let func = read_func("
-    (F0 (C0))   = (C0)
-    (F0 (C1 0)) = (C1 (C1 (F0 0)))
+  //let func = read_func("
+    //(F0 (C0))   = (C0)
+    //(F0 (C1 0)) = (C1 (C1 (F0 0)))
+  //").1;
+
+  let gen = read_func("
+    (F0 #0) = (C0 #1)
+    (F1 0)  = (C1 (F0 (- 0 #1)) (F0 (- 0 #1)))
+  ").1;
+
+  let sum = read_func("
+    (F1 (C0 0))   = 0
+    (F1 (C1 0 1)) = (+ (F1 0) (F1 1))
   ").1;
 
   let file = File {
-    funcs: vec![Some(func.clone())]
+    funcs: vec![
+      Some(gen.clone()),
+      Some(sum.clone()),
+    ]
   };
 
-  let val = read_term("(F0 (C1 (C1 (C0))))").1;
+  let val = read_term("(F1 (F0 #21))").1;
 
   mem.size    = 1;
   mem.node[0] = alloc_term(&mut mem, &val, 1, &mut vec![None; 65536], &mut 0);
 
   println!("term: {:?}", show_term(&mem, mem.node[0], None, 0));
 
+  let init = Instant::now();
+
   let term = normal(&mut mem, &file, 0, None, false);
   println!("term: {:?}", show_term(&mem, term, None, 0));
+
+  println!("cost: {}", mem.cost);
+  println!("time: {}", init.elapsed().as_millis());
 }
 
