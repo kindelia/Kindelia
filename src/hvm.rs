@@ -6,6 +6,7 @@ use std::collections::{hash_map, HashMap};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use rand::prelude::*;
 use std::time::Instant;
 
 // Terms
@@ -57,7 +58,7 @@ pub struct Var {
 pub struct Rule {
   pub cond: Vec<Lnk>,        // left-hand side matching conditions
   pub vars: Vec<Var>,        // left-hand side variable locations
-  pub free: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
+  pub eras: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
   pub body: Term,            // right-hand side body of rule
 }
 
@@ -79,12 +80,14 @@ pub struct File {
 const U64_PER_KB: u64 = 0x80;
 const U64_PER_MB: u64 = 0x20000;
 const U64_PER_GB: u64 = 0x8000000;
+const FRAME_SIZE: u64 = 1024 * U64_PER_MB;
 
 pub const MAX_ARITY: u64 = 16;
 pub const MEM_SPACE: u64 = U64_PER_GB;
 pub const MAX_DYNFUNS: u64 = 65536;
 
 pub const SEEN_SIZE: usize = 4194304; // uses 32 MB, covers heaps up to 2 GB
+pub const VARS_SIZE: usize = 65536; // maximum variables per rule
 
 pub const VAL: u64 = 1;
 pub const EXT: u64 = 0x100000000;
@@ -154,18 +157,23 @@ pub type Lnk = u64;
 // 256 MB   : node
 
 pub struct Frame {
-  pub node: Vec<Lnk>,
-  pub size: u64,
-  pub free: Vec<Vec<u64>>,
+  pub data: Vec<u64>,
   pub cost: u64,
+  pub size: u64,
+  pub next: u64,
+  //pub node: Vec<Lnk>,
+  //pub size: u64,
+  //pub free: Vec<Vec<u64>>,
 }
 
 pub fn new_worker() -> Frame {
   Frame {
-    node: vec![0; 6 * 0x8000000],
+    data: vec![0; FRAME_SIZE as usize],
+    cost: 0,
     size: 0,
-    free: vec![vec![]; 16],
-    cost: 0
+    next: 0,
+    //size: 0,
+    //free: vec![vec![]; 16],
   }
 }
 
@@ -173,6 +181,7 @@ pub fn new_worker() -> Frame {
 // -------
 
 static mut SEEN_DATA: [u64; SEEN_SIZE] = [0; SEEN_SIZE];
+static mut VARS_DATA: [Option<Lnk>; VARS_SIZE] = [None; VARS_SIZE];
 static mut CALL_COUNT: &'static mut [u64] = &mut [0; MAX_DYNFUNS as usize];
 
 // Constructors
@@ -261,7 +270,7 @@ pub fn get_loc(lnk: Lnk, arg: u64) -> u64 {
 // ------
 
 pub fn ask_lnk(mem: &Frame, loc: u64) -> Lnk {
-  unsafe { *mem.node.get_unchecked(loc as usize) }
+  unsafe { *mem.data.get_unchecked(loc as usize) }
 }
 
 pub fn ask_arg(mem: &Frame, term: Lnk, arg: u64) -> Lnk {
@@ -270,10 +279,10 @@ pub fn ask_arg(mem: &Frame, term: Lnk, arg: u64) -> Lnk {
 
 pub fn link(mem: &mut Frame, loc: u64, lnk: Lnk) -> Lnk {
   unsafe {
-    *mem.node.get_unchecked_mut(loc as usize) = lnk;
+    *mem.data.get_unchecked_mut(loc as usize) = lnk;
     if get_tag(lnk) <= VAR {
       let pos = get_loc(lnk, get_tag(lnk) & 0x01);
-      *mem.node.get_unchecked_mut(pos as usize) = Arg(loc);
+      *mem.data.get_unchecked_mut(pos as usize) = Arg(loc);
     }
   }
   lnk
@@ -281,18 +290,35 @@ pub fn link(mem: &mut Frame, loc: u64, lnk: Lnk) -> Lnk {
 
 pub fn alloc(mem: &mut Frame, size: u64) -> u64 {
   if size == 0 {
-    0
-  } else if let Some(reuse) = mem.free[size as usize].pop() {
-    reuse
+    return 0;
   } else {
-    let loc = mem.size;
-    mem.size += size;
-    loc
+    loop {
+      let index = mem.next;
+      if index <= FRAME_SIZE - size {
+        let mut empty = true;
+        for i in 0 .. size {
+          if mem.data[(index + i) as usize] != 0 {
+            empty = false;
+            break;
+          }
+        }
+        if empty {
+          mem.next += size;
+          mem.size += size;
+          return index;
+        }
+      }
+      mem.next = fastrand::u64(..) % FRAME_SIZE;
+    }
   }
 }
 
 pub fn clear(mem: &mut Frame, loc: u64, size: u64) {
-  mem.free[size as usize].push(loc);
+  for i in 0 .. size {
+    mem.data[(loc + i) as usize] = 0;
+  }
+  mem.size -= size;
+  //mem.free[size as usize].push(loc);
 }
 
 pub fn collect(mem: &mut Frame, term: Lnk) {
@@ -371,57 +397,63 @@ pub fn inc_cost(mem: &mut Frame) {
 // ----
 
 // Writes a Term represented as a Rust enum on the Runtime's memory.
-pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, vars: &mut Vec<Option<Lnk>>, dups: &mut u64) -> Lnk {
-  fn bind(mem: &mut Frame, vars: &mut Vec<Option<Lnk>>, loc: u64, name: u64, lnk: Lnk) {
-    match vars[name as usize] {
-      Some(got) => {
-        link(mem, got, lnk);
-      }
-      None => {
-        vars[name as usize] = Some(lnk);
-        link(mem, loc, Era());
+pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, dups: &mut u64) -> Lnk {
+  fn bind(mem: &mut Frame, loc: u64, name: u64, lnk: Lnk) {
+    unsafe {
+      match VARS_DATA[name as usize] {
+        Some(got) => {
+          VARS_DATA[name as usize] = None;
+          link(mem, got, lnk);
+        }
+        None => {
+          VARS_DATA[name as usize] = Some(lnk);
+          link(mem, loc, Era());
+        }
       }
     }
   }
   match term {
     Term::Var { name } => {
-      if (*name as usize) < vars.len() {
-        match vars[*name as usize] {
-          Some(got) => {
-            return got;
+      unsafe {
+        if (*name as usize) < VARS_DATA.len() {
+          match VARS_DATA[*name as usize] {
+            Some(got) => {
+              VARS_DATA[*name as usize] = None;
+              return got;
+            }
+            None => {
+              VARS_DATA[*name as usize] = Some(loc);
+              return U_32(0);
+            }
           }
-          None => {
-            vars[*name as usize] = Some(loc);
-            return U_32(0);
-          }
+        } else {
+          return U_32(0);
         }
-      } else {
-        return U_32(0);
       }
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(mem, 3);
       let dupk = *dups;
       *dups += 1;
-      bind(mem, vars, node + 0, *nam0, Dp0(dupk, node));
-      bind(mem, vars, node + 1, *nam1, Dp1(dupk, node));
-      let expr = alloc_term(mem, expr, node + 2, vars, dups);
+      bind(mem, node + 0, *nam0, Dp0(dupk, node));
+      bind(mem, node + 1, *nam1, Dp1(dupk, node));
+      let expr = alloc_term(mem, expr, node + 2, dups);
       link(mem, node + 2, expr);
-      let body = alloc_term(mem, body, loc, vars, dups);
+      let body = alloc_term(mem, body, loc, dups);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(mem, 2);
-      bind(mem, vars, node + 0, *name, Var(node));
-      let body = alloc_term(mem, body, node + 1, vars, dups);
+      bind(mem, node + 0, *name, Var(node));
+      let body = alloc_term(mem, body, node + 1, dups);
       link(mem, node + 1, body);
       Lam(node)
     }
     Term::App { func, argm } => {
       let node = alloc(mem, 2);
-      let func = alloc_term(mem, func, node + 0, vars, dups);
+      let func = alloc_term(mem, func, node + 0, dups);
       link(mem, node + 0, func);
-      let argm = alloc_term(mem, argm, node + 1, vars, dups);
+      let argm = alloc_term(mem, argm, node + 1, dups);
       link(mem, node + 1, argm);
       App(node)
     }
@@ -429,7 +461,7 @@ pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, vars: &mut Vec<Option<
       let size = args.len() as u64;
       let node = alloc(mem, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = alloc_term(mem, arg, node + i as u64, vars, dups);
+        let arg_lnk = alloc_term(mem, arg, node + i as u64, dups);
         link(mem, node + i as u64, arg_lnk);
       }
       Fun(size, *name, node)
@@ -438,7 +470,7 @@ pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, vars: &mut Vec<Option<
       let size = args.len() as u64;
       let node = alloc(mem, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = alloc_term(mem, arg, node + i as u64, vars, dups);
+        let arg_lnk = alloc_term(mem, arg, node + i as u64, dups);
         link(mem, node + i as u64, arg_lnk);
       }
       Ctr(size, *name, node)
@@ -448,9 +480,9 @@ pub fn alloc_term(mem: &mut Frame, term: &Term, loc: u64, vars: &mut Vec<Option<
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(mem, 2);
-      let val0 = alloc_term(mem, val0, node + 0, vars, dups);
+      let val0 = alloc_term(mem, val0, node + 0, dups);
       link(mem, node + 0, val0);
-      let val1 = alloc_term(mem, val1, node + 1, vars, dups);
+      let val1 = alloc_term(mem, val1, node + 1, dups);
       link(mem, node + 1, val1);
       Op2(*oper, node)
     }
@@ -484,7 +516,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
 
     let mut cond = Vec::new();
     let mut vars = Vec::new();
-    let mut free = Vec::new();
+    let mut eras = Vec::new();
 
     // If the lhs is a Fun
     if let Term::Fun { ref name, ref args } = rule.0 {
@@ -502,7 +534,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
           Term::Ctr { name: arg_name, args: arg_args } => {
             strict[i as usize] = true;
             cond.push(Ctr(args.len() as u64, *arg_name, 0)); // adds its matching condition
-            free.push((i, args.len() as u64)); // marks its index and arity for freeing
+            eras.push((i, args.len() as u64)); // marks its index and arity for freeing
             // For each of its fields...
             for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
@@ -539,7 +571,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
     let body = rule.1.clone();
 
     // Adds the rule to the result vector
-    rules.push(Rule { cond, vars, free, body });
+    rules.push(Rule { cond, vars, eras, body });
   }
 
   // Builds the redux object, with the index of strict arguments
@@ -582,10 +614,10 @@ pub fn reduce(
   loop {
     let term = ask_lnk(mem, host);
 
-    if debug {
-      println!("------------------------");
-      println!("{}", show_term(mem, ask_lnk(mem, 0), _i2n, term));
-    }
+    //if debug || true {
+      //println!("------------------------");
+      //println!("{}", show_term(mem, ask_lnk(mem, 0), _i2n, term));
+    //}
 
     if init == 1 {
       match get_tag(term) {
@@ -609,9 +641,7 @@ pub fn reduce(
         CAL => {
           let fun = get_ext(term);
           let ari = get_ari(term);
-          //println!("- on call {} {}", fun, ari);
           if let Some(func) = &file.funcs[fun as usize] {
-            //println!("- calling");
             if ari == func.arity {
               if func.redux.len() == 0 {
                 init = 0;
@@ -839,7 +869,7 @@ pub fn reduce(
           let fun = get_ext(term);
           let ari = get_ari(term);
 
-          //println!("- on call 2");
+          //println!("- on call {} | {}", get_loc(term, 0), show_lnk(term));
 
           if let Some(func) = &file.funcs[fun as usize] {
 
@@ -850,7 +880,6 @@ pub fn reduce(
             // For each argument, if it is a redex and a PAR, apply the cal_par rule
             for idx in &func.redux {
               if get_tag(ask_arg(mem, term, *idx)) == PAR {
-                //println!("- found PAR");
                 inc_cost(mem);
                 let argn = ask_arg(mem, term, *idx);
                 let arit = get_ari(term);
@@ -889,7 +918,7 @@ pub fn reduce(
             for rule in &func.rules {
               // Check if the rule matches
               let mut matched = true;
-              //println!("- matching rule {:?}", rule);
+              //println!("- matching rule");
 
               // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
               for i in 0 .. rule.cond.len() as u64 {
@@ -914,39 +943,46 @@ pub fn reduce(
 
               // If all conditions are satisfied, the rule matched, so we must apply it
               if matched {
+                
+                //println!("- matched");
+
                 // Increments the gas count
                 inc_cost(mem);
 
                 // Gathers matched variables
-                let mut vars = vec![None; 256]; // FIXME: pre-alloc statically
+                //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
                 for i in 0 .. rule.vars.len() {
                   let mut var = term;
                   var = ask_arg(mem, var, rule.vars[i].param);
                   if let Some(field) = rule.vars[i].field {
                     var = ask_arg(mem, var, field);
                   }
-                  vars[i] = Some(var);
+                  unsafe {
+                    VARS_DATA[i] = Some(var);
+                  }
                 }
 
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- alloc {:?}", rule.body);
                 //println!("-- vars: {:?}", vars);
-                let done = alloc_term(mem, &rule.body, host, &mut vars, dups);
+                let done = alloc_term(mem, &rule.body, host, dups);
 
                 // Links the host location to it
                 link(mem, host, done);
 
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
-                clear(mem, get_loc(term, 0), func.arity);
-                for (free_index, free_arity) in &rule.free {
-                  clear(mem, get_loc(ask_arg(mem, term, *free_index), 0), *free_arity);
+                for (eras_index, eras_arity) in &rule.eras {
+                  clear(mem, get_loc(ask_arg(mem, term, *eras_index), 0), *eras_arity);
                 }
+                clear(mem, get_loc(term, 0), func.arity);
 
                 // Collects unused variables (none in this example)
                 for i in 0 .. rule.vars.len() {
                   if rule.vars[i].erase {
-                    if let Some(var) = vars[i] {
-                      collect(mem, var);
+                    unsafe {
+                      if let Some(var) = VARS_DATA[i] {
+                        collect(mem, var);
+                      }
                     }
                   }
                 }
@@ -1127,7 +1163,7 @@ pub fn show_mem(worker: &Frame) -> String {
   for i in 0..48 {
     // pushes to the string
     s.push_str(&format!("{:x} | ", i));
-    s.push_str(&show_lnk(worker.node[i]));
+    s.push_str(&show_lnk(worker.data[i]));
     s.push('\n');
   }
   s
@@ -1387,6 +1423,16 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, body) = read_term(code);
       return (code, Term::Lam { name, body: Box::new(body) });
     },
+    '!' => {
+      let code         = tail(code);
+      let (code, nam0) = read_numb(code);
+      let (code, nam1) = read_numb(code);
+      let (code, skip) = read_char(code, '=');
+      let (code, expr) = read_term(code);
+      let (code, skip) = read_char(code, ';');
+      let (code, body) = read_term(code);
+      return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
+    },
     '(' => {
       let code = tail(code);
       if head(code) == '+' {
@@ -1463,7 +1509,7 @@ pub fn test_0() {
 
   let gen = read_func("
     (F0 #0) = (C0 #1)
-    (F1 0)  = (C1 (F0 (- 0 #1)) (F0 (- 0 #1)))
+    (F1 0) = ! 1 2 = 0; (C1 (F0 (- 1 #1)) (F0 (- 2 #1)))
   ").1;
 
   let sum = read_func("
@@ -1478,12 +1524,12 @@ pub fn test_0() {
     ]
   };
 
-  let val = read_term("(F1 (F0 #21))").1;
+  let val = read_term("(F1 (F0 #23))").1;
 
-  mem.size    = 1;
-  mem.node[0] = alloc_term(&mut mem, &val, 1, &mut vec![None; 65536], &mut 0);
+  mem.next    = 1;
+  mem.data[0] = alloc_term(&mut mem, &val, 1, &mut 0);
 
-  println!("term: {:?}", show_term(&mem, mem.node[0], None, 0));
+  println!("term: {:?}", show_term(&mem, mem.data[0], None, 0));
 
   let init = Instant::now();
 
