@@ -178,17 +178,16 @@ impl Heap {
   fn read(&self, idx: usize) -> u64 {
     return self.data.read(idx);
   }
-  fn merge(&mut self, mut other: Self) -> Self {
-    other.data = self.data.merge(other.data);
-    other.file = self.file.merge(other.file);
-    other.arit = self.arit.merge(other.arit);
+  fn merge(&mut self, other: &mut Self) {
+    self.data.merge(&mut other.data);
+    self.file.merge(&mut other.file);
+    self.arit.merge(&mut other.arit);
     self.tick = self.tick + other.tick;
     self.funs = self.funs + other.funs;
     self.dups = self.dups + other.dups;
     self.cost = self.cost + other.cost;
     self.size = self.size + other.size;
     self.next = self.next;
-    return other;
   }
   fn clear(&mut self) {
     self.data.clear();
@@ -248,7 +247,7 @@ impl Blob {
     }
     self.used.clear();
   }
-  fn merge(&mut self, mut other: Self) -> Self {
+  fn merge(&mut self, other: &mut Self) {
     for idx in &other.used {
       unsafe {
         let other_val = other.data.get_unchecked_mut(*idx);
@@ -259,7 +258,6 @@ impl Blob {
       }
     }
     other.clear();
-    return other;
   }
 }
 
@@ -273,14 +271,13 @@ impl File {
   fn clear(&mut self) {
     self.funcs.clear();
   }
-  fn merge(&mut self, mut other: Self) -> Self {
+  fn merge(&mut self, other: &mut Self) {
     for (fid, func) in other.funcs.drain() {
       if !self.funcs.contains_key(&fid) {
         self.write(fid, func);
       }
     }
     other.clear();
-    return other;
   }
 }
 
@@ -298,13 +295,12 @@ impl Arit {
   fn clear(&mut self) {
     self.arits.clear();
   }
-  fn merge(&mut self, mut other: Self) -> Self {
+  fn merge(&mut self, other: &mut Self) {
     for (fid, func) in other.arits.drain() {
       if !self.arits.contains_key(&fid) {
         self.arits.insert(fid, func);
       }
     }
-    return other;
   }
 }
 
@@ -333,8 +329,8 @@ pub fn rollback_push(mut elem: Box<Heap>, back: Box<Rollback>) -> (bool, Option<
       if keep == 0xF {
         let (included, mut lost, tail) = rollback_push(head, tail);
         if !included {
-          if let Some(lost_val) = lost {
-            lost = Some(Box::new(elem.merge(*lost_val)));
+          if let Some(lost_val) = &mut lost {
+            elem.merge(lost_val);
           }
         }
         return (true, lost, Rollback::Cons {
