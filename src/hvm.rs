@@ -73,26 +73,28 @@ pub struct Arit {
   pub arits: HashMap<u64, u64, BuildHasherDefault<NoHashHasher<u64>>>,
 }
 
-// Can point to a node, a variable, or be unboxed value
+// Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u64;
 
-// A mutable Option<a> vector that tracks used indices
+// A mergeable vector of u64 values
 #[derive(Debug, Clone)]
-pub struct HeapData {
+pub struct Blob {
   data: Vec<u64>,
   used: Vec<usize>,
 }
 
-// HVM's memory (nodes and stats)
+// HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug)]
 pub struct Heap {
-  pub data: HeapData, // memory block holding HVM nodes
-  pub tick: u64,      // time counter
-  pub funs: u64,      // total function count
-  pub dups: u64,      // total function count
-  pub cost: u64,      // total cost count, in gas
-  pub size: i64,      // total used memory (in 64-bit words)
-  pub next: u64,      // memory index that *may* be empty
+  pub data: Blob, // memory block holding HVM nodes
+  pub file: File, // functions
+  pub arit: Arit, // function arities
+  pub tick: u64,  // time counter
+  pub funs: u64,  // total function count
+  pub dups: u64,  // total function count
+  pub cost: u64,  // total cost count, in gas
+  pub size: i64,  // total used memory (in 64-bit words)
+  pub next: u64,  // memory index that *may* be empty
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -108,8 +110,6 @@ pub enum Rollback {
 
 // The current and past states
 pub struct Runtime {
-  file: File,           // functions
-  arit: Arit,           // function arities
   heap: Box<Heap>,      // current state
   back: Box<Rollback>,  // past states
   nuls: Vec<Box<Heap>>, // empty heaps (for reuse)
@@ -179,17 +179,22 @@ impl Heap {
   fn read(&self, idx: usize) -> u64 {
     return self.data.read(idx);
   }
-  fn merge(&mut self, other: &mut Self) {
-    self.data.merge(&mut other.data);
+  fn merge(&mut self, mut other: Self) -> Self {
+    other.data = self.data.merge(other.data);
+    other.file = self.file.merge(other.file);
+    other.arit = self.arit.merge(other.arit);
     self.tick = self.tick + other.tick;
     self.funs = self.funs + other.funs;
     self.dups = self.dups + other.dups;
     self.cost = self.cost + other.cost;
     self.size = self.size + other.size;
     self.next = self.next;
+    return other;
   }
   fn clear(&mut self) {
     self.data.clear();
+    self.file.clear();
+    self.arit.clear();
     self.tick = U64_NONE;
     self.funs = U64_NONE;
     self.dups = U64_NONE;
@@ -202,6 +207,8 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     data: init_heapdata(U64_NONE),
+    file: File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) },
+    arit: Arit { arits: HashMap::with_hasher(BuildHasherDefault::default()) },
     tick: U64_NONE,
     funs: U64_NONE,
     dups: U64_NONE,
@@ -211,14 +218,14 @@ pub fn init_heap() -> Heap {
   }
 }
 
-pub fn init_heapdata(zero: u64) -> HeapData {
-  return HeapData {
+pub fn init_heapdata(zero: u64) -> Blob {
+  return Blob {
     data: vec![zero; HEAP_SIZE as usize],
     used: vec![],
   };
 }
 
-impl HeapData {
+impl Blob {
   fn write(&mut self, idx: usize, val: u64) {
     unsafe {
       let got = self.data.get_unchecked_mut(idx);
@@ -242,7 +249,7 @@ impl HeapData {
     }
     self.used.clear();
   }
-  fn merge(&mut self, other: &mut Self) {
+  fn merge(&mut self, mut other: Self) -> Self {
     for idx in &other.used {
       unsafe {
         let other_val = other.data.get_unchecked_mut(*idx);
@@ -253,6 +260,52 @@ impl HeapData {
       }
     }
     other.clear();
+    return other;
+  }
+}
+
+impl File {
+  fn write(&mut self, fid: u64, val: Func) {
+    self.funcs.insert(fid, val);
+  }
+  fn read(&self, fid: u64) -> Option<&Func> {
+    return self.funcs.get(&fid);
+  }
+  fn clear(&mut self) {
+    self.funcs.clear();
+  }
+  fn merge(&mut self, mut other: Self) -> Self {
+    for (fid, func) in other.funcs.drain() {
+      if !self.funcs.contains_key(&fid) {
+        self.write(fid, func);
+      }
+    }
+    other.clear();
+    return other;
+  }
+}
+
+impl Arit {
+  fn write(&mut self, fid: u64, val: u64) {
+    self.arits.insert(fid, val);
+  }
+  fn read(&self, fid: u64) -> Option<u64> {
+    if let Some(arit) = self.arits.get(&fid) {
+      return Some(*arit);
+    } else {
+      return None;
+    }
+  }
+  fn clear(&mut self) {
+    self.arits.clear();
+  }
+  fn merge(&mut self, mut other: Self) -> Self {
+    for (fid, func) in other.arits.drain() {
+      if !self.arits.contains_key(&fid) {
+        self.arits.insert(fid, func);
+      }
+    }
+    return other;
   }
 }
 
@@ -281,7 +334,9 @@ pub fn rollback_push(mut elem: Box<Heap>, back: Box<Rollback>) -> (bool, Option<
       if keep == 0xF {
         let (included, mut lost, tail) = rollback_push(head, tail);
         if !included {
-          elem.merge(lost.as_deref_mut().unwrap());
+          if let Some(lost_val) = lost {
+            lost = Some(Box::new(elem.merge(*lost_val)));
+          }
         }
         return (true, lost, Rollback::Cons {
           keep: 0,
@@ -305,8 +360,6 @@ pub fn init_runtime() -> Runtime {
     nuls.push(Box::new(init_heap()));
   }
   return Runtime {
-    file: File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) },
-    arit: Arit { arits: HashMap::with_hasher(BuildHasherDefault::default()) },
     heap: Box::new(init_heap()),
     back: Box::new(init_rollback()),
     nuls: nuls,
@@ -319,12 +372,12 @@ impl Runtime {
   // ---
 
   fn define_function(&mut self, fid: u64, func: Func) {
-    self.arit.arits.insert(fid, func.arity);
-    self.file.funcs.insert(fid, func);
+    self.heap.arit.write(fid, func.arity);
+    self.heap.file.write(fid, func);
   }
 
   fn define_constructor(&mut self, cid: u64, arity: u64) {
-    self.arit.arits.insert(cid, arity);
+    self.heap.arit.write(cid, arity);
   }
 
   fn create_term(&mut self, term: &Term) -> u64 {
@@ -343,8 +396,8 @@ impl Runtime {
   }
 
   fn get_arity(&self, fid: u64) -> u64 {
-    if let Some(arity) = self.arit.arits.get(&fid) {
-      return *arity;
+    if let Some(arity) = self.heap.arit.read(fid) {
+      return arity;
     } else {
       return 0;
     }
@@ -936,7 +989,7 @@ pub fn reduce(
   // Separates runtime from file to satisfy the borrow checker
   // FIXME: this isn't good code; should split Runtime instead
   let mut file = File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) };
-  std::mem::swap(&mut rt.file, &mut file);
+  std::mem::swap(&mut rt.heap.file, &mut file);
 
   let mut stack: Vec<u64> = Vec::new();
 
@@ -1350,7 +1403,7 @@ pub fn reduce(
   }
 
   // FIXME: remove this when Runtime is split (see above)
-  rt.file = file;
+  rt.heap.file = file;
 
   ask_lnk(rt, root)
 }
