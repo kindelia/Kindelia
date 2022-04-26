@@ -863,7 +863,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
           Term::Ctr { name: arg_name, args: arg_args } => {
             strict[i as usize] = true;
             cond.push(Ctr(*arg_name, 0)); // adds its matching condition
-            eras.push((i, args.len() as u64)); // marks its index and arity for freeing
+            eras.push((i, arg_args.len() as u64)); // marks its index and arity for freeing
             // For each of its fields...
             for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
@@ -1091,6 +1091,7 @@ pub fn reduce(
             inc_cost(rt);
             subst(rt, ask_arg(rt, term, 0), arg0);
             subst(rt, ask_arg(rt, term, 1), arg0);
+            clear(rt, get_loc(term, 0), 3);
             let _done = arg0;
             link(rt, host, arg0);
           } else if get_tag(arg0) == CTR {
@@ -1212,6 +1213,7 @@ pub fn reduce(
             // For each argument, if it is a redex and a PAR, apply the cal_par rule
             for idx in &func.redux {
               if get_tag(ask_arg(rt, term, *idx)) == PAR {
+                //println!("cal-par");
                 inc_cost(rt);
                 let argn = ask_arg(rt, term, *idx);
                 let func = get_ext(term);
@@ -1276,7 +1278,7 @@ pub fn reduce(
 
               // If all conditions are satisfied, the rule matched, so we must apply it
               if matched {
-                
+                //println!("cal-fun");
                 //println!("- matched");
 
                 // Increments the gas count
@@ -1485,7 +1487,7 @@ pub fn show_lnk(x: Lnk) -> String {
 
 pub fn show_rt(rt: &Runtime) -> String {
   let mut s: String = String::new();
-  for i in 0..48 {
+  for i in 0..32 {
     // pushes to the string
     s.push_str(&format!("{:x} | ", i));
     s.push_str(&show_lnk(rt.read(i)));
@@ -1893,7 +1895,10 @@ pub fn test_0() {
   rt.normalize(main);
   println!("term: {:?}", rt.show_term_at(main));
   println!("cost: {}", rt.get_cost());
+  println!("size: {}", rt.get_size());
   println!("time: {}", init.elapsed().as_millis());
+
+  //println!("{}", show_rt(&rt));
 
 }
 
