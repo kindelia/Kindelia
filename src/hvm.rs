@@ -2,12 +2,11 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-use std::collections::{hash_map, HashMap};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher, BuildHasherDefault};
 use nohash_hasher::NoHashHasher;
-
 use rand::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map, HashMap};
+use std::hash::{Hash, Hasher, BuildHasherDefault};
 use std::time::Instant;
 
 // Types
@@ -388,11 +387,11 @@ impl Runtime {
   }
 
   fn normalize(&mut self, loc: u64) -> Lnk {
-    normal(self, loc, None, false)
+    normal(self, loc)
   }
 
   fn show_term_at(&mut self, loc: u64) -> String {
-    return show_term(self, self.read(loc as usize), None, 0);
+    return show_term(self, self.read(loc as usize));
   }
 
   fn get_arity(&self, fid: u64) -> u64 {
@@ -710,11 +709,11 @@ pub fn collect(rt: &mut Runtime, term: Lnk) {
     match get_tag(term) {
       DP0 => {
         link(rt, get_loc(term, 0), Era());
-        //r_educe(rt, get_loc(ask_arg(rt,term,1),0));
+        reduce(rt, get_loc(ask_arg(rt,term,1),0));
       }
       DP1 => {
         link(rt, get_loc(term, 1), Era());
-        //r_educe(rt, get_loc(ask_arg(rt,term,0),0));
+        reduce(rt, get_loc(ask_arg(rt,term,0),0));
       }
       VAR => {
         link(rt, get_loc(term, 0), Era());
@@ -979,12 +978,7 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk) {
   }
 }
 
-pub fn reduce(
-  rt: &mut Runtime,
-  root: u64,
-  _i2n: Option<&HashMap<u64, String>>,
-  debug: bool,
-) -> Lnk {
+pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
 
   // Separates runtime from file to satisfy the borrow checker
   // FIXME: this isn't good code; should split Runtime instead
@@ -1001,7 +995,7 @@ pub fn reduce(
 
     //if debug || true {
       //println!("------------------------");
-      //println!("{}", show_term(rt, ask_lnk(rt, 0), _i2n, term));
+      //println!("{}", show_term(rt, ask_lnk(rt, 0)));
     //}
 
     if init == 1 {
@@ -1416,18 +1410,12 @@ pub fn get_bit(bits: &[u64], bit: u64) -> bool {
   (((bits[bit as usize >> 6] >> (bit & 0x3f)) as u8) & 1) == 1
 }
 
-pub fn normal_go(
-  rt: &mut Runtime,
-  host: u64,
-  seen: &mut [u64],
-  i2n: Option<&HashMap<u64, String>>,
-  debug: bool,
-) -> Lnk {
+pub fn normal_go(rt: &mut Runtime, host: u64, seen: &mut [u64]) -> Lnk {
   let term = ask_lnk(rt, host);
   if get_bit(seen, host) {
     term
   } else {
-    let term = reduce(rt, host, i2n, debug);
+    let term = reduce(rt, host);
     set_bit(seen, host);
     let mut rec_locs = Vec::with_capacity(16);
     match get_tag(term) {
@@ -1457,60 +1445,30 @@ pub fn normal_go(
       _ => {}
     }
     for loc in rec_locs {
-      let lnk: Lnk = normal_go(rt, loc, seen, i2n, debug);
+      let lnk: Lnk = normal_go(rt, loc, seen);
       link(rt, loc, lnk);
     }
     term
   }
 }
 
-pub fn normal(
-  rt: &mut Runtime,
-  host: u64,
-  i2n: Option<&HashMap<u64, String>>,
-  debug: bool,
-) -> Lnk {
+pub fn normal(rt: &mut Runtime, host: u64) -> Lnk {
   let mut done;
   let mut cost = rt.get_cost();
   loop {
     let mut seen = vec![0; 4194304];
-    done = normal_go(rt, host, &mut seen, i2n, debug);
+    done = normal_go(rt, host, &mut seen);
     if rt.get_cost() != cost {
       cost = rt.get_cost();
     } else {
       break;
     }
   }
-  //print_call_counts(i2n); // TODO: uncomment
   done
 }
 
 // Debug
 // -----
-
-// Debug: prints call counts
-fn print_call_counts(i2n: Option<&HashMap<u64, String>>) {
-  unsafe {
-    let mut counts : Vec<(String,u64)> = Vec::new();
-    for fun in 0..MAX_FUNCS {
-      if let Some(id_to_name) = i2n {
-        match id_to_name.get(&fun) {
-          None => {
-            break;
-          }
-          Some(fun_name) => {
-            counts.push((fun_name.clone(), CALL_COUNT[fun as usize]));
-          }
-        }
-      }
-    }
-    counts.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    for (name, count) in counts {
-      println!("{} - {}", name, count);
-    }
-    println!("");
-  }
-}
 
 pub fn show_lnk(x: Lnk) -> String {
   if x == 0 {
@@ -1549,12 +1507,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   s
 }
 
-pub fn show_term(
-  rt: &Runtime,
-  term: Lnk,
-  i2n: Option<&HashMap<u64, String>>,
-  focus: u64,
-) -> String {
+pub fn show_term(rt: &Runtime, term: Lnk) -> String {
   let mut lets: HashMap<u64, u64> = HashMap::new();
   let mut kinds: HashMap<u64, u64> = HashMap::new();
   let mut names: HashMap<u64, String> = HashMap::new();
@@ -1612,13 +1565,7 @@ pub fn show_term(
       _ => {}
     }
   }
-  fn go(
-    rt: &Runtime,
-    term: Lnk,
-    names: &HashMap<u64, String>,
-    i2n: Option<&HashMap<u64, String>>,
-    focus: u64,
-  ) -> String {
+  fn go(rt: &Runtime, term: Lnk, names: &HashMap<u64, String>) -> String {
     let done = match get_tag(term) {
       DP0 => {
         format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")))
@@ -1631,23 +1578,23 @@ pub fn show_term(
       }
       LAM => {
         let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?d")));
-        format!("λ{} {}", name, go(rt, ask_arg(rt, term, 1), names, i2n, focus))
+        format!("λ{} {}", name, go(rt, ask_arg(rt, term, 1), names))
       }
       APP => {
-        let func = go(rt, ask_arg(rt, term, 0), names, i2n, focus);
-        let argm = go(rt, ask_arg(rt, term, 1), names, i2n, focus);
+        let func = go(rt, ask_arg(rt, term, 0), names);
+        let argm = go(rt, ask_arg(rt, term, 1), names);
         format!("({} {})", func, argm)
       }
       PAR => {
         //let kind = get_ext(term);
-        let func = go(rt, ask_arg(rt, term, 0), names, i2n, focus);
-        let argm = go(rt, ask_arg(rt, term, 1), names, i2n, focus);
+        let func = go(rt, ask_arg(rt, term, 0), names);
+        let argm = go(rt, ask_arg(rt, term, 1), names);
         format!("{{{} {}}}", func, argm)
       }
       OP2 => {
         let oper = get_ext(term);
-        let val0 = go(rt, ask_arg(rt, term, 0), names, i2n, focus);
-        let val1 = go(rt, ask_arg(rt, term, 1), names, i2n, focus);
+        let val0 = go(rt, ask_arg(rt, term, 0), names);
+        let val1 = go(rt, ask_arg(rt, term, 1), names);
         let symb = match oper {
           ADD => "+",
           SUB => "-",
@@ -1675,13 +1622,13 @@ pub fn show_term(
       CTR => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names, i2n, focus)).collect();
+        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
         format!("(#{}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names, i2n, focus)).collect();
+        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
         format!("(@{}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
@@ -1689,14 +1636,10 @@ pub fn show_term(
       }
       _ => format!("?g({})", get_tag(term)),
     };
-    if term == focus {
-      format!("${}", done)
-    } else {
-      done
-    }
+    return done;
   }
   find_lets(rt, term, &mut lets, &mut kinds, &mut names, &mut count);
-  let mut text = go(rt, term, &names, i2n, focus);
+  let mut text = go(rt, term, &names);
   for (_key, pos) in lets {
     // todo: reverse
     let what = String::from("?h");
@@ -1704,13 +1647,7 @@ pub fn show_term(
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(
-      "\n@ {} {} = {};",
-      //kind,
-      nam0,
-      nam1,
-      go(rt, ask_lnk(rt, pos + 2), &names, i2n, focus)
-    ));
+    text.push_str(&format!("\n& {} {} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }
@@ -1952,6 +1889,4 @@ pub fn test_0() {
   println!("time: {}", init.elapsed().as_millis());
 
   //println!("{}", show_rt(&rt));
-
 }
-
