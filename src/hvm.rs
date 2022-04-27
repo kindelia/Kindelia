@@ -7,13 +7,14 @@ use rand::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
 use std::hash::{Hash, Hasher, BuildHasherDefault};
+use std::rc::Rc;
 use std::time::Instant;
 
 // Types
 // -----
 
 // A native HVM term
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Term {
   Var { name: u64 },
   Dup { nam0: u64, nam1: u64, expr: Box<Term>, body: Box<Term> },
@@ -26,7 +27,7 @@ pub enum Term {
 }
 
 // A native HVM machine integer operation
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Oper {
   Add, Sub, Mul, Div,
   Mod, And, Or,  Xor,
@@ -35,7 +36,7 @@ pub enum Oper {
 }
 
 // A left-hand side variable in a rewrite rule (equation)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Var {
   pub name : u64,         // this variable's name
   pub param: u64,         // in what parameter is this variable located?
@@ -44,7 +45,7 @@ pub struct Var {
 }
 
 // A rewrite rule (equation)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
   pub cond: Vec<Lnk>,        // left-hand side matching conditions
   pub vars: Vec<Var>,        // left-hand side variable locations
@@ -53,7 +54,7 @@ pub struct Rule {
 }
 
 // A function is a vector of rules
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Func {
   arity: u64,       // number of arguments
   redux: Vec<u64>,  // index of strict arguments
@@ -63,13 +64,19 @@ pub struct Func {
 // A file is a map of `FuncID -> Function`
 #[derive(Clone, Debug)]
 pub struct File {
-  pub funcs: HashMap<u64, Func, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub funcs: HashMap<u64, Rc<Func>, BuildHasherDefault<NoHashHasher<u64>>>,
 }
 
-// A map of `FundID -> Arity`
+// A map of `FuncID -> Arity`
 #[derive(Clone, Debug)]
 pub struct Arit {
   pub arits: HashMap<u64, u64, BuildHasherDefault<NoHashHasher<u64>>>,
+}
+
+// A map of `FuncID -> Lnk`, pointing to a function's state
+#[derive(Clone, Debug)]
+pub struct Disk {
+  pub links: HashMap<u64, Lnk, BuildHasherDefault<NoHashHasher<u64>>>,
 }
 
 // Can point to a node, a variable, or hold an unboxed value
@@ -86,6 +93,7 @@ pub struct Blob {
 #[derive(Debug)]
 pub struct Heap {
   pub data: Blob, // memory block holding HVM nodes
+  pub disk: Disk, // points to stored contract states
   pub file: File, // functions
   pub arit: Arit, // function arities
   pub tick: u64,  // time counter
@@ -168,6 +176,23 @@ pub const NEQ: u64 = 0xF;
 pub const U64_NONE: u64 = 0xFFFFFFFFFFFFFFFF;
 pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 
+// (IO s:Type r:Type) : Type
+//   (IOEND retr:r)                    : (IO s r)
+//   (IOGET        cont:(∀s (IO s r))) : (IO s r)
+//   (IOSET expr:s cont:(∀s (IO s U))) : (IO s r)
+const IOEND : u64 = 0x1364f60e;
+const IOGET : u64 = 0x136513de;
+const IOSET : u64 = 0x1365d3de;
+
+const fn GET_ARITY(fid: u64) -> Option<u64> {
+  match fid {
+    IOEND => Some(1),
+    IOGET => Some(1),
+    IOSET => Some(2),
+    _     => None,
+  }
+}
+
 // Rollback
 // --------
 
@@ -180,6 +205,7 @@ impl Heap {
   }
   fn merge(&mut self, other: &mut Self) {
     self.data.merge(&mut other.data);
+    self.disk.merge(&mut other.disk);
     self.file.merge(&mut other.file);
     self.arit.merge(&mut other.arit);
     self.tick = self.tick + other.tick;
@@ -191,6 +217,7 @@ impl Heap {
   }
   fn clear(&mut self) {
     self.data.clear();
+    self.disk.clear();
     self.file.clear();
     self.arit.clear();
     self.tick = U64_NONE;
@@ -205,6 +232,7 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     data: init_heapdata(U64_NONE),
+    disk: Disk { links: HashMap::with_hasher(BuildHasherDefault::default()) },
     file: File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) },
     arit: Arit { arits: HashMap::with_hasher(BuildHasherDefault::default()) },
     tick: U64_NONE,
@@ -261,12 +289,32 @@ impl Blob {
   }
 }
 
+impl Disk {
+  fn write(&mut self, fid: u64, val: Lnk) {
+    self.links.insert(fid, val);
+  }
+  fn read(&self, fid: u64) -> Option<Lnk> {
+    return self.links.get(&fid).map(|x| *x);
+  }
+  fn clear(&mut self) {
+    self.links.clear();
+  }
+  fn merge(&mut self, other: &mut Self) {
+    for (fid, func) in other.links.drain() {
+      if !self.links.contains_key(&fid) {
+        self.write(fid, func);
+      }
+    }
+    other.clear();
+  }
+}
+
 impl File {
-  fn write(&mut self, fid: u64, val: Func) {
+  fn write(&mut self, fid: u64, val: Rc<Func>) {
     self.funcs.insert(fid, val);
   }
-  fn read(&self, fid: u64) -> Option<&Func> {
-    return self.funcs.get(&fid);
+  fn read(&self, fid: u64) -> Option<Rc<Func>> {
+    return self.funcs.get(&fid).map(|x| x.clone());
   }
   fn clear(&mut self) {
     self.funcs.clear();
@@ -274,7 +322,7 @@ impl File {
   fn merge(&mut self, other: &mut Self) {
     for (fid, func) in other.funcs.drain() {
       if !self.funcs.contains_key(&fid) {
-        self.write(fid, func);
+        self.write(fid, func.clone());
       }
     }
     other.clear();
@@ -286,19 +334,15 @@ impl Arit {
     self.arits.insert(fid, val);
   }
   fn read(&self, fid: u64) -> Option<u64> {
-    if let Some(arit) = self.arits.get(&fid) {
-      return Some(*arit);
-    } else {
-      return None;
-    }
+    return self.arits.get(&fid).map(|x| *x);
   }
   fn clear(&mut self) {
     self.arits.clear();
   }
   fn merge(&mut self, other: &mut Self) {
-    for (fid, func) in other.arits.drain() {
+    for (fid, arit) in other.arits.drain() {
       if !self.arits.contains_key(&fid) {
-        self.arits.insert(fid, func);
+        self.arits.insert(fid, arit);
       }
     }
   }
@@ -368,7 +412,7 @@ impl Runtime {
 
   fn define_function(&mut self, fid: u64, func: Func) {
     self.heap.arit.write(fid, func.arity);
-    self.heap.file.write(fid, func);
+    self.heap.file.write(fid, Rc::new(func));
   }
 
   fn define_constructor(&mut self, cid: u64, arity: u64) {
@@ -377,24 +421,75 @@ impl Runtime {
 
   fn create_term(&mut self, term: &Term) -> u64 {
     let loc = alloc(self, 1);
-    let lnk = alloc_term(self, term, loc);
+    let lnk = create_term(self, term, loc);
     self.write(loc as usize, lnk);
     return loc;
   }
 
-  fn normalize(&mut self, loc: u64) -> Lnk {
+  fn create_term_from_code(&mut self, code: &str) -> u64 {
+    self.create_term(&read_term(code).1)
+  }
+
+  fn run_io_code(&mut self, caller: &str, code: &str) -> Lnk {
+    let main = self.create_term_from_code(code);
+    let done = self.run_io(name_to_u64(caller), main).unwrap();
+    return done;
+  }
+
+  fn normalize_at(&mut self, loc: u64) -> Lnk {
     normal(self, loc)
+  }
+
+  fn normalize(&mut self, lnk: Lnk) -> Lnk {
+    let loc = alloc_lnk(self, lnk);
+    return self.normalize_at(loc);
+  }
+
+  fn show_term(&mut self, lnk: Lnk) -> String {
+    return show_term(self, lnk);
   }
 
   fn show_term_at(&mut self, loc: u64) -> String {
     return show_term(self, self.read(loc as usize));
   }
 
-  fn get_arity(&self, fid: u64) -> u64 {
-    if let Some(arity) = self.heap.arit.read(fid) {
-      return arity;
-    } else {
-      return 0;
+  // IO
+  // --
+
+  pub fn run_io(&mut self, caller: u64, host: u64) -> Option<Lnk> {
+    let term = ask_lnk(self, host);
+    let term = reduce(self, host);
+    println!("[EVAL] {}", show_term(self, term));
+    match get_tag(term) {
+      CTR => {
+        match get_ext(term) {
+          IOGET => {
+            let cont = ask_arg(self, term, 0);
+            let stat = self.disk_read(caller).unwrap_or(Num(0));
+            let call = alloc_app(self, cont, stat);
+            return self.run_io(caller, call);
+          }
+          IOSET => {
+            let expr = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let call = alloc_app(self, cont, Num(0));
+            let save = self.normalize(expr);
+            self.disk_write(caller, save);
+            return self.run_io(caller, call);
+          }
+          IOEND => {
+            let retr = ask_arg(self, term, 0);
+            return Some(retr);
+          }
+          _ => {
+            return None;
+          }
+        }
+      }
+      _ => {
+        println!("ue {}", show_lnk(term));
+        return None;
+      }
     }
   }
 
@@ -471,22 +566,21 @@ impl Runtime {
   // If not present, looks for it on past states.
   fn get_with<A: std::cmp::PartialEq>(&self, zero: A, none: A, get: impl Fn(&Heap) -> A) -> A {
     let got = get(&self.heap);
-    if got != none {
+    if none != got {
       return got;
-    } else {
-      let mut back = &self.back;
-      loop {
-        match &**back {
-          Rollback::Cons { keep, head, tail } => {
-            let val = get(&head);
-            if val != none {
-              return val;
-            }
-            back = &*tail;
+    }
+    let mut back = &self.back;
+    loop {
+      match &**back {
+        Rollback::Cons { keep, head, tail } => {
+          let val = get(&head);
+          if val != none {
+            return val;
           }
-          Rollback::Nil => {
-            return zero;
-          }
+          back = &*tail;
+        }
+        Rollback::Nil => {
+          return zero;
         }
       }
     }
@@ -498,6 +592,46 @@ impl Runtime {
 
   fn read(&self, idx: usize) -> u64 {
     return self.get_with(0, U64_NONE, |heap| heap.read(idx));
+  }
+
+  fn disk_write(&mut self, fid: u64, val: Lnk) {
+    return self.heap.disk.write(fid, val);
+  }
+
+  fn disk_read(&mut self, fid: u64) -> Option<Lnk> {
+    return self.get_with(None, None, |heap| heap.disk.read(fid));
+  }
+
+  fn get_arity(&self, fid: u64) -> u64 {
+    if let Some(arity) = GET_ARITY(fid) {
+      return arity;
+    } else if let Some(arity) = self.get_with(None, None, |heap| heap.arit.read(fid)) {
+      return arity;
+    } else {
+      return 0;
+    }
+  }
+
+  fn get_func(&self, fid: u64) -> Option<Rc<Func>> {
+    let got = self.heap.file.read(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
+    let mut back = &self.back;
+    loop {
+      match &**back {
+        Rollback::Cons { keep, head, tail } => {
+          let got = head.file.read(fid);
+          if let Some(func) = got {
+            return Some(func);
+          }
+          back = &*tail;
+        }
+        Rollback::Nil => {
+          return None;
+        }
+      }
+    }
   }
 
   fn set_tick(&mut self, tick: u64) {
@@ -602,7 +736,7 @@ pub fn Op2(ope: u64, pos: u64) -> Lnk {
   (OP2 * TAG) | (ope * EXT) | pos
 }
 
-pub fn U_32(val: u64) -> Lnk {
+pub fn Num(val: u64) -> Lnk {
   (U60 * TAG) | val
 }
 
@@ -773,18 +907,22 @@ pub fn inc_cost(rt: &mut Runtime) {
 // ----
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn alloc_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
   fn bind(rt: &mut Runtime, loc: u64, name: u64, lnk: Lnk) {
     //println!("~~ bind {} {}", u64_to_name(name), show_lnk(lnk));
     unsafe {
-      match VARS_DATA[name as usize] {
-        Some(got) => {
-          VARS_DATA[name as usize] = None;
-          link(rt, got, lnk);
-        }
-        None => {
-          VARS_DATA[name as usize] = Some(lnk);
-          link(rt, loc, Era());
+      if name == U64_NONE {
+        link(rt, loc, Era());
+      } else {
+        match VARS_DATA[name as usize] {
+          Some(got) => {
+            VARS_DATA[name as usize] = None;
+            link(rt, got, lnk);
+          }
+          None => {
+            VARS_DATA[name as usize] = Some(lnk);
+            link(rt, loc, Era());
+          }
         }
       }
     }
@@ -801,11 +939,11 @@ pub fn alloc_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
             }
             None => {
               VARS_DATA[*name as usize] = Some(loc);
-              return U_32(0);
+              return Num(0);
             }
           }
         } else {
-          return U_32(0);
+          return Num(0);
         }
       }
     }
@@ -814,23 +952,23 @@ pub fn alloc_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
       let dupk = rt.get_dups();
       bind(rt, node + 0, *nam0, Dp0(dupk, node));
       bind(rt, node + 1, *nam1, Dp1(dupk, node));
-      let expr = alloc_term(rt, expr, node + 2);
+      let expr = create_term(rt, expr, node + 2);
       link(rt, node + 2, expr);
-      let body = alloc_term(rt, body, loc);
+      let body = create_term(rt, body, loc);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
       bind(rt, node + 0, *name, Var(node));
-      let body = alloc_term(rt, body, node + 1);
+      let body = create_term(rt, body, node + 1);
       link(rt, node + 1, body);
       Lam(node)
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
-      let func = alloc_term(rt, func, node + 0);
+      let func = create_term(rt, func, node + 0);
       link(rt, node + 0, func);
-      let argm = alloc_term(rt, argm, node + 1);
+      let argm = create_term(rt, argm, node + 1);
       link(rt, node + 1, argm);
       App(node)
     }
@@ -838,7 +976,7 @@ pub fn alloc_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
       let size = args.len() as u64;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = alloc_term(rt, arg, node + i as u64);
+        let arg_lnk = create_term(rt, arg, node + i as u64);
         link(rt, node + i as u64, arg_lnk);
       }
       Fun(*name, node)
@@ -847,19 +985,19 @@ pub fn alloc_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
       let size = args.len() as u64;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = alloc_term(rt, arg, node + i as u64);
+        let arg_lnk = create_term(rt, arg, node + i as u64);
         link(rt, node + i as u64, arg_lnk);
       }
       Ctr(*name, node)
     }
     Term::U60 { numb } => {
-      U_32(*numb as u64)
+      Num(*numb as u64)
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
-      let val0 = alloc_term(rt, val0, node + 0);
+      let val0 = create_term(rt, val0, node + 0);
       link(rt, node + 0, val0);
-      let val1 = alloc_term(rt, val1, node + 1);
+      let val1 = create_term(rt, val1, node + 1);
       link(rt, node + 1, val1);
       Op2(*oper, node)
     }
@@ -926,7 +1064,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
           // If it is a number...
           Term::U60 { numb: arg_numb } => {
             strict[i as usize] = true;
-            cond.push(U_32(*arg_numb as u64)); // adds its matching condition
+            cond.push(Num(*arg_numb as u64)); // adds its matching condition
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
@@ -962,6 +1100,23 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
   return Some(Func { arity, redux, rules });
 }
 
+pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
+  let node = alloc(rt, 2);
+  link(rt, node + 0, func);
+  link(rt, node + 1, argm);
+  App(node)
+}
+
+pub fn alloc_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> u64 {
+  let app = create_app(rt, func, argm);
+  return alloc_lnk(rt, app);
+}
+
+pub fn alloc_lnk(rt: &mut Runtime, term: Lnk) -> u64 {
+  let loc = alloc(rt, 1);
+  link(rt, loc, term);
+  return loc;
+}
 
 // Reduction
 // ---------
@@ -978,13 +1133,16 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
 
   // Separates runtime from file to satisfy the borrow checker
   // FIXME: this isn't good code; should split Runtime instead
-  let mut file = File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) };
-  std::mem::swap(&mut rt.heap.file, &mut file);
+  //let mut file = File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) };
+  //std::mem::swap(&mut rt.heap.file, &mut file);
 
   let mut stack: Vec<u64> = Vec::new();
 
   let mut init = 1;
   let mut host = root;
+
+  let mut func_val : Option<Func>;
+  let mut func_ref : Option<&mut Func>;
 
   loop {
     let term = ask_lnk(rt, host);
@@ -1016,7 +1174,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
         FUN => {
           let fun = get_ext(term);
           let ari = rt.get_arity(fun);
-          if let Some(func) = &file.funcs.get(&fun) {
+          if let Some(func) = &rt.get_func(fun) {
             if ari == func.arity {
               if func.redux.len() == 0 {
                 init = 0;
@@ -1204,7 +1362,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
               NEQ => u64::from(a != b),
               _   => 0,
             };
-            let done = U_32(c);
+            let done = Num(c);
             clear(rt, get_loc(term, 0), 2);
             link(rt, host, done);
           } else if get_tag(arg0) == PAR {
@@ -1242,25 +1400,16 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           }
         }
         FUN => {
-          let fun = get_ext(term);
-          let ari = rt.get_arity(fun);
 
-          //println!("- on call {} | {}", get_loc(term, 0), show_lnk(term));
-
-          if let Some(func) = &file.funcs.get(&fun) {
-
-          //println!("- calling");
-
-            let mut cont = false;
-
+          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u64, term: Lnk) -> bool {
             // For each argument, if it is a redex and a PAR, apply the cal_par rule
             for idx in &func.redux {
               if get_tag(ask_arg(rt, term, *idx)) == PAR {
                 //println!("cal-par");
                 inc_cost(rt);
                 let argn = ask_arg(rt, term, *idx);
-                let func = get_ext(term);
-                let arit = rt.get_arity(func);
+                let funx = get_ext(term);
+                let arit = rt.get_arity(funx);
                 let fun0 = get_loc(term, 0);
                 let fun1 = alloc(rt, arit);
                 let par0 = get_loc(argn, 0);
@@ -1276,31 +1425,20 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
                     link(rt, fun1 + i, ask_arg(rt, argn, 1));
                   }
                 }
-                link(rt, par0 + 0, Fun(func, fun0));
-                link(rt, par0 + 1, Fun(func, fun1));
+                link(rt, par0 + 0, Fun(funx, fun0));
+                link(rt, par0 + 1, Fun(funx, fun1));
                 let done = Par(get_ext(argn), par0);
                 link(rt, host, done);
-                cont = true;
-                break;
+                return true;
               }
             }
-
-            // If applied the PAR rule, continue
-            if cont {
-              init = 1;
-              continue;
-            }
-
             // For each rule condition vector
             for rule in &func.rules {
-
               // Check if the rule matches
               let mut matched = true;
               //println!("- matching rule");
-
               // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
               for i in 0 .. rule.cond.len() as u64 {
-
                 let cond = rule.cond[i as usize];
                 match get_tag(cond) {
                   U60 => {
@@ -1318,15 +1456,12 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
                   _ => {}
                 }
               }
-
               // If all conditions are satisfied, the rule matched, so we must apply it
               if matched {
                 //println!("cal-fun");
                 //println!("- matched");
-
                 // Increments the gas count
                 inc_cost(rt);
-
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
                 for i in 0 .. rule.vars.len() {
@@ -1340,21 +1475,17 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
                     VARS_DATA[rule.vars[i].name as usize] = Some(var);
                   }
                 }
-
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- alloc {:?}", rule.body);
                 //println!("-- vars: {:?}", vars);
-                let done = alloc_term(rt, &rule.body, host);
-
+                let done = create_term(rt, &rule.body, host);
                 // Links the host location to it
                 link(rt, host, done);
-
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
                 for (eras_index, eras_arity) in &rule.eras {
                   clear(rt, get_loc(ask_arg(rt, term, *eras_index), 0), *eras_arity);
                 }
                 clear(rt, get_loc(term, 0), func.arity);
-
                 // Collects unused variables (none in this example)
                 for i in 0 .. rule.vars.len() {
                   if rule.vars[i].erase {
@@ -1365,19 +1496,21 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
                     }
                   }
                 }
-
-                cont = true;
-                break;
+                return true;
               }
-                      
             }
+            return false;
+          }
 
-            // If applied a function, continue
-            if cont {
+          let fun = get_ext(term);
+          let ari = rt.get_arity(fun);
+          if let Some(func) = rt.get_func(fun) {
+            if call_function(rt, func, host, term) {
               init = 1;
               continue;
             }
           }
+
         }
         _ => {}
       }
@@ -1393,7 +1526,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
   }
 
   // FIXME: remove this when Runtime is split (see above)
-  rt.heap.file = file;
+  //rt.heap.file = file;
 
   ask_lnk(rt, root)
 }
@@ -1573,7 +1706,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c")))
       }
       LAM => {
-        let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?d")));
+        let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
         format!("λ{} {}", name, go(rt, ask_arg(rt, term, 1), names))
       }
       APP => {
@@ -1707,19 +1840,23 @@ fn read_numb(code: &str) -> (&str, u64) {
 fn read_name(code: &str) -> (&str, u64) {
   let code = skip(code);
   let mut name = String::new();
-  let mut code = code;
-  while is_name_char(head(code)) {
-    name.push(head(code));
-    code = tail(code);
+  if head(code) == '~' {
+    return (tail(code), U64_NONE);
+  } else {
+    let mut code = code;
+    while is_name_char(head(code)) {
+      name.push(head(code));
+      code = tail(code);
+    }
+    return (code, name_to_u64(&name));
   }
-  return (code, name_to_u64(&name));
 }
 
 // Converts a name to a number, using the following table:
-// '.'       => 0
-// '0' - '9' => 1 - 10
-// 'A' - 'Z' => 11 - 36
-// 'a' - 'z' => 37 - 62
+// '.'       =>  0
+// '0' - '9' =>  1 to 10
+// 'A' - 'Z' => 11 to 36
+// 'a' - 'z' => 37 to 62
 // '_'       => 63
 fn name_to_u64(code: &str) -> u64 {
   let mut num = 0;
@@ -1739,6 +1876,7 @@ fn name_to_u64(code: &str) -> u64 {
   return num;
 }
 
+// Inverse of name_to_u64
 fn u64_to_name(num: u64) -> String {
   let mut name = String::new();
   let mut num = num;
@@ -1827,10 +1965,6 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, numb) = read_numb(code);
       return (code, Term::U60 { numb });
     },
-    '~' => {
-      let code = tail(code);
-      return (code, Term::Var { name: 0xFFFFFFFFFFFFFFFF });
-    },
     _ => {
       let (code, name) = read_name(code);
       return (code, Term::Var { name: name % 0x3FFFF });
@@ -1859,30 +1993,45 @@ fn read_func(code: &str) -> (&str, Func) {
 
 pub fn test_0() {
   
+  //let mut rt = init_runtime();
+
+  //rt.define_constructor(name_to_u64("Leaf"), 1);
+  //rt.define_constructor(name_to_u64("Node"), 2);
+  //rt.define_function(name_to_u64("Gen"), read_func("
+    //(@Gen #0) = (#Leaf #1)
+    //(@Gen x) = & x0 x1 = x; (#Node (@Gen (- x0 #1)) (@Gen (- x1 #1)))
+  //").1);
+  //rt.define_function(name_to_u64("Sum"), read_func("
+    //(@Sum (#Leaf x))   = x
+    //(@Sum (#Node a b)) = (+ (@Sum a) (@Sum b))
+  //").1);
+
+  //// Main term
+  //let main = rt.create_term_from_code("(@Sum (@Gen #21))");
+  //println!("term: {:?}", rt.show_term_at(main));
+
+  //// Normalizes and benchmarks
+  //let init = Instant::now();
+  //rt.normalize(main);
+  //println!("term: {:?}", rt.show_term_at(main));
+  //println!("cost: {}", rt.get_cost());
+  //println!("size: {}", rt.get_size());
+  //println!("time: {}", init.elapsed().as_millis());
+
+  test_1();
+
+}
+
+pub fn test_1() {
   let mut rt = init_runtime();
 
-  rt.define_constructor(name_to_u64("Leaf"), 1);
-  rt.define_constructor(name_to_u64("Node"), 2);
-  rt.define_function(name_to_u64("Gen"), read_func("
-    (@Gen #0) = (#Leaf #1)
-    (@Gen x) = & x0 x1 = x; (#Node (@Gen (- x0 #1)) (@Gen (- x1 #1)))
-  ").1);
-  rt.define_function(name_to_u64("Sum"), read_func("
-    (@Sum (#Leaf x))   = x
-    (@Sum (#Node a b)) = (+ (@Sum a) (@Sum b))
-  ").1);
+  for i in 0 .. 3 {
+    let done = rt.run_io_code("bob", "(#IOGET λx (#IOSET (+ x #1) λ~ (#IOEND #0)))");
+    println!("[DONE] {}\n", rt.show_term(done));
+  }
 
-  // Main term
-  let main = rt.create_term(&read_term("(@Sum (@Gen #21))").1);
-  println!("term: {:?}", rt.show_term_at(main));
-
-  // Normalizes and benchmarks
-  let init = Instant::now();
-  rt.normalize(main);
-  println!("term: {:?}", rt.show_term_at(main));
-  println!("cost: {}", rt.get_cost());
-  println!("size: {}", rt.get_size());
-  println!("time: {}", init.elapsed().as_millis());
-
-  //println!("{}", show_rt(&rt));
+  let done = rt.run_io_code("bob", "(#IOGET λx (#IOEND x))");
+  let done = rt.normalize(done);
+  println!("[DONE] {}\n", rt.show_term(done));
 }
+
