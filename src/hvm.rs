@@ -99,7 +99,8 @@ pub struct Heap {
   pub tick: u64,  // time counter
   pub funs: u64,  // total function count
   pub dups: u64,  // total function count
-  pub cost: u64,  // total cost count, in gas
+  pub cost: u64,  // total graph rewrites
+  pub mana: u64,  // total mana cost
   pub size: i64,  // total used memory (in 64-bit words)
   pub next: u64,  // memory index that *may* be empty
 }
@@ -176,19 +177,22 @@ pub const NEQ: u64 = 0xF;
 pub const U64_NONE: u64 = 0xFFFFFFFFFFFFFFFF;
 pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 
-// (IO s:Type r:Type) : Type
-//   (IOEND retr:r)                    : (IO s r)
-//   (IOGET        cont:(∀s (IO s r))) : (IO s r)
-//   (IOSET expr:s cont:(∀s (IO s U))) : (IO s r)
+// (IO r:Type) : Type
+//   (IOEND retr:r)                            : (IO r)
+//   (IOGET                  cont:(∀? (IO r))) : (IO r)
+//   (IOSET expr:?           cont:(∀? (IO r))) : (IO r)
+//   (IOCAL addr:Addr argm:? cont:(∀? (IO r))) : (IO r)
 const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
+const IOCAL : u64 = 0x1364d2d6;
 
 const fn GET_ARITY(fid: u64) -> Option<u64> {
   match fid {
     IOEND => Some(1),
     IOGET => Some(1),
     IOSET => Some(2),
+    IOCAL => Some(2),
     _     => None,
   }
 }
@@ -212,6 +216,7 @@ impl Heap {
     self.funs = self.funs + other.funs;
     self.dups = self.dups + other.dups;
     self.cost = self.cost + other.cost;
+    self.mana = self.mana + other.mana;
     self.size = self.size + other.size;
     self.next = self.next;
   }
@@ -224,6 +229,7 @@ impl Heap {
     self.funs = U64_NONE;
     self.dups = U64_NONE;
     self.cost = U64_NONE;
+    self.mana = U64_NONE;
     self.size = I64_NONE;
     self.next = U64_NONE;
   }
@@ -239,6 +245,7 @@ pub fn init_heap() -> Heap {
     funs: U64_NONE,
     dups: U64_NONE,
     cost: U64_NONE,
+    mana: U64_NONE,
     size: I64_NONE,
     next: U64_NONE,
   }
@@ -419,20 +426,25 @@ impl Runtime {
     self.heap.arit.write(cid, arity);
   }
 
-  fn create_term(&mut self, term: &Term) -> u64 {
+  fn define_function_from_code(&mut self, name: &str, code: &str) {
+    self.define_function(name_to_u64(name), read_func(code).1);
+  }
+
+  fn alloc_term(&mut self, term: &Term) -> u64 {
     let loc = alloc(self, 1);
     let lnk = create_term(self, term, loc);
     self.write(loc as usize, lnk);
     return loc;
   }
 
-  fn create_term_from_code(&mut self, code: &str) -> u64 {
-    self.create_term(&read_term(code).1)
+  fn alloc_term_from_code(&mut self, code: &str) -> u64 {
+    self.alloc_term(&read_term(code).1)
   }
 
-  fn run_io_code(&mut self, caller: &str, code: &str) -> Lnk {
-    let main = self.create_term_from_code(code);
+  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Lnk {
+    let main = self.alloc_term_from_code(code);
     let done = self.run_io(name_to_u64(caller), main).unwrap();
+    let done = self.normalize(done);
     return done;
   }
 
@@ -445,11 +457,11 @@ impl Runtime {
     return self.normalize_at(loc);
   }
 
-  fn show_term(&mut self, lnk: Lnk) -> String {
+  fn show_term(&self, lnk: Lnk) -> String {
     return show_term(self, lnk);
   }
 
-  fn show_term_at(&mut self, loc: u64) -> String {
+  fn show_term_at(&self, loc: u64) -> String {
     return show_term(self, self.read(loc as usize));
   }
 
@@ -457,31 +469,49 @@ impl Runtime {
   // --
 
   pub fn run_io(&mut self, caller: u64, host: u64) -> Option<Lnk> {
-    let term = ask_lnk(self, host);
     let term = reduce(self, host);
     println!("[EVAL] {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
+          IOEND => {
+            clear(self, host, 1);
+            let retr = ask_arg(self, term, 0);
+            return Some(retr);
+          }
           IOGET => {
             let cont = ask_arg(self, term, 0);
             let stat = self.disk_read(caller).unwrap_or(Num(0));
-            let call = alloc_app(self, cont, stat);
-            return self.run_io(caller, call);
+            let cont = alloc_app(self, cont, stat);
+            clear(self, host, 1);
+            return self.run_io(caller, cont);
           }
           IOSET => {
             let expr = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let call = alloc_app(self, cont, Num(0));
+            let cont = alloc_app(self, cont, Num(0));
             let save = self.normalize(expr);
             self.disk_write(caller, save);
-            return self.run_io(caller, call);
+            let done = self.run_io(caller, get_loc(term, 1));
+            clear(self, host, 2);
+            return done;
           }
-          IOEND => {
-            let retr = ask_arg(self, term, 0);
-            return Some(retr);
+          IOCAL => {
+            let addr = ask_arg(self, term, 0);
+            let argm = ask_arg(self, term, 1);
+            let cont = ask_arg(self, term, 2);
+            if get_tag(addr) == U60 {
+              let func = alloc_fun(self, get_num(addr), &[argm]);
+              let retr = self.run_io(addr, func)?;
+              let cont = alloc_app(self, cont, retr);
+              clear(self, host, 3);
+              return self.run_io(caller, cont);
+            } else {
+              return None;
+            }
           }
           _ => {
+            collect(self, term);
             return None;
           }
         }
@@ -664,6 +694,14 @@ impl Runtime {
 
   fn get_cost(&self) -> u64 {
     return self.get_with(0, U64_NONE, |heap| heap.cost);
+  }
+
+  fn set_mana(&mut self, mana: u64) {
+    self.heap.mana = mana;
+  }
+
+  fn get_mana(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.mana);
   }
 
   fn set_size(&mut self, size: i64) {
@@ -903,6 +941,10 @@ pub fn inc_cost(rt: &mut Runtime) {
   rt.set_cost(rt.get_cost() + 1);
 }
 
+pub fn add_mana(rt: &mut Runtime, amount: u64) {
+  rt.set_mana(rt.get_mana() + amount);
+}
+
 // Term
 // ----
 
@@ -1107,15 +1149,28 @@ pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
   App(node)
 }
 
-pub fn alloc_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> u64 {
-  let app = create_app(rt, func, argm);
-  return alloc_lnk(rt, app);
+pub fn create_fun(rt: &mut Runtime, fun: u64, args: &[Lnk]) -> Lnk {
+  let node = alloc(rt, args.len() as u64);
+  for i in 0 .. args.len() {
+    link(rt, node + i as u64, args[i]);
+  }
+  Fun(fun, node)
 }
 
 pub fn alloc_lnk(rt: &mut Runtime, term: Lnk) -> u64 {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
+}
+
+pub fn alloc_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> u64 {
+  let app = create_app(rt, func, argm);
+  return alloc_lnk(rt, app);
+}
+
+pub fn alloc_fun(rt: &mut Runtime, fun: u64, args: &[Lnk]) -> u64 {
+  let fun = create_fun(rt, fun, args);
+  return alloc_lnk(rt, fun);
 }
 
 // Reduction
@@ -1965,6 +2020,11 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, numb) = read_numb(code);
       return (code, Term::U60 { numb });
     },
+    '@' => {
+      let code = tail(code);
+      let (code, numb) = read_name(code);
+      return (code, Term::U60 { numb });
+    },
     _ => {
       let (code, name) = read_name(code);
       return (code, Term::Var { name: name % 0x3FFFF });
@@ -2023,15 +2083,34 @@ pub fn test_0() {
 }
 
 pub fn test_1() {
+
+  //println!("{:x}", name_to_u64("IOCAL"));
+
   let mut rt = init_runtime();
 
+  // Defines the `Count` contract, with 2 commands:
+  // - Inc: increments the counter
+  // - Get: returns the counter
+  rt.define_constructor(name_to_u64("Inc"), 0);
+  rt.define_constructor(name_to_u64("Get"), 0);
+  rt.define_function_from_code("Count", "
+    (@Count (#Inc)) = (#IOGET λx (#IOSET (+ x #1) (#IOEND #0)))
+    (@Count (#Get)) = (#IOGET λx (#IOEND x))
+  ");
+
+  // Bob calls Count Inc 3 times
   for i in 0 .. 3 {
-    let done = rt.run_io_code("bob", "(#IOGET λx (#IOSET (+ x #1) λ~ (#IOEND #0)))");
-    println!("[DONE] {}\n", rt.show_term(done));
+    rt.run_io_from_code("Bob", "
+      (#IOCAL @Count (#Inc) λ~
+      (#IOEND #0))");
   }
 
-  let done = rt.run_io_code("bob", "(#IOGET λx (#IOEND x))");
-  let done = rt.normalize(done);
+  // Bob calls Count Get and prints the result
+  let done = rt.run_io_from_code("Bob", "
+    (#IOCAL @Count (#Get) λresult
+    (#IOEND x))
+  ");
   println!("[DONE] {}\n", rt.show_term(done));
+
 }
 
