@@ -82,6 +82,12 @@ pub struct Disk {
 // Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u64;
 
+// A global action that alters the state of the blockchain
+pub enum Action {
+  Def { name: u64, func: Vec<(Term, Term)> },
+  Run { name: u64, expr: Term },
+}
+
 // A mergeable vector of u64 values
 #[derive(Debug, Clone)]
 pub struct Blob {
@@ -130,7 +136,7 @@ const U64_PER_KB: u64 = 0x80;
 const U64_PER_MB: u64 = 0x20000;
 const U64_PER_GB: u64 = 0x8000000;
 
-const HEAP_SIZE: u64 = 256 * U64_PER_MB;
+const HEAP_SIZE: u64 = 1 * U64_PER_MB;
 //const HEAP_SIZE: u64 = 256;
 
 pub const MAX_ARITY: u64 = 16;
@@ -441,11 +447,25 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Lnk {
-    let main = self.alloc_term_from_code(code);
-    let done = self.run_io(name_to_u64(caller), main).unwrap();
-    let done = self.normalize(done);
+  fn run_io_term(&mut self, caller: u64, term: &Term) -> Lnk {
+    let main = self.alloc_term(term);
+    let done = self.run_io(caller, main).unwrap();
+    //let done = self.normalize(done);
     return done;
+  }
+
+  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Lnk {
+    return self.run_io_term(name_to_u64(caller), &read_term(code).1);
+  }
+
+  fn run_actions(&mut self, actions: &[Action]) {
+    for action in actions {
+      self.run_action(action);
+    }
+  }
+
+  fn run_actions_from_code(&mut self, code: &str) {
+    return self.run_actions(&read_actions(code).1);
   }
 
   fn normalize_at(&mut self, loc: u64) -> Lnk {
@@ -522,6 +542,24 @@ impl Runtime {
       }
     }
   }
+
+  fn run_action(&mut self, action: &Action) {
+    match action {
+      Action::Def { name, func } => {
+        println!("| def: {}", name);
+        if let Some(func) = build_func(func) {
+          self.define_function(*name, func);
+        }
+      }
+      Action::Run { name, expr } => {
+        println!("| run: {}", name);
+        let done = self.run_io_term(*name, &expr);
+        let done = self.normalize(done);
+        println!("| val: {}", self.show_term(done));
+      }
+    }
+  }
+
 
   // Rollback
   // --------
@@ -2039,6 +2077,11 @@ fn read_rule(code: &str) -> (&str, (Term,Term)) {
   return (code, (lhs, rhs));
 }
 
+fn read_rules(code: &str) -> (&str, Vec<(Term,Term)>) {
+  let (code, rules) = read_until(code, '\0', read_rule);
+  return (code, rules);
+}
+
 fn read_func(code: &str) -> (&str, Func) {
   let (code, rules) = read_until(code, '\0', read_rule);
   if let Some(func) = build_func(rules.as_slice()) {
@@ -2048,69 +2091,104 @@ fn read_func(code: &str) -> (&str, Func) {
   }
 }
 
+//def Double {
+  //(Double ...) = ...
+  //(Double ...) = ...
+  //(Double ...) = ...
+//}
+
+//run Name {
+  //(RUNIO ....)
+//}
+
+fn read_action(code: &str) -> (&str, Action) {
+  let code = skip(code);
+  match head(code) {
+    'd' => {
+      let code = tail(code);
+      let (code, skip) = read_char(code, 'e');
+      let (code, skip) = read_char(code, 'f');
+      let (code, name) = read_name(code);
+      let (code, skip) = read_char(code, '{');
+      let (code, func) = read_until(code, '}', read_rule);
+      return (code, Action::Def { name, func });
+    }
+    'r' => {
+      let code = tail(code);
+      let (code, skip) = read_char(code, 'u');
+      let (code, skip) = read_char(code, 'n');
+      let (code, name) = read_name(code);
+      let (code, skip) = read_char(code, '{');
+      let (code, expr) = read_term(code);
+      let (code, skip) = read_char(code, '}');
+      return (code, Action::Run { name, expr });
+    }
+    _ => {
+      panic!("Couldn't parse action.");
+    }
+  }
+}
+
+fn read_actions(code: &str) -> (&str, Vec<Action>) {
+  let (code, actions) = read_until(code, '\0', read_action);
+  return (code, actions);
+}
+
 // Tests
 // -----
 
 pub fn test_0() {
   
-  //let mut rt = init_runtime();
+  let mut rt = init_runtime();
 
-  //rt.define_constructor(name_to_u64("Leaf"), 1);
-  //rt.define_constructor(name_to_u64("Node"), 2);
-  //rt.define_function(name_to_u64("Gen"), read_func("
-    //(@Gen #0) = (#Leaf #1)
-    //(@Gen x) = & x0 x1 = x; (#Node (@Gen (- x0 #1)) (@Gen (- x1 #1)))
-  //").1);
-  //rt.define_function(name_to_u64("Sum"), read_func("
-    //(@Sum (#Leaf x))   = x
-    //(@Sum (#Node a b)) = (+ (@Sum a) (@Sum b))
-  //").1);
+  rt.define_constructor(name_to_u64("Leaf"), 1);
+  rt.define_constructor(name_to_u64("Node"), 2);
+  rt.define_function(name_to_u64("Gen"), read_func("
+    (@Gen #0) = (#Leaf #1)
+    (@Gen x) = & x0 x1 = x; (#Node (@Gen (- x0 #1)) (@Gen (- x1 #1)))
+  ").1);
+  rt.define_function(name_to_u64("Sum"), read_func("
+    (@Sum (#Leaf x))   = x
+    (@Sum (#Node a b)) = (+ (@Sum a) (@Sum b))
+  ").1);
 
-  //// Main term
-  //let main = rt.create_term_from_code("(@Sum (@Gen #21))");
-  //println!("term: {:?}", rt.show_term_at(main));
+  // Main term
+  let main = rt.alloc_term_from_code("(@Sum (@Gen #21))");
+  println!("term: {:?}", rt.show_term_at(main));
 
-  //// Normalizes and benchmarks
-  //let init = Instant::now();
-  //rt.normalize(main);
-  //println!("term: {:?}", rt.show_term_at(main));
-  //println!("cost: {}", rt.get_cost());
-  //println!("size: {}", rt.get_size());
-  //println!("time: {}", init.elapsed().as_millis());
-
-  test_1();
+  // Normalizes and benchmarks
+  let init = Instant::now();
+  rt.normalize(main);
+  println!("term: {:?}", rt.show_term_at(main));
+  println!("cost: {}", rt.get_cost());
+  println!("size: {}", rt.get_size());
+  println!("time: {}", init.elapsed().as_millis());
 
 }
 
 pub fn test_1() {
 
-  //println!("{:x}", name_to_u64("IOCAL"));
-
   let mut rt = init_runtime();
 
-  // Defines the `Count` contract, with 2 commands:
-  // - Inc: increments the counter
-  // - Get: returns the counter
-  rt.define_constructor(name_to_u64("Inc"), 0);
-  rt.define_constructor(name_to_u64("Get"), 0);
-  rt.define_function_from_code("Count", "
-    (@Count (#Inc)) = (#IOGET λx (#IOSET (+ x #1) (#IOEND #0)))
-    (@Count (#Get)) = (#IOGET λx (#IOEND x))
-  ");
+  let actions = read_actions("
+    def Count {
+      (@Count (#Inc)) = (#IOGET λx (#IOSET (+ x #1) (#IOEND #0)))
+      (@Count (#Get)) = (#IOGET λx (#IOEND x))
+    }
 
-  // Bob calls Count Inc 3 times
-  for i in 0 .. 3 {
-    rt.run_io_from_code("Bob", "
+    run Alice {
       (#IOCAL @Count (#Inc) λ~
-      (#IOEND #0))");
-  }
+      (#IOCAL @Count (#Inc) λ~
+      (#IOCAL @Count (#Inc) λ~
+      (#IOEND #0))))
+    }
 
-  // Bob calls Count Get and prints the result
-  let done = rt.run_io_from_code("Bob", "
-    (#IOCAL @Count (#Get) λresult
-    (#IOEND x))
-  ");
-  println!("[DONE] {}\n", rt.show_term(done));
+    run Bob {
+      (#IOCAL @Count (#Get) λx
+      (#IOEND x))
+    }
 
+  ").1;
+
+  rt.run_actions(&actions);
 }
-

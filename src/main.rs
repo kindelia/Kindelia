@@ -27,7 +27,7 @@ use cli::{Cli, Parser};
 use primitive_types::U256;
 
 fn main() {
-  hvm::test_0();
+  hvm::test_1();
 }
 
 //fn main() {
