@@ -136,7 +136,7 @@ const U64_PER_KB: u64 = 0x80;
 const U64_PER_MB: u64 = 0x20000;
 const U64_PER_GB: u64 = 0x8000000;
 
-const HEAP_SIZE: u64 = 1 * U64_PER_MB;
+const HEAP_SIZE: u64 = 256 * U64_PER_MB;
 //const HEAP_SIZE: u64 = 256;
 
 pub const MAX_ARITY: u64 = 16;
@@ -180,6 +180,7 @@ pub const GTE: u64 = 0xD;
 pub const GTN: u64 = 0xE;
 pub const NEQ: u64 = 0xF;
 
+pub const VAR_NONE: u64 = 0x3FFFF;
 pub const U64_NONE: u64 = 0xFFFFFFFFFFFFFFFF;
 pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 
@@ -990,7 +991,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u64) -> Lnk {
   fn bind(rt: &mut Runtime, loc: u64, name: u64, lnk: Lnk) {
     //println!("~~ bind {} {}", u64_to_name(name), show_lnk(lnk));
     unsafe {
-      if name == U64_NONE {
+      if name == VAR_NONE {
         link(rt, loc, Era());
       } else {
         match VARS_DATA[name as usize] {
@@ -1133,7 +1134,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
             for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                vars.push(Var { name, param: i, field: Some(j), erase: name == U64_NONE }); // add its location
+                vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
               // Otherwise..
               } else {
                 return None; // return none, because we don't allow nested matches
@@ -1147,7 +1148,7 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == U64_NONE }); // add its location
+            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
             cond.push(0); // it has no matching condition
           }
           _ => {
@@ -1939,7 +1940,7 @@ fn read_name(code: &str) -> (&str, u64) {
   let code = skip(code);
   let mut name = String::new();
   if head(code) == '~' {
-    return (tail(code), U64_NONE);
+    return (tail(code), VAR_NONE);
   } else {
     let mut code = code;
     while is_name_char(head(code)) {
@@ -2144,16 +2145,6 @@ fn read_func(code: &str) -> (&str, Func) {
   }
 }
 
-//def Double {
-  //(Double ...) = ...
-  //(Double ...) = ...
-  //(Double ...) = ...
-//}
-
-//run Name {
-  //(RUNIO ....)
-//}
-
 fn read_action(code: &str) -> (&str, Action) {
   let code = skip(code);
   match head(code) {
@@ -2191,7 +2182,7 @@ fn read_actions(code: &str) -> (&str, Vec<Action>) {
 // ----
 
 pub fn view_name(name: u64) -> String {
-  if name == U64_NONE {
+  if name == VAR_NONE {
     return "~".to_string();
   } else {
     return u64_to_name(name);
@@ -2296,6 +2287,30 @@ pub fn view_actions(actions: &[Action]) -> String {
 // Tests
 // -----
 
+// Serializes, deserializes and evaluates actions
+pub fn test_actions(actions: &[Action]) {
+  //println!("[Actions]");
+  let str_0 = view_actions(actions);
+  //println!("{}", str_0);
+
+  let s = crate::serializer::serialized_actions(&actions);
+  println!("[Serialization]");
+  println!("{:?}\n", s);
+
+  let a = crate::serializer::deserialized_actions(&s);
+  let str_1 = view_actions(&a);
+  println!("[Deserialization] {}", if str_0 == str_1 { "" } else { "(error: not equal)" });
+  println!("{}", str_1);
+
+  println!("[Evaluation]");
+  let mut rt = init_runtime();
+  rt.run_actions(&actions);
+}
+
+pub fn test_actions_from_code(code: &str) {
+  test_actions(&read_actions(code).1);
+}
+
 pub fn test_0() {
   
   let mut rt = init_runtime();
@@ -2303,12 +2318,12 @@ pub fn test_0() {
   rt.define_constructor(name_to_u64("Leaf"), 1);
   rt.define_constructor(name_to_u64("Node"), 2);
   rt.define_function(name_to_u64("Gen"), read_func("
-    @(Gen #0) = $(Leaf #1)
-    @(Gen x) = & x0 x1 = x; #(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+    !(Gen #0) = $(Leaf #1)
+    !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
   ").1);
   rt.define_function(name_to_u64("Sum"), read_func("
-    !(Sum #(Leaf x))   = x
-    !(Sum #(Node a b)) = (+ !(Sum a) !(Sum b))
+    !(Sum $(Leaf x))   = x
+    !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
   ").1);
 
   // Main term
@@ -2317,40 +2332,21 @@ pub fn test_0() {
 
   // Normalizes and benchmarks
   let init = Instant::now();
-  rt.normalize(main);
-  println!("term: {:?}", rt.show_term_at(main));
+  rt.normalize_at(main);
+  println!("norm: {:?}", rt.show_term_at(main));
   println!("cost: {}", rt.get_cost());
   println!("size: {}", rt.get_size());
   println!("time: {}", init.elapsed().as_millis());
 
 }
 
-// Serializes, deserializes and evaluates actions
-pub fn test_actions(actions: &[Action]) {
-  println!("[Actions]");
-  let str_0 = view_actions(actions);
-  println!("{}", str_0);
-
-  let s = crate::serializer::serialized_actions(&actions);
-  println!("[Serialized]");
-  println!("{:?}\n", s);
-
-  let a = crate::serializer::deserialized_actions(&s);
-  println!("[Deserialized]");
-  let str_1 = view_actions(&a);
-  println!("{}", str_1);
-
-  println!("[Evaluation]");
-  let mut rt = init_runtime();
-  rt.run_actions(&actions);
-}
-
 pub fn test_1() {
 
-  test_actions(&read_actions("
+  test_actions_from_code("
 
     def Count {
       !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
+      !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) $(IOEND #0)))
       !(Count $(Get)) = $(IOGET λx $(IOEND x))
     }
 
@@ -2361,11 +2357,16 @@ pub fn test_1() {
       $(IOEND #0))))
     }
 
+    run Mary {
+      $(IOCAL @Count $(Dob) λ~
+      $(IOEND #0))
+    }
+
     run Bob {
       $(IOCAL @Count $(Get) λx
       $(IOEND x))
     }
 
-  ").1);
+  ");
 
 }
