@@ -198,7 +198,7 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOEND => Some(1),
     IOGET => Some(1),
     IOSET => Some(2),
-    IOCAL => Some(2),
+    IOCAL => Some(3),
     _     => None,
   }
 }
@@ -447,14 +447,14 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn run_io_term(&mut self, caller: u64, term: &Term) -> Lnk {
+  fn run_io_term(&mut self, caller: u64, term: &Term) -> Option<Lnk> {
     let main = self.alloc_term(term);
-    let done = self.run_io(caller, main).unwrap();
+    let done = self.run_io(caller, main);
     //let done = self.normalize(done);
     return done;
   }
 
-  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Lnk {
+  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Option<Lnk> {
     return self.run_io_term(name_to_u64(caller), &read_term(code).1);
   }
 
@@ -490,7 +490,7 @@ impl Runtime {
 
   pub fn run_io(&mut self, caller: u64, host: u64) -> Option<Lnk> {
     let term = reduce(self, host);
-    println!("[EVAL] {}", show_term(self, term));
+    println!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -537,7 +537,6 @@ impl Runtime {
         }
       }
       _ => {
-        println!("ue {}", show_lnk(term));
         return None;
       }
     }
@@ -546,16 +545,16 @@ impl Runtime {
   fn run_action(&mut self, action: &Action) {
     match action {
       Action::Def { name, func } => {
-        println!("| def: {}", name);
+        println!("- def {}", u64_to_name(*name));
         if let Some(func) = build_func(func) {
           self.define_function(*name, func);
         }
       }
       Action::Run { name, expr } => {
-        println!("| run: {}", name);
-        let done = self.run_io_term(*name, &expr);
-        let done = self.normalize(done);
-        println!("| val: {}", self.show_term(done));
+        println!("- run {}", u64_to_name(*name));
+        let done = self.run_io_term(*name, &expr).expect("Failed to run IO."); // FIXME: treat failure & rollback
+        //let done = self.normalize(done);
+        //println!("- ret: {}", self.show_term(done));
       }
     }
   }
@@ -1839,19 +1838,25 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         format!("({} {} {})", symb, val0, val1)
       }
       U60 => {
-        format!("#{}", get_num(term))
+        let numb = get_num(term);
+        // If it has 26-30 bits, pretty-print as a name
+        if numb > 0x3FFFFFF && numb <= 0x3FFFFFFF {
+          return format!("@{}", view_name(numb));
+        } else {
+          return format!("#{}", numb);
+        }
       }
       CTR => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("(#{}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("$({}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("(@{}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("!({}{})", u64_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
         format!("*")
@@ -1951,7 +1956,7 @@ fn read_name(code: &str) -> (&str, u64) {
 // 'A' - 'Z' => 11 to 36
 // 'a' - 'z' => 37 to 62
 // '_'       => 63
-fn name_to_u64(code: &str) -> u64 {
+pub fn name_to_u64(code: &str) -> u64 {
   let mut num = 0;
   for chr in code.chars() {
     if chr == '.' {
@@ -1970,7 +1975,7 @@ fn name_to_u64(code: &str) -> u64 {
 }
 
 // Inverse of name_to_u64
-fn u64_to_name(num: u64) -> String {
+pub fn u64_to_name(num: u64) -> String {
   let mut name = String::new();
   let mut num = num;
   while num > 0 {
@@ -2024,34 +2029,33 @@ fn read_term(code: &str) -> (&str, Term) {
     },
     '(' => {
       let code = tail(code);
-      if head(code) == '+' {
+      let (code, oper) = read_oper(code);
+      if let Some(oper) = oper {
         let code = tail(code);
         let (code, val0) = read_term(code);
         let (code, val1) = read_term(code);
         let (code, skip) = read_char(code, ')');
-        return (code, Term::Op2 { oper: ADD, val0: Box::new(val0), val1: Box::new(val1) });
-      } else if head(code) == '-' {
-        let code = tail(code);
-        let (code, val0) = read_term(code);
-        let (code, val1) = read_term(code);
-        let (code, skip) = read_char(code, ')');
-        return (code, Term::Op2 { oper: SUB, val0: Box::new(val0), val1: Box::new(val1) });
-      } else if head(code) == '#' {
-        let code = tail(code);
-        let (code, name) = read_name(code);
-        let (code, args) = read_until(code, ')', read_term);
-        return (code, Term::Ctr { name, args });
-      } else if head(code) == '@' {
-        let code = tail(code);
-        let (code, name) = read_name(code);
-        let (code, args) = read_until(code, ')', read_term);
-        return (code, Term::Fun { name, args });
+        return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
       } else {
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
       }
+    },
+    '$' => {
+      let code = tail(code);
+      let (code, skip) = read_char(code, '(');
+      let (code, name) = read_name(code);
+      let (code, args) = read_until(code, ')', read_term);
+      return (code, Term::Ctr { name, args });
+    },
+    '!' => {
+      let code = tail(code);
+      let (code, skip) = read_char(code, '(');
+      let (code, name) = read_name(code);
+      let (code, args) = read_until(code, ')', read_term);
+      return (code, Term::Fun { name, args });
     },
     '#' => {
       let code = tail(code);
@@ -2067,6 +2071,55 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, name) = read_name(code);
       return (code, Term::Var { name: name % 0x3FFFF });
     }
+  }
+}
+
+fn read_oper(code: &str) -> (&str, Option<u64>) {
+  let code = skip(code);
+  match head(code) {
+    '+' => (tail(code), Some(ADD)),
+    '-' => (tail(code), Some(SUB)),
+    '*' => (tail(code), Some(MUL)),
+    '/' => (tail(code), Some(DIV)),
+    '%' => (tail(code), Some(MOD)),
+    '&' => (tail(code), Some(AND)),
+    '|' => (tail(code), Some(OR)),
+    '^' => (tail(code), Some(XOR)),
+    '<' => {
+      let code = tail(code);
+      if head(code) == '=' { 
+        (tail(code), Some(LTE))
+      } else if head(code) == '<' {
+        (tail(code), Some(SHL))
+      } else {
+        (code, Some(LTN))
+      }
+    },
+    '>' => {
+      let code = tail(code);
+      if head(code) == '=' { 
+        (tail(code), Some(GTE))
+      } else if head(code) == '<' {
+        (tail(code), Some(SHR))
+      } else {
+        (code, Some(GTN))
+      }
+    },
+    '=' => {
+      if head(tail(code)) == '=' {
+        (tail(tail(code)), Some(EQL))
+      } else {
+        (code, None)
+      }
+    },
+    '!' => {
+      if head(tail(code)) == '=' {
+        (tail(tail(code)), Some(NEQ))
+      } else {
+        (code, None)
+      }
+    },
+    _ => (code, None)
   }
 }
 
@@ -2134,6 +2187,112 @@ fn read_actions(code: &str) -> (&str, Vec<Action>) {
   return (code, actions);
 }
 
+// View
+// ----
+
+pub fn view_name(name: u64) -> String {
+  if name == U64_NONE {
+    return "~".to_string();
+  } else {
+    return u64_to_name(name);
+  }
+}
+
+pub fn view_term(term: &Term) -> String {
+  match term {
+    Term::Var { name } => {
+      return view_name(*name);
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let nam0 = view_name(*nam0);
+      let nam1 = view_name(*nam1);
+      let expr = view_term(expr);
+      let body = view_term(body);
+      return format!("& {} {} = {}; {}", nam0, nam1, expr, body);
+    }
+    Term::Lam { name, body } => {
+      let name = view_name(*name);
+      let body = view_term(body);
+      return format!("λ{} {}", name, body);
+    }
+    Term::App { func, argm } => {
+      let func = view_term(func);
+      let argm = view_term(argm);
+      return format!("({} {})", func, argm);
+    }
+    Term::Ctr { name, args } => {
+      let name = view_name(*name);
+      let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
+      return format!("$({}{})", name, args);
+    }
+    Term::Fun { name, args } => {
+      let name = view_name(*name);
+      let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
+      return format!("!({}{})", name, args);
+    }
+    Term::U60 { numb } => {
+      // If it has 26-30 bits, pretty-print as a name
+      if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
+        return format!("@{}", view_name(*numb));
+      } else {
+        return format!("#{}", numb);
+      }
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let oper = view_oper(oper);
+      let val0 = view_term(val0);
+      let val1 = view_term(val1);
+      return format!("({} {} {})", oper, val0, val1);
+    }
+  }
+}
+
+pub fn view_oper(oper: &u64) -> String {
+  match oper {
+     0 => "+".to_string(),
+     1 => "-".to_string(),
+     2 => "*".to_string(),
+     3 => "/".to_string(),
+     4 => "%".to_string(),
+     5 => "&".to_string(),
+     6 => "|".to_string(),
+     7 => "^".to_string(),
+     8 => "<<".to_string(),
+     9 => ">>".to_string(),
+    10 => "<=".to_string(),
+    11 => "<".to_string(),
+    12 => "==".to_string(),
+    13 => ">=".to_string(),
+    14 => ">".to_string(),
+    15 => "!=".to_string(),
+     _ => "?".to_string(),
+  }
+}
+
+pub fn view_action(action: &Action) -> String {
+  match action {
+    Action::Def { name, func } => {
+      let name = u64_to_name(*name);
+      let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
+      return format!("def {} {{\n{}\n}}", name, func);
+    }
+    Action::Run { name, expr } => {
+      let name = u64_to_name(*name);
+      let expr = view_term(expr);
+      return format!("run {} {{\n  {}\n}}", name, expr);
+    }
+  }
+}
+
+pub fn view_actions(actions: &[Action]) -> String {
+  let mut result = String::new();
+  for action in actions {
+    result.push_str(&view_action(action));
+    result.push_str("\n");
+  }
+  return result;
+}
+
 // Tests
 // -----
 
@@ -2144,16 +2303,16 @@ pub fn test_0() {
   rt.define_constructor(name_to_u64("Leaf"), 1);
   rt.define_constructor(name_to_u64("Node"), 2);
   rt.define_function(name_to_u64("Gen"), read_func("
-    (@Gen #0) = (#Leaf #1)
-    (@Gen x) = & x0 x1 = x; (#Node (@Gen (- x0 #1)) (@Gen (- x1 #1)))
+    @(Gen #0) = $(Leaf #1)
+    @(Gen x) = & x0 x1 = x; #(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
   ").1);
   rt.define_function(name_to_u64("Sum"), read_func("
-    (@Sum (#Leaf x))   = x
-    (@Sum (#Node a b)) = (+ (@Sum a) (@Sum b))
+    !(Sum #(Leaf x))   = x
+    !(Sum #(Node a b)) = (+ !(Sum a) !(Sum b))
   ").1);
 
   // Main term
-  let main = rt.alloc_term_from_code("(@Sum (@Gen #21))");
+  let main = rt.alloc_term_from_code("!(Sum !(Gen #21))");
   println!("term: {:?}", rt.show_term_at(main));
 
   // Normalizes and benchmarks
@@ -2166,29 +2325,47 @@ pub fn test_0() {
 
 }
 
+// Serializes, deserializes and evaluates actions
+pub fn test_actions(actions: &[Action]) {
+  println!("[Actions]");
+  let str_0 = view_actions(actions);
+  println!("{}", str_0);
+
+  let s = crate::serializer::serialized_actions(&actions);
+  println!("[Serialized]");
+  println!("{:?}\n", s);
+
+  let a = crate::serializer::deserialized_actions(&s);
+  println!("[Deserialized]");
+  let str_1 = view_actions(&a);
+  println!("{}", str_1);
+
+  println!("[Evaluation]");
+  let mut rt = init_runtime();
+  rt.run_actions(&actions);
+}
+
 pub fn test_1() {
 
-  let mut rt = init_runtime();
+  test_actions(&read_actions("
 
-  let actions = read_actions("
     def Count {
-      (@Count (#Inc)) = (#IOGET λx (#IOSET (+ x #1) (#IOEND #0)))
-      (@Count (#Get)) = (#IOGET λx (#IOEND x))
+      !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
+      !(Count $(Get)) = $(IOGET λx $(IOEND x))
     }
 
     run Alice {
-      (#IOCAL @Count (#Inc) λ~
-      (#IOCAL @Count (#Inc) λ~
-      (#IOCAL @Count (#Inc) λ~
-      (#IOEND #0))))
+      $(IOCAL @Count $(Inc) λ~
+      $(IOCAL @Count $(Inc) λ~
+      $(IOCAL @Count $(Inc) λ~
+      $(IOEND #0))))
     }
 
     run Bob {
-      (#IOCAL @Count (#Get) λx
-      (#IOEND x))
+      $(IOCAL @Count $(Get) λx
+      $(IOEND x))
     }
 
-  ").1;
+  ").1);
 
-  rt.run_actions(&actions);
 }

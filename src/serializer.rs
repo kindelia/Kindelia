@@ -1,8 +1,15 @@
 use bit_vec::BitVec;
-use primitive_types::U256;
 use crate::algorithms::*;
 use crate::constants::*;
+use crate::hvm::*;
 use crate::types::*;
+use primitive_types::U256;
+
+
+
+
+
+
 
 // Serializers
 // ===========
@@ -70,7 +77,7 @@ pub fn deserialize_bits(bits: &BitVec, index: &mut u64) -> BitVec {
 
 // Many elements
 
-pub fn serialize_many<T>(serialize_one: impl Fn(&T, &mut BitVec) -> (), values: &Vec<T>, bits: &mut BitVec) {
+pub fn serialize_many<T>(serialize_one: impl Fn(&T, &mut BitVec) -> (), values: &[T], bits: &mut BitVec) {
   for x in values {
     bits.push(true);
     serialize_one(x, bits);
@@ -84,6 +91,7 @@ pub fn deserialize_many<T>(deserialize_one: impl Fn(&BitVec, &mut u64) -> T, bit
     *index = *index + 1;
     result.push(deserialize_one(bits, index));
   }
+  *index = *index + 1;
   result
 }
 
@@ -260,6 +268,202 @@ pub fn deserialized_message(bits: &BitVec) -> Message {
   deserialize_message(bits, &mut index)
 }
 
+//pub enum Term {
+  //Var { name: u64 },
+  //Dup { nam0: u64, nam1: u64, expr: Box<Term>, body: Box<Term> },
+  //Lam { name: u64, body: Box<Term> },
+  //App { func: Box<Term>, argm: Box<Term> },
+  //Ctr { name: u64, args: Vec<Term> },
+  //Fun { name: u64, args: Vec<Term> },
+  //U60 { numb: u64 },
+  //Op2 { oper: u64, val0: Box<Term>, val1: Box<Term> },
+//}
+
+//pub enum Oper {
+  //Add, Sub, Mul, Div,
+  //Mod, And, Or,  Xor,
+  //Shl, Shr, Lte, Ltn,
+  //Eql, Gte, Gtn, Neq,
+//}
+
+//pub enum Action {
+  //Def { name: u64, func: Vec<(Term, Term)> },
+  //Run { name: u64, expr: Term },
+//}
+
+// A Term
+
+pub fn serialize_term(term: &Term, bits: &mut BitVec) {
+  match term {
+    Term::Var { name } => {
+      serialize_fixlen(3, &u256(0), bits);
+      serialize_fixlen(18, &u256(*name as u64), bits);
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      serialize_fixlen(3, &u256(1), bits);
+      serialize_fixlen(18, &u256(*nam0 as u64), bits);
+      serialize_fixlen(18, &u256(*nam1 as u64), bits);
+      serialize_term(expr, bits);
+      serialize_term(body, bits);
+    }
+    Term::Lam { name, body } => {
+      serialize_fixlen(3, &u256(2), bits);
+      serialize_fixlen(18, &u256(*name as u64), bits);
+      serialize_term(body, bits);
+    }
+    Term::App { func, argm } => {
+      serialize_fixlen(3, &u256(3), bits);
+      serialize_term(func, bits);
+      serialize_term(argm, bits);
+    }
+    Term::Ctr { name, args } => {
+      serialize_fixlen(3, &u256(4), bits);
+      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_many(serialize_term, args, bits);
+    }
+    Term::Fun { name, args } => {
+      serialize_fixlen(3, &u256(5), bits);
+      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_many(serialize_term, args, bits);
+    }
+    Term::U60 { numb } => {
+      serialize_fixlen(3, &u256(6), bits);
+      serialize_fixlen(60, &u256(*numb as u64), bits);
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      serialize_fixlen(3, &u256(7), bits);
+      serialize_fixlen(8, &u256(*oper as u64), bits);
+      serialize_term(val0, bits);
+      serialize_term(val1, bits);
+    }
+  }
+}
+
+pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
+  let tag = deserialize_fixlen(3, bits, index);
+  //println!("- tag.: {} {:?}", tag, bits.clone().split_off(*index as usize));
+  match tag.low_u64() {
+    0 => {
+      let name = deserialize_fixlen(18, bits, index).low_u64();
+      Term::Var { name }
+    }
+    1 => {
+      let nam0 = deserialize_fixlen(18, bits, index).low_u64();
+      let nam1 = deserialize_fixlen(18, bits, index).low_u64();
+      let expr = Box::new(deserialize_term(bits, index));
+      let body = Box::new(deserialize_term(bits, index));
+      Term::Dup { nam0, nam1, expr, body }
+    }
+    2 => {
+      let name = deserialize_fixlen(18, bits, index).low_u64();
+      let body = Box::new(deserialize_term(bits, index));
+      Term::Lam { name, body }
+    }
+    3 => {
+      let func = Box::new(deserialize_term(bits, index));
+      let argm = Box::new(deserialize_term(bits, index));
+      Term::App { func, argm }
+    }
+    4 => {
+      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let args = deserialize_many(|bits, index| {
+        let term = deserialize_term(bits, index);
+        return term;
+      }, bits, index);
+      Term::Ctr { name, args }
+    }
+    5 => {
+      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let args = deserialize_many(deserialize_term, bits, index);
+      Term::Fun { name, args }
+    }
+    6 => {
+      let numb = deserialize_fixlen(60, bits, index).low_u64();
+      Term::U60 { numb }
+    }
+    7 => {
+      let oper = deserialize_fixlen(8, bits, index).low_u64();
+      let val0 = Box::new(deserialize_term(bits, index));
+      let val1 = Box::new(deserialize_term(bits, index));
+      Term::Op2 { oper, val0, val1 }
+    }
+    _ => panic!("unknown term tag"),
+  }
+}
+
+// An Action
+
+pub fn serialize_action(action: &Action, bits: &mut BitVec) {
+  match action {
+    Action::Def { name, func } => {
+      serialize_fixlen(4, &u256(0), bits);
+      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_many(|rule, bits| {
+        serialize_term(&rule.0, bits);
+        serialize_term(&rule.1, bits);
+      }, func, bits);
+    }
+    Action::Run { name, expr } => {
+      serialize_fixlen(4, &u256(1), bits);
+      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_term(expr, bits);
+    }
+  }
+}
+
+pub fn deserialize_action(bits: &BitVec, index: &mut u64) -> Action {
+  let tag = deserialize_fixlen(4, bits, index);
+  match tag.low_u64() {
+    0 => {
+      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let func = deserialize_many(|bits, index| {
+        let lhs  = deserialize_term(bits, index);
+        let rhs  = deserialize_term(bits, index);
+        let rule = (lhs, rhs);
+        return rule;
+      }, bits, index);
+      Action::Def { name, func }
+    }
+    1 => {
+      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let expr = deserialize_term(bits, index);
+      Action::Run { name, expr }
+    }
+    _ => panic!("unknown action tag"),
+  }
+}
+
+pub fn serialized_action(action: &Action) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_action(action, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_action(bits: &BitVec) -> Action {
+  let mut index = 0;
+  deserialize_action(bits, &mut index)
+}
+
+// Many actions
+
+pub fn serialize_actions(actions: &[Action], bits: &mut BitVec) {
+  serialize_many(serialize_action, actions, bits);
+}
+
+pub fn deserialize_actions(bits: &BitVec, index: &mut u64) -> Vec<Action> {
+  deserialize_many(deserialize_action, bits, index)
+}
+
+pub fn serialized_actions(actions: &[Action]) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_actions(actions, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_actions(bits: &BitVec) -> Vec<Action> {
+  let mut index = 0;
+  deserialize_actions(bits, &mut index)
+}
 
 // Tests
 // =====
