@@ -4,11 +4,9 @@
 #![allow(unused_variables)]
 
 mod algorithms;
-mod api;
 mod cli;
 mod common;
 mod constants;
-mod frontend;
 mod hvm;
 mod network;
 mod node;
@@ -28,8 +26,6 @@ use crate::network::*;
 use crate::node::*;
 use crate::serializer::*;
 use crate::types::*;
-
-use crate::api::Frontend;
 
 fn main() -> Result<(), String> {
   // hvm::test_1();
@@ -60,15 +56,17 @@ fn start_node(ui: bool) {
   // Node state object
   let node = new_node();
 
-  let (node_comm, front_comm) = api::make_node_channels(1);
-
   // Node to Miner communication object
   let miner_comm_0 = new_miner_comm();
   let miner_comm_1 = miner_comm_0.clone();
 
+  // User input object
+  let input_0 = new_input();
+  let input_1 = input_0.clone();
+
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node, miner_comm_0, node_comm);
+    node_loop(node, miner_comm_0, input_0, ui);
   });
 
   // Spawns the miner thread
@@ -76,19 +74,15 @@ fn start_node(ui: bool) {
     miner_loop(miner_comm_1);
   });
 
-  // Spawns frontend threads
-  let frontend: Box<dyn Frontend> = if ui {
-    Box::new(crate::frontend::tui::TuiFrontend::new())
-  } else {
-    Box::new(crate::frontend::headless::HeadlessFrontend::new())
-  };
-  let tasks = frontend.get_tasks(front_comm);
-  let front_threads = tasks.into_iter().map(thread::spawn).collect::<Vec<_>>();
+  // Spawns the input thread
+  let input_thread = thread::spawn(move || {
+    if ui {
+      input_loop(&input_1);
+    }
+  });
 
   // Joins all threads
   node_thread.join().unwrap();
   miner_thread.join().unwrap();
-  for thread in front_threads {
-    thread.join().unwrap();
-  }
+  input_thread.join().unwrap();
 }

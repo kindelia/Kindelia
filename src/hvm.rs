@@ -225,7 +225,7 @@ impl Heap {
     self.cost = self.cost + other.cost;
     self.mana = self.mana + other.mana;
     self.size = self.size + other.size;
-    self.next = self.next;
+    // self.next = self.next;
   }
   fn clear(&mut self) {
     self.data.clear();

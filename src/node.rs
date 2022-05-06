@@ -23,8 +23,6 @@ use crate::network::*;
 use crate::serializer::*;
 use crate::types::*;
 
-use crate::api::{self, NodeCommEdge};
-
 // initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
   return difficulty_to_target(u256(INITIAL_DIFFICULTY));
@@ -357,14 +355,23 @@ fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
   });
 }
 
+fn node_handle_input(node: &Node, miner_comm: &SharedMinerComm, input: &str) {
+  if let Some('\n') = input.chars().last() {
+    let mine_body = input.replace("\n", "");
+    let mine_body = string_to_body(&mine_body);
+    node_ask_mine(node, miner_comm, mine_body);
+  }
+}
+
 pub fn node_loop(
   mut node: Node,
   miner_comm: SharedMinerComm,
-  node_comm: NodeCommEdge,
+  input: SharedInput,
+  ui: bool,
 ) {
   let mut mined = 0;
   let mut tick = 0;
-  let mut body_to_mine: Option<Body> = None;
+  let mut last_screen: Option<Vec<String>> = None;
 
   loop {
     tick += 1;
@@ -374,13 +381,6 @@ pub fn node_loop(
       if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
         mined += 1;
         node_add_block(&mut node, &block);
-      }
-
-      // Asks the miner to mine a block
-      if tick % 3 == 0 {
-        if let Some(body) = &body_to_mine {
-          node_ask_mine(&node, &miner_comm, body.clone());
-        }
       }
 
       // Receives and handles incoming messages
@@ -404,9 +404,18 @@ pub fn node_loop(
         node_peers_timeout(&mut node);
       }
 
-      // Handle API messages
+      // Asks the miner to mine a block
       if tick % 3 == 0 {
-        handle_node_comm(&node, &node_comm, &miner_comm, &mut body_to_mine);
+        let input = (input.lock().unwrap()).clone();
+        node_handle_input(&node, &miner_comm, &input);
+      }
+
+      // Display node info
+      if ui && tick % 2 == 0 {
+        let input = (input.lock().unwrap()).clone();
+        display_tui(&node_get_info(&node, None), &input, &mut last_screen);
+      } else if tick % 60 == 0 {
+        display_simple(&node_get_info(&node, None));
       }
     }
 
@@ -415,31 +424,55 @@ pub fn node_loop(
   }
 }
 
-fn handle_node_comm(
-  node: &Node,
-  node_comm: &NodeCommEdge,
-  miner_comm: &SharedMinerComm,
-  body_to_mine: &mut Option<Body>,
-) {
-  use api::{NodeAns, NodeAsk};
-  let (tx, rx) = node_comm;
-  match rx.try_recv() {
-    Ok(val) => match val {
-      NodeAsk::Info { max_last_blocks: max_last } => {
-        tx.send(NodeAns::NodeInfo(get_node_info(node, max_last))).unwrap();
-      }
-      NodeAsk::ToMine(body) => {
-        *body_to_mine = Some(*body);
-      }
-    },
-    Err(err) => match err {
-      std::sync::mpsc::TryRecvError::Empty => (),
-      std::sync::mpsc::TryRecvError::Disconnected => panic!("Error: {}", err),
-    },
+// Interface
+// =========
+
+// Input
+// -----
+
+pub fn new_input() -> SharedInput {
+  Arc::new(Mutex::new(String::new()))
+}
+
+pub fn input_loop(input: &SharedInput) {
+  let mut stdout = stdout().into_raw_mode().unwrap();
+
+  for key in stdin().keys() {
+    //print!("got {:?}\n\r", key);
+    if let Ok(Key::Char(chr)) = key {
+      (input.lock().unwrap()).push(chr);
+      stdout.flush().unwrap();
+    }
+    if let Ok(Key::Backspace) = key {
+      (input.lock().unwrap()).pop();
+      stdout.flush().unwrap();
+    }
+    if let Ok(Key::Ctrl('c')) = key {
+      std::process::exit(0);
+    }
+    if let Ok(Key::Ctrl('q')) = key {
+      std::process::exit(0);
+    }
   }
 }
 
-fn get_node_info(node: &Node, max_last_blocks: Option<u64>) -> api::NodeInfo {
+// Output
+// ------
+
+pub struct NodeInfo {
+  pub time: u64,
+  pub num_peers: u64,
+  pub num_blocks: u64,
+  pub num_pending: u64,
+  pub num_pending_seen: u64,
+  pub height: u64,
+  pub difficulty: U256,
+  pub hash_rate: U256,
+  pub tip_hash: U256,
+  pub last_blocks: Vec<Block>,
+}
+
+fn node_get_info(node: &Node, max_last_blocks: Option<u64>) -> NodeInfo {
   let tip = node.tip.1;
   let height = *node.height.get(&tip).unwrap();
   let tip_target = *node.target.get(&tip).unwrap();
@@ -458,7 +491,7 @@ fn get_node_info(node: &Node, max_last_blocks: Option<u64>) -> api::NodeInfo {
   // TODO: max_last_blocks
   let last_blocks = get_longest_chain(node);
 
-  api::NodeInfo {
+  NodeInfo {
     time: get_time(),
     num_peers: node.peers.len() as u64,
     num_blocks: node.block.len() as u64,
@@ -470,4 +503,144 @@ fn get_node_info(node: &Node, max_last_blocks: Option<u64>) -> api::NodeInfo {
     tip_hash: tip,
     last_blocks,
   }
+}
+
+fn display_simple(info: &NodeInfo) {
+  let time = crate::algorithms::get_time();
+  println!("{{");
+  println!(r#"  "time": "{}","#, time);
+  println!(r#"  "num_peers: {},"#, info.num_peers);
+  println!(r#"  "tip_hash": "{}","#, info.tip_hash);
+  println!(r#"  "tip_height": {}"#, info.height);
+  println!("}}");
+}
+
+#[allow(clippy::useless_format)]
+pub fn display_tui(info: &NodeInfo, input: &str, last_screen: &mut Option<Vec<String>>) {
+  //─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾
+
+  fn bold(text: &str) -> String {
+    return format!("{}{}{}", "\x1b[1m", text, "\x1b[0m");
+  }
+
+  fn display_block(block: &Block, index: usize, width: u16) -> String {
+    let zero = u256(0);
+    let b_hash = hash_block(block);
+    let show_index = format!("{}", index).pad(6, ' ', Alignment::Right, true);
+    let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
+    let show_hash = format!("{}", hex::encode(u256_to_bytes(b_hash)));
+    let show_body = format!(
+      "{}",
+      body_to_string(&block.body).pad(
+        std::cmp::max(width as i32 - 110, 0) as usize,
+        ' ',
+        Alignment::Left,
+        true
+      )
+    );
+    return format!("{} | {} | {} | {}", show_index, show_time, show_hash, show_body);
+  }
+
+  fn display_input(input: &str) -> String {
+    let mut input: String = input.to_string();
+    if let Some('\n') = input.chars().last() {
+      input = bold(&input);
+    }
+    input.replace('\n', "")
+  }
+
+  // Gets the terminal width and height
+  let (width, height) = termion::terminal_size().unwrap();
+  let menu_width = 17;
+
+  let mut menu_lines: Vec<(String, bool)> = vec![];
+  macro_rules! menu_block {
+    ($title:expr, $val:expr) => {
+      menu_lines.push((format!("{}", $title), true));
+      menu_lines.push((format!("{}", $val), false));
+      menu_lines.push((format!("{}", "-------------"), false));
+    };
+  }
+
+  menu_block!("Time", get_time());
+  menu_block!("Peers", info.num_peers);
+  menu_block!("Difficulty", info.difficulty);
+  menu_block!("Hash Rate", info.hash_rate);
+  menu_block!("Blocks", info.num_blocks);
+  menu_block!("Height", info.height);
+  menu_block!("Pending", format!("{} / {}", info.num_pending_seen, info.num_pending));
+
+  let mut body_lines: Vec<String> = vec![];
+  let blocks = &info.last_blocks;
+  body_lines.push(format!("#block | time          | hash                                                             | body "));
+  body_lines.push(format!("------ | ------------- | ---------------------------------------------------------------- | {}", "-".repeat(std::cmp::max(width as i64 - menu_width as i64 - 93, 0) as usize)));
+  let min = std::cmp::max(blocks.len() as i64 - (height as i64 - 5), 0) as usize;
+  let max = blocks.len();
+  for i in min..max {
+    body_lines.push(display_block(&blocks[i as usize], i as usize, width));
+  }
+
+  let mut screen = Vec::new();
+
+  // Draws top bar
+  screen.push(format!("  ╻╻           │"));
+  screen.push(format!(" ╻┣┓  {} │ {}", bold("Kindelia"), { display_input(input) }));
+  screen.push(format!("╺┛╹┗╸──────────┼{}", "─".repeat(width as usize - 16)));
+
+  // Draws each line
+  for i in 0..height - 4 {
+    let mut line = String::new();
+
+    // Draws menu item
+    line.push_str(&format!(" "));
+    if let Some((menu_line, menu_bold)) = menu_lines.get(i as usize) {
+      let text = menu_line.pad(menu_width - 4, ' ', Alignment::Left, true);
+      let text = if *menu_bold { bold(&text) } else { text };
+      line.push_str(&format!("{}", text));
+    } else {
+      line.push_str(&format!("{}", " ".repeat(menu_width - 4)));
+    }
+
+    // Draws separator
+    line.push_str(&format!(" │ "));
+
+    // Draws body item
+    line.push_str(&format!("{}", body_lines.get(i as usize).unwrap_or(&"".to_string())));
+
+    // Draws line break
+    screen.push(line);
+  }
+
+  render(last_screen, &screen);
+}
+
+// Prints screen, only re-printing lines that change
+fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
+  fn redraw(screen: &Vec<String>) {
+    print!("{esc}c", esc = 27 as char); // clear screen
+    for line in screen {
+      print!("{}\n\r", line);
+    }
+  }
+  match old_screen {
+    None => redraw(new_screen),
+    Some(old_screen) => {
+      if old_screen.len() != new_screen.len() {
+        redraw(new_screen);
+      } else {
+        for y in 0..new_screen.len() {
+          if let (Some(old_line), Some(new_line)) = (old_screen.get(y), new_screen.get(y)) {
+            if old_line != new_line {
+              print!("{}", termion::cursor::Hide);
+              print!("{}", termion::cursor::Goto(1, (y + 1) as u16));
+              print!("{}", new_line);
+              print!("{}", termion::clear::UntilNewline);
+            }
+          }
+        }
+      }
+    }
+  }
+  std::io::stdout().flush().ok();
+  *old_screen = Some(new_screen.clone());
 }
