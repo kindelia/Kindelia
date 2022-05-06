@@ -19,7 +19,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use cli::{Cli, Parser};
+use cli::{Cli, CliCmd, Parser};
 use primitive_types::U256;
 
 use crate::algorithms::*;
@@ -32,29 +32,24 @@ use crate::types::*;
 use crate::api::Frontend;
 
 fn main() {
-  hvm::test_1();
+  run_cli();
+  // hvm::test_1();
 }
 
-fn run() {
+fn run_cli() {
   let cli_matches = cli::Cli::parse();
 
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
-  //print!("0123456789abcdef\n");
+  match cli_matches.command {
+    CliCmd::Start { ui } => {
+      start_node(ui);
+    }
+    CliCmd::Eval { file } => {
+      todo!();
+    }
+  }
+}
 
-  //let mut out = std::io::stdout();
-
-  //print!("{}", termion::clear::All);
-  //print!("{}", termion::cursor::Goto(4,4));
-  //print!("{}", "XXXX");
-  //print!("{}", "\n\n\n");
-  //out.flush();
-
+fn start_node(ui: bool) {
   // Node state object
   let node = new_node();
 
@@ -75,10 +70,10 @@ fn run() {
   });
 
   // Spawns frontend threads
-  let frontend: Box<dyn Frontend> = if cli_matches.no_ui {
-    Box::new(crate::frontend::headless::HeadlessFrontend::new())
-  } else {
+  let frontend: Box<dyn Frontend> = if ui {
     Box::new(crate::frontend::tui::TuiFrontend::new())
+  } else {
+    Box::new(crate::frontend::headless::HeadlessFrontend::new())
   };
   let tasks = frontend.get_tasks(front_comm);
   let front_threads = tasks.into_iter().map(thread::spawn).collect::<Vec<_>>();
