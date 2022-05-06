@@ -84,7 +84,8 @@ pub type Lnk = u64;
 
 // A global action that alters the state of the blockchain
 pub enum Action {
-  Def { name: u64, func: Vec<(Term, Term)> },
+  Fun { name: u64, arit: u64, func: Vec<(Term, Term)> },
+  Ctr { name: u64, arit: u64, },
   Run { name: u64, expr: Term },
 }
 
@@ -189,10 +190,12 @@ pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 //   (IOGET                  cont:(∀? (IO r))) : (IO r)
 //   (IOSET expr:?           cont:(∀? (IO r))) : (IO r)
 //   (IOCAL addr:Addr argm:? cont:(∀? (IO r))) : (IO r)
+//   (IONRM           expr:? cont:(∀? (IO r))) : (IO r)
 const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
 const IOCAL : u64 = 0x1364d2d6;
+const IONRM : u64 = 0x13658717;
 
 const fn GET_ARITY(fid: u64) -> Option<u64> {
   match fid {
@@ -200,6 +203,7 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOGET => Some(1),
     IOSET => Some(2),
     IOCAL => Some(3),
+    IONRM => Some(2),
     _     => None,
   }
 }
@@ -531,6 +535,12 @@ impl Runtime {
               return None;
             }
           }
+          IONRM => {
+            let norm = self.normalize_at(get_loc(term, 0));
+            let cont = ask_arg(self, term, 1);
+            let cont = alloc_app(self, cont, norm);
+            return self.run_io(caller, cont);
+          }
           _ => {
             collect(self, term);
             return None;
@@ -545,11 +555,16 @@ impl Runtime {
 
   fn run_action(&mut self, action: &Action) {
     match action {
-      Action::Def { name, func } => {
-        println!("- def {}", u64_to_name(*name));
+      Action::Fun { name, arit, func } => {
+        println!("- fun {} {}", u64_to_name(*name), arit);
         if let Some(func) = build_func(func) {
+          self.set_arity(*name, *arit);
           self.define_function(*name, func);
         }
+      }
+      Action::Ctr { name, arit } => {
+        println!("- ctr {} {}", u64_to_name(*name), arit);
+        self.set_arity(*name, *arit);
       }
       Action::Run { name, expr } => {
         println!("- run {}", u64_to_name(*name));
@@ -678,6 +693,10 @@ impl Runtime {
     } else {
       return 0;
     }
+  }
+
+  fn set_arity(&mut self, fid: u64, arity: u64) {
+    self.heap.arit.write(fid, arity);
   }
 
   fn get_func(&self, fid: u64) -> Option<Rc<Func>> {
@@ -1596,7 +1615,6 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           }
 
           let fun = get_ext(term);
-          let ari = rt.get_arity(fun);
           if let Some(func) = rt.get_func(fun) {
             if call_function(rt, func, host, term) {
               init = 1;
@@ -2153,9 +2171,18 @@ fn read_action(code: &str) -> (&str, Action) {
       let (code, skip) = read_char(code, 'e');
       let (code, skip) = read_char(code, 'f');
       let (code, name) = read_name(code);
+      let (code, arit) = read_numb(code);
       let (code, skip) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
-      return (code, Action::Def { name, func });
+      return (code, Action::Fun { name, arit, func });
+    }
+    'c' => {
+      let code = tail(code);
+      let (code, skip) = read_char(code, 't');
+      let (code, skip) = read_char(code, 'r');
+      let (code, name) = read_name(code);
+      let (code, arit) = read_numb(code);
+      return (code, Action::Ctr { name, arit });
     }
     'r' => {
       let code = tail(code);
@@ -2262,10 +2289,14 @@ pub fn view_oper(oper: &u64) -> String {
 
 pub fn view_action(action: &Action) -> String {
   match action {
-    Action::Def { name, func } => {
+    Action::Fun { name, arit, func } => {
       let name = u64_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
-      return format!("def {} {{\n{}\n}}", name, func);
+      return format!("fun {} {} {{\n{}\n}}", name, arit, func);
+    }
+    Action::Ctr { name, arit } => {
+      let name = u64_to_name(*name);
+      return format!("ctr {} {}", name, arit);
     }
     Action::Run { name, expr } => {
       let name = u64_to_name(*name);
@@ -2304,7 +2335,14 @@ pub fn test_actions(actions: &[Action]) {
 
   println!("[Evaluation]");
   let mut rt = init_runtime();
+  let init = Instant::now();
   rt.run_actions(&actions);
+
+  println!("[Stats]");
+  println!("- cost: {} gas", rt.get_cost());
+  println!("- size: {} words", rt.get_size());
+  println!("- time: {} ms", init.elapsed().as_millis());
+
 }
 
 pub fn test_actions_from_code(code: &str) {
@@ -2344,7 +2382,7 @@ pub fn test_1() {
 
   test_actions_from_code("
 
-    def Count {
+    def Count 1 {
       !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
       !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) $(IOEND #0)))
       !(Count $(Get)) = $(IOGET λx $(IOEND x))
@@ -2357,13 +2395,26 @@ pub fn test_1() {
       $(IOEND #0))))
     }
 
-    run Mary {
-      $(IOCAL @Count $(Dob) λ~
-      $(IOEND #0))
-    }
-
     run Bob {
       $(IOCAL @Count $(Get) λx
+      $(IOEND x))
+    }
+
+    ctr Leaf 1
+    ctr Node 2
+
+    def Gen 1 {
+      !(Gen #0) = $(Leaf #1)
+      !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+    }
+
+    def Sum 1 {
+      !(Sum $(Leaf x))   = x
+      !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
+    }
+
+    run Mary {
+      $(IONRM !(Sum !(Gen #21)) λx
       $(IOEND x))
     }
 

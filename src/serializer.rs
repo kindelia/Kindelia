@@ -5,12 +5,6 @@ use crate::hvm::*;
 use crate::types::*;
 use primitive_types::U256;
 
-
-
-
-
-
-
 // Serializers
 // ===========
 
@@ -395,16 +389,22 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
 
 pub fn serialize_action(action: &Action, bits: &mut BitVec) {
   match action {
-    Action::Def { name, func } => {
+    Action::Fun { name, arit, func } => {
       serialize_fixlen(4, &u256(0), bits);
       serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_fixlen(4, &u256(*arit as u64), bits);
       serialize_many(|rule, bits| {
         serialize_term(&rule.0, bits);
         serialize_term(&rule.1, bits);
       }, func, bits);
     }
-    Action::Run { name, expr } => {
+    Action::Ctr { name, arit } => {
       serialize_fixlen(4, &u256(1), bits);
+      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_fixlen(4, &u256(*arit as u64), bits);
+    }
+    Action::Run { name, expr } => {
+      serialize_fixlen(4, &u256(2), bits);
       serialize_fixlen(30, &u256(*name as u64), bits);
       serialize_term(expr, bits);
     }
@@ -416,15 +416,21 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u64) -> Action {
   match tag.low_u64() {
     0 => {
       let name = deserialize_fixlen(30, bits, index).low_u64();
+      let arit = deserialize_fixlen(4, bits, index).low_u64();
       let func = deserialize_many(|bits, index| {
         let lhs  = deserialize_term(bits, index);
         let rhs  = deserialize_term(bits, index);
         let rule = (lhs, rhs);
         return rule;
       }, bits, index);
-      Action::Def { name, func }
+      Action::Fun { name, arit, func }
     }
     1 => {
+      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let arit = deserialize_fixlen(4, bits, index).low_u64();
+      Action::Ctr { name, arit }
+    }
+    2 => {
       let name = deserialize_fixlen(30, bits, index).low_u64();
       let expr = deserialize_term(bits, index);
       Action::Run { name, expr }

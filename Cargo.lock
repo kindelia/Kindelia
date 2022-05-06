@@ -307,7 +307,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 
 [[package]]
-name = "kindelia-node"
+name = "kindelia"
 version = "0.1.0"
 dependencies = [
  "bit-vec",

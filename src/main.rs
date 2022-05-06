@@ -28,8 +28,9 @@ use crate::serializer::*;
 use crate::types::*;
 
 fn main() -> Result<(), String> {
-  // hvm::test_1();
-  run_cli()
+  //run_cli() // ???????????????
+  hvm::test_1();
+  return Ok(());
 }
 
 fn run_cli() -> Result<(), String> {
