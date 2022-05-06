@@ -31,12 +31,12 @@ use crate::types::*;
 
 use crate::api::Frontend;
 
-fn main() {
-  run_cli();
+fn main() -> Result<(), String> {
   // hvm::test_1();
+  run_cli()
 }
 
-fn run_cli() {
+fn run_cli() -> Result<(), String> {
   let cli_matches = cli::Cli::parse();
 
   match cli_matches.command {
@@ -44,9 +44,16 @@ fn run_cli() {
       start_node(ui);
     }
     CliCmd::Eval { file } => {
-      todo!();
+      let file = std::fs::read_to_string(file);
+      match file {
+        Err(err) => return Err(format!("{}", err)),
+        Ok(code) => {
+          hvm::test_actions_from_code(&code);
+        }
+      }
     }
-  }
+  };
+  Ok(())
 }
 
 fn start_node(ui: bool) {
