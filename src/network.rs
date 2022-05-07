@@ -3,7 +3,24 @@ use std::net::*;
 
 use crate::algorithms::*;
 use crate::serializer::*;
-use crate::types::*;
+use crate::node::*;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Address {
+  IPv4 {
+    val0: u8,
+    val1: u8,
+    val2: u8,
+    val3: u8,
+    port: u16,
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Peer {
+  pub seen_at: u64,
+  pub address: Address,
+}
 
 // UDP
 // ===
@@ -50,4 +67,15 @@ pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
     messages.push((addr, msge));
   }
   return messages;
+}
+
+// Stringification
+// ===============
+
+pub fn show_address_hostname(address: &Address) -> String {
+  match address {
+    Address::IPv4{ val0, val1, val2, val3, port } => {
+      return format!("{}.{}.{}.{}", val0, val1, val2, val3);
+    }
+  }
 }

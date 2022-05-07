@@ -749,12 +749,20 @@ impl Runtime {
     self.heap.cost = cost;
   }
 
+  fn add_cost(&mut self, add: u64) {
+    self.heap.cost += add;
+  }
+
   fn get_cost(&self) -> u64 {
     return self.get_with(0, U64_NONE, |heap| heap.cost);
   }
 
   fn set_mana(&mut self, mana: u64) {
     self.heap.mana = mana;
+  }
+
+  fn add_mana(&mut self, add: u64) {
+    self.heap.mana += add;
   }
 
   fn get_mana(&self) -> u64 {

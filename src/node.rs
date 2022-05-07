@@ -21,7 +21,148 @@ use crate::algorithms::*;
 use crate::constants::*;
 use crate::network::*;
 use crate::serializer::*;
-use crate::types::*;
+
+// Types
+// -----
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Body {
+  pub value: [u8; BODY_SIZE],
+}
+
+#[derive(Debug, Clone)]
+pub struct Block {
+  pub time: u64,  // block timestamp
+  pub rand: u64,  // block nonce
+  pub prev: U256, // previous block (32 bytes)
+  pub body: Body, // block contents (1280 bytes)
+}
+
+pub type Transaction = Vec<u8>;
+
+pub struct Node {
+  pub socket     : UdpSocket,                      // UDP socket
+  pub port       : u16,                            // UDP port
+  pub tip        : (U256, U256),                   // current tip work and block hash
+  pub block      : U256Map<Block>,                 // block hash -> block information
+  pub children   : U256Map<Vec<U256>>,             // block hash -> blocks that have this as its parent
+  pub waiters    : U256Map<Vec<Block>>,            // block hash -> blocks that are waiting for this block info
+  pub work       : U256Map<U256>,                  // block hash -> accumulated work
+  pub target     : U256Map<U256>,                  // block hash -> this block's target
+  pub height     : U256Map<u64>,                   // block hash -> cached height
+  pub seen       : U256Map<()>,                    // block hash -> have we received it yet?
+  pub was_mined  : U256Map<HashSet<Transaction>>,  // block hash -> set of transaction hashes that were already mined
+  pub pool       : PriorityQueue<Transaction,u64>, // transactions to be mined
+  pub peer_id    : HashMap<Address, u64>,          // peer address -> peer id
+  pub peers      : HashMap<u64, Peer>,             // peer id -> peer
+}
+
+#[derive(Debug, Clone)]
+pub enum MinerComm {
+  Request {
+    prev: U256,
+    body: Body,
+    targ: U256, 
+  },
+  Answer {
+    block: Block
+  },
+  Stop
+}
+
+pub type Shared<T> = Arc<Mutex<T>>;
+pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
+pub type SharedInput = Arc<Mutex<String>>;
+
+#[derive(Debug, Clone)]
+pub enum Message {
+  PutBlock {
+    block: Block,
+    peers: Vec<Peer>,
+  },
+  AskBlock {
+    bhash: Hash
+  }
+}
+
+// Algorithms
+// ----------
+
+pub fn target_to_difficulty(target: U256) -> U256 {
+  let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+  return p256 / (p256 - target);
+}
+
+pub fn difficulty_to_target(difficulty: U256) -> U256 {
+  let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+  return p256 - p256 / difficulty;
+}
+
+// Computes next target by scaling the current difficulty by a `scale` factor
+// Since the factor is an integer, it is divided by 2^32 to allow integer division
+// - compute_next_target(t, 2n**32n / 2n): difficulty halves
+// - compute_next_target(t, 2n**32n * 1n): nothing changes
+// - compute_next_target(t, 2n**32n * 2n): difficulty doubles
+pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
+  let p32 = U256::from("0x100000000");
+  let last_difficulty = target_to_difficulty(last_target);
+  let next_difficulty = u256(1) + (last_difficulty * scale - u256(1)) / p32;
+  return difficulty_to_target(next_difficulty);
+}
+
+pub fn compute_next_target_f64(last_target: U256, scale: f64) -> U256 {
+  return compute_next_target(last_target, u256((scale * 4294967296.0) as u64));
+}
+
+pub fn get_hash_work(hash: U256) -> U256 {
+  if hash == u256(0) {
+    return u256(0);
+  } else {
+    return target_to_difficulty(hash);
+  }
+}
+
+pub fn hash_u256(value: U256) -> U256 {
+  return hash_bytes(u256_to_bytes(value).as_slice());
+}
+
+pub fn hash_bytes(bytes: &[u8]) -> U256 {
+  let mut hasher = sha3::Keccak256::new();
+  hasher.update(&bytes);
+  let hash = hasher.finalize();
+  return U256::from_little_endian(&hash);
+}
+
+pub fn hash_block(block: &Block) -> U256 {
+  if block.time == 0 {
+    return hash_bytes(&[]);
+  } else {
+    let mut bytes : Vec<u8> = Vec::new();
+    bytes.extend_from_slice(&u256_to_bytes(block.prev));
+    bytes.extend_from_slice(&u64_to_bytes(block.time));
+    bytes.extend_from_slice(&u64_to_bytes(block.rand));
+    bytes.extend_from_slice(&block.body.value);
+    return hash_bytes(&bytes);
+  }
+}
+
+// Converts a string to a body, terminating with a null character.
+// Truncates if the string length is larger than BODY_SIZE-1.
+pub fn string_to_body(text: &str) -> Body {
+  let mut body = Body { value: [0; BODY_SIZE] };
+  let bytes = text.as_bytes();
+  for i in 0 .. std::cmp::min(BODY_SIZE, bytes.len()) {
+    body.value[i] = bytes[i];
+  }
+  return body;
+}
+
+pub fn body_to_string(body: &Body) -> String {
+  match std::str::from_utf8(&body.value) {
+    Ok(s)  => s.to_string(),
+    Err(e) => "\n".repeat(BODY_SIZE),
+  }
+}
 
 // initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
@@ -248,6 +389,19 @@ pub fn get_blocks_dir() -> String {
   return dir.to_str().unwrap().to_string();
 }
 
+pub fn show_block(block: &Block) -> String {
+  let hash = hash_block(block);
+  return format!(
+    "time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
+    block.time,
+    block.rand,
+    body_to_string(&block.body),
+    block.prev,
+    hex::encode(u256_to_bytes(hash)),
+    get_hash_work(hash),
+  );
+}
+
 // Mining
 // ======
 
@@ -383,35 +537,34 @@ pub fn node_loop(
         node_add_block(&mut node, &block);
       }
 
-      // Receives and handles incoming messages
-      if tick % 3 == 0 {
-        node_message_receive(&mut node);
-      }
-
       // Spreads the tip block
-      if tick % 3 == 0 {
+      if tick % 1 == 0 {
         node_gossip_tip_block(&mut node, 8);
       }
 
+      // Receives and handles incoming messages
+      if tick % 10 == 0 {
+        node_message_receive(&mut node);
+      }
+
       // Requests missing blocks
-      if tick % 3 == 0 {
+      if tick % 1 == 0 {
         node_ask_missing_blocks(&mut node);
       }
 
       // Peer timeout
-      // FIXME: should be less frequent
-      if tick % 60 == 0 {
+      if tick % 1000 == 0 {
         node_peers_timeout(&mut node);
       }
 
       // Asks the miner to mine a block
-      if tick % 3 == 0 {
+      if tick % 10 == 0 {
         let input = (input.lock().unwrap()).clone();
         node_handle_input(&node, &miner_comm, &input);
       }
 
       // Display node info
-      if ui && tick % 2 == 0 {
+      if ui && tick % 10 == 0 {
         let input = (input.lock().unwrap()).clone();
         display_tui(&node_get_info(&node, None), &input, &mut last_screen);
       } else if tick % 60 == 0 {
@@ -419,8 +572,8 @@ pub fn node_loop(
       }
     }
 
-    // Sleep for 1/60 seconds
-    std::thread::sleep(std::time::Duration::from_micros(16666));
+    // Sleep for 1/100 seconds
+    //std::thread::sleep(std::time::Duration::from_micros(16666));
   }
 }
 

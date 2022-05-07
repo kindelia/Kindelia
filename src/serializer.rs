@@ -1,9 +1,13 @@
 use bit_vec::BitVec;
+
 use crate::algorithms::*;
 use crate::constants::*;
 use crate::hvm::*;
-use crate::types::*;
+use crate::network::*;
+use crate::node::*;
+
 use primitive_types::U256;
+
 
 // Serializers
 // ===========

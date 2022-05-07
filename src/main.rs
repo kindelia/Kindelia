@@ -11,7 +11,6 @@ mod hvm;
 mod network;
 mod node;
 mod serializer;
-mod types;
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -25,7 +24,6 @@ use crate::constants::*;
 use crate::network::*;
 use crate::node::*;
 use crate::serializer::*;
-use crate::types::*;
 
 fn main() -> Result<(), String> {
   //run_cli() // ???????????????
