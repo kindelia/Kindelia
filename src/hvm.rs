@@ -186,16 +186,32 @@ pub const U64_NONE: u64 = 0xFFFFFFFFFFFFFFFF;
 pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
-//   (IOEND retr:r)                            : (IO r)
-//   (IOGET                  cont:(∀? (IO r))) : (IO r)
-//   (IOSET expr:?           cont:(∀? (IO r))) : (IO r)
-//   (IOCAL addr:Addr argm:? cont:(∀? (IO r))) : (IO r)
-//   (IONRM           expr:? cont:(∀? (IO r))) : (IO r)
-//   (IOWHO                  cont:(∀? (IO r))) : (IO r)
+//   (IOEND retr:r)                                       : (IO r)
+//   (IOGET                             cont:(∀? (IO r))) : (IO r)
+//   (IOSET expr:?                      cont:(∀? (IO r))) : (IO r)
+//   (IOFN0 addr:Addr                   cont:(∀? (IO r))) : (IO r)
+//   (IOFN1 addr:Addr arg0:?            cont:(∀? (IO r))) : (IO r)
+//   (IOFN2 addr:Addr arg0:? arg1:?     cont:(∀? (IO r))) : (IO r)
+//   (IOFN3 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOFN4 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOFN5 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOFN6 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOFN7 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOFN8 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IONRM           expr:?            cont:(∀? (IO r))) : (IO r)
+//   (IOWHO                             cont:(∀? (IO r))) : (IO r)
 const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
-const IOCAL : u64 = 0x1364d2d6;
+const IOFN0 : u64 = 0x13650601;
+const IOFN1 : u64 = 0x13650602;
+const IOFN2 : u64 = 0x13650603;
+const IOFN3 : u64 = 0x13650604;
+const IOFN4 : u64 = 0x13650605;
+const IOFN5 : u64 = 0x13650606;
+const IOFN6 : u64 = 0x13650607;
+const IOFN7 : u64 = 0x13650608;
+const IOFN8 : u64 = 0x13650609;
 const IONRM : u64 = 0x13658717;
 const IOWHO : u64 = 0x13661499;
 
@@ -204,7 +220,15 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOEND => Some(1),
     IOGET => Some(1),
     IOSET => Some(2),
-    IOCAL => Some(3),
+    IOFN0 => Some(2),
+    IOFN1 => Some(3),
+    IOFN2 => Some(4),
+    IOFN3 => Some(5),
+    IOFN4 => Some(6),
+    IOFN5 => Some(7),
+    IOFN6 => Some(8),
+    IOFN7 => Some(9),
+    IOFN8 => Some(10),
     IONRM => Some(2),
     IOWHO => Some(1),
     _     => None,
@@ -497,6 +521,23 @@ impl Runtime {
   // --
 
   pub fn run_io(&mut self, subject: u64, caller: u64, host: u64) -> Option<Lnk> {
+    fn iofnx(rt: &mut Runtime, subject: u64, caller: u64, host: u64, term: Lnk, size: u64) -> Option<Lnk> {
+      let fnid = ask_arg(rt, term, 0);
+      let mut args = Vec::new();
+      for i in 0 .. size {
+        args.push(ask_arg(rt, term, 1 + i));
+      }
+      let cont = ask_arg(rt, term, 1 + size);
+      if get_tag(fnid) == U60 {
+        let func = alloc_fun(rt, get_num(fnid), &args);
+        let retr = rt.run_io(fnid, subject, func)?;
+        let cont = alloc_app(rt, cont, retr);
+        clear(rt, host, 3);
+        return rt.run_io(subject, caller, cont);
+      } else {
+        return None;
+      }
+    }
     let term = reduce(self, host);
     println!("-- {}", show_term(self, term));
     match get_tag(term) {
@@ -524,19 +565,32 @@ impl Runtime {
             clear(self, host, 2);
             return done;
           }
-          IOCAL => {
-            let fnid = ask_arg(self, term, 0);
-            let argm = ask_arg(self, term, 1);
-            let cont = ask_arg(self, term, 2);
-            if get_tag(fnid) == U60 {
-              let func = alloc_fun(self, get_num(fnid), &[argm]);
-              let retr = self.run_io(fnid, subject, func)?;
-              let cont = alloc_app(self, cont, retr);
-              clear(self, host, 3);
-              return self.run_io(subject, caller, cont);
-            } else {
-              return None;
-            }
+          IOFN0 => {
+            iofnx(self, subject, caller, host, term, 0)
+          }
+          IOFN1 => {
+            iofnx(self, subject, caller, host, term, 1)
+          }
+          IOFN2 => {
+            iofnx(self, subject, caller, host, term, 2)
+          }
+          IOFN3 => {
+            iofnx(self, subject, caller, host, term, 3)
+          }
+          IOFN4 => {
+            iofnx(self, subject, caller, host, term, 4)
+          }
+          IOFN5 => {
+            iofnx(self, subject, caller, host, term, 5)
+          }
+          IOFN6 => {
+            iofnx(self, subject, caller, host, term, 6)
+          }
+          IOFN7 => {
+            iofnx(self, subject, caller, host, term, 7)
+          }
+          IOFN8 => {
+            iofnx(self, subject, caller, host, term, 8)
           }
           IONRM => {
             let norm = self.normalize_at(get_loc(term, 0));
@@ -2394,6 +2448,21 @@ pub fn test_0() {
 
 pub fn test_1() {
 
+  println!("{:x}", name_to_u64("IOEND"));
+  println!("{:x}", name_to_u64("IOGET"));
+  println!("{:x}", name_to_u64("IOSET"));
+  println!("{:x}", name_to_u64("IOFN0"));
+  println!("{:x}", name_to_u64("IOFN1"));
+  println!("{:x}", name_to_u64("IOFN2"));
+  println!("{:x}", name_to_u64("IOFN3"));
+  println!("{:x}", name_to_u64("IOFN4"));
+  println!("{:x}", name_to_u64("IOFN5"));
+  println!("{:x}", name_to_u64("IOFN6"));
+  println!("{:x}", name_to_u64("IOFN7"));
+  println!("{:x}", name_to_u64("IOFN8"));
+  println!("{:x}", name_to_u64("IONRM"));
+  println!("{:x}", name_to_u64("IOWHO"));
+
   test_actions_from_code("
 
     def Count 1 {
@@ -2403,14 +2472,14 @@ pub fn test_1() {
     }
 
     run {
-      $(IOCAL @Count $(Inc) λ~
-      $(IOCAL @Count $(Inc) λ~
-      $(IOCAL @Count $(Inc) λ~
+      $(IOFN1 @Count $(Inc) λ~
+      $(IOFN1 @Count $(Inc) λ~
+      $(IOFN1 @Count $(Inc) λ~
       $(IOEND #0))))
     }
 
     run {
-      $(IOCAL @Count $(Get) λx
+      $(IOFN1 @Count $(Get) λx
       $(IOEND x))
     }
 
@@ -2432,18 +2501,16 @@ pub fn test_1() {
       $(IOEND x))
     }
 
-    ctr Unit 0
-
     def Foo 1 {
-      !(Foo $(Unit)) = $(IOWHO λwho $(IOEND who))
+      !(Foo) = $(IOWHO λwho $(IOEND who))
     }
 
     def Bar 1 {
-      !(Bar $(Unit)) = $(IOCAL @Foo $(Unit) λres $(IOEND res))
+      !(Bar) = $(IOFN0 @Foo λres $(IOEND res))
     }
 
     run {
-      $(IOCAL @Bar $(Unit) λwho
+      $(IOFN0 @Bar λwho
       $(IOEND who))
     }
 
