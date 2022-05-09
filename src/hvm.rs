@@ -86,7 +86,7 @@ pub type Lnk = u64;
 pub enum Action {
   Fun { name: u64, arit: u64, func: Vec<(Term, Term)> },
   Ctr { name: u64, arit: u64, },
-  Run { name: u64, expr: Term },
+  Run { expr: Term },
 }
 
 // A mergeable vector of u64 values
@@ -191,11 +191,13 @@ pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 //   (IOSET expr:?           cont:(∀? (IO r))) : (IO r)
 //   (IOCAL addr:Addr argm:? cont:(∀? (IO r))) : (IO r)
 //   (IONRM           expr:? cont:(∀? (IO r))) : (IO r)
+//   (IOWHO                  cont:(∀? (IO r))) : (IO r)
 const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
 const IOCAL : u64 = 0x1364d2d6;
 const IONRM : u64 = 0x13658717;
+const IOWHO : u64 = 0x13661499;
 
 const fn GET_ARITY(fid: u64) -> Option<u64> {
   match fid {
@@ -204,6 +206,7 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOSET => Some(2),
     IOCAL => Some(3),
     IONRM => Some(2),
+    IOWHO => Some(1),
     _     => None,
   }
 }
@@ -452,15 +455,15 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn run_io_term(&mut self, caller: u64, term: &Term) -> Option<Lnk> {
+  fn run_io_term(&mut self, subject: u64, caller: u64, term: &Term) -> Option<Lnk> {
     let main = self.alloc_term(term);
-    let done = self.run_io(caller, main);
+    let done = self.run_io(subject, caller, main);
     //let done = self.normalize(done);
     return done;
   }
 
-  fn run_io_from_code(&mut self, caller: &str, code: &str) -> Option<Lnk> {
-    return self.run_io_term(name_to_u64(caller), &read_term(code).1);
+  fn run_io_from_code(&mut self, code: &str) -> Option<Lnk> {
+    return self.run_io_term(0, 0, &read_term(code).1);
   }
 
   fn run_actions(&mut self, actions: &[Action]) {
@@ -493,7 +496,7 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, caller: u64, host: u64) -> Option<Lnk> {
+  pub fn run_io(&mut self, subject: u64, caller: u64, host: u64) -> Option<Lnk> {
     let term = reduce(self, host);
     println!("-- {}", show_term(self, term));
     match get_tag(term) {
@@ -509,7 +512,7 @@ impl Runtime {
             let stat = self.disk_read(caller).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
             clear(self, host, 1);
-            return self.run_io(caller, cont);
+            return self.run_io(subject, caller, cont);
           }
           IOSET => {
             let expr = ask_arg(self, term, 0);
@@ -517,20 +520,20 @@ impl Runtime {
             let cont = alloc_app(self, cont, Num(0));
             let save = self.normalize(expr);
             self.disk_write(caller, save);
-            let done = self.run_io(caller, get_loc(term, 1));
+            let done = self.run_io(subject, caller, get_loc(term, 1));
             clear(self, host, 2);
             return done;
           }
           IOCAL => {
-            let addr = ask_arg(self, term, 0);
+            let fnid = ask_arg(self, term, 0);
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
-            if get_tag(addr) == U60 {
-              let func = alloc_fun(self, get_num(addr), &[argm]);
-              let retr = self.run_io(addr, func)?;
+            if get_tag(fnid) == U60 {
+              let func = alloc_fun(self, get_num(fnid), &[argm]);
+              let retr = self.run_io(fnid, subject, func)?;
               let cont = alloc_app(self, cont, retr);
               clear(self, host, 3);
-              return self.run_io(caller, cont);
+              return self.run_io(subject, caller, cont);
             } else {
               return None;
             }
@@ -539,7 +542,12 @@ impl Runtime {
             let norm = self.normalize_at(get_loc(term, 0));
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, norm);
-            return self.run_io(caller, cont);
+            return self.run_io(subject, caller, cont);
+          }
+          IOWHO => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(caller));
+            return self.run_io(subject, caller, cont);
           }
           _ => {
             collect(self, term);
@@ -566,9 +574,9 @@ impl Runtime {
         println!("- ctr {} {}", u64_to_name(*name), arit);
         self.set_arity(*name, *arit);
       }
-      Action::Run { name, expr } => {
-        println!("- run {}", u64_to_name(*name));
-        let done = self.run_io_term(*name, &expr).expect("Failed to run IO."); // FIXME: treat failure & rollback
+      Action::Run { expr } => {
+        println!("- run");
+        let done = self.run_io_term(0, 0, &expr).expect("Failed to run IO."); // FIXME: treat failure & rollback
         //let done = self.normalize(done);
         //println!("- ret: {}", self.show_term(done));
       }
@@ -2196,11 +2204,10 @@ fn read_action(code: &str) -> (&str, Action) {
       let code = tail(code);
       let (code, skip) = read_char(code, 'u');
       let (code, skip) = read_char(code, 'n');
-      let (code, name) = read_name(code);
       let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
-      return (code, Action::Run { name, expr });
+      return (code, Action::Run { expr });
     }
     _ => {
       panic!("Couldn't parse action.");
@@ -2306,10 +2313,9 @@ pub fn view_action(action: &Action) -> String {
       let name = u64_to_name(*name);
       return format!("ctr {} {}", name, arit);
     }
-    Action::Run { name, expr } => {
-      let name = u64_to_name(*name);
+    Action::Run { expr } => {
       let expr = view_term(expr);
-      return format!("run {} {{\n  {}\n}}", name, expr);
+      return format!("run {{\n  {}\n}}", expr);
     }
   }
 }
@@ -2396,14 +2402,14 @@ pub fn test_1() {
       !(Count $(Get)) = $(IOGET λx $(IOEND x))
     }
 
-    run Alice {
+    run {
       $(IOCAL @Count $(Inc) λ~
       $(IOCAL @Count $(Inc) λ~
       $(IOCAL @Count $(Inc) λ~
       $(IOEND #0))))
     }
 
-    run Bob {
+    run {
       $(IOCAL @Count $(Get) λx
       $(IOEND x))
     }
@@ -2421,9 +2427,24 @@ pub fn test_1() {
       !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
     }
 
-    run Mary {
+    run {
       $(IONRM !(Sum !(Gen #21)) λx
       $(IOEND x))
+    }
+
+    ctr Unit 0
+
+    def Foo 1 {
+      !(Foo $(Unit)) = $(IOWHO λwho $(IOEND who))
+    }
+
+    def Bar 1 {
+      !(Bar $(Unit)) = $(IOCAL @Foo $(Unit) λres $(IOEND res))
+    }
+
+    run {
+      $(IOCAL @Bar $(Unit) λwho
+      $(IOEND who))
     }
 
   ");
