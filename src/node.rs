@@ -3,8 +3,8 @@ use im::HashSet;
 use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
-use sha3::Digest;
 use rand::seq::IteratorRandom;
+use sha3::Digest;
 
 use std::collections::HashMap;
 use std::net::*;
@@ -17,10 +17,8 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 use termion::{color, style};
 
-use crate::algorithms::*;
-use crate::constants::*;
-use crate::network::*;
-use crate::serializer::*;
+use crate::util::*;
+use crate::bits::*;
 
 // Types
 // -----
@@ -82,6 +80,144 @@ pub enum Message {
   },
   AskBlock {
     bhash: Hash
+  }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Address {
+  IPv4 {
+    val0: u8,
+    val1: u8,
+    val2: u8,
+    val3: u8,
+    port: u16,
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Peer {
+  pub seen_at: u64,
+  pub address: Address,
+}
+
+// Constants
+// =========
+
+// UDP port to listen to
+pub const UDP_PORT : u16 = 42000;
+
+// Size of a hash, in bytes
+pub const HASH_SIZE : usize = 32;
+
+// Size of a u64, in bytes
+pub const U64_SIZE : usize = 64 / 8;
+
+// Size of a block's body, in bytes
+pub const BODY_SIZE : usize = 1280;
+
+// Size of a block, in bytes
+pub const BLOCK_SIZE : usize = HASH_SIZE + (U64_SIZE * 4) + BODY_SIZE;
+
+// Size of an IPv4 address, in bytes
+pub const IPV4_SIZE : usize = 4;
+
+// Size of an IPv6 address, in bytes
+pub const IPV6_SIZE : usize = 16;
+
+// Size of an IP port, in bytes
+pub const PORT_SIZE : usize = 2;
+
+// How many nodes we gossip an information to?
+pub const GOSSIP_FACTOR : u64 = 16;
+
+// When we need missing info, how many nodes do we ask?
+pub const MISSING_INFO_ASK_FACTOR : u64 = 3;
+
+// How many times the mining thread attempts before unblocking?
+pub const MINE_ATTEMPTS : u64 = 1024;
+
+// Desired average time between mined blocks, in milliseconds
+pub const TIME_PER_BLOCK : u64 = 3000;
+
+// Don't accept blocks from N milliseconds in the future
+pub const DELAY_TOLERANCE : u64 = 60 * 60 * 1000;
+  
+// Readjust difficulty every N blocks
+pub const BLOCKS_PER_PERIOD : u64 = 20;
+
+// Readjusts difficulty every N seconds
+pub const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
+
+// Initial difficulty, in expected hashes per block
+pub const INITIAL_DIFFICULTY : u64 = 256;
+
+// How many milliseconds without notice until we forget a peer?
+pub const PEER_TIMEOUT : u64 = 10 * 1000;
+
+// How many peers we need to keep minimum?
+pub const PEER_COUNT_MINIMUM : u64 = 256;
+
+// How many peers we send when asked?
+pub const SHARE_PEER_COUNT : u64 = 3;
+
+// How many peers we keep on the last_seen object?
+pub const LAST_SEEN_SIZE : u64 = 2;
+
+// UDP
+// ===
+
+pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
+  Address::IPv4 { val0, val1, val2, val3, port }
+}
+
+pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
+  for port in ports {
+    if let Ok(socket) = UdpSocket::bind(&format!("127.0.0.1:{}",port)) {
+      socket.set_nonblocking(true).ok();
+      return Some((socket, *port));
+    }
+  }
+  return None;
+}
+
+pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
+  match address {
+    Address::IPv4 { val0, val1, val2, val3, port } => {
+      let bits = bitvec_to_bytes(&serialized_message(message));
+      let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
+      socket.send_to(bits.as_slice(), addr).ok();
+    }
+  }
+}
+
+pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
+  let mut buffer = [0; 65536];
+  let mut messages = Vec::new();
+  while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
+    let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
+    let msge = deserialized_message(&bits);
+    let addr = match sender_addr.ip() {
+      std::net::IpAddr::V4(v4addr) => {
+        let [val0, val1, val2, val3] = v4addr.octets();
+        Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
+      }
+      _ => {
+        panic!("TODO: IPv6")
+      }
+    };
+    messages.push((addr, msge));
+  }
+  return messages;
+}
+
+// Stringification
+// ===============
+
+pub fn show_address_hostname(address: &Address) -> String {
+  match address {
+    Address::IPv4{ val0, val1, val2, val3, port } => {
+      return format!("{}.{}.{}.{}", val0, val1, val2, val3);
+    }
   }
 }
 
@@ -659,7 +795,7 @@ fn node_get_info(node: &Node, max_last_blocks: Option<u64>) -> NodeInfo {
 }
 
 fn display_simple(info: &NodeInfo) {
-  let time = crate::algorithms::get_time();
+  let time = get_time();
   println!("{{");
   println!(r#"  "time": "{}","#, time);
   println!(r#"  "num_peers: {},"#, info.num_peers);

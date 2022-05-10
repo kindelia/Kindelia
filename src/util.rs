@@ -6,13 +6,9 @@ use sha3::Digest;
 use std::collections::HashMap;
 use std::net::*;
 
-use crate::constants::*;
-use crate::serializer::*;
-
-use crate::constants::*;
+use crate::bits::*;
 
 pub type U256Map<T> = HashMap<U256, T>;
-
 pub type Hash = U256;
 
 // Numerics

@@ -3,26 +3,22 @@
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 
-mod algorithms;
-mod constants;
+mod util;
 mod hvm;
-mod network;
 mod node;
-mod serializer;
+mod bits;
+
+use primitive_types::U256;
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use primitive_types::U256;
-
-use crate::algorithms::*;
-use crate::constants::*;
-use crate::network::*;
-use crate::node::*;
-use crate::serializer::*;
-
 pub use clap::{Parser, Subcommand};
+
+use crate::bits::*;
+use crate::node::*;
+use crate::util::*;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
