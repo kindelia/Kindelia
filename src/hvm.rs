@@ -1725,31 +1725,31 @@ pub fn normal_go(rt: &mut Runtime, host: u64, seen: &mut [u64]) -> Lnk {
   if get_bit(seen, host) {
     term
   } else {
-    let term = reduce(rt, host);
+    let norm = reduce(rt, host);
     set_bit(seen, host);
     let mut rec_locs = Vec::with_capacity(16);
-    match get_tag(term) {
+    match get_tag(norm) {
       LAM => {
-        rec_locs.push(get_loc(term, 1));
+        rec_locs.push(get_loc(norm, 1));
       }
       APP => {
-        rec_locs.push(get_loc(term, 0));
-        rec_locs.push(get_loc(term, 1));
+        rec_locs.push(get_loc(norm, 0));
+        rec_locs.push(get_loc(norm, 1));
       }
       PAR => {
-        rec_locs.push(get_loc(term, 0));
-        rec_locs.push(get_loc(term, 1));
+        rec_locs.push(get_loc(norm, 0));
+        rec_locs.push(get_loc(norm, 1));
       }
       DP0 => {
-        rec_locs.push(get_loc(term, 2));
+        rec_locs.push(get_loc(norm, 2));
       }
       DP1 => {
-        rec_locs.push(get_loc(term, 2));
+        rec_locs.push(get_loc(norm, 2));
       }
       CTR | FUN => {
-        let arity = rt.get_arity(get_ext(term));
+        let arity = rt.get_arity(get_ext(norm));
         for i in 0..arity {
-          rec_locs.push(get_loc(term, i));
+          rec_locs.push(get_loc(norm, i));
         }
       }
       _ => {}
@@ -1758,7 +1758,7 @@ pub fn normal_go(rt: &mut Runtime, host: u64, seen: &mut [u64]) -> Lnk {
       let lnk: Lnk = normal_go(rt, loc, seen);
       link(rt, loc, lnk);
     }
-    term
+    norm
   }
 }
 
@@ -2501,19 +2501,24 @@ pub fn test_1() {
       $(IOEND x))
     }
 
-    def Foo 1 {
-      !(Foo) = $(IOWHO λwho $(IOEND who))
+    def WhoIs {
+      !(WhoIs) = $(IOWHO λwho $(IOEND who))
     }
 
-    def Bar 1 {
-      !(Bar) = $(IOFN0 @Foo λres $(IOEND res))
+    def Alice {
+      !(Alice $(Call0 acc))     = $(IOFN0 acc     λres $(IOEND res))
+      !(Alice $(Call1 acc arg)) = $(IOFN1 acc arg λres $(IOEND res))
     }
 
     run {
-      $(IOFN0 @Bar λwho
-      $(IOEND who))
+      $(IOFN1 @Alice $(Call0 @WhoIs) λnam
+      $(IOEND nam))
     }
-
   ");
 
 }
+
+/*
+
+
+*/
