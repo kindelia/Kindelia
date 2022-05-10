@@ -14,7 +14,7 @@ pub enum CliCmd {
     ui: bool, 
   },
   /// Runs a Kindelia file
-  Eval { 
+  Run { 
     /// Input file
     file: String,
     // #[clap(short, long)]

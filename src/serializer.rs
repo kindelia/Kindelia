@@ -393,7 +393,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
 
 pub fn serialize_action(action: &Action, bits: &mut BitVec) {
   match action {
-    Action::Fun { name, arit, func } => {
+    Action::Fun { name, arit, func, init } => {
       serialize_fixlen(4, &u256(0), bits);
       serialize_fixlen(30, &u256(*name as u64), bits);
       serialize_fixlen(4, &u256(*arit as u64), bits);
@@ -401,6 +401,7 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
         serialize_term(&rule.0, bits);
         serialize_term(&rule.1, bits);
       }, func, bits);
+      serialize_term(init, bits);
     }
     Action::Ctr { name, arit } => {
       serialize_fixlen(4, &u256(1), bits);
@@ -426,7 +427,8 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u64) -> Action {
         let rule = (lhs, rhs);
         return rule;
       }, bits, index);
-      Action::Fun { name, arit, func }
+      let init = deserialize_term(bits, index);
+      Action::Fun { name, arit, func, init }
     }
     1 => {
       let name = deserialize_fixlen(30, bits, index).low_u64();

@@ -26,9 +26,9 @@ use crate::node::*;
 use crate::serializer::*;
 
 fn main() -> Result<(), String> {
-  //run_cli() // ???????????????
-  hvm::test_1();
-  return Ok(());
+  run_cli() // ???????????????
+  //hvm::test_1();
+  //return Ok(());
 }
 
 fn run_cli() -> Result<(), String> {
@@ -38,7 +38,7 @@ fn run_cli() -> Result<(), String> {
     CliCmd::Start { ui } => {
       start_node(ui);
     }
-    CliCmd::Eval { file } => {
+    CliCmd::Run { file } => {
       let file = std::fs::read_to_string(file);
       match file {
         Err(err) => return Err(format!("{}", err)),

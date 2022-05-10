@@ -84,7 +84,7 @@ pub type Lnk = u64;
 
 // A global action that alters the state of the blockchain
 pub enum Action {
-  Fun { name: u64, arit: u64, func: Vec<(Term, Term)> },
+  Fun { name: u64, arit: u64, func: Vec<(Term, Term)>, init: Term },
   Ctr { name: u64, arit: u64, },
   Run { expr: Term },
 }
@@ -468,6 +468,10 @@ impl Runtime {
     self.define_function(name_to_u64(name), read_func(code).1);
   }
 
+  fn create_term(&mut self, term: &Term, loc: u64) -> Lnk {
+    return create_term(self, term, loc);
+  }
+
   fn alloc_term(&mut self, term: &Term) -> u64 {
     let loc = alloc(self, 1);
     let lnk = create_term(self, term, loc);
@@ -530,16 +534,16 @@ impl Runtime {
       let cont = ask_arg(rt, term, 1 + size);
       if get_tag(fnid) == U60 {
         let func = alloc_fun(rt, get_num(fnid), &args);
-        let retr = rt.run_io(fnid, subject, func)?;
+        let retr = rt.run_io(get_num(fnid), subject, func)?;
         let cont = alloc_app(rt, cont, retr);
-        clear(rt, host, 3);
+        clear(rt, host, size + 2);
         return rt.run_io(subject, caller, cont);
       } else {
         return None;
       }
     }
     let term = reduce(self, host);
-    println!("-- {}", show_term(self, term));
+    //println!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -549,19 +553,21 @@ impl Runtime {
             return Some(retr);
           }
           IOGET => {
+            //println!("- IOGET subject is {} {}", u64_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
-            let stat = self.disk_read(caller).unwrap_or(Num(0));
+            let stat = self.disk_read(subject).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
             clear(self, host, 1);
-            return self.run_io(subject, caller, cont);
+            return self.run_io(subject, subject, cont);
           }
           IOSET => {
+            //println!("- IOSET subject is {} {}", u64_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let save = self.normalize(expr);
-            self.disk_write(caller, save);
-            let done = self.run_io(subject, caller, get_loc(term, 1));
+            self.disk_write(subject, save);
+            let done = self.run_io(subject, subject, get_loc(term, 1));
             clear(self, host, 2);
             return done;
           }
@@ -617,11 +623,13 @@ impl Runtime {
 
   fn run_action(&mut self, action: &Action) {
     match action {
-      Action::Fun { name, arit, func } => {
+      Action::Fun { name, arit, func, init } => {
         println!("- fun {} {}", u64_to_name(*name), arit);
         if let Some(func) = build_func(func) {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
+          let state = self.create_term(init, 0);
+          self.disk_write(*name, state);
         }
       }
       Action::Ctr { name, arit } => {
@@ -629,8 +637,9 @@ impl Runtime {
         self.set_arity(*name, *arit);
       }
       Action::Run { expr } => {
-        println!("- run");
+        println!("- run {}", view_term(expr));
         let done = self.run_io_term(0, 0, &expr).expect("Failed to run IO."); // FIXME: treat failure & rollback
+        println!("-   = {}", self.show_term(done));
         //let done = self.normalize(done);
         //println!("- ret: {}", self.show_term(done));
       }
@@ -1985,8 +1994,20 @@ fn tail(code: &str) -> &str {
 
 fn skip(code: &str) -> &str {
   let mut code = code;
-  while head(code) == ' ' || head(code) == '\n' {
-    code = tail(code);
+  loop {
+    if head(code) == ' ' || head(code) == '\n' {
+      while head(code) == ' ' || head(code) == '\n' {
+        code = tail(code);
+      }
+      continue;
+    }
+    if head(code) == '/' {
+      while head(code) != '\n' && head(code) != '\0' {
+        code = tail(code);
+      }
+      continue;
+    }
+    break;
   }
   return code;
 }
@@ -2236,15 +2257,17 @@ fn read_func(code: &str) -> (&str, Func) {
 fn read_action(code: &str) -> (&str, Action) {
   let code = skip(code);
   match head(code) {
-    'd' => {
+    'f' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 'e');
-      let (code, skip) = read_char(code, 'f');
+      let (code, skip) = read_char(code, 'u');
+      let (code, skip) = read_char(code, 'n');
       let (code, name) = read_name(code);
       let (code, arit) = read_numb(code);
       let (code, skip) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
-      return (code, Action::Fun { name, arit, func });
+      let (code, skip) = read_char(code, '=');
+      let (code, init) = read_term(code);
+      return (code, Action::Fun { name, arit, func, init });
     }
     'c' => {
       let code = tail(code);
@@ -2358,10 +2381,11 @@ pub fn view_oper(oper: &u64) -> String {
 
 pub fn view_action(action: &Action) -> String {
   match action {
-    Action::Fun { name, arit, func } => {
+    Action::Fun { name, arit, func, init } => {
       let name = u64_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
-      return format!("fun {} {} {{\n{}\n}}", name, arit, func);
+      let init = view_term(init);
+      return format!("fun {} {} {{\n{}\n}} = {}", name, arit, func, init);
     }
     Action::Ctr { name, arit } => {
       let name = u64_to_name(*name);
@@ -2389,22 +2413,23 @@ pub fn view_actions(actions: &[Action]) -> String {
 // Serializes, deserializes and evaluates actions
 pub fn test_actions(actions: &[Action]) {
   //println!("[Actions]");
-  let str_0 = view_actions(actions);
+  //let str_0 = view_actions(actions);
   //println!("{}", str_0);
 
-  let s = crate::serializer::serialized_actions(&actions);
-  println!("[Serialization]");
-  println!("{:?}\n", s);
+  //let s = crate::serializer::serialized_actions(&actions);
+  //println!("[Serialization]");
+  //println!("{:?}\n", s);
 
-  let a = crate::serializer::deserialized_actions(&s);
-  let str_1 = view_actions(&a);
-  println!("[Deserialization] {}", if str_0 == str_1 { "" } else { "(error: not equal)" });
-  println!("{}", str_1);
+  //let a = crate::serializer::deserialized_actions(&s);
+  //let str_1 = view_actions(&a);
+  //println!("[Deserialization] {}", if str_0 == str_1 { "" } else { "(error: not equal)" });
+  //println!("{}", str_1);
 
   println!("[Evaluation]");
   let mut rt = init_runtime();
   let init = Instant::now();
   rt.run_actions(&actions);
+  println!("");
 
   println!("[Stats]");
   println!("- cost: {} gas", rt.get_cost());
@@ -2433,7 +2458,7 @@ pub fn test_0() {
   ").1);
 
   // Main term
-  let main = rt.alloc_term_from_code("!(Sum !(Gen #21))");
+  let main = rt.alloc_term_from_code("!(Sum !(Gen #20))");
   println!("term: {:?}", rt.show_term_at(main));
 
   // Normalizes and benchmarks
@@ -2448,77 +2473,21 @@ pub fn test_0() {
 
 pub fn test_1() {
 
-  println!("{:x}", name_to_u64("IOEND"));
-  println!("{:x}", name_to_u64("IOGET"));
-  println!("{:x}", name_to_u64("IOSET"));
-  println!("{:x}", name_to_u64("IOFN0"));
-  println!("{:x}", name_to_u64("IOFN1"));
-  println!("{:x}", name_to_u64("IOFN2"));
-  println!("{:x}", name_to_u64("IOFN3"));
-  println!("{:x}", name_to_u64("IOFN4"));
-  println!("{:x}", name_to_u64("IOFN5"));
-  println!("{:x}", name_to_u64("IOFN6"));
-  println!("{:x}", name_to_u64("IOFN7"));
-  println!("{:x}", name_to_u64("IOFN8"));
-  println!("{:x}", name_to_u64("IONRM"));
-  println!("{:x}", name_to_u64("IOWHO"));
+  //println!("{:x}", name_to_u64("IOEND"));
+  //println!("{:x}", name_to_u64("IOGET"));
+  //println!("{:x}", name_to_u64("IOSET"));
+  //println!("{:x}", name_to_u64("IOFN0"));
+  //println!("{:x}", name_to_u64("IOFN1"));
+  //println!("{:x}", name_to_u64("IOFN2"));
+  //println!("{:x}", name_to_u64("IOFN3"));
+  //println!("{:x}", name_to_u64("IOFN4"));
+  //println!("{:x}", name_to_u64("IOFN5"));
+  //println!("{:x}", name_to_u64("IOFN6"));
+  //println!("{:x}", name_to_u64("IOFN7"));
+  //println!("{:x}", name_to_u64("IOFN8"));
+  //println!("{:x}", name_to_u64("IONRM"));
+  //println!("{:x}", name_to_u64("IOWHO"));
 
-  test_actions_from_code("
-
-    def Count 1 {
-      !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
-      !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) $(IOEND #0)))
-      !(Count $(Get)) = $(IOGET λx $(IOEND x))
-    }
-
-    run {
-      $(IOFN1 @Count $(Inc) λ~
-      $(IOFN1 @Count $(Inc) λ~
-      $(IOFN1 @Count $(Inc) λ~
-      $(IOEND #0))))
-    }
-
-    run {
-      $(IOFN1 @Count $(Get) λx
-      $(IOEND x))
-    }
-
-    ctr Leaf 1
-    ctr Node 2
-
-    def Gen 1 {
-      !(Gen #0) = $(Leaf #1)
-      !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
-    }
-
-    def Sum 1 {
-      !(Sum $(Leaf x))   = x
-      !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
-    }
-
-    run {
-      $(IONRM !(Sum !(Gen #21)) λx
-      $(IOEND x))
-    }
-
-    def WhoIs {
-      !(WhoIs) = $(IOWHO λwho $(IOEND who))
-    }
-
-    def Alice {
-      !(Alice $(Call0 acc))     = $(IOFN0 acc     λres $(IOEND res))
-      !(Alice $(Call1 acc arg)) = $(IOFN1 acc arg λres $(IOEND res))
-    }
-
-    run {
-      $(IOFN1 @Alice $(Call0 @WhoIs) λnam
-      $(IOEND nam))
-    }
-  ");
+  test_actions_from_code(&std::fs::read_to_string("./example.kdl").expect("example.kdl not found"));
 
 }
-
-/*
-
-
-*/

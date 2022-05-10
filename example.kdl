@@ -1,0 +1,152 @@
+// Kindelia Example Block
+// ======================
+// 
+// This is an example Kindelia block. Kindelia blocks are just pages of code
+// that are interpreted by Kindelia's global computer. To run this example,
+// install Kindelia and type:
+// 
+// $ kindelia run example.kdl
+// 
+// Kindelia's HVM
+// ==============
+// 
+// Kindelia blocks use HVM internally, with some changes and additions:
+// 
+// - Letters are 6-bit chars on the set: 
+//   
+//     .ABCDEFGHIJKLMNO
+//     PQRSTUVWXYZabcde
+//     fghijklmnopqrstu
+//     vwxyz0123456789_
+//
+// - Variables can have up to 3 letters (18 bits)
+//
+// - Names can have up to 5 letters (30 bits)
+//
+// - Constructors are written as `$(CtrName arg_0 arg_1 ...)`
+//
+// - Function calls are written as `!(FunName arg_0 arg_1 ...)`
+//
+// - Integers are 60-bit, and are written like `#123`
+// 
+// - You can also write a number with a name, like `@Foo`
+//
+// - Function names must have, at most, 5 letters
+//
+// - Functions can hold an internal state
+//
+// - Files are groups of statements, each altering the blockchain state
+//
+// - Constructors must be declared with 'ctr' statements:
+//
+//     ctr Name arity
+// 
+// - Functions must be declared with 'fun' statements:
+//
+//     fun Name arity {
+//       !(Name arg_0 arg_1) = return
+//       !(Name arg_0 arg_1) = return
+//       ...
+//     } = initial_state
+// 
+// - IO actions can be performed with Run statements:
+//
+//     run {
+//       IO_expression
+//     }
+//
+// - The following IO actions are available:
+//
+//     - IOEND value                         -- completes the IO action
+//     - IOGET                               -- returns the internal state
+//     - IOSET value                         -- sets the internal state
+//     - IOFN0 fname                         -- calls a 0-arg IO function
+//     - IOFN1 fname arg_0                   -- calls a 1-arg IO function
+//     - IOFN2 fname arg_0 arg_1             -- calls a 2-arg IO function
+//     - IOFN3 fname arg_0 arg_1 arg_2       -- calls a 3-arg IO function
+//     - IOFN4 fname arg_0 arg_1 arg_2 arg_3 -- calls a 4-arg IO function
+//     - IONRM value                         -- normalizes a value
+//     - IOWHO                               -- returns the caller name
+// 
+// - This is a prototype. All the above is subject to change!
+
+// Example counter function (contract):
+// ====================================
+
+// Creates a Count function with 3 actions:
+// - Inc: increment its counter, return 0
+// - Dec: decrement its counter, return 0
+// - Get: return its counter
+// And an initial state of zero (#0)
+fun Count 1 {
+  !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
+  !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) $(IOEND #0)))
+  !(Count $(Get)) = $(IOGET λx $(IOEND x))
+} = #0
+
+// Runs a script that increments the Count's state 3 times
+run {
+  $(IOFN1 @Count $(Inc) λ~
+  $(IOFN1 @Count $(Inc) λ~
+  $(IOFN1 @Count $(Inc) λ~
+  $(IOEND #0))))
+}
+
+// Runs a script that prints the Count's state
+run {
+  $(IOFN1 @Count $(Get) λx
+  $(IOEND x))
+}
+
+// Example datatype and algorithm:
+// ===============================
+
+// Declares a constructor, Leaf, with arity (size) 1
+ctr Leaf 1
+
+// Declares a constructor, Node, with arity (size) 2
+ctr Node 2
+
+// Declares a pure function, Gen, that receives a
+// num and returns a tree with 2^num copies of #1
+fun Gen 1 {
+  !(Gen #0) = $(Leaf #1)
+  !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+} = #0
+
+// Declares a pure function that sums a tree
+fun Sum 1 {
+  !(Sum $(Leaf x))   = x
+  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
+} = #0
+
+// Run statement that creates a tree with 2^21
+// numbers, sums them all and prints the result:
+run {
+  $(IONRM !(Sum !(Gen #21)) λx
+  $(IOEND x))
+}
+
+// Example account
+// ===============
+
+// Utility that, when called, returns the caller name
+fun WhoIs {
+  !(WhoIs) = $(IOWHO λwho $(IOEND who))
+} = #0
+
+// Creates the Alice account. It just receives a `$(CallN ...)`
+// action and calls another function directly. When that is done,
+// that function's 'caller' will be set to Alice, so it is like
+// Alice is an user of that other function. Note that this account
+// isn't checking signatures, so anyone can act on Alice's behalf.
+fun Alice {
+  !(Alice $(Call0 acc))     = $(IOFN0 acc     λres $(IOEND res))
+  !(Alice $(Call1 acc arg)) = $(IOFN1 acc arg λres $(IOEND res))
+} = #0
+
+// Prints Alice's name
+run {
+  $(IOFN1 @Alice $(Call0 @WhoIs) λnam
+  $(IOEND nam))
+}
