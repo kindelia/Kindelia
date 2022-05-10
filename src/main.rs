@@ -4,8 +4,6 @@
 #![allow(unused_variables)]
 
 mod algorithms;
-mod cli;
-mod common;
 mod constants;
 mod hvm;
 mod network;
@@ -16,7 +14,6 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use cli::{Cli, CliCmd, Parser};
 use primitive_types::U256;
 
 use crate::algorithms::*;
@@ -25,14 +22,39 @@ use crate::network::*;
 use crate::node::*;
 use crate::serializer::*;
 
+pub use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+pub struct Cli {
+  #[clap(subcommand)]
+  pub command: CliCmd,
+}
+
+#[derive(Subcommand)]
+pub enum CliCmd {
+  Start {
+    #[clap(long)]
+    ui: bool, 
+  },
+  /// Runs a Kindelia file
+  Run { 
+    /// Input file
+    file: String,
+    // #[clap(short, long)]
+    // debug: bool,
+  },
+}
+
 fn main() -> Result<(), String> {
-  run_cli() // ???????????????
+  run_cli()
+  
   //hvm::test_1();
   //return Ok(());
 }
 
 fn run_cli() -> Result<(), String> {
-  let cli_matches = cli::Cli::parse();
+  let cli_matches = Cli::parse();
 
   match cli_matches.command {
     CliCmd::Start { ui } => {
