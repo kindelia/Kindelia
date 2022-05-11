@@ -144,7 +144,6 @@ const HEAP_SIZE: u64 = 256 * U64_PER_MB;
 pub const MAX_ARITY: u64 = 16;
 pub const MAX_FUNCS: u64 = 16777216; // TODO: increase to 2^30 once arity is moved out
 
-pub const SEEN_SIZE: usize = 4194304; // uses 32 MB, covers heaps up to 2 GB
 pub const VARS_SIZE: usize = 262144; // maximum variables per rule
 
 pub const VAL: u64 = 1;
@@ -197,7 +196,7 @@ const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
 const IOCAL : u64 = 0x1364d2d6;
-const IONRM : u64 = 0x13658717;
+//const IONRM : u64 = 0x13658717;
 const IOWHO : u64 = 0x13661499;
 
 const fn GET_ARITY(fid: u64) -> Option<u64> {
@@ -206,7 +205,7 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOGET => Some(1),
     IOSET => Some(2),
     IOCAL => Some(2),
-    IONRM => Some(2),
+    //IONRM => Some(2),
     IOWHO => Some(1),
     _     => None,
   }
@@ -563,7 +562,6 @@ impl Runtime {
   fn run_io_term(&mut self, subject: u64, caller: u64, term: &Term) -> Option<Lnk> {
     let main = self.alloc_term(term);
     let done = self.run_io(subject, caller, main);
-    //let done = self.normalize(done);
     return done;
   }
 
@@ -581,13 +579,13 @@ impl Runtime {
     return self.run_actions(&read_actions(code).1);
   }
 
-  fn normalize_at(&mut self, loc: u64) -> Lnk {
-    normal(self, loc)
+  fn compute_at(&mut self, loc: u64) -> Lnk {
+    compute_at(self, loc)
   }
 
-  fn normalize(&mut self, lnk: Lnk) -> Lnk {
+  fn compute(&mut self, lnk: Lnk) -> Lnk {
     let loc = alloc_lnk(self, lnk);
-    return self.normalize_at(loc);
+    return self.compute_at(loc);
   }
 
   fn show_term(&self, lnk: Lnk) -> String {
@@ -625,7 +623,7 @@ impl Runtime {
             let expr = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
-            let save = self.normalize(expr);
+            let save = self.compute(expr);
             self.write_disk(subject, save);
             let done = self.run_io(subject, subject, get_loc(term, 1));
             clear(self, host, 2);
@@ -644,12 +642,12 @@ impl Runtime {
               return None;
             }
           }
-          IONRM => {
-            let norm = self.normalize_at(get_loc(term, 0));
-            let cont = ask_arg(self, term, 1);
-            let cont = alloc_app(self, cont, norm);
-            return self.run_io(subject, caller, cont);
-          }
+          //IONRM => {
+            //let norm = self.compute_at(get_loc(term, 0));
+            //let cont = ask_arg(self, term, 1);
+            //let cont = alloc_app(self, cont, norm);
+            //return self.run_io(subject, caller, cont);
+          //}
           IOWHO => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(caller));
@@ -689,6 +687,7 @@ impl Runtime {
       Action::Run { expr } => {
         println!("- run {}", view_term(expr));
         if let Some(done) = self.run_io_term(0, 0, &expr) {
+          let done = self.compute(done);
           println!("    = {}", self.show_term(done));
           self.heap.absorb(&mut self.draw, true);
           self.draw.clear();
@@ -894,9 +893,7 @@ impl Runtime {
 // Globals
 // -------
 
-static mut SEEN_DATA: [u64; SEEN_SIZE] = [0; SEEN_SIZE];
 static mut VARS_DATA: [Option<u64>; VARS_SIZE] = [None; VARS_SIZE];
-static mut CALL_COUNT: &'static mut [u64] = &mut [0; MAX_FUNCS as usize];
 
 // Constructors
 // ------------
@@ -1748,61 +1745,43 @@ pub fn get_bit(bits: &[u64], bit: u64) -> bool {
   (((bits[bit as usize >> 6] >> (bit & 0x3f)) as u8) & 1) == 1
 }
 
-pub fn normal_go(rt: &mut Runtime, host: u64, seen: &mut [u64]) -> Lnk {
+// Evaluates redexes recursively. This is used to save space before storing a term, since,
+// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
+// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
+// since it would require passing over the entire state.
+pub fn compute_at(rt: &mut Runtime, host: u64) -> Lnk {
   let term = ask_lnk(rt, host);
-  if get_bit(seen, host) {
-    term
-  } else {
-    let norm = reduce(rt, host);
-    set_bit(seen, host);
-    let mut rec_locs = Vec::with_capacity(16);
+  let norm = reduce(rt, host);
+  if term != norm {
     match get_tag(norm) {
       LAM => {
-        rec_locs.push(get_loc(norm, 1));
+        compute_at(rt, get_loc(norm, 1));
       }
       APP => {
-        rec_locs.push(get_loc(norm, 0));
-        rec_locs.push(get_loc(norm, 1));
+        compute_at(rt, get_loc(norm, 0));
+        compute_at(rt, get_loc(norm, 1));
       }
       PAR => {
-        rec_locs.push(get_loc(norm, 0));
-        rec_locs.push(get_loc(norm, 1));
+        compute_at(rt, get_loc(norm, 0));
+        compute_at(rt, get_loc(norm, 1));
       }
       DP0 => {
-        rec_locs.push(get_loc(norm, 2));
+        compute_at(rt, get_loc(norm, 2));
       }
       DP1 => {
-        rec_locs.push(get_loc(norm, 2));
+        compute_at(rt, get_loc(norm, 2));
       }
       CTR | FUN => {
-        let arity = rt.get_arity(get_ext(norm));
-        for i in 0..arity {
-          rec_locs.push(get_loc(norm, i));
+        for i in 0 .. rt.get_arity(get_ext(norm)) {
+          compute_at(rt, get_loc(norm, i));
         }
       }
       _ => {}
-    }
-    for loc in rec_locs {
-      let lnk: Lnk = normal_go(rt, loc, seen);
-      link(rt, loc, lnk);
-    }
-    norm
+    };
+    return norm;
+  } else {
+    return term;
   }
-}
-
-pub fn normal(rt: &mut Runtime, host: u64) -> Lnk {
-  let mut done;
-  let mut cost = rt.get_cost();
-  loop {
-    let mut seen = vec![0; 4194304];
-    done = normal_go(rt, host, &mut seen);
-    if rt.get_cost() != cost {
-      cost = rt.get_cost();
-    } else {
-      break;
-    }
-  }
-  done
 }
 
 // Debug
@@ -1957,11 +1936,11 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       U60 => {
         let numb = get_num(term);
         // If it has 26-30 bits, pretty-print as a name
-        if numb > 0x3FFFFFF && numb <= 0x3FFFFFFF {
-          return format!("@{}", view_name(numb));
-        } else {
+        //if numb > 0x3FFFFFF && numb <= 0x3FFFFFFF {
+          //return format!("@{}", view_name(numb));
+        //} else {
           return format!("#{}", numb);
-        }
+        //}
       }
       CTR => {
         let func = get_ext(term);
@@ -2361,11 +2340,11 @@ pub fn view_term(term: &Term) -> String {
     }
     Term::U60 { numb } => {
       // If it has 26-30 bits, pretty-print as a name
-      if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
-        return format!("@{}", view_name(*numb));
-      } else {
+      //if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
+        //return format!("@{}", view_name(*numb));
+      //} else {
         return format!("#{}", numb);
-      }
+      //}
     }
     Term::Op2 { oper, val0, val1 } => {
       let oper = view_oper(oper);
@@ -2482,7 +2461,7 @@ pub fn test_0() {
 
   // Normalizes and benchmarks
   let init = Instant::now();
-  rt.normalize_at(main);
+  rt.compute_at(main);
   println!("norm: {:?}", rt.show_term_at(main));
   println!("cost: {}", rt.get_cost());
   println!("size: {}", rt.get_size());

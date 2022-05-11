@@ -7,7 +7,7 @@ their adoption. Formal verification techniques can be used to ensure these DApps
 have no exploits, but Ethereum's underlying processor, the EVM, make these too
 expensive to be viable. By leveraging a functional virtual machine, the HVM,
 Kindelia is able to run formally verified DApps cheaply and efficiently.
-Moreover, extensive low-level optimizations let it sustain a extremelly high
+Moreover, extensive low-level optimizations let it sustain an extremelly high
 layer-1 throughput, compared to alternatives. Finally, Kindelia has no built-in
 token, and, thus, isn't a cryptocurrency; instead, it is merely a peer-to-peer
 computer capable of hosting secure functional programs.
