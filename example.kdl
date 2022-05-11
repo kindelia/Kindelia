@@ -60,18 +60,14 @@
 //     - IOEND value                         -- completes the IO action
 //     - IOGET                               -- returns the internal state
 //     - IOSET value                         -- sets the internal state
-//     - IOFN0 fname                         -- calls a 0-arg IO function
-//     - IOFN1 fname arg_0                   -- calls a 1-arg IO function
-//     - IOFN2 fname arg_0 arg_1             -- calls a 2-arg IO function
-//     - IOFN3 fname arg_0 arg_1 arg_2       -- calls a 3-arg IO function
-//     - IOFN4 fname arg_0 arg_1 arg_2 arg_3 -- calls a 4-arg IO function
+//     - IOCAL ioexp                         -- calls an IO function
 //     - IONRM value                         -- normalizes a value
 //     - IOWHO                               -- returns the caller name
 // 
 // - This is a prototype. All the above is subject to change!
 
-// Example counter function (contract):
-// ====================================
+// Example counter function (contract)
+// ===================================
 
 // Creates a Count function with 3 actions:
 // - Inc: increment its counter, return 0
@@ -86,20 +82,20 @@ fun Count 1 {
 
 // Runs a script that increments the Count's state 3 times
 run {
-  $(IOFN1 @Count $(Inc) λ~
-  $(IOFN1 @Count $(Inc) λ~
-  $(IOFN1 @Count $(Inc) λ~
+  $(IOCAL !(Count $(Inc)) λ~
+  $(IOCAL !(Count $(Inc)) λ~
+  $(IOCAL !(Count $(Inc)) λ~
   $(IOEND #0))))
 }
 
 // Runs a script that prints the Count's state
 run {
-  $(IOFN1 @Count $(Get) λx
+  $(IOCAL !(Count $(Get)) λx
   $(IOEND x))
 }
 
-// Example datatype and algorithm:
-// ===============================
+// Example datatype and algorithm
+// ==============================
 
 // Declares a constructor, Leaf, with arity (size) 1
 ctr Leaf 1
@@ -123,7 +119,7 @@ fun Sum 1 {
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
 run {
-  $(IONRM !(Sum !(Gen #21)) λx
+  $(IONRM !(Sum !(Gen #20)) λx
   $(IOEND x))
 }
 
@@ -137,16 +133,31 @@ fun WhoIs 0 {
 
 // Creates the Alice account. It just receives a `$(CallN ...)`
 // action and calls another function directly. When that is done,
-// that function's 'caller' will be set to Alice, so it is like
+// that function's 'caller' will be set to Alice, so it works as if
 // Alice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on Alice's behalf.
 fun Alice 1 {
-  !(Alice $(Call0 acc))     = $(IOFN0 acc     λres $(IOEND res))
-  !(Alice $(Call1 acc arg)) = $(IOFN1 acc arg λres $(IOEND res))
+  !(Alice $(Call expr)) = $(IOCAL expr λres $(IOEND res))
 } = #0
 
 // Prints Alice's name
 run {
-  $(IOFN1 @Alice $(Call0 @WhoIs) λnam
+  $(IOCAL !(Alice $(Call !(WhoIs))) λnam
   $(IOEND nam))
+}
+
+// Example failure
+// ===============
+
+// When a transaction fails, it is fully reversed
+run {
+  $(IOCAL !(Count $(Inc)) λ~
+  $(Foo))
+}
+
+// Here, the count wasn't incremented, even though
+// the last transaction called `!(Count $(Inc))`
+run {
+  $(IOCAL !(Count $(Get)) λx
+  $(IOEND x))
 }

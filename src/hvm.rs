@@ -26,7 +26,7 @@ pub enum Term {
   Op2 { oper: u64, val0: Box<Term>, val1: Box<Term> },
 }
 
-// A native HVM machine integer operation
+// A native HVM 60-bit machine integer operation
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Oper {
   Add, Sub, Mul, Div,
@@ -100,12 +100,12 @@ pub struct Blob {
 #[derive(Debug)]
 pub struct Heap {
   pub data: Blob, // memory block holding HVM nodes
-  pub disk: Disk, // points to stored contract states
-  pub file: File, // functions
+  pub disk: Disk, // points to stored function states
+  pub file: File, // function codes
   pub arit: Arit, // function arities
   pub tick: u64,  // time counter
   pub funs: u64,  // total function count
-  pub dups: u64,  // total function count
+  pub dups: u64,  // total dups count
   pub cost: u64,  // total graph rewrites
   pub mana: u64,  // total mana cost
   pub size: i64,  // total used memory (in 64-bit words)
@@ -125,6 +125,7 @@ pub enum Rollback {
 
 // The current and past states
 pub struct Runtime {
+  draw: Box<Heap>,      // drawing state
   heap: Box<Heap>,      // current state
   back: Box<Rollback>,  // past states
   nuls: Vec<Box<Heap>>, // empty heaps (for reuse)
@@ -138,7 +139,7 @@ const U64_PER_MB: u64 = 0x20000;
 const U64_PER_GB: u64 = 0x8000000;
 
 const HEAP_SIZE: u64 = 256 * U64_PER_MB;
-//const HEAP_SIZE: u64 = 256;
+//const HEAP_SIZE: u64 = 65536;
 
 pub const MAX_ARITY: u64 = 16;
 pub const MAX_FUNCS: u64 = 16777216; // TODO: increase to 2^30 once arity is moved out
@@ -189,29 +190,13 @@ pub const I64_NONE: i64 = -0x7FFFFFFFFFFFFFFF;
 //   (IOEND retr:r)                                       : (IO r)
 //   (IOGET                             cont:(∀? (IO r))) : (IO r)
 //   (IOSET expr:?                      cont:(∀? (IO r))) : (IO r)
-//   (IOFN0 addr:Addr                   cont:(∀? (IO r))) : (IO r)
-//   (IOFN1 addr:Addr arg0:?            cont:(∀? (IO r))) : (IO r)
-//   (IOFN2 addr:Addr arg0:? arg1:?     cont:(∀? (IO r))) : (IO r)
-//   (IOFN3 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
-//   (IOFN4 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
-//   (IOFN5 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
-//   (IOFN6 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
-//   (IOFN7 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
-//   (IOFN8 addr:Addr arg0:? arg1:? ... cont:(∀? (IO r))) : (IO r)
+//   (IOCAL expr:?                      cont:(∀? (IO r))) : (IO r)
 //   (IONRM           expr:?            cont:(∀? (IO r))) : (IO r)
 //   (IOWHO                             cont:(∀? (IO r))) : (IO r)
 const IOEND : u64 = 0x1364f60e;
 const IOGET : u64 = 0x136513de;
 const IOSET : u64 = 0x1365d3de;
-const IOFN0 : u64 = 0x13650601;
-const IOFN1 : u64 = 0x13650602;
-const IOFN2 : u64 = 0x13650603;
-const IOFN3 : u64 = 0x13650604;
-const IOFN4 : u64 = 0x13650605;
-const IOFN5 : u64 = 0x13650606;
-const IOFN6 : u64 = 0x13650607;
-const IOFN7 : u64 = 0x13650608;
-const IOFN8 : u64 = 0x13650609;
+const IOCAL : u64 = 0x1364d2d6;
 const IONRM : u64 = 0x13658717;
 const IOWHO : u64 = 0x13661499;
 
@@ -220,15 +205,7 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
     IOEND => Some(1),
     IOGET => Some(1),
     IOSET => Some(2),
-    IOFN0 => Some(2),
-    IOFN1 => Some(3),
-    IOFN2 => Some(4),
-    IOFN3 => Some(5),
-    IOFN4 => Some(6),
-    IOFN5 => Some(7),
-    IOFN6 => Some(8),
-    IOFN7 => Some(9),
-    IOFN8 => Some(10),
+    IOCAL => Some(2),
     IONRM => Some(2),
     IOWHO => Some(1),
     _     => None,
@@ -237,6 +214,18 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
 
 // Rollback
 // --------
+
+fn absorb_u64(a: u64, b: u64) -> u64 {
+  let a = if a == U64_NONE { 0 } else { a };
+  let b = if b == U64_NONE { 0 } else { b };
+  return a + b;
+}
+
+fn absorb_i64(a: i64, b: i64) -> i64 {
+  let a = if a == I64_NONE { 0 } else { a };
+  let b = if b == I64_NONE { 0 } else { b };
+  return a + b;
+}
 
 impl Heap {
   fn write(&mut self, idx: usize, val: u64) {
@@ -305,18 +294,18 @@ impl Heap {
   fn get_next(&self) -> u64 {
     return self.next;
   }
-  fn merge(&mut self, other: &mut Self) {
-    self.data.merge(&mut other.data);
-    self.disk.merge(&mut other.disk);
-    self.file.merge(&mut other.file);
-    self.arit.merge(&mut other.arit);
-    self.tick = self.tick + other.tick;
-    self.funs = self.funs + other.funs;
-    self.dups = self.dups + other.dups;
-    self.cost = self.cost + other.cost;
-    self.mana = self.mana + other.mana;
-    self.size = self.size + other.size;
-    // self.next = self.next;
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    self.data.absorb(&mut other.data, overwrite);
+    self.disk.absorb(&mut other.disk, overwrite);
+    self.file.absorb(&mut other.file, overwrite);
+    self.arit.absorb(&mut other.arit, overwrite);
+    self.tick = absorb_u64(self.tick, other.tick);
+    self.funs = absorb_u64(self.funs, other.funs);
+    self.dups = absorb_u64(self.dups, other.dups);
+    self.cost = absorb_u64(self.cost, other.cost);
+    self.mana = absorb_u64(self.mana, other.mana);
+    self.size = absorb_i64(self.size, other.size);
+    self.next = absorb_u64(self.next, other.next);
   }
   fn clear(&mut self) {
     self.data.clear();
@@ -380,19 +369,40 @@ impl Blob {
     }
     self.used.clear();
   }
-  fn merge(&mut self, other: &mut Self) {
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    //println!("absorb");
+    //println!("{}", show_buff(&other.data));
+    //println!("{}", show_buff(&self.data));
+    //println!("");
     for idx in &other.used {
       unsafe {
         let other_val = other.data.get_unchecked_mut(*idx);
         let self_val = self.data.get_unchecked_mut(*idx);
-        if *self_val == U64_NONE {
+        if overwrite || *self_val == U64_NONE {
           self.write(*idx, *other_val);
         }
       }
     }
     other.clear();
+    //println!("result");
+    //println!("{}", show_buff(&other.data));
+    //println!("{}", show_buff(&self.data));
+    //println!("");
   }
 }
+
+fn show_buff(vec: &[u64]) -> String {
+  let mut result = String::new();
+  for x in vec {
+    if *x == U64_NONE {
+      result.push_str(&format!("_ "));
+    } else {
+      result.push_str(&format!("{:x} ", *x));
+    }
+  }
+  return result;
+}
+
 
 impl Disk {
   fn write(&mut self, fid: u64, val: Lnk) {
@@ -404,13 +414,12 @@ impl Disk {
   fn clear(&mut self) {
     self.links.clear();
   }
-  fn merge(&mut self, other: &mut Self) {
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.links.drain() {
-      if !self.links.contains_key(&fid) {
+      if overwrite || !self.links.contains_key(&fid) {
         self.write(fid, func);
       }
     }
-    other.clear();
   }
 }
 
@@ -426,13 +435,12 @@ impl File {
   fn clear(&mut self) {
     self.funcs.clear();
   }
-  fn merge(&mut self, other: &mut Self) {
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.funcs.drain() {
-      if !self.funcs.contains_key(&fid) {
+      if overwrite || !self.funcs.contains_key(&fid) {
         self.write(fid, func.clone());
       }
     }
-    other.clear();
   }
 }
 
@@ -448,9 +456,9 @@ impl Arit {
   fn clear(&mut self) {
     self.arits.clear();
   }
-  fn merge(&mut self, other: &mut Self) {
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, arit) in other.arits.drain() {
-      if !self.arits.contains_key(&fid) {
+      if overwrite || !self.arits.contains_key(&fid) {
         self.arits.insert(fid, arit);
       }
     }
@@ -480,13 +488,15 @@ pub fn rollback_push(mut elem: Box<Heap>, back: Box<Rollback>) -> (bool, Option<
     }
     Rollback::Cons { keep, head, tail } => {
       if keep == 0xF {
-        let (included, mut lost, tail) = rollback_push(head, tail);
+        let (included, mut deleted, tail) = rollback_push(head, tail);
         if !included {
-          if let Some(lost_val) = &mut lost {
-            elem.merge(lost_val);
+          // moves data from deleted heap to kept heap
+          if let Some(deleted) = &mut deleted {
+            elem.absorb(deleted, false);
+            deleted.clear();
           }
         }
-        return (true, lost, Rollback::Cons {
+        return (true, deleted, Rollback::Cons {
           keep: 0,
           head: elem,
           tail: Box::new(tail),
@@ -508,6 +518,7 @@ pub fn init_runtime() -> Runtime {
     nuls.push(Box::new(init_heap()));
   }
   return Runtime {
+    draw: Box::new(init_heap()),
     heap: Box::new(init_heap()),
     back: Box::new(init_rollback()),
     nuls: nuls,
@@ -520,14 +531,14 @@ impl Runtime {
   // ---
 
   fn define_function(&mut self, fid: u64, func: Func) {
-    self.heap.write_arit(fid, func.arity);
-    self.heap.write_file(fid, Rc::new(func));
+    self.draw.write_arit(fid, func.arity);
+    self.draw.write_file(fid, Rc::new(func));
     //self.heap.arit.write(fid, func.arity);
     //self.heap.file.write(fid, Rc::new(func));
   }
 
   fn define_constructor(&mut self, cid: u64, arity: u64) {
-    self.heap.write_arit(cid, arity);
+    self.draw.write_arit(cid, arity);
   }
 
   fn define_function_from_code(&mut self, name: &str, code: &str) {
@@ -591,23 +602,6 @@ impl Runtime {
   // --
 
   pub fn run_io(&mut self, subject: u64, caller: u64, host: u64) -> Option<Lnk> {
-    fn iofnx(rt: &mut Runtime, subject: u64, caller: u64, host: u64, term: Lnk, size: u64) -> Option<Lnk> {
-      let fnid = ask_arg(rt, term, 0);
-      let mut args = Vec::new();
-      for i in 0 .. size {
-        args.push(ask_arg(rt, term, 1 + i));
-      }
-      let cont = ask_arg(rt, term, 1 + size);
-      if get_tag(fnid) == U60 {
-        let func = alloc_fun(rt, get_num(fnid), &args);
-        let retr = rt.run_io(get_num(fnid), subject, func)?;
-        let cont = alloc_app(rt, cont, retr);
-        clear(rt, host, size + 2);
-        return rt.run_io(subject, caller, cont);
-      } else {
-        return None;
-      }
-    }
     let term = reduce(self, host);
     //println!("-- {}", show_term(self, term));
     match get_tag(term) {
@@ -637,32 +631,18 @@ impl Runtime {
             clear(self, host, 2);
             return done;
           }
-          IOFN0 => {
-            iofnx(self, subject, caller, host, term, 0)
-          }
-          IOFN1 => {
-            iofnx(self, subject, caller, host, term, 1)
-          }
-          IOFN2 => {
-            iofnx(self, subject, caller, host, term, 2)
-          }
-          IOFN3 => {
-            iofnx(self, subject, caller, host, term, 3)
-          }
-          IOFN4 => {
-            iofnx(self, subject, caller, host, term, 4)
-          }
-          IOFN5 => {
-            iofnx(self, subject, caller, host, term, 5)
-          }
-          IOFN6 => {
-            iofnx(self, subject, caller, host, term, 6)
-          }
-          IOFN7 => {
-            iofnx(self, subject, caller, host, term, 7)
-          }
-          IOFN8 => {
-            iofnx(self, subject, caller, host, term, 8)
+          IOCAL => {
+            let expr = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            if get_tag(expr) == FUN {
+              let fnid = get_ext(expr);
+              let retr = self.run_io(fnid, subject, get_loc(term, 0))?;
+              let cont = alloc_app(self, cont, retr);
+              clear(self, host, 2);
+              return self.run_io(subject, caller, cont);
+            } else {
+              return None;
+            }
           }
           IONRM => {
             let norm = self.normalize_at(get_loc(term, 0));
@@ -696,18 +676,26 @@ impl Runtime {
           self.define_function(*name, func);
           let state = self.create_term(init, 0);
           self.write_disk(*name, state);
+          self.heap.absorb(&mut self.draw, true);
+          self.draw.clear();
         }
       }
       Action::Ctr { name, arit } => {
         println!("- ctr {} {}", u64_to_name(*name), arit);
         self.set_arity(*name, *arit);
+        self.heap.absorb(&mut self.draw, true);
+        self.draw.clear();
       }
       Action::Run { expr } => {
         println!("- run {}", view_term(expr));
-        let done = self.run_io_term(0, 0, &expr).expect("Failed to run IO."); // FIXME: treat failure & rollback
-        println!("-   = {}", self.show_term(done));
-        //let done = self.normalize(done);
-        //println!("- ret: {}", self.show_term(done));
+        if let Some(done) = self.run_io_term(0, 0, &expr) {
+          println!("    = {}", self.show_term(done));
+          self.heap.absorb(&mut self.draw, true);
+          self.draw.clear();
+        } else {
+          println!("    = fail");
+          self.draw.clear();
+        }
       }
     }
   }
@@ -718,7 +706,9 @@ impl Runtime {
 
   // Advances the heap time counter, saving past states for rollback.
   fn tick(mut self) {
-    self.heap.set_tick(self.heap.get_tick() + 1);
+    self.draw.set_tick(self.draw.get_tick() + 1);
+    self.heap.absorb(&mut self.draw, true);
+    self.draw.clear();
     let (_, drop, back) = rollback_push(self.heap, self.back);
     self.back = Box::new(back);
     self.heap = match drop {
@@ -726,12 +716,7 @@ impl Runtime {
       None => {
         match self.nuls.pop() {
           Some(heap) => { heap }
-          None => {
-            // Shouldn't happen because we pre-alloc 9 heaps,
-            // which is enough to store past states for up to
-            // 68719476736 blocks, which is more than 6000 years
-            panic!("Impossible error.");
-          }
+          None => { panic!("Not enough heaps."); }
         }
       }
     };
@@ -785,6 +770,10 @@ impl Runtime {
   // Attempts to read data from the latest heap.
   // If not present, looks for it on past states.
   fn get_with<A: std::cmp::PartialEq>(&self, zero: A, none: A, get: impl Fn(&Heap) -> A) -> A {
+    let got = get(&self.draw);
+    if none != got {
+      return got;
+    }
     let got = get(&self.heap);
     if none != got {
       return got;
@@ -807,7 +796,7 @@ impl Runtime {
   }
 
   fn write(&mut self, idx: usize, val: u64) {
-    return self.heap.write(idx, val);
+    return self.draw.write(idx, val);
   }
 
   fn read(&self, idx: usize) -> u64 {
@@ -815,7 +804,7 @@ impl Runtime {
   }
 
   fn write_disk(&mut self, fid: u64, val: Lnk) {
-    return self.heap.write_disk(fid, val);
+    return self.draw.write_disk(fid, val);
   }
 
   fn read_disk(&mut self, fid: u64) -> Option<Lnk> {
@@ -833,10 +822,14 @@ impl Runtime {
   }
 
   fn set_arity(&mut self, fid: u64, arity: u64) {
-    self.heap.write_arit(fid, arity);
+    self.draw.write_arit(fid, arity);
   }
 
   fn get_func(&self, fid: u64) -> Option<Rc<Func>> {
+    let got = self.draw.read_file(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
     let got = self.heap.read_file(fid);
     if let Some(func) = got {
       return Some(func);
@@ -858,32 +851,12 @@ impl Runtime {
     }
   }
 
-  //fn set_tick(&mut self, tick: u64) {
-    //self.heap.tick = tick;
-  //}
-
-  //fn get_tick(&self) -> u64 {
-    //return self.get_with(0, U64_NONE, |heap| heap.tick);
-  //}
-
-  //fn set_funs(&mut self, funs: u64) {
-    //self.heap.funs = funs;
-  //}
-
-  //fn get_funs(&self) -> u64 {
-    //return self.get_with(0, U64_NONE, |heap| heap.funs);
-  //}
-
-  //fn set_dups(&mut self, dups: u64) {
-    //self.heap.dups = dups;
-  //}
-
   fn get_dups(&self) -> u64 {
     return self.get_with(0, U64_NONE, |heap| heap.get_dups());
   }
 
   fn set_cost(&mut self, cost: u64) {
-    self.heap.set_cost(cost);
+    self.draw.set_cost(cost);
   }
 
   fn get_cost(&self) -> u64 {
@@ -891,11 +864,11 @@ impl Runtime {
   }
 
   fn set_mana(&mut self, mana: u64) {
-    self.heap.set_mana(mana);
+    self.draw.set_mana(mana);
   }
 
   fn set_size(&mut self, size: i64) {
-    self.heap.size = size;
+    self.draw.size = size;
   }
 
   fn get_size(&self) -> i64 {
@@ -903,7 +876,7 @@ impl Runtime {
   }
 
   fn set_next(&mut self, next: u64) {
-    self.heap.next = next;
+    self.draw.next = next;
   }
 
   fn get_next(&self) -> u64 {
@@ -911,8 +884,8 @@ impl Runtime {
   }
 
   fn fresh_dups(&mut self) -> u64 {
-    let dups = self.heap.get_dups();
-    self.heap.set_dups(self.heap.get_dups() + 1);
+    let dups = self.draw.get_dups();
+    self.draw.set_dups(self.draw.get_dups() + 1);
     return dups & 0x3FFFFFFF;
   }
 
@@ -2518,21 +2491,7 @@ pub fn test_0() {
 }
 
 pub fn test_1() {
-
-  //println!("{:x}", name_to_u64("IOEND"));
-  //println!("{:x}", name_to_u64("IOGET"));
-  //println!("{:x}", name_to_u64("IOSET"));
-  //println!("{:x}", name_to_u64("IOFN0"));
-  //println!("{:x}", name_to_u64("IOFN1"));
-  //println!("{:x}", name_to_u64("IOFN2"));
-  //println!("{:x}", name_to_u64("IOFN3"));
-  //println!("{:x}", name_to_u64("IOFN4"));
-  //println!("{:x}", name_to_u64("IOFN5"));
-  //println!("{:x}", name_to_u64("IOFN6"));
-  //println!("{:x}", name_to_u64("IOFN7"));
-  //println!("{:x}", name_to_u64("IOFN8"));
-  //println!("{:x}", name_to_u64("IONRM"));
-  //println!("{:x}", name_to_u64("IOWHO"));
+  //println!("{:x}", name_to_u64("IOCAL"));
 
   test_actions_from_code(&std::fs::read_to_string("./example.kdl").expect("example.kdl not found"));
 
