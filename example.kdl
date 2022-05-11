@@ -131,7 +131,7 @@ run {
 // ===============
 
 // Utility that, when called, returns the caller name
-fun WhoIs {
+fun WhoIs 0 {
   !(WhoIs) = $(IOWHO λwho $(IOEND who))
 } = #0
 
@@ -140,7 +140,7 @@ fun WhoIs {
 // that function's 'caller' will be set to Alice, so it is like
 // Alice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on Alice's behalf.
-fun Alice {
+fun Alice 1 {
   !(Alice $(Call0 acc))     = $(IOFN0 acc     λres $(IOEND res))
   !(Alice $(Call1 acc arg)) = $(IOFN1 acc arg λres $(IOEND res))
 } = #0

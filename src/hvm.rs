@@ -245,6 +245,66 @@ impl Heap {
   fn read(&self, idx: usize) -> u64 {
     return self.data.read(idx);
   }
+  fn write_disk(&mut self, fid: u64, val: Lnk) {
+    return self.disk.write(fid, val);
+  }
+  fn read_disk(&self, fid: u64) -> Option<Lnk> {
+    return self.disk.read(fid);
+  }
+  fn write_file(&mut self, fid: u64, fun: Rc<Func>) {
+    return self.file.write(fid, fun);
+  }
+  fn read_file(&self, fid: u64) -> Option<Rc<Func>> {
+    return self.file.read(fid);
+  }
+  fn write_arit(&mut self, fid: u64, val: u64) {
+    return self.arit.write(fid, val);
+  }
+  fn read_arit(&self, fid: u64) -> Option<u64> {
+    return self.arit.read(fid);
+  }
+  fn set_tick(&mut self, tick: u64) {
+    self.tick = tick;
+  }
+  fn get_tick(&self) -> u64 {
+    return self.tick;
+  }
+  fn set_funs(&mut self, funs: u64) {
+    self.funs = funs;
+  }
+  fn get_funs(&self) -> u64 {
+    return self.funs;
+  }
+  fn set_dups(&mut self, dups: u64) {
+    self.dups = dups;
+  }
+  fn get_dups(&self) -> u64 {
+    return self.dups;
+  }
+  fn set_cost(&mut self, cost: u64) {
+    self.cost = cost;
+  }
+  fn get_cost(&self) -> u64 {
+    return self.cost;
+  }
+  fn set_mana(&mut self, mana: u64) {
+    self.mana = mana;
+  }
+  fn get_mana(&self) -> u64 {
+    return self.mana;
+  }
+  fn set_size(&mut self, size: i64) {
+    self.size = size;
+  }
+  fn get_size(&self) -> i64 {
+    return self.size;
+  }
+  fn set_next(&mut self, next: u64) {
+    self.next = next;
+  }
+  fn get_next(&self) -> u64 {
+    return self.next;
+  }
   fn merge(&mut self, other: &mut Self) {
     self.data.merge(&mut other.data);
     self.disk.merge(&mut other.disk);
@@ -356,7 +416,9 @@ impl Disk {
 
 impl File {
   fn write(&mut self, fid: u64, val: Rc<Func>) {
-    self.funcs.insert(fid, val);
+    if !self.funcs.contains_key(&fid) {
+      self.funcs.insert(fid, val);
+    }
   }
   fn read(&self, fid: u64) -> Option<Rc<Func>> {
     return self.funcs.get(&fid).map(|x| x.clone());
@@ -376,7 +438,9 @@ impl File {
 
 impl Arit {
   fn write(&mut self, fid: u64, val: u64) {
-    self.arits.insert(fid, val);
+    if !self.arits.contains_key(&fid) {
+      self.arits.insert(fid, val);
+    }
   }
   fn read(&self, fid: u64) -> Option<u64> {
     return self.arits.get(&fid).map(|x| *x);
@@ -456,12 +520,14 @@ impl Runtime {
   // ---
 
   fn define_function(&mut self, fid: u64, func: Func) {
-    self.heap.arit.write(fid, func.arity);
-    self.heap.file.write(fid, Rc::new(func));
+    self.heap.write_arit(fid, func.arity);
+    self.heap.write_file(fid, Rc::new(func));
+    //self.heap.arit.write(fid, func.arity);
+    //self.heap.file.write(fid, Rc::new(func));
   }
 
   fn define_constructor(&mut self, cid: u64, arity: u64) {
-    self.heap.arit.write(cid, arity);
+    self.heap.write_arit(cid, arity);
   }
 
   fn define_function_from_code(&mut self, name: &str, code: &str) {
@@ -555,7 +621,7 @@ impl Runtime {
           IOGET => {
             //println!("- IOGET subject is {} {}", u64_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
-            let stat = self.disk_read(subject).unwrap_or(Num(0));
+            let stat = self.read_disk(subject).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
             clear(self, host, 1);
             return self.run_io(subject, subject, cont);
@@ -566,7 +632,7 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let save = self.normalize(expr);
-            self.disk_write(subject, save);
+            self.write_disk(subject, save);
             let done = self.run_io(subject, subject, get_loc(term, 1));
             clear(self, host, 2);
             return done;
@@ -629,7 +695,7 @@ impl Runtime {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
           let state = self.create_term(init, 0);
-          self.disk_write(*name, state);
+          self.write_disk(*name, state);
         }
       }
       Action::Ctr { name, arit } => {
@@ -652,7 +718,7 @@ impl Runtime {
 
   // Advances the heap time counter, saving past states for rollback.
   fn tick(mut self) {
-    self.heap.tick += 1;
+    self.heap.set_tick(self.heap.get_tick() + 1);
     let (_, drop, back) = rollback_push(self.heap, self.back);
     self.back = Box::new(back);
     self.heap = match drop {
@@ -748,18 +814,18 @@ impl Runtime {
     return self.get_with(0, U64_NONE, |heap| heap.read(idx));
   }
 
-  fn disk_write(&mut self, fid: u64, val: Lnk) {
-    return self.heap.disk.write(fid, val);
+  fn write_disk(&mut self, fid: u64, val: Lnk) {
+    return self.heap.write_disk(fid, val);
   }
 
-  fn disk_read(&mut self, fid: u64) -> Option<Lnk> {
-    return self.get_with(None, None, |heap| heap.disk.read(fid));
+  fn read_disk(&mut self, fid: u64) -> Option<Lnk> {
+    return self.get_with(None, None, |heap| heap.read_disk(fid));
   }
 
   fn get_arity(&self, fid: u64) -> u64 {
     if let Some(arity) = GET_ARITY(fid) {
       return arity;
-    } else if let Some(arity) = self.get_with(None, None, |heap| heap.arit.read(fid)) {
+    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return arity;
     } else {
       return 0;
@@ -767,11 +833,11 @@ impl Runtime {
   }
 
   fn set_arity(&mut self, fid: u64, arity: u64) {
-    self.heap.arit.write(fid, arity);
+    self.heap.write_arit(fid, arity);
   }
 
   fn get_func(&self, fid: u64) -> Option<Rc<Func>> {
-    let got = self.heap.file.read(fid);
+    let got = self.heap.read_file(fid);
     if let Some(func) = got {
       return Some(func);
     }
@@ -792,36 +858,32 @@ impl Runtime {
     }
   }
 
-  fn set_tick(&mut self, tick: u64) {
-    self.heap.tick = tick;
-  }
+  //fn set_tick(&mut self, tick: u64) {
+    //self.heap.tick = tick;
+  //}
 
-  fn get_tick(&self) -> u64 {
-    return self.get_with(0, U64_NONE, |heap| heap.tick);
-  }
+  //fn get_tick(&self) -> u64 {
+    //return self.get_with(0, U64_NONE, |heap| heap.tick);
+  //}
 
-  fn set_funs(&mut self, funs: u64) {
-    self.heap.funs = funs;
-  }
+  //fn set_funs(&mut self, funs: u64) {
+    //self.heap.funs = funs;
+  //}
 
-  fn get_funs(&self) -> u64 {
-    return self.get_with(0, U64_NONE, |heap| heap.funs);
-  }
+  //fn get_funs(&self) -> u64 {
+    //return self.get_with(0, U64_NONE, |heap| heap.funs);
+  //}
 
-  fn set_dups(&mut self, dups: u64) {
-    self.heap.dups = dups;
-  }
+  //fn set_dups(&mut self, dups: u64) {
+    //self.heap.dups = dups;
+  //}
 
   fn get_dups(&self) -> u64 {
-    return self.get_with(0, U64_NONE, |heap| heap.dups);
+    return self.get_with(0, U64_NONE, |heap| heap.get_dups());
   }
 
   fn set_cost(&mut self, cost: u64) {
-    self.heap.cost = cost;
-  }
-
-  fn add_cost(&mut self, add: u64) {
-    self.heap.cost += add;
+    self.heap.set_cost(cost);
   }
 
   fn get_cost(&self) -> u64 {
@@ -829,15 +891,7 @@ impl Runtime {
   }
 
   fn set_mana(&mut self, mana: u64) {
-    self.heap.mana = mana;
-  }
-
-  fn add_mana(&mut self, add: u64) {
-    self.heap.mana += add;
-  }
-
-  fn get_mana(&self) -> u64 {
-    return self.get_with(0, U64_NONE, |heap| heap.mana);
+    self.heap.set_mana(mana);
   }
 
   fn set_size(&mut self, size: i64) {
@@ -857,8 +911,8 @@ impl Runtime {
   }
 
   fn fresh_dups(&mut self) -> u64 {
-    let dups = self.get_dups();
-    self.set_dups(dups + 1);
+    let dups = self.heap.get_dups();
+    self.heap.set_dups(self.heap.get_dups() + 1);
     return dups & 0x3FFFFFFF;
   }
 
@@ -1071,14 +1125,6 @@ pub fn collect(rt: &mut Runtime, term: Lnk) {
       break;
     }
   }
-}
-
-pub fn inc_cost(rt: &mut Runtime) {
-  rt.set_cost(rt.get_cost() + 1);
-}
-
-pub fn add_mana(rt: &mut Runtime, amount: u64) {
-  rt.set_mana(rt.get_mana() + amount);
 }
 
 // Term
@@ -1391,7 +1437,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           let arg0 = ask_arg(rt, term, 0);
           if get_tag(arg0) == LAM {
             //println!("app-lam");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1));
             let _done = link(rt, host, ask_arg(rt, arg0, 1));
             clear(rt, get_loc(term, 0), 2);
@@ -1401,7 +1447,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           }
           if get_tag(arg0) == PAR {
             //println!("app-sup");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let app0 = get_loc(term, 0);
             let app1 = get_loc(arg0, 0);
             let let0 = alloc(rt, 3);
@@ -1428,7 +1474,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           // }
           if get_tag(arg0) == LAM {
             //println!("dup-lam");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let let0 = get_loc(term, 0);
             let par0 = get_loc(arg0, 0);
             let lam0 = alloc(rt, 2);
@@ -1451,7 +1497,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           } else if get_tag(arg0) == PAR {
             //println!("dup-sup");
             if get_ext(term) == get_ext(arg0) {
-              inc_cost(rt);
+              rt.set_cost(rt.get_cost() + 1);
               subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0));
               subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1));
               let _done = link(rt, host, ask_arg(rt, arg0, if get_tag(term) == DP0 { 0 } else { 1 }));
@@ -1460,7 +1506,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
               init = 1;
               continue;
             } else {
-              inc_cost(rt);
+              rt.set_cost(rt.get_cost() + 1);
               let par0 = alloc(rt, 2);
               let let0 = get_loc(term, 0);
               let par1 = get_loc(arg0, 0);
@@ -1480,7 +1526,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
             }
           } else if get_tag(arg0) == U60 {
             //println!("dup-u32");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             subst(rt, ask_arg(rt, term, 0), arg0);
             subst(rt, ask_arg(rt, term, 1), arg0);
             clear(rt, get_loc(term, 0), 3);
@@ -1488,7 +1534,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
             link(rt, host, arg0);
           } else if get_tag(arg0) == CTR {
             //println!("dup-ctr");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let func = get_ext(arg0);
             let arit = rt.get_arity(func);
             if arit == 0 {
@@ -1517,7 +1563,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
               link(rt, host, done);
             }
           } else if get_tag(arg0) == ERA {
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             subst(rt, ask_arg(rt, term, 0), Era());
             subst(rt, ask_arg(rt, term, 1), Era());
             link(rt, host, Era());
@@ -1531,7 +1577,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
           let arg1 = ask_arg(rt, term, 1);
           if get_tag(arg0) == U60 && get_tag(arg1) == U60 {
             //println!("op2-u32");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let a = get_num(arg0);
             let b = get_num(arg1);
             let c = match get_ext(term) {
@@ -1558,7 +1604,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
             link(rt, host, done);
           } else if get_tag(arg0) == PAR {
             //println!("op2-sup-0");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let op20 = get_loc(term, 0);
             let op21 = get_loc(arg0, 0);
             let let0 = alloc(rt, 3);
@@ -1574,7 +1620,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
             link(rt, host, done);
           } else if get_tag(arg1) == PAR {
             //println!("op2-sup-1");
-            inc_cost(rt);
+            rt.set_cost(rt.get_cost() + 1);
             let op20 = get_loc(term, 0);
             let op21 = get_loc(arg1, 0);
             let let0 = alloc(rt, 3);
@@ -1597,7 +1643,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
             for idx in &func.redux {
               if get_tag(ask_arg(rt, term, *idx)) == PAR {
                 //println!("cal-par");
-                inc_cost(rt);
+                rt.set_cost(rt.get_cost() + 1);
                 let argn = ask_arg(rt, term, *idx);
                 let funx = get_ext(term);
                 let arit = rt.get_arity(funx);
@@ -1652,7 +1698,7 @@ pub fn reduce(rt: &mut Runtime, root: u64) -> Lnk {
                 //println!("cal-fun");
                 //println!("- matched");
                 // Increments the gas count
-                inc_cost(rt);
+                rt.set_cost(rt.get_cost() + 1);
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
                 for i in 0 .. rule.vars.len() {
