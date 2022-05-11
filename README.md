@@ -1,21 +1,19 @@
-Kindelia: a hack-proof decentralized computer
-=============================================
+Kindelia: a peer-to-peer functional computer
+============================================
 
-Turing-complete blockchains, such as Ethereum, allow users to host applications
-in a decentralized network (DApps), but continuous security exploits hinder
-their adoption. Formal verification techniques can be used to ensure these
-applications have no exploits before being deployed, but Ethereum's underlying
-processor, the EVM, make these techniques too expensive to be viable. By
-leveraging a pure functional virtual machine, the HVM, Kindelia is able to run
-formally verified programs cheaply and efficiently, letting it host hack-proof
-DApps. Moreover, due to extensive low-level optimizations, Kindelia is able to
-sustain a considerably higher throughput, making its layer-1 transaction costs 2
-order of magnitudes lower than Ethereum's, for the same usage level.
+Turing-complete blockchains, such as Ethereum, allow users to create
+decentralized applications (DApps), but continuous security exploits hinder
+their adoption. Formal verification techniques can be used to ensure these DApps
+have no exploits, but Ethereum's underlying processor, the EVM, make these too
+expensive to be viable. By leveraging a functional virtual machine, the HVM,
+Kindelia is able to run formally verified DApps cheaply and efficiently.
+Moreover, extensive low-level optimizations let it sustain a extremelly high
+layer-1 throughput, compared to alternatives. Finally, Kindelia has no built-in
+token, and, thus, isn't a cryptocurrency; instead, it is merely a peer-to-peer
+computer capable of hosting secure functional programs.
 
 Introduction
 ============
-
-
 
 ### Efficiency
 
