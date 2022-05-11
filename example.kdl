@@ -21,7 +21,7 @@
 //
 // - Variables can have up to 3 letters (18 bits)
 //
-// - Names can have up to 5 letters (30 bits)
+// - Names can have up to 10 letters (60 bits)
 //
 // - Constructors are written as `$(CtrName arg_0 arg_1 ...)`
 //
@@ -30,8 +30,6 @@
 // - Integers are 60-bit, and are written like `#123`
 // 
 // - You can also write a number with a name, like `@Foo`
-//
-// - Function names must have, at most, 5 letters
 //
 // - Functions can hold an internal state
 //
@@ -57,12 +55,11 @@
 //
 // - The following IO actions are available:
 //
-//     - IOEND value                         -- completes the IO action
-//     - IOGET                               -- returns the internal state
-//     - IOSET value                         -- sets the internal state
-//     - IOCAL ioexp                         -- calls an IO function
-//     - IONRM value                         -- normalizes a value
-//     - IOWHO                               -- returns the caller name
+//     - IO.done value -- completes the IO action
+//     - IO.load       -- returns the internal state
+//     - IO.save value -- sets the internal state
+//     - IO.call ioexp -- calls an IO function
+//     - IO.from       -- returns the caller name
 // 
 // - This is a prototype. All the above is subject to change!
 
@@ -75,23 +72,23 @@
 // - Get: return its counter
 // And an initial state of zero (#0)
 fun Count 1 {
-  !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) λ~ $(IOEND #0)))
-  !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) λ~ $(IOEND #0)))
-  !(Count $(Get)) = $(IOGET λx $(IOEND x))
+  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
+  !(Count $(Dob)) = $(IO.load λx $(IO.save (* x #2) λ~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load λx $(IO.done x))
 } = #0
 
 // Runs a script that increments the Count's state 3 times
 run {
-  $(IOCAL !(Count $(Inc)) λ~
-  $(IOCAL !(Count $(Inc)) λ~
-  $(IOCAL !(Count $(Inc)) λ~
-  $(IOEND #0))))
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.done #0))))
 }
 
 // Runs a script that prints the Count's state
 run {
-  $(IOCAL !(Count $(Get)) λx
-  $(IOEND x))
+  $(IO.call !(Count $(Get)) λx
+  $(IO.done x))
 }
 
 // Example datatype and algorithm
@@ -119,7 +116,7 @@ fun Sum 1 {
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
 run {
-  $(IOEND !(Sum !(Gen #21)))
+  $(IO.done !(Sum !(Gen #21)))
 }
 
 // Example account
@@ -127,22 +124,22 @@ run {
 
 // Utility that, when called, returns the caller name
 fun WhoIs 0 {
-  !(WhoIs) = $(IOWHO λwho $(IOEND who))
+  !(WhoIs) = $(IO.from λwho $(IO.done who))
 } = #0
 
-// Creates the Alice account. It just receives a `$(CallN ...)`
+// Creates the LadyAlice account. It just receives a `$(CallN ...)`
 // action and calls another function directly. When that is done,
-// that function's 'caller' will be set to Alice, so it works as if
-// Alice is an user of that other function. Note that this account
-// isn't checking signatures, so anyone can act on Alice's behalf.
-fun Alice 1 {
-  !(Alice $(Call expr)) = $(IOCAL expr λres $(IOEND res))
+// that function's 'caller' will be set to LadyAlice, so it works as if
+// LadyAlice is an user of that other function. Note that this account
+// isn't checking signatures, so anyone can act on LadyAlice's behalf.
+fun LadyAlice 1 {
+  !(LadyAlice $(Call expr)) = $(IO.call expr λres $(IO.done res))
 } = #0
 
-// Prints Alice's name
+// Prints LadyAlice's name
 run {
-  $(IOCAL !(Alice $(Call !(WhoIs))) λnam
-  $(IOEND nam))
+  $(IO.call !(LadyAlice $(Call !(WhoIs))) λnam
+  $(IO.done nam))
 }
 
 // Example failure
@@ -150,13 +147,14 @@ run {
 
 // When a transaction fails, it is fully reversed
 run {
-  $(IOCAL !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Inc)) λ~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
 run {
-  $(IOCAL !(Count $(Get)) λx
-  $(IOEND x))
+  $(IO.call !(Count $(Get)) λx
+  $(IO.done x))
 }
+

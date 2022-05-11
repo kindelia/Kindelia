@@ -11,16 +11,16 @@ use primitive_types::U256;
 
 // A number with a known amount of bits
 
-pub fn serialize_fixlen(size: u64, value: &U256, bits: &mut BitVec) {
+pub fn serialize_fixlen(size: u128, value: &U256, bits: &mut BitVec) {
   for i in 0 .. size {
-    bits.push((value >> i).low_u64() & 1 == 1);
+    bits.push((value >> i).low_u128() & 1 == 1);
   }
 }
 
-pub fn deserialize_fixlen(size: u64, bits: &BitVec, index: &mut u64) -> U256 {
+pub fn deserialize_fixlen(size: u128, bits: &BitVec, index: &mut u128) -> U256 {
   let mut result = u256(0);
   for i in 0 .. size {
-    result = result * u256(2) + u256(bits[(*index + size - i - 1) as usize] as u64); 
+    result = result * u256(2) + u256(bits[(*index + size - i - 1) as usize] as u128); 
   }
   *index = *index + size;
   result
@@ -32,13 +32,13 @@ pub fn serialize_varlen(value: &U256, bits: &mut BitVec) {
   let mut value : U256 = *value;
   while value > u256(0) {
     bits.push(true);
-    bits.push(value.low_u64() & 1 == 1);
+    bits.push(value.low_u128() & 1 == 1);
     value = value >> u256(1);
   }
   bits.push(false);
 }
 
-pub fn deserialize_varlen(bits: &BitVec, index: &mut u64) -> U256 {
+pub fn deserialize_varlen(bits: &BitVec, index: &mut u128) -> U256 {
   let mut val : U256 = u256(0);
   let mut add : U256 = u256(1);
   while bits[*index as usize] {
@@ -60,7 +60,7 @@ pub fn serialize_bits(data: &BitVec, bits: &mut BitVec) {
   bits.push(false);
 }
 
-pub fn deserialize_bits(bits: &BitVec, index: &mut u64) -> BitVec {
+pub fn deserialize_bits(bits: &BitVec, index: &mut u128) -> BitVec {
   let mut result = BitVec::new();
   while bits[*index as usize] {
     result.push(bits[*index as usize + 1]);
@@ -80,7 +80,7 @@ pub fn serialize_many<T>(serialize_one: impl Fn(&T, &mut BitVec) -> (), values: 
   bits.push(false);
 }
 
-pub fn deserialize_many<T>(deserialize_one: impl Fn(&BitVec, &mut u64) -> T, bits: &BitVec, index: &mut u64) -> Vec<T> {
+pub fn deserialize_many<T>(deserialize_one: impl Fn(&BitVec, &mut u128) -> T, bits: &BitVec, index: &mut u128) -> Vec<T> {
   let mut result = Vec::new();
   while bits[*index as usize] {
     *index = *index + 1;
@@ -96,23 +96,23 @@ pub fn serialize_address(address: &Address, bits: &mut BitVec) {
   match address {
     Address::IPv4 { val0, val1, val2, val3, port } => {
       bits.push(false);
-      serialize_fixlen(8, &u256(*val0 as u64), bits);
-      serialize_fixlen(8, &u256(*val1 as u64), bits);
-      serialize_fixlen(8, &u256(*val2 as u64), bits);
-      serialize_fixlen(8, &u256(*val3 as u64), bits);
-      serialize_fixlen(16, &u256(*port as u64), bits);
+      serialize_fixlen(8, &u256(*val0 as u128), bits);
+      serialize_fixlen(8, &u256(*val1 as u128), bits);
+      serialize_fixlen(8, &u256(*val2 as u128), bits);
+      serialize_fixlen(8, &u256(*val3 as u128), bits);
+      serialize_fixlen(16, &u256(*port as u128), bits);
     }
   }
 }
 
-pub fn deserialize_address(bits: &BitVec, index: &mut u64) -> Address {
-  if bits[*index as usize] as u64 == 0 {
+pub fn deserialize_address(bits: &BitVec, index: &mut u128) -> Address {
+  if bits[*index as usize] as u128 == 0 {
     *index = *index + 1;
-    let val0 = deserialize_fixlen(8, bits, index).low_u64() as u8;
-    let val1 = deserialize_fixlen(8, bits, index).low_u64() as u8;
-    let val2 = deserialize_fixlen(8, bits, index).low_u64() as u8;
-    let val3 = deserialize_fixlen(8, bits, index).low_u64() as u8;
-    let port = deserialize_fixlen(16, bits, index).low_u64() as u16;
+    let val0 = deserialize_fixlen(8, bits, index).low_u128() as u8;
+    let val1 = deserialize_fixlen(8, bits, index).low_u128() as u8;
+    let val2 = deserialize_fixlen(8, bits, index).low_u128() as u8;
+    let val3 = deserialize_fixlen(8, bits, index).low_u128() as u8;
+    let port = deserialize_fixlen(16, bits, index).low_u128() as u16;
     return Address::IPv4 { val0, val1, val2, val3, port };
   } else {
     panic!("Bad address deserialization.");
@@ -134,12 +134,12 @@ pub fn deserialized_address(bits: &BitVec) -> Address {
 
 pub fn serialize_peer(peer: &Peer, bits: &mut BitVec) {
   serialize_address(&peer.address, bits);
-  serialize_fixlen(48, &u256(peer.seen_at as u64), bits);
+  serialize_fixlen(48, &u256(peer.seen_at as u128), bits);
 }
 
-pub fn deserialize_peer(bits: &BitVec, index: &mut u64) -> Peer {
+pub fn deserialize_peer(bits: &BitVec, index: &mut u128) -> Peer {
   let address = deserialize_address(bits, index);
-  let seen_at = deserialize_fixlen(48, bits, index).low_u64();
+  let seen_at = deserialize_fixlen(48, bits, index).low_u128();
   return Peer { address, seen_at };
 }
 
@@ -160,14 +160,14 @@ pub fn serialize_block(block: &Block, bits: &mut BitVec) {
   serialize_fixlen(256, &block.prev, bits);
   serialize_fixlen(64, &u256(block.time), bits);
   serialize_fixlen(64, &u256(block.rand), bits);
-  serialize_bytes(BODY_SIZE as u64, &block.body.value, bits);
+  serialize_bytes(BODY_SIZE as u128, &block.body.value, bits);
 }
 
-pub fn deserialize_block(bits: &BitVec, index: &mut u64) -> Block {
+pub fn deserialize_block(bits: &BitVec, index: &mut u128) -> Block {
   let prev = deserialize_fixlen(256, bits, index);
-  let time = deserialize_fixlen(64, bits, index).low_u64();
-  let rand = deserialize_fixlen(64, bits, index).low_u64();
-  let body = deserialize_bytes(BODY_SIZE as u64, bits, index);
+  let time = deserialize_fixlen(64, bits, index).low_u128();
+  let rand = deserialize_fixlen(64, bits, index).low_u128();
+  let body = deserialize_bytes(BODY_SIZE as u128, bits, index);
   let mut value : [u8; BODY_SIZE] = [0; BODY_SIZE];
   for i in 0 .. BODY_SIZE {
     value[i] = body[i];
@@ -192,22 +192,22 @@ pub fn serialize_hash(hash: &Hash, bits: &mut BitVec) {
   serialize_varlen(hash, bits);
 }
 
-pub fn deserialize_hash(bits: &BitVec, index: &mut u64) -> Hash {
+pub fn deserialize_hash(bits: &BitVec, index: &mut u128) -> Hash {
   deserialize_varlen(bits, index)
 }
 
 // Bytes
 
-pub fn serialize_bytes(size: u64, bytes: &[u8], bits: &mut BitVec) {
+pub fn serialize_bytes(size: u128, bytes: &[u8], bits: &mut BitVec) {
   for byte in bytes {
-    serialize_fixlen(8, &u256(*byte as u64), bits);
+    serialize_fixlen(8, &u256(*byte as u128), bits);
   }
 }
 
-pub fn deserialize_bytes(size: u64, bits: &BitVec, index: &mut u64) -> Vec<u8> {
+pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128) -> Vec<u8> {
   let mut result = Vec::new();
   for _ in 0 .. size {
-    result.push(deserialize_fixlen(8, bits, index).low_u64() as u8);
+    result.push(deserialize_fixlen(8, bits, index).low_u128() as u8);
   }
   result
 }
@@ -232,8 +232,8 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
   }
 }
 
-pub fn deserialize_message(bits: &BitVec, index: &mut u64) -> Message {
-  let code = deserialize_fixlen(4, bits, index).low_u64();
+pub fn deserialize_message(bits: &BitVec, index: &mut u128) -> Message {
+  let code = deserialize_fixlen(4, bits, index).low_u128();
   match code {
     //0 => {
       //let peers = deserialize_many(deserialize_address, bits, index);
@@ -264,14 +264,14 @@ pub fn deserialized_message(bits: &BitVec) -> Message {
 }
 
 //pub enum Term {
-  //Var { name: u64 },
-  //Dup { nam0: u64, nam1: u64, expr: Box<Term>, body: Box<Term> },
-  //Lam { name: u64, body: Box<Term> },
+  //Var { name: u128 },
+  //Dup { nam0: u128, nam1: u128, expr: Box<Term>, body: Box<Term> },
+  //Lam { name: u128, body: Box<Term> },
   //App { func: Box<Term>, argm: Box<Term> },
-  //Ctr { name: u64, args: Vec<Term> },
-  //Fun { name: u64, args: Vec<Term> },
-  //U60 { numb: u64 },
-  //Op2 { oper: u64, val0: Box<Term>, val1: Box<Term> },
+  //Ctr { name: u128, args: Vec<Term> },
+  //Fun { name: u128, args: Vec<Term> },
+  //U60 { numb: u128 },
+  //Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
 //}
 
 //pub enum Oper {
@@ -282,8 +282,8 @@ pub fn deserialized_message(bits: &BitVec) -> Message {
 //}
 
 //pub enum Action {
-  //Def { name: u64, func: Vec<(Term, Term)> },
-  //Run { name: u64, expr: Term },
+  //Def { name: u128, func: Vec<(Term, Term)> },
+  //Run { name: u128, expr: Term },
 //}
 
 // A Term
@@ -292,18 +292,18 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
   match term {
     Term::Var { name } => {
       serialize_fixlen(3, &u256(0), bits);
-      serialize_fixlen(18, &u256(*name as u64), bits);
+      serialize_fixlen(18, &u256(*name as u128), bits);
     }
     Term::Dup { nam0, nam1, expr, body } => {
       serialize_fixlen(3, &u256(1), bits);
-      serialize_fixlen(18, &u256(*nam0 as u64), bits);
-      serialize_fixlen(18, &u256(*nam1 as u64), bits);
+      serialize_fixlen(18, &u256(*nam0 as u128), bits);
+      serialize_fixlen(18, &u256(*nam1 as u128), bits);
       serialize_term(expr, bits);
       serialize_term(body, bits);
     }
     Term::Lam { name, body } => {
       serialize_fixlen(3, &u256(2), bits);
-      serialize_fixlen(18, &u256(*name as u64), bits);
+      serialize_fixlen(18, &u256(*name as u128), bits);
       serialize_term(body, bits);
     }
     Term::App { func, argm } => {
@@ -313,44 +313,44 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
     }
     Term::Ctr { name, args } => {
       serialize_fixlen(3, &u256(4), bits);
-      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_fixlen(60, &u256(*name as u128), bits);
       serialize_many(serialize_term, args, bits);
     }
     Term::Fun { name, args } => {
       serialize_fixlen(3, &u256(5), bits);
-      serialize_fixlen(30, &u256(*name as u64), bits);
+      serialize_fixlen(60, &u256(*name as u128), bits);
       serialize_many(serialize_term, args, bits);
     }
-    Term::U60 { numb } => {
+    Term::Num { numb } => {
       serialize_fixlen(3, &u256(6), bits);
-      serialize_fixlen(60, &u256(*numb as u64), bits);
+      serialize_fixlen(60, &u256(*numb as u128), bits);
     }
     Term::Op2 { oper, val0, val1 } => {
       serialize_fixlen(3, &u256(7), bits);
-      serialize_fixlen(8, &u256(*oper as u64), bits);
+      serialize_fixlen(8, &u256(*oper as u128), bits);
       serialize_term(val0, bits);
       serialize_term(val1, bits);
     }
   }
 }
 
-pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
+pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
   let tag = deserialize_fixlen(3, bits, index);
   //println!("- tag.: {} {:?}", tag, bits.clone().split_off(*index as usize));
-  match tag.low_u64() {
+  match tag.low_u128() {
     0 => {
-      let name = deserialize_fixlen(18, bits, index).low_u64();
+      let name = deserialize_fixlen(18, bits, index).low_u128();
       Term::Var { name }
     }
     1 => {
-      let nam0 = deserialize_fixlen(18, bits, index).low_u64();
-      let nam1 = deserialize_fixlen(18, bits, index).low_u64();
+      let nam0 = deserialize_fixlen(18, bits, index).low_u128();
+      let nam1 = deserialize_fixlen(18, bits, index).low_u128();
       let expr = Box::new(deserialize_term(bits, index));
       let body = Box::new(deserialize_term(bits, index));
       Term::Dup { nam0, nam1, expr, body }
     }
     2 => {
-      let name = deserialize_fixlen(18, bits, index).low_u64();
+      let name = deserialize_fixlen(18, bits, index).low_u128();
       let body = Box::new(deserialize_term(bits, index));
       Term::Lam { name, body }
     }
@@ -360,7 +360,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
       Term::App { func, argm }
     }
     4 => {
-      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let name = deserialize_fixlen(60, bits, index).low_u128();
       let args = deserialize_many(|bits, index| {
         let term = deserialize_term(bits, index);
         return term;
@@ -368,16 +368,16 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u64) -> Term {
       Term::Ctr { name, args }
     }
     5 => {
-      let name = deserialize_fixlen(30, bits, index).low_u64();
+      let name = deserialize_fixlen(60, bits, index).low_u128();
       let args = deserialize_many(deserialize_term, bits, index);
       Term::Fun { name, args }
     }
     6 => {
-      let numb = deserialize_fixlen(60, bits, index).low_u64();
-      Term::U60 { numb }
+      let numb = deserialize_fixlen(60, bits, index).low_u128();
+      Term::Num { numb }
     }
     7 => {
-      let oper = deserialize_fixlen(8, bits, index).low_u64();
+      let oper = deserialize_fixlen(8, bits, index).low_u128();
       let val0 = Box::new(deserialize_term(bits, index));
       let val1 = Box::new(deserialize_term(bits, index));
       Term::Op2 { oper, val0, val1 }
@@ -392,8 +392,8 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
   match action {
     Action::Fun { name, arit, func, init } => {
       serialize_fixlen(4, &u256(0), bits);
-      serialize_fixlen(30, &u256(*name as u64), bits);
-      serialize_fixlen(4, &u256(*arit as u64), bits);
+      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_fixlen(4, &u256(*arit as u128), bits);
       serialize_many(|rule, bits| {
         serialize_term(&rule.0, bits);
         serialize_term(&rule.1, bits);
@@ -402,8 +402,8 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
     }
     Action::Ctr { name, arit } => {
       serialize_fixlen(4, &u256(1), bits);
-      serialize_fixlen(30, &u256(*name as u64), bits);
-      serialize_fixlen(4, &u256(*arit as u64), bits);
+      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_fixlen(4, &u256(*arit as u128), bits);
     }
     Action::Run { expr } => {
       serialize_fixlen(4, &u256(2), bits);
@@ -412,12 +412,12 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
   }
 }
 
-pub fn deserialize_action(bits: &BitVec, index: &mut u64) -> Action {
+pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Action {
   let tag = deserialize_fixlen(4, bits, index);
-  match tag.low_u64() {
+  match tag.low_u128() {
     0 => {
-      let name = deserialize_fixlen(30, bits, index).low_u64();
-      let arit = deserialize_fixlen(4, bits, index).low_u64();
+      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let arit = deserialize_fixlen(4, bits, index).low_u128();
       let func = deserialize_many(|bits, index| {
         let lhs  = deserialize_term(bits, index);
         let rhs  = deserialize_term(bits, index);
@@ -428,8 +428,8 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u64) -> Action {
       Action::Fun { name, arit, func, init }
     }
     1 => {
-      let name = deserialize_fixlen(30, bits, index).low_u64();
-      let arit = deserialize_fixlen(4, bits, index).low_u64();
+      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let arit = deserialize_fixlen(4, bits, index).low_u128();
       Action::Ctr { name, arit }
     }
     2 => {
@@ -457,7 +457,7 @@ pub fn serialize_actions(actions: &[Action], bits: &mut BitVec) {
   serialize_many(serialize_action, actions, bits);
 }
 
-pub fn deserialize_actions(bits: &BitVec, index: &mut u64) -> Vec<Action> {
+pub fn deserialize_actions(bits: &BitVec, index: &mut u128) -> Vec<Action> {
   deserialize_many(deserialize_action, bits, index)
 }
 

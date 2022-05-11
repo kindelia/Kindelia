@@ -30,8 +30,8 @@ pub struct Body {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-  pub time: u64,  // block timestamp
-  pub rand: u64,  // block nonce
+  pub time: u128,  // block timestamp
+  pub rand: u128,  // block nonce
   pub prev: U256, // previous block (32 bytes)
   pub body: Body, // block contents (1280 bytes)
 }
@@ -47,12 +47,12 @@ pub struct Node {
   pub waiters    : U256Map<Vec<Block>>,            // block hash -> blocks that are waiting for this block info
   pub work       : U256Map<U256>,                  // block hash -> accumulated work
   pub target     : U256Map<U256>,                  // block hash -> this block's target
-  pub height     : U256Map<u64>,                   // block hash -> cached height
+  pub height     : U256Map<u128>,                   // block hash -> cached height
   pub seen       : U256Map<()>,                    // block hash -> have we received it yet?
   pub was_mined  : U256Map<HashSet<Transaction>>,  // block hash -> set of transaction hashes that were already mined
-  pub pool       : PriorityQueue<Transaction,u64>, // transactions to be mined
-  pub peer_id    : HashMap<Address, u64>,          // peer address -> peer id
-  pub peers      : HashMap<u64, Peer>,             // peer id -> peer
+  pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
+  pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
+  pub peers      : HashMap<u128, Peer>,             // peer id -> peer
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ pub enum Address {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Peer {
-  pub seen_at: u64,
+  pub seen_at: u128,
   pub address: Address,
 }
 
@@ -109,14 +109,14 @@ pub const UDP_PORT : u16 = 42000;
 // Size of a hash, in bytes
 pub const HASH_SIZE : usize = 32;
 
-// Size of a u64, in bytes
-pub const U64_SIZE : usize = 64 / 8;
+// Size of a u128, in bytes
+pub const U128_SIZE : usize = 64 / 8;
 
 // Size of a block's body, in bytes
 pub const BODY_SIZE : usize = 1280;
 
 // Size of a block, in bytes
-pub const BLOCK_SIZE : usize = HASH_SIZE + (U64_SIZE * 4) + BODY_SIZE;
+pub const BLOCK_SIZE : usize = HASH_SIZE + (U128_SIZE * 4) + BODY_SIZE;
 
 // Size of an IPv4 address, in bytes
 pub const IPV4_SIZE : usize = 4;
@@ -128,40 +128,40 @@ pub const IPV6_SIZE : usize = 16;
 pub const PORT_SIZE : usize = 2;
 
 // How many nodes we gossip an information to?
-pub const GOSSIP_FACTOR : u64 = 16;
+pub const GOSSIP_FACTOR : u128 = 16;
 
 // When we need missing info, how many nodes do we ask?
-pub const MISSING_INFO_ASK_FACTOR : u64 = 3;
+pub const MISSING_INFO_ASK_FACTOR : u128 = 3;
 
 // How many times the mining thread attempts before unblocking?
-pub const MINE_ATTEMPTS : u64 = 1024;
+pub const MINE_ATTEMPTS : u128 = 1024;
 
 // Desired average time between mined blocks, in milliseconds
-pub const TIME_PER_BLOCK : u64 = 3000;
+pub const TIME_PER_BLOCK : u128 = 3000;
 
 // Don't accept blocks from N milliseconds in the future
-pub const DELAY_TOLERANCE : u64 = 60 * 60 * 1000;
+pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
   
 // Readjust difficulty every N blocks
-pub const BLOCKS_PER_PERIOD : u64 = 20;
+pub const BLOCKS_PER_PERIOD : u128 = 20;
 
 // Readjusts difficulty every N seconds
-pub const TIME_PER_PERIOD : u64 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
+pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
 
 // Initial difficulty, in expected hashes per block
-pub const INITIAL_DIFFICULTY : u64 = 256;
+pub const INITIAL_DIFFICULTY : u128 = 256;
 
 // How many milliseconds without notice until we forget a peer?
-pub const PEER_TIMEOUT : u64 = 10 * 1000;
+pub const PEER_TIMEOUT : u128 = 10 * 1000;
 
 // How many peers we need to keep minimum?
-pub const PEER_COUNT_MINIMUM : u64 = 256;
+pub const PEER_COUNT_MINIMUM : u128 = 256;
 
 // How many peers we send when asked?
-pub const SHARE_PEER_COUNT : u64 = 3;
+pub const SHARE_PEER_COUNT : u128 = 3;
 
 // How many peers we keep on the last_seen object?
-pub const LAST_SEEN_SIZE : u64 = 2;
+pub const LAST_SEEN_SIZE : u128 = 2;
 
 // UDP
 // ===
@@ -247,7 +247,7 @@ pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
 }
 
 pub fn compute_next_target_f64(last_target: U256, scale: f64) -> U256 {
-  return compute_next_target(last_target, u256((scale * 4294967296.0) as u64));
+  return compute_next_target(last_target, u256((scale * 4294967296.0) as u128));
 }
 
 pub fn get_hash_work(hash: U256) -> U256 {
@@ -275,8 +275,8 @@ pub fn hash_block(block: &Block) -> U256 {
   } else {
     let mut bytes : Vec<u8> = Vec::new();
     bytes.extend_from_slice(&u256_to_bytes(block.prev));
-    bytes.extend_from_slice(&u64_to_bytes(block.time));
-    bytes.extend_from_slice(&u64_to_bytes(block.rand));
+    bytes.extend_from_slice(&u128_to_bytes(block.time));
+    bytes.extend_from_slice(&u128_to_bytes(block.rand));
     bytes.extend_from_slice(&block.body.value);
     return hash_bytes(&bytes);
   }
@@ -363,7 +363,7 @@ pub fn node_see_peer(node: &mut Node, peer: Peer) {
     None => {
       // FIXME: `index` can't be generated from length as `.peers` is a map and
       // peers can be deleted
-      let index = node.peers.len() as u64;
+      let index = node.peers.len() as u128;
       node.peers.insert(index, peer.clone());
       node.peer_id.insert(peer.address, index);
     }
@@ -381,7 +381,7 @@ pub fn node_del_peer(node: &mut Node, addr: Address) {
   }
 }
 
-pub fn get_random_peers(node: &mut Node, amount: u64) -> Vec<Peer> {
+pub fn get_random_peers(node: &mut Node, amount: u128) -> Vec<Peer> {
   let amount = amount as usize;
   let mut rng = rand::thread_rng();
   node.peers.values().cloned().choose_multiple(&mut rng, amount)
@@ -433,7 +433,7 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
           let period_time = btime - node.block[&checkpoint_hash].time;
           // Computes the target of this period
           let last_target = node.target[&phash];
-          let next_scaler = 2u64.pow(32) * TIME_PER_PERIOD / period_time;
+          let next_scaler = 2u128.pow(32) * TIME_PER_PERIOD / period_time;
           let next_target = compute_next_target(last_target, u256(next_scaler));
           // Sets the new target
           node.target.insert(bhash, next_target);
@@ -512,7 +512,7 @@ pub fn node_message_handle(node: &mut Node, addr: Address, msg: &Message) {
   }
 }
 
-pub fn gossip(node: &mut Node, peer_count: u64, message: &Message) {
+pub fn gossip(node: &mut Node, peer_count: u128, message: &Message) {
   for peer in get_random_peers(node, peer_count) {
     udp_send(&mut node.socket, peer.address, message);
   }
@@ -547,8 +547,8 @@ pub fn get_tip_target(node: &Node) -> U256 {
 }
 
 // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
-pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u64) -> Option<Block> {
-  let rand = rand::random::<u64>();
+pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Option<Block> {
+  let rand = rand::random::<u128>();
   let time = get_time();
   let mut block = Block { time, rand, prev, body };
   for _i in 0 .. max_attempts {
@@ -589,7 +589,7 @@ pub fn miner_loop(miner_comm: SharedMinerComm) {
 // Node
 // ====
 
-fn node_gossip_tip_block(node: &mut Node, peer_count: u64) {
+fn node_gossip_tip_block(node: &mut Node, peer_count: u128) {
   let random_peers = get_random_peers(node, peer_count);
   for peer in random_peers {
     node_send_block_to(node, peer.address, node.block[&node.tip.1].clone());
@@ -749,27 +749,27 @@ pub fn input_loop(input: &SharedInput) {
 // ------
 
 pub struct NodeInfo {
-  pub time: u64,
-  pub num_peers: u64,
-  pub num_blocks: u64,
-  pub num_pending: u64,
-  pub num_pending_seen: u64,
-  pub height: u64,
+  pub time: u128,
+  pub num_peers: u128,
+  pub num_blocks: u128,
+  pub num_pending: u128,
+  pub num_pending_seen: u128,
+  pub height: u128,
   pub difficulty: U256,
   pub hash_rate: U256,
   pub tip_hash: U256,
   pub last_blocks: Vec<Block>,
 }
 
-fn node_get_info(node: &Node, max_last_blocks: Option<u64>) -> NodeInfo {
+fn node_get_info(node: &Node, max_last_blocks: Option<u128>) -> NodeInfo {
   let tip = node.tip.1;
   let height = *node.height.get(&tip).unwrap();
   let tip_target = *node.target.get(&tip).unwrap();
   let difficulty = target_to_difficulty(tip_target);
   let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
 
-  let mut num_pending: u64 = 0;
-  let mut num_pending_seen: u64 = 0;
+  let mut num_pending: u128 = 0;
+  let mut num_pending_seen: u128 = 0;
   for (bhash, _) in node.waiters.iter() {
     if node.seen.get(bhash).is_some() {
       num_pending_seen += 1;
@@ -782,8 +782,8 @@ fn node_get_info(node: &Node, max_last_blocks: Option<u64>) -> NodeInfo {
 
   NodeInfo {
     time: get_time(),
-    num_peers: node.peers.len() as u64,
-    num_blocks: node.block.len() as u64,
+    num_peers: node.peers.len() as u128,
+    num_blocks: node.block.len() as u128,
     num_pending,
     num_pending_seen,
     height,

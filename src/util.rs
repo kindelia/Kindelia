@@ -14,7 +14,7 @@ pub type Hash = U256;
 // Numerics
 // ========
 
-pub fn u256(x: u64) -> U256 {
+pub fn u256(x: u128) -> U256 {
   return U256::from(x);
 }
 
@@ -22,7 +22,7 @@ pub fn next_power_of_two(x: f64) -> f64 {
   if x <= 1.0 { x } else { (2.0_f64).powf(x.log2().floor() + 1.0) }
 }
 
-pub fn u64_to_bytes(value: u64) -> Vec<u8> {
+pub fn u128_to_bytes(value: u128) -> Vec<u8> {
   return Vec::from(value.to_le_bytes());
 }
 
@@ -46,6 +46,6 @@ pub fn bytes_to_bitvec(bytes: &[u8]) -> BitVec {
 // ======
 
 // Gets current timestamp in milliseconds
-pub fn get_time() -> u64 {
-  return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+pub fn get_time() -> u128 {
+  return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u128;
 }
