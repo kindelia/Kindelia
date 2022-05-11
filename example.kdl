@@ -75,8 +75,8 @@
 // - Get: return its counter
 // And an initial state of zero (#0)
 fun Count 1 {
-  !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) $(IOEND #0)))
-  !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) $(IOEND #0)))
+  !(Count $(Inc)) = $(IOGET λx $(IOSET (+ x #1) λ~ $(IOEND #0)))
+  !(Count $(Dob)) = $(IOGET λx $(IOSET (* x #2) λ~ $(IOEND #0)))
   !(Count $(Get)) = $(IOGET λx $(IOEND x))
 } = #0
 
@@ -119,7 +119,7 @@ fun Sum 1 {
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
 run {
-  $(IOEND !(Sum !(Gen #20)))
+  $(IOEND !(Sum !(Gen #21)))
 }
 
 // Example account

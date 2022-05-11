@@ -139,7 +139,7 @@ const U64_PER_MB: u64 = 0x20000;
 const U64_PER_GB: u64 = 0x8000000;
 
 const HEAP_SIZE: u64 = 256 * U64_PER_MB;
-//const HEAP_SIZE: u64 = 65536;
+//const HEAP_SIZE: u64 = 32;
 
 pub const MAX_ARITY: u64 = 16;
 pub const MAX_FUNCS: u64 = 16777216; // TODO: increase to 2^30 once arity is moved out
@@ -214,16 +214,12 @@ const fn GET_ARITY(fid: u64) -> Option<u64> {
 // Rollback
 // --------
 
-fn absorb_u64(a: u64, b: u64) -> u64 {
-  let a = if a == U64_NONE { 0 } else { a };
-  let b = if b == U64_NONE { 0 } else { b };
-  return a + b;
+fn absorb_u64(a: u64, b: u64, overwrite: bool) -> u64 {
+  if b == U64_NONE { a } else if overwrite || a == U64_NONE { b } else { a }
 }
 
-fn absorb_i64(a: i64, b: i64) -> i64 {
-  let a = if a == I64_NONE { 0 } else { a };
-  let b = if b == I64_NONE { 0 } else { b };
-  return a + b;
+fn absorb_i64(a: i64, b: i64, overwrite: bool) -> i64 {
+  if b == I64_NONE { a } else if overwrite || a == I64_NONE { b } else { a }
 }
 
 impl Heap {
@@ -298,13 +294,13 @@ impl Heap {
     self.disk.absorb(&mut other.disk, overwrite);
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
-    self.tick = absorb_u64(self.tick, other.tick);
-    self.funs = absorb_u64(self.funs, other.funs);
-    self.dups = absorb_u64(self.dups, other.dups);
-    self.cost = absorb_u64(self.cost, other.cost);
-    self.mana = absorb_u64(self.mana, other.mana);
-    self.size = absorb_i64(self.size, other.size);
-    self.next = absorb_u64(self.next, other.next);
+    self.tick = absorb_u64(self.tick, other.tick, overwrite);
+    self.funs = absorb_u64(self.funs, other.funs, overwrite);
+    self.dups = absorb_u64(self.dups, other.dups, overwrite);
+    self.cost = absorb_u64(self.cost, other.cost, overwrite);
+    self.mana = absorb_u64(self.mana, other.mana, overwrite);
+    self.size = absorb_i64(self.size, other.size, overwrite);
+    self.next = absorb_u64(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
     self.data.clear();
@@ -559,15 +555,19 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn run_io_term(&mut self, subject: u64, caller: u64, term: &Term) -> Option<Lnk> {
-    let main = self.alloc_term(term);
-    let done = self.run_io(subject, caller, main);
-    return done;
+  fn collect(&mut self, term: Lnk) {
+    collect(self, term);
   }
 
-  fn run_io_from_code(&mut self, code: &str) -> Option<Lnk> {
-    return self.run_io_term(0, 0, &read_term(code).1);
-  }
+  //fn run_io_term(&mut self, subject: u64, caller: u64, term: &Term) -> Option<Lnk> {
+    //let main = self.alloc_term(term);
+    //let done = self.run_io(subject, caller, main);
+    //return done;
+  //}
+
+  //fn run_io_from_code(&mut self, code: &str) -> Option<Lnk> {
+    //return self.run_io_term(0, 0, &read_term(code).1);
+  //}
 
   fn run_actions(&mut self, actions: &[Action]) {
     for action in actions {
@@ -584,8 +584,10 @@ impl Runtime {
   }
 
   fn compute(&mut self, lnk: Lnk) -> Lnk {
-    let loc = alloc_lnk(self, lnk);
-    return self.compute_at(loc);
+    let host = alloc_lnk(self, lnk);
+    let done = self.compute_at(host);
+    clear(self, host, 1);
+    return done;
   }
 
   fn show_term(&self, lnk: Lnk) -> String {
@@ -606,8 +608,9 @@ impl Runtime {
       CTR => {
         match get_ext(term) {
           IOEND => {
-            clear(self, host, 1);
             let retr = ask_arg(self, term, 0);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
             return Some(retr);
           }
           IOGET => {
@@ -615,18 +618,21 @@ impl Runtime {
             let cont = ask_arg(self, term, 0);
             let stat = self.read_disk(subject).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
+            let done = self.run_io(subject, subject, cont);
             clear(self, host, 1);
-            return self.run_io(subject, subject, cont);
+            clear(self, get_loc(term, 0), 1);
+            return done;
           }
           IOSET => {
             //println!("- IOSET subject is {} {}", u64_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
-            let cont = ask_arg(self, term, 1);
-            let cont = alloc_app(self, cont, Num(0));
             let save = self.compute(expr);
             self.write_disk(subject, save);
-            let done = self.run_io(subject, subject, get_loc(term, 1));
-            clear(self, host, 2);
+            let cont = ask_arg(self, term, 1);
+            let cont = alloc_app(self, cont, Num(0));
+            let done = self.run_io(subject, subject, cont);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
             return done;
           }
           IOCAL => {
@@ -636,9 +642,13 @@ impl Runtime {
               let fnid = get_ext(expr);
               let retr = self.run_io(fnid, subject, get_loc(term, 0))?;
               let cont = alloc_app(self, cont, retr);
-              clear(self, host, 2);
-              return self.run_io(subject, caller, cont);
+              let done = self.run_io(subject, caller, cont);
+              clear(self, host, 1);
+              clear(self, get_loc(term, 1), 1); // term[0] is already cleared by the "retr" run_io
+              return done;
             } else {
+              clear(self, host, 1);
+              clear(self, get_loc(term, 0), 2);
               return None;
             }
           }
@@ -651,10 +661,13 @@ impl Runtime {
           IOWHO => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(caller));
-            return self.run_io(subject, caller, cont);
+            let done = self.run_io(subject, caller, cont);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
           }
           _ => {
-            collect(self, term);
+            self.collect(term);
             return None;
           }
         }
@@ -686,13 +699,17 @@ impl Runtime {
       }
       Action::Run { expr } => {
         println!("- run {}", view_term(expr));
-        if let Some(done) = self.run_io_term(0, 0, &expr) {
+        let host = self.alloc_term(expr);
+        if let Some(done) = self.run_io(0, 0, host) {
           let done = self.compute(done);
           println!("    = {}", self.show_term(done));
+          self.collect(done);
           self.heap.absorb(&mut self.draw, true);
           self.draw.clear();
+          //println!("{}", show_rt(self));
         } else {
           println!("    = fail");
+          //self.collect(done);
           self.draw.clear();
         }
       }
@@ -1022,7 +1039,12 @@ pub fn alloc(rt: &mut Runtime, size: u64) -> u64 {
 }
 
 pub fn clear(rt: &mut Runtime, loc: u64, size: u64) {
+  //println!("- clear {} {}", loc, size);
   for i in 0 .. size {
+    if rt.read((loc + i) as usize) == 0 {
+      println!("- clear again {}", loc);
+      panic!("nope");
+    }
     rt.write((loc + i) as usize, 0);
   }
   rt.set_size(rt.get_size() - size as i64);
@@ -1755,25 +1777,41 @@ pub fn compute_at(rt: &mut Runtime, host: u64) -> Lnk {
   if term != norm {
     match get_tag(norm) {
       LAM => {
-        compute_at(rt, get_loc(norm, 1));
+        let loc_1 = get_loc(norm, 1);
+        let lnk_1 = compute_at(rt, loc_1);
+        link(rt, loc_1, lnk_1);
       }
       APP => {
-        compute_at(rt, get_loc(norm, 0));
-        compute_at(rt, get_loc(norm, 1));
+        let loc_0 = get_loc(norm, 0);
+        let lnk_0 = compute_at(rt, loc_0);
+        link(rt, loc_0, lnk_0);
+        let loc_1 = get_loc(norm, 1);
+        let lnk_1 = compute_at(rt, loc_1);
+        link(rt, loc_1, lnk_1);
       }
       PAR => {
-        compute_at(rt, get_loc(norm, 0));
-        compute_at(rt, get_loc(norm, 1));
+        let loc_0 = get_loc(norm, 0);
+        let lnk_0 = compute_at(rt, loc_0);
+        link(rt, loc_0, lnk_0);
+        let loc_1 = get_loc(norm, 1);
+        let lnk_1 = compute_at(rt, loc_1);
+        link(rt, loc_1, lnk_1);
       }
       DP0 => {
-        compute_at(rt, get_loc(norm, 2));
+        let loc_2 = get_loc(norm, 2);
+        let lnk_2 = compute_at(rt, loc_2);
+        link(rt, loc_2, lnk_2);
       }
       DP1 => {
-        compute_at(rt, get_loc(norm, 2));
+        let loc_2 = get_loc(norm, 2);
+        let lnk_2 = compute_at(rt, loc_2);
+        link(rt, loc_2, lnk_2);
       }
       CTR | FUN => {
         for i in 0 .. rt.get_arity(get_ext(norm)) {
-          compute_at(rt, get_loc(norm, i));
+          let loc_i = get_loc(norm, i);
+          let lnk_i = compute_at(rt, loc_i);
+          link(rt, loc_i, lnk_i);
         }
       }
       _ => {}
@@ -1809,7 +1847,7 @@ pub fn show_lnk(x: Lnk) -> String {
       U60 => "U60",
       _   => "?",
     };
-    format!("{}:{:x}:{:x}", tgs, ext, val)
+    format!("{}:{}:{:x}", tgs, u64_to_name(ext), val)
   }
 }
 
