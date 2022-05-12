@@ -138,7 +138,7 @@ const U128_PER_KB: u128 = 0x80;
 const U128_PER_MB: u128 = 0x20000;
 const U128_PER_GB: u128 = 0x8000000;
 
-const HEAP_SIZE: u128 = 1024 * U128_PER_MB;
+const HEAP_SIZE: u128 = 16 * U128_PER_MB;
 //const HEAP_SIZE: u128 = 32;
 
 pub const MAX_ARITY: u128 = 16;

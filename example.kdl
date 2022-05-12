@@ -116,7 +116,7 @@ fun Sum 1 {
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
 run {
-  $(IO.done !(Sum !(Gen #21)))
+  $(IO.done !(Sum !(Gen #10)))
 }
 
 // Example account

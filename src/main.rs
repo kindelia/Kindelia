@@ -43,10 +43,10 @@ pub enum CliCmd {
 }
 
 fn main() -> Result<(), String> {
-  //run_cli()
+  run_cli()
   
-  hvm::test();
-  return Ok(());
+  //hvm::test();
+  //return Ok(());
 }
 
 fn run_cli() -> Result<(), String> {
