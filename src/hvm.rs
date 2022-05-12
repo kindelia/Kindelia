@@ -106,7 +106,7 @@ pub struct Heap {
   pub tick: u128,  // time counter
   pub funs: u128,  // total function count
   pub dups: u128,  // total dups count
-  pub cost: u128,  // total graph rewrites
+  pub rwts: u128,  // total graph rewrites
   pub mana: u128,  // total mana cost
   pub size: i128,  // total used memory (in 64-bit words)
   pub next: u128,  // memory index that *may* be empty
@@ -157,7 +157,7 @@ pub const ARG: u128 = 0x3;
 pub const ERA: u128 = 0x4;
 pub const LAM: u128 = 0x5;
 pub const APP: u128 = 0x6;
-pub const PAR: u128 = 0x7;
+pub const SUP: u128 = 0x7;
 pub const CTR: u128 = 0x8;
 pub const FUN: u128 = 0x9;
 pub const OP2: u128 = 0xA;
@@ -204,6 +204,123 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
     IO_CALL => Some(2),
     IO_FROM => Some(1),
     _       => None,
+  }
+}
+
+// Mana Table
+// ----------
+
+// |---------|---------------------------------|----------|
+// | Opcode  | Effect                          | Mana     |
+// |---------|---------------------------------|----------|
+// | APP-LAM | applies a lambda                | 10       |
+// | APP-SUP | applies a superposition         | 20       |
+// | OP2-NUM | operates on a number            | 10       |
+// | OP2-SUP | operates on a superposition     | 20       |
+// | FUN-CTR | pattern-matches a constructor   | 10 + M   |
+// | FUN-SUP | pattern-matches a superposition | 10 + A*5 |
+// | DUP-LAM | clones a lambda                 | 20       |
+// | DUP-NUM | clones a number                 | 10       |
+// | DUP-CTR | clones a constructor            | 10 + A*5 |
+// | DUP-DUP | clones a cloner                 | 20       |
+// | DUP-SUP | clones a superposition          | 10       |
+// | DUP-ERA | clones an erasure               | 10       |
+// |------------------------------------------------------|
+// | * A is the constructor or function arity             |
+// | * M is the alloc count of the right-hand side        |
+// |------------------------------------------------------|
+
+fn AppLamMana() -> u128 {
+  return 10;
+}
+
+fn AppSupMana() -> u128 {
+  return 20; // 19?
+}
+
+fn Op2NumMana() -> u128 {
+  return 10;
+}
+
+fn Op2SupMana() -> u128 {
+  return 20; // 19?
+}
+
+fn FunCtrMana(body: &Term) -> u128 {
+  return 10 + count_allocs(body);
+}
+
+fn FunSupMana(arity: u128) -> u128 {
+  return 10 + arity * 5;
+}
+
+fn DupLamMana() -> u128 {
+  return 20; // 19?
+}
+
+fn DupNumMana() -> u128 {
+  return 10;
+}
+
+fn DupCtrMana(arity: u128) -> u128 {
+  return 10 + arity * 5;
+}
+
+fn DupDupMana() -> u128 {
+  return 20;
+}
+
+fn DupSupMana() -> u128 {
+  return 10;
+}
+
+fn DupEraMana() -> u128 {
+  return 10;
+}
+
+fn count_allocs(body: &Term) -> u128 {
+  match body {
+    Term::Var { name } => {
+      0
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let expr = count_allocs(expr);
+      let body = count_allocs(body);
+      3 + expr + body
+    }
+    Term::Lam { name, body } => {
+      let body = count_allocs(body);
+      2 + body
+    }
+    Term::App { func, argm } => {
+      let func = count_allocs(func);
+      let argm = count_allocs(argm);
+      2 + func + argm
+    }
+    Term::Fun { name, args } => {
+      let size = args.len() as u128;
+      let mut count = 0;
+      for (i, arg) in args.iter().enumerate() {
+        count += count_allocs(arg);
+      }
+      size + count
+    }
+    Term::Ctr { name, args } => {
+      let size = args.len() as u128;
+      let mut count = 0;
+      for (i, arg) in args.iter().enumerate() {
+        count += count_allocs(arg);
+      }
+      size + count
+    }
+    Term::Num { numb } => {
+      0
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let val0 = count_allocs(val0);
+      let val1 = count_allocs(val1);
+      2 + val0 + val1
+    }
   }
 }
 
@@ -261,11 +378,11 @@ impl Heap {
   fn get_dups(&self) -> u128 {
     return self.dups;
   }
-  fn set_cost(&mut self, cost: u128) {
-    self.cost = cost;
+  fn set_rwts(&mut self, rwts: u128) {
+    self.rwts = rwts;
   }
-  fn get_cost(&self) -> u128 {
-    return self.cost;
+  fn get_rwts(&self) -> u128 {
+    return self.rwts;
   }
   fn set_mana(&mut self, mana: u128) {
     self.mana = mana;
@@ -293,7 +410,7 @@ impl Heap {
     self.tick = absorb_u128(self.tick, other.tick, overwrite);
     self.funs = absorb_u128(self.funs, other.funs, overwrite);
     self.dups = absorb_u128(self.dups, other.dups, overwrite);
-    self.cost = absorb_u128(self.cost, other.cost, overwrite);
+    self.rwts = absorb_u128(self.rwts, other.rwts, overwrite);
     self.mana = absorb_u128(self.mana, other.mana, overwrite);
     self.size = absorb_i128(self.size, other.size, overwrite);
     self.next = absorb_u128(self.next, other.next, overwrite);
@@ -306,7 +423,7 @@ impl Heap {
     self.tick = U128_NONE;
     self.funs = U128_NONE;
     self.dups = U128_NONE;
-    self.cost = U128_NONE;
+    self.rwts = U128_NONE;
     self.mana = U128_NONE;
     self.size = I128_NONE;
     self.next = U128_NONE;
@@ -322,7 +439,7 @@ pub fn init_heap() -> Heap {
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
-    cost: U128_NONE,
+    rwts: U128_NONE,
     mana: U128_NONE,
     size: I128_NONE,
     next: U128_NONE,
@@ -851,16 +968,20 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.get_dups());
   }
 
-  fn set_cost(&mut self, cost: u128) {
-    self.draw.set_cost(cost);
+  fn set_rwts(&mut self, rwts: u128) {
+    self.draw.set_rwts(rwts);
   }
 
-  fn get_cost(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.cost);
+  fn get_rwts(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.rwts);
   }
 
   fn set_mana(&mut self, mana: u128) {
     self.draw.set_mana(mana);
+  }
+
+  fn get_mana(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.mana);
   }
 
   fn set_size(&mut self, size: i128) {
@@ -924,7 +1045,7 @@ pub fn App(pos: u128) -> Lnk {
 }
 
 pub fn Par(col: u128, pos: u128) -> Lnk {
-  (PAR * TAG) | (col * EXT) | pos
+  (SUP * TAG) | (col * EXT) | pos
 }
 
 pub fn Op2(ope: u128, pos: u128) -> Lnk {
@@ -1062,7 +1183,7 @@ pub fn collect(rt: &mut Runtime, term: Lnk) {
         clear(rt, get_loc(term, 0), 2);
         continue;
       }
-      PAR => {
+      SUP => {
         stack.push(ask_arg(rt, term, 0));
         next = ask_arg(rt, term, 1);
         clear(rt, get_loc(term, 0), 2);
@@ -1340,11 +1461,6 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk) {
 
 pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
 
-  // Separates runtime from file to satisfy the borrow checker
-  // FIXME: this isn't good code; should split Runtime instead
-  //let mut file = File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) };
-  //std::mem::swap(&mut rt.heap.file, &mut file);
-
   let mut stack: Vec<u128> = Vec::new();
 
   let mut init = 1;
@@ -1407,9 +1523,14 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
       match get_tag(term) {
         APP => {
           let arg0 = ask_arg(rt, term, 0);
+          // (λx(body) a)
+          // ------------ APP-LAM
+          // x <- a
+          // body
           if get_tag(arg0) == LAM {
             //println!("app-lam");
-            rt.set_cost(rt.get_cost() + 1);
+            rt.set_mana(rt.get_mana() + AppLamMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1));
             let _done = link(rt, host, ask_arg(rt, arg0, 1));
             clear(rt, get_loc(term, 0), 2);
@@ -1417,9 +1538,14 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
             init = 1;
             continue;
           }
-          if get_tag(arg0) == PAR {
+          // ({a b} c)
+          // ----------------- APP-SUP
+          // dup x0 x1 = c
+          // {(a x0) (b x1)}
+          if get_tag(arg0) == SUP {
             //println!("app-sup");
-            rt.set_cost(rt.get_cost() + 1);
+            rt.set_mana(rt.get_mana() + AppSupMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             let app0 = get_loc(term, 0);
             let app1 = get_loc(arg0, 0);
             let let0 = alloc(rt, 3);
@@ -1437,16 +1563,16 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
         }
         DP0 | DP1 => {
           let arg0 = ask_arg(rt, term, 2);
-          // let argK = ask_arg(rt, term, if get_tag(term) == DP0 { 1 } else { 0 });
-          // if get_tag(argK) == ERA {
-          //   let done = arg0;
-          //   link(rt, host, done);
-          //   init = 1;
-          //   continue;
-          // }
+          // dup r s = λx(f)
+          // --------------- DUP-LAM
+          // dup f0 f1 = f
+          // r <- λx0(f0)
+          // s <- λx1(f1)
+          // x <- {x0 x1}
           if get_tag(arg0) == LAM {
             //println!("dup-lam");
-            rt.set_cost(rt.get_cost() + 1);
+            rt.set_mana(rt.get_mana() + DupLamMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             let let0 = get_loc(term, 0);
             let par0 = get_loc(arg0, 0);
             let lam0 = alloc(rt, 2);
@@ -1466,10 +1592,15 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
             link(rt, host, done);
             init = 1;
             continue;
-          } else if get_tag(arg0) == PAR {
-            //println!("dup-sup");
+          // dup x y = {a b}
+          // --------------- DUP-SUP (equal)
+          // x <- a
+          // y <- b
+          } else if get_tag(arg0) == SUP {
             if get_ext(term) == get_ext(arg0) {
-              rt.set_cost(rt.get_cost() + 1);
+              //println!("dup-sup");
+              rt.set_mana(rt.get_mana() + DupSupMana());
+              rt.set_rwts(rt.get_rwts() + 1);
               subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0));
               subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1));
               let _done = link(rt, host, ask_arg(rt, arg0, if get_tag(term) == DP0 { 0 } else { 1 }));
@@ -1477,8 +1608,16 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
               clear(rt, get_loc(arg0, 0), 2);
               init = 1;
               continue;
+            // dup x y = {a b}
+            // ----------------- DUP-SUP (different)
+            // x <- {xA xB}
+            // y <- {yA yB}
+            // dup xA yA = a
+            // dup xB yB = b
             } else {
-              rt.set_cost(rt.get_cost() + 1);
+              //println!("dup-dup");
+              rt.set_mana(rt.get_mana() + DupDupMana());
+              rt.set_rwts(rt.get_rwts() + 1);
               let par0 = alloc(rt, 2);
               let let0 = get_loc(term, 0);
               let par1 = get_loc(arg0, 0);
@@ -1496,19 +1635,34 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
               let done = Par(get_ext(arg0), if get_tag(term) == DP0 { par0 } else { par1 });
               link(rt, host, done);
             }
+          // dup x y = N
+          // ----------- DUP-NUM
+          // x <- N
+          // y <- N
+          // ~
           } else if get_tag(arg0) == NUM {
-            //println!("dup-u32");
-            rt.set_cost(rt.get_cost() + 1);
+            //println!("dup-num");
+            rt.set_mana(rt.get_mana() + DupNumMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             subst(rt, ask_arg(rt, term, 0), arg0);
             subst(rt, ask_arg(rt, term, 1), arg0);
             clear(rt, get_loc(term, 0), 3);
             let _done = arg0;
             link(rt, host, arg0);
+          // dup x y = (K a b c ...)
+          // ----------------------- DUP-CTR
+          // dup a0 a1 = a
+          // dup b0 b1 = b
+          // dup c0 c1 = c
+          // ...
+          // x <- (K a0 b0 c0 ...)
+          // y <- (K a1 b1 c1 ...)
           } else if get_tag(arg0) == CTR {
             //println!("dup-ctr");
-            rt.set_cost(rt.get_cost() + 1);
             let func = get_ext(arg0);
             let arit = rt.get_arity(func);
+            rt.set_mana(rt.get_mana() + DupCtrMana(arit));
+            rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
               subst(rt, ask_arg(rt, term, 0), Ctr(func, 0));
               subst(rt, ask_arg(rt, term, 1), Ctr(func, 0));
@@ -1534,8 +1688,14 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
               let done = Ctr(func, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
+          // dup x y = *
+          // ----------- DUP-ERA
+          // x <- *
+          // y <- *
           } else if get_tag(arg0) == ERA {
-            rt.set_cost(rt.get_cost() + 1);
+            //println!("dup-era");
+            rt.set_mana(rt.get_mana() + DupEraMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             subst(rt, ask_arg(rt, term, 0), Era());
             subst(rt, ask_arg(rt, term, 1), Era());
             link(rt, host, Era());
@@ -1547,9 +1707,13 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
         OP2 => {
           let arg0 = ask_arg(rt, term, 0);
           let arg1 = ask_arg(rt, term, 1);
+          // (+ a b)
+          // --------- OP2-NUM
+          // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
-            //println!("op2-u32");
-            rt.set_cost(rt.get_cost() + 1);
+            //println!("op2-num");
+            rt.set_mana(rt.get_mana() + Op2NumMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             let a = get_num(arg0);
             let b = get_num(arg1);
             let c = match get_ext(term) {
@@ -1574,9 +1738,14 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
             let done = Num(c);
             clear(rt, get_loc(term, 0), 2);
             link(rt, host, done);
-          } else if get_tag(arg0) == PAR {
+          // (+ {a0 a1} b)
+          // --------------------- OP2-SUP-0
+          // let b0 b1 = b
+          // {(+ a0 b0) (+ a1 b1)}
+          } else if get_tag(arg0) == SUP {
             //println!("op2-sup-0");
-            rt.set_cost(rt.get_cost() + 1);
+            rt.set_mana(rt.get_mana() + Op2SupMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             let op20 = get_loc(term, 0);
             let op21 = get_loc(arg0, 0);
             let let0 = alloc(rt, 3);
@@ -1590,9 +1759,14 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
             link(rt, par0 + 1, Op2(get_ext(term), op21));
             let done = Par(get_ext(arg0), par0);
             link(rt, host, done);
-          } else if get_tag(arg1) == PAR {
+          // (+ a {b0 b1})
+          // --------------- OP2-SUP-1
+          // dup a0 a1 = a
+          // {(+ a0 b0) (+ a1 b1)}
+          } else if get_tag(arg1) == SUP {
             //println!("op2-sup-1");
-            rt.set_cost(rt.get_cost() + 1);
+            rt.set_mana(rt.get_mana() + Op2SupMana());
+            rt.set_rwts(rt.get_rwts() + 1);
             let op20 = get_loc(term, 0);
             let op21 = get_loc(arg1, 0);
             let let0 = alloc(rt, 3);
@@ -1611,14 +1785,21 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
         FUN => {
 
           fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk) -> bool {
-            // For each argument, if it is a redex and a PAR, apply the cal_par rule
+            // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
-              if get_tag(ask_arg(rt, term, *idx)) == PAR {
-                //println!("cal-par");
-                rt.set_cost(rt.get_cost() + 1);
-                let argn = ask_arg(rt, term, *idx);
+              // (F {a0 a1} b c ...)
+              // ------------------- FUN-SUP
+              // dup b0 b1 = b
+              // dup c0 c1 = c
+              // ...
+              // {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
+              if get_tag(ask_arg(rt, term, *idx)) == SUP {
+                //println!("fun-sup");
                 let funx = get_ext(term);
                 let arit = rt.get_arity(funx);
+                rt.set_mana(rt.get_mana() + FunSupMana(arit));
+                rt.set_rwts(rt.get_rwts() + 1);
+                let argn = ask_arg(rt, term, *idx);
                 let fun0 = get_loc(term, 0);
                 let fun1 = alloc(rt, arit);
                 let par0 = get_loc(argn, 0);
@@ -1665,12 +1846,16 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
                   _ => {}
                 }
               }
+              // (user-defined)
+              // -------------- FUN-CTR
+              // (user-defined)
               // If all conditions are satisfied, the rule matched, so we must apply it
               if matched {
-                //println!("cal-fun");
+                //println!("fun-ctr");
                 //println!("- matched");
                 // Increments the gas count
-                rt.set_cost(rt.get_cost() + 1);
+                rt.set_mana(rt.get_mana() + FunCtrMana(&rule.body));
+                rt.set_rwts(rt.get_rwts() + 1);
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
                 for i in 0 .. rule.vars.len() {
@@ -1769,7 +1954,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128) -> Lnk {
         let lnk_1 = compute_at(rt, loc_1);
         link(rt, loc_1, lnk_1);
       }
-      PAR => {
+      SUP => {
         let loc_0 = get_loc(norm, 0);
         let lnk_0 = compute_at(rt, loc_0);
         link(rt, loc_0, lnk_0);
@@ -1820,7 +2005,7 @@ pub fn show_lnk(x: Lnk) -> String {
       ERA => "ERA",
       LAM => "LAM",
       APP => "APP",
-      PAR => "PAR",
+      SUP => "SUP",
       CTR => "CTR",
       FUN => "FUN",
       OP2 => "OP2",
@@ -1865,7 +2050,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
         find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
       }
-      PAR => {
+      SUP => {
         find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
         find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
       }
@@ -1920,7 +2105,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         let argm = go(rt, ask_arg(rt, term, 1), names);
         format!("({} {})", func, argm)
       }
-      PAR => {
+      SUP => {
         //let kind = get_ext(term);
         let func = go(rt, ask_arg(rt, term, 0), names);
         let argm = go(rt, ask_arg(rt, term, 1), names);
@@ -2448,7 +2633,7 @@ pub fn test_actions(actions: &[Action]) {
   println!("");
 
   println!("[Stats]");
-  println!("- cost: {} gas", rt.get_cost());
+  println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());
   println!("- size: {} words", rt.get_size());
   println!("- time: {} ms", init.elapsed().as_millis());
 
@@ -2458,42 +2643,11 @@ pub fn test_actions_from_code(code: &str) {
   test_actions(&read_actions(code).1);
 }
 
-pub fn test_0() {
-  
-  let mut rt = init_runtime();
-
-  rt.define_constructor(name_to_u128("Leaf"), 1);
-  rt.define_constructor(name_to_u128("Node"), 2);
-  rt.define_function(name_to_u128("Gen"), read_func("
-    !(Gen #0) = $(Leaf #1)
-    !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
-  ").1);
-  rt.define_function(name_to_u128("Sum"), read_func("
-    !(Sum $(Leaf x))   = x
-    !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
-  ").1);
-
-  // Main term
-  let main = rt.alloc_term_from_code("!(Sum !(Gen #20))");
-  println!("term: {:?}", rt.show_term_at(main));
-
-  // Normalizes and benchmarks
-  let init = Instant::now();
-  rt.compute_at(main);
-  println!("norm: {:?}", rt.show_term_at(main));
-  println!("cost: {}", rt.get_cost());
-  println!("size: {}", rt.get_size());
-  println!("time: {}", init.elapsed().as_millis());
-
-}
-
-pub fn test_1() {
+pub fn test() {
   //println!("{:x}", name_to_u128("IO.done"));
   //println!("{:x}", name_to_u128("IO.load"));
   //println!("{:x}", name_to_u128("IO.save"));
   //println!("{:x}", name_to_u128("IO.call"));
   //println!("{:x}", name_to_u128("IO.from"));
-
   test_actions_from_code(&std::fs::read_to_string("./example.kdl").expect("example.kdl not found"));
-
 }

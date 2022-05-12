@@ -2,7 +2,7 @@ Kindelia: a peer-to-peer functional computer
 ============================================
 
 Turing-complete blockchains, such as Ethereum, allow users to create
-decentralized applications (DApps), but continuous security exploits hinder
+decentralized applications (DApps), but recurrent security exploits hinder
 their adoption. Formal verification techniques can be used to ensure these DApps
 have no exploits, but Ethereum's underlying processor, the EVM, make these too
 expensive to be viable. By leveraging a functional virtual machine, the HVM,
