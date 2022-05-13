@@ -16,11 +16,11 @@ count_cmd="scc --no-cocomo"
     echo
   } >>"$outfile"
 
-  {
-    echo "FRONTEND"
-    echo "========"
-    $count_cmd ./frontend/*.rs
-    echo
-  } >>"$outfile"
+  # {
+  #   echo "FOLDER"
+  #   echo "======"
+  #   $count_cmd ./folder/*.rs
+  #   echo
+  # } >>"$outfile"
 
 )
