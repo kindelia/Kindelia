@@ -382,7 +382,7 @@ transactions, but with the block as a whole.
     | DUP-LAM | clones a lambda                 | 20       |
     | DUP-NUM | clones a number                 | 10       |
     | DUP-CTR | clones a constructor            | 10 + A*5 |
-    | DUP-SUP | clones a superposition          | 20       |
+    | DUP-DUP | clones a superposition          | 20       |
     | DUP-SUP | undoes a superposition          | 10       |
     | DUP-ERA | clones an erasure               | 10       |
     |------------------------------------------------------|
