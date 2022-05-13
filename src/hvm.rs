@@ -31,7 +31,7 @@ pub enum Term {
 pub enum Oper {
   Add, Sub, Mul, Div,
   Mod, And, Or,  Xor,
-  Shl, Shr, Lte, Ltn,
+  Shl, Shr, Ltn, Lte,
   Eql, Gte, Gtn, Neq,
 }
 
@@ -222,8 +222,8 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
 // | DUP-LAM | clones a lambda                 | 20       |
 // | DUP-NUM | clones a number                 | 10       |
 // | DUP-CTR | clones a constructor            | 10 + A*5 |
-// | DUP-DUP | clones a cloner                 | 20       |
-// | DUP-SUP | clones a superposition          | 10       |
+// | DUP-SUP | clones a superposition          | 20       |
+// | DUP-SUP | undoes a superposition          | 10       |
 // | DUP-ERA | clones an erasure               | 10       |
 // |------------------------------------------------------|
 // | * A is the constructor or function arity             |
@@ -658,8 +658,8 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn collect(&mut self, term: Lnk) {
-    collect(self, term);
+  fn collect(&mut self, term: Lnk) -> Option<()> {
+    collect(self, term)
   }
 
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
@@ -682,15 +682,15 @@ impl Runtime {
     return self.run_actions(&read_actions(code).1);
   }
 
-  fn compute_at(&mut self, loc: u128) -> Lnk {
+  fn compute_at(&mut self, loc: u128) -> Option<Lnk> {
     compute_at(self, loc)
   }
 
-  fn compute(&mut self, lnk: Lnk) -> Lnk {
+  fn compute(&mut self, lnk: Lnk) -> Option<Lnk> {
     let host = alloc_lnk(self, lnk);
-    let done = self.compute_at(host);
+    let done = self.compute_at(host)?;
     clear(self, host, 1);
-    return done;
+    return Some(done);
   }
 
   fn show_term(&self, lnk: Lnk) -> String {
@@ -705,7 +705,7 @@ impl Runtime {
   // --
 
   pub fn run_io(&mut self, subject: u128, caller: u128, host: u128) -> Option<Lnk> {
-    let term = reduce(self, host);
+    let term = reduce(self, host)?;
     //println!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
@@ -729,7 +729,7 @@ impl Runtime {
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", U128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
-            let save = self.compute(expr);
+            let save = self.compute(expr)?;
             self.write_disk(subject, save);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
@@ -764,7 +764,7 @@ impl Runtime {
             return done;
           }
           _ => {
-            self.collect(term);
+            self.collect(term)?;
             return None;
           }
         }
@@ -798,17 +798,19 @@ impl Runtime {
         println!("- run {}", view_term(expr));
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host) {
-          let done = self.compute(done);
-          println!("    = {}", self.show_term(done));
-          self.collect(done);
-          self.heap.absorb(&mut self.draw, true);
-          self.draw.clear();
+          if let Some(done) = self.compute(done) {
+            println!("    = {}", self.show_term(done));
+            if let Some(()) = self.collect(done) {
+              self.heap.absorb(&mut self.draw, true);
+              self.draw.clear();
+              return;
+            }
+          }
           //println!("{}", show_rt(self));
-        } else {
-          println!("    = fail");
-          //self.collect(done);
-          self.draw.clear();
         }
+        println!("    = fail");
+        //self.collect(done);
+        self.draw.clear();
       }
     }
   }
@@ -1152,7 +1154,7 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Lnk) {
+pub fn collect(rt: &mut Runtime, term: Lnk) -> Option<()> {
   let mut stack : Vec<Lnk> = Vec::new();
   let mut next = term;
   loop {
@@ -1160,11 +1162,11 @@ pub fn collect(rt: &mut Runtime, term: Lnk) {
     match get_tag(term) {
       DP0 => {
         link(rt, get_loc(term, 0), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,1),0));
+        reduce(rt, get_loc(ask_arg(rt,term,1),0))?;
       }
       DP1 => {
         link(rt, get_loc(term, 1), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,0),0));
+        reduce(rt, get_loc(ask_arg(rt,term,0),0))?;
       }
       VAR => {
         link(rt, get_loc(term, 0), Era());
@@ -1218,6 +1220,7 @@ pub fn collect(rt: &mut Runtime, term: Lnk) {
       break;
     }
   }
+  return Some(());
 }
 
 // Term
@@ -1451,15 +1454,16 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk) {
+pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk) -> Option<()> {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
-    collect(rt, val);
+    collect(rt, val)?;
   }
+  return Some(());
 }
 
-pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
+pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
 
   let mut stack: Vec<u128> = Vec::new();
 
@@ -1615,7 +1619,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
             // dup xA yA = a
             // dup xB yB = b
             } else {
-              //println!("dup-dup");
+              //println!("dup-sup");
               rt.set_mana(rt.get_mana() + DupDupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               let par0 = alloc(rt, 2);
@@ -1784,7 +1788,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk) -> bool {
+          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -1819,7 +1823,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
                 link(rt, par0 + 1, Fun(funx, fun1));
                 let done = Par(get_ext(argn), par0);
                 link(rt, host, done);
-                return true;
+                return Some(true);
               }
             }
             // For each rule condition vector
@@ -1885,20 +1889,20 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
                   if rule.vars[i].erase {
                     unsafe {
                       if let Some(var) = VARS_DATA[i] {
-                        collect(rt, var);
+                        collect(rt, var)?;
                       }
                     }
                   }
                 }
-                return true;
+                return Some(true);
               }
             }
-            return false;
+            return Some(false);
           }
 
           let fun = get_ext(term);
           if let Some(func) = rt.get_func(fun) {
-            if call_function(rt, func, host, term) {
+            if call_function(rt, func, host, term)? {
               init = 1;
               continue;
             }
@@ -1921,7 +1925,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Lnk {
   // FIXME: remove this when Runtime is split (see above)
   //rt.heap.file = file;
 
-  ask_lnk(rt, root)
+  return Some(ask_lnk(rt, root));
 }
 
 pub fn set_bit(bits: &mut [u128], bit: u128) {
@@ -1936,54 +1940,54 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
 // otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 // normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
 // since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128) -> Lnk {
+pub fn compute_at(rt: &mut Runtime, host: u128) -> Option<Lnk> {
   let term = ask_lnk(rt, host);
-  let norm = reduce(rt, host);
+  let norm = reduce(rt, host)?;
   if term != norm {
     match get_tag(norm) {
       LAM => {
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1);
+        let lnk_1 = compute_at(rt, loc_1)?;
         link(rt, loc_1, lnk_1);
       }
       APP => {
         let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0);
+        let lnk_0 = compute_at(rt, loc_0)?;
         link(rt, loc_0, lnk_0);
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1);
+        let lnk_1 = compute_at(rt, loc_1)?;
         link(rt, loc_1, lnk_1);
       }
       SUP => {
         let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0);
+        let lnk_0 = compute_at(rt, loc_0)?;
         link(rt, loc_0, lnk_0);
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1);
+        let lnk_1 = compute_at(rt, loc_1)?;
         link(rt, loc_1, lnk_1);
       }
       DP0 => {
         let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2);
+        let lnk_2 = compute_at(rt, loc_2)?;
         link(rt, loc_2, lnk_2);
       }
       DP1 => {
         let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2);
+        let lnk_2 = compute_at(rt, loc_2)?;
         link(rt, loc_2, lnk_2);
       }
       CTR | FUN => {
         for i in 0 .. rt.get_arity(get_ext(norm)) {
           let loc_i = get_loc(norm, i);
-          let lnk_i = compute_at(rt, loc_i);
+          let lnk_i = compute_at(rt, loc_i)?;
           link(rt, loc_i, lnk_i);
         }
       }
       _ => {}
     };
-    return norm;
+    return Some(norm);
   } else {
-    return term;
+    return Some(term);
   }
 }
 
@@ -2330,8 +2334,10 @@ fn read_term(code: &str) -> (&str, Term) {
     },
     '&' => {
       let code         = tail(code);
+      let (code, skip) = read_char(code, '{');
       let (code, nam0) = read_name(code);
       let (code, nam1) = read_name(code);
+      let (code, skip) = read_char(code, '}');
       let (code, skip) = read_char(code, '=');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, ';');
@@ -2519,7 +2525,7 @@ pub fn view_term(term: &Term) -> String {
       let nam1 = view_name(*nam1);
       let expr = view_term(expr);
       let body = view_term(body);
-      return format!("& {} {} = {}; {}", nam0, nam1, expr, body);
+      return format!("&{{{} {}}} = {}; {}", nam0, nam1, expr, body);
     }
     Term::Lam { name, body } => {
       let name = view_name(*name);

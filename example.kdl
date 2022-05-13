@@ -104,7 +104,7 @@ ctr Node 2
 // num and returns a tree with 2^num copies of #1
 fun Gen 1 {
   !(Gen #0) = $(Leaf #1)
-  !(Gen  x) = & x0 x1 = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
 } = #0
 
 // Declares a pure function that sums a tree
