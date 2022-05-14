@@ -405,7 +405,8 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
       serialize_fixlen(60, &u256(*name as u128), bits);
       serialize_fixlen(4, &u256(*arit as u128), bits);
     }
-    Action::Run { expr } => {
+    Action::Run { mana, expr } => {
+      serialize_fixlen(32, &u256(*mana as u128), bits);
       serialize_fixlen(4, &u256(2), bits);
       serialize_term(expr, bits);
     }
@@ -433,8 +434,9 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Action {
       Action::Ctr { name, arit }
     }
     2 => {
+      let mana = deserialize_fixlen(32, bits, index).low_u128();
       let expr = deserialize_term(bits, index);
-      Action::Run { expr }
+      Action::Run { mana, expr }
     }
     _ => panic!("unknown action tag"),
   }

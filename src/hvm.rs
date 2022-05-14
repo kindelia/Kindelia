@@ -86,7 +86,7 @@ pub type Lnk = u128;
 pub enum Action {
   Fun { name: u128, arit: u128, func: Vec<(Term, Term)>, init: Term },
   Ctr { name: u128, arit: u128, },
-  Run { expr: Term },
+  Run { mana: u128, expr: Term },
 }
 
 // A mergeable vector of u128 values
@@ -658,8 +658,8 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn collect(&mut self, term: Lnk) -> Option<()> {
-    collect(self, term)
+  fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
+    collect(self, term, mana)
   }
 
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
@@ -682,13 +682,13 @@ impl Runtime {
     return self.run_actions(&read_actions(code).1);
   }
 
-  fn compute_at(&mut self, loc: u128) -> Option<Lnk> {
-    compute_at(self, loc)
+  fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
+    compute_at(self, loc, mana)
   }
 
-  fn compute(&mut self, lnk: Lnk) -> Option<Lnk> {
+  fn compute(&mut self, lnk: Lnk, mana: u128) -> Option<Lnk> {
     let host = alloc_lnk(self, lnk);
-    let done = self.compute_at(host)?;
+    let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Some(done);
   }
@@ -704,8 +704,8 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128) -> Option<Lnk> {
-    let term = reduce(self, host)?;
+  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
+    let term = reduce(self, host, mana)?;
     //println!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
@@ -721,7 +721,7 @@ impl Runtime {
             let cont = ask_arg(self, term, 0);
             let stat = self.read_disk(subject).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
-            let done = self.run_io(subject, subject, cont);
+            let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
             return done;
@@ -729,11 +729,11 @@ impl Runtime {
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", U128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
-            let save = self.compute(expr)?;
+            let save = self.compute(expr, mana)?;
             self.write_disk(subject, save);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
-            let done = self.run_io(subject, subject, cont);
+            let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 2);
             return done;
@@ -743,9 +743,9 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             if get_tag(expr) == FUN {
               let fnid = get_ext(expr);
-              let retr = self.run_io(fnid, subject, get_loc(term, 0))?;
+              let retr = self.run_io(fnid, subject, get_loc(term, 0), mana)?;
               let cont = alloc_app(self, cont, retr);
-              let done = self.run_io(subject, caller, cont);
+              let done = self.run_io(subject, caller, cont, mana);
               clear(self, host, 1);
               clear(self, get_loc(term, 1), 1); // term[0] is already cleared by the "retr" run_io
               return done;
@@ -758,13 +758,13 @@ impl Runtime {
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(caller));
-            let done = self.run_io(subject, caller, cont);
+            let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
             return done;
           }
           _ => {
-            self.collect(term)?;
+            //self.collect(term, mana)?;
             return None;
           }
         }
@@ -794,13 +794,17 @@ impl Runtime {
         self.heap.absorb(&mut self.draw, true);
         self.draw.clear();
       }
-      Action::Run { expr } => {
-        println!("- run {}", view_term(expr));
+      Action::Run { mana, expr } => {
+        println!("- run {} {}", mana, view_term(expr));
+        //println!("- mana_limit={} current_mana={} run_max_mana={}", self.get_mana_limit(), self.get_mana(), mana);
+        let mana_ini = self.get_mana(); 
+        let mana_lim = std::cmp::min(self.get_mana_limit(), mana_ini + mana); // max mana we can reach on this action
         let host = self.alloc_term(expr);
-        if let Some(done) = self.run_io(0, 0, host) {
-          if let Some(done) = self.compute(done) {
-            println!("    = {}", self.show_term(done));
-            if let Some(()) = self.collect(done) {
+        if let Some(done) = self.run_io(0, 0, host, mana_lim) {
+          if let Some(done) = self.compute(done, mana_lim) {
+            if let Some(()) = self.collect(done, mana_lim) {
+              println!("  - mana: {}", self.get_mana() - mana_ini);
+              println!("  - term: {}", self.show_term(done));
               self.heap.absorb(&mut self.draw, true);
               self.draw.clear();
               return;
@@ -808,11 +812,16 @@ impl Runtime {
           }
           //println!("{}", show_rt(self));
         }
-        println!("    = fail");
+        println!("  - fail");
         //self.collect(done);
         self.draw.clear();
       }
     }
+  }
+
+  // Maximum mana = 42m * block_number
+  fn get_mana_limit(&self) -> u128 {
+    (self.get_tick() + 1) * 42000000
   }
 
 
@@ -986,6 +995,14 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.mana);
   }
 
+  fn set_tick(&mut self, tick: u128) {
+    self.draw.set_tick(tick);
+  }
+
+  fn get_tick(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.tick);
+  }
+
   fn set_size(&mut self, size: i128) {
     self.draw.size = size;
   }
@@ -1154,7 +1171,7 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Lnk) -> Option<()> {
+pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
   let mut stack : Vec<Lnk> = Vec::new();
   let mut next = term;
   loop {
@@ -1162,11 +1179,11 @@ pub fn collect(rt: &mut Runtime, term: Lnk) -> Option<()> {
     match get_tag(term) {
       DP0 => {
         link(rt, get_loc(term, 0), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,1),0))?;
+        reduce(rt, get_loc(ask_arg(rt,term,1),0), mana)?;
       }
       DP1 => {
         link(rt, get_loc(term, 1), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,0),0))?;
+        reduce(rt, get_loc(ask_arg(rt,term,0),0), mana)?;
       }
       VAR => {
         link(rt, get_loc(term, 0), Era());
@@ -1454,16 +1471,16 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk) -> Option<()> {
+pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
-    collect(rt, val)?;
+    collect(rt, val, mana)?;
   }
   return Some(());
 }
 
-pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
+pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
 
   let mut stack: Vec<u128> = Vec::new();
 
@@ -1475,6 +1492,11 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
 
   loop {
     let term = ask_lnk(rt, host);
+
+    if rt.get_mana() > mana {
+      println!("OOM {} > {}", rt.get_mana(), mana);
+      return None;
+    }
 
     //if debug || true {
       //println!("------------------------");
@@ -1535,7 +1557,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
             //println!("app-lam");
             rt.set_mana(rt.get_mana() + AppLamMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1));
+            subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1), mana);
             let _done = link(rt, host, ask_arg(rt, arg0, 1));
             clear(rt, get_loc(term, 0), 2);
             clear(rt, get_loc(arg0, 0), 2);
@@ -1585,13 +1607,13 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
             link(rt, par0 + 1, Var(lam1));
             let arg0_arg_0 = ask_arg(rt, arg0, 0);
             link(rt, par0 + 0, Var(lam0));
-            subst(rt, arg0_arg_0, Par(get_ext(term), par0));
+            subst(rt, arg0_arg_0, Par(get_ext(term), par0), mana);
             let term_arg_0 = ask_arg(rt, term, 0);
             link(rt, lam0 + 1, Dp0(get_ext(term), let0));
-            subst(rt, term_arg_0, Lam(lam0));
+            subst(rt, term_arg_0, Lam(lam0), mana);
             let term_arg_1 = ask_arg(rt, term, 1);
             link(rt, lam1 + 1, Dp1(get_ext(term), let0));
-            subst(rt, term_arg_1, Lam(lam1));
+            subst(rt, term_arg_1, Lam(lam1), mana);
             let done = Lam(if get_tag(term) == DP0 { lam0 } else { lam1 });
             link(rt, host, done);
             init = 1;
@@ -1605,8 +1627,8 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
               //println!("dup-sup");
               rt.set_mana(rt.get_mana() + DupSupMana());
               rt.set_rwts(rt.get_rwts() + 1);
-              subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0));
-              subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1));
+              subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0), mana);
+              subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1), mana);
               let _done = link(rt, host, ask_arg(rt, arg0, if get_tag(term) == DP0 { 0 } else { 1 }));
               clear(rt, get_loc(term, 0), 3);
               clear(rt, get_loc(arg0, 0), 2);
@@ -1634,8 +1656,8 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
               link(rt, par1 + 1, Dp1(get_ext(term), let1));
               link(rt, par0 + 0, Dp0(get_ext(term), let0));
               link(rt, par0 + 1, Dp0(get_ext(term), let1));
-              subst(rt, term_arg_0, Par(get_ext(arg0), par0));
-              subst(rt, term_arg_1, Par(get_ext(arg0), par1));
+              subst(rt, term_arg_0, Par(get_ext(arg0), par0), mana);
+              subst(rt, term_arg_1, Par(get_ext(arg0), par1), mana);
               let done = Par(get_ext(arg0), if get_tag(term) == DP0 { par0 } else { par1 });
               link(rt, host, done);
             }
@@ -1648,8 +1670,8 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
             //println!("dup-num");
             rt.set_mana(rt.get_mana() + DupNumMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), arg0);
-            subst(rt, ask_arg(rt, term, 1), arg0);
+            subst(rt, ask_arg(rt, term, 0), arg0, mana);
+            subst(rt, ask_arg(rt, term, 1), arg0, mana);
             clear(rt, get_loc(term, 0), 3);
             let _done = arg0;
             link(rt, host, arg0);
@@ -1668,8 +1690,8 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
-              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0));
-              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0));
+              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0), mana);
+              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0), mana);
               clear(rt, get_loc(term, 0), 3);
               let _done = link(rt, host, Ctr(func, 0));
             } else {
@@ -1685,10 +1707,10 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
               link(rt, leti + 2, ask_arg(rt, arg0, arit - 1));
               let term_arg_0 = ask_arg(rt, term, 0);
               link(rt, ctr0 + arit - 1, Dp0(get_ext(term), leti));
-              subst(rt, term_arg_0, Ctr(func, ctr0));
+              subst(rt, term_arg_0, Ctr(func, ctr0), mana);
               let term_arg_1 = ask_arg(rt, term, 1);
               link(rt, ctr1 + arit - 1, Dp1(get_ext(term), leti));
-              subst(rt, term_arg_1, Ctr(func, ctr1));
+              subst(rt, term_arg_1, Ctr(func, ctr1), mana);
               let done = Ctr(func, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
@@ -1700,8 +1722,8 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
             //println!("dup-era");
             rt.set_mana(rt.get_mana() + DupEraMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), Era());
-            subst(rt, ask_arg(rt, term, 1), Era());
+            subst(rt, ask_arg(rt, term, 0), Era(), mana);
+            subst(rt, ask_arg(rt, term, 1), Era(), mana);
             link(rt, host, Era());
             clear(rt, get_loc(term, 0), 3);
             init = 1;
@@ -1788,7 +1810,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk, mana: u128) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -1889,7 +1911,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
                   if rule.vars[i].erase {
                     unsafe {
                       if let Some(var) = VARS_DATA[i] {
-                        collect(rt, var)?;
+                        collect(rt, var, mana)?;
                       }
                     }
                   }
@@ -1902,7 +1924,7 @@ pub fn reduce(rt: &mut Runtime, root: u128) -> Option<Lnk> {
 
           let fun = get_ext(term);
           if let Some(func) = rt.get_func(fun) {
-            if call_function(rt, func, host, term)? {
+            if call_function(rt, func, host, term, mana)? {
               init = 1;
               continue;
             }
@@ -1940,46 +1962,46 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
 // otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 // normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
 // since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128) -> Option<Lnk> {
+pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
   let term = ask_lnk(rt, host);
-  let norm = reduce(rt, host)?;
+  let norm = reduce(rt, host, mana)?;
   if term != norm {
     match get_tag(norm) {
       LAM => {
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1)?;
+        let lnk_1 = compute_at(rt, loc_1, mana)?;
         link(rt, loc_1, lnk_1);
       }
       APP => {
         let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0)?;
+        let lnk_0 = compute_at(rt, loc_0, mana)?;
         link(rt, loc_0, lnk_0);
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1)?;
+        let lnk_1 = compute_at(rt, loc_1, mana)?;
         link(rt, loc_1, lnk_1);
       }
       SUP => {
         let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0)?;
+        let lnk_0 = compute_at(rt, loc_0, mana)?;
         link(rt, loc_0, lnk_0);
         let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1)?;
+        let lnk_1 = compute_at(rt, loc_1, mana)?;
         link(rt, loc_1, lnk_1);
       }
       DP0 => {
         let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2)?;
+        let lnk_2 = compute_at(rt, loc_2, mana)?;
         link(rt, loc_2, lnk_2);
       }
       DP1 => {
         let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2)?;
+        let lnk_2 = compute_at(rt, loc_2, mana)?;
         link(rt, loc_2, lnk_2);
       }
       CTR | FUN => {
         for i in 0 .. rt.get_arity(get_ext(norm)) {
           let loc_i = get_loc(norm, i);
-          let lnk_i = compute_at(rt, loc_i)?;
+          let lnk_i = compute_at(rt, loc_i, mana)?;
           link(rt, loc_i, lnk_i);
         }
       }
@@ -2488,10 +2510,11 @@ fn read_action(code: &str) -> (&str, Action) {
       let code = tail(code);
       let (code, skip) = read_char(code, 'u');
       let (code, skip) = read_char(code, 'n');
+      let (code, mana) = read_numb(code);
       let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
-      return (code, Action::Run { expr });
+      return (code, Action::Run { mana, expr });
     }
     _ => {
       panic!("Couldn't parse action.");
@@ -2598,9 +2621,9 @@ pub fn view_action(action: &Action) -> String {
       let name = U128_to_name(*name);
       return format!("ctr {} {}", name, arit);
     }
-    Action::Run { expr } => {
+    Action::Run { mana, expr } => {
       let expr = view_term(expr);
-      return format!("run {{\n  {}\n}}", expr);
+      return format!("run {} {{\n  {}\n}}", mana, expr);
     }
   }
 }

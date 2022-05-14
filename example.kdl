@@ -78,7 +78,7 @@ fun Count 1 {
 } = #0
 
 // Runs a script that increments the Count's state 3 times
-run {
+run 1000 {
   $(IO.call !(Count $(Inc)) λ~
   $(IO.call !(Count $(Inc)) λ~
   $(IO.call !(Count $(Inc)) λ~
@@ -86,7 +86,7 @@ run {
 }
 
 // Runs a script that prints the Count's state
-run {
+run 1000 {
   $(IO.call !(Count $(Get)) λx
   $(IO.done x))
 }
@@ -115,7 +115,7 @@ fun Sum 1 {
 
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
-run {
+run 10000000 {
   $(IO.done !(Sum !(Gen #10)))
 }
 
@@ -137,7 +137,7 @@ fun LadyAlice 1 {
 } = #0
 
 // Prints LadyAlice's name
-run {
+run 1000 {
   $(IO.call !(LadyAlice $(Call !(WhoIs))) λnam
   $(IO.done nam))
 }
@@ -148,14 +148,14 @@ run {
 // ===============
 
 // When a transaction fails, it is fully reversed
-run {
+run 1000 {
   $(IO.call !(Count $(Inc)) λ~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
-run {
+run 1000 {
   $(IO.call !(Count $(Get)) λx
   $(IO.done x))
 }

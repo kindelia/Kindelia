@@ -166,7 +166,7 @@ be one of 4 variants:
 - **run**: runs an IO expression
 
     ```c
-    run {
+    run ManaLimit {
       <io_expression>
     }
     ```
