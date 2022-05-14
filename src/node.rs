@@ -737,12 +737,16 @@ pub fn input_loop(input: &SharedInput) {
       stdout.flush().unwrap();
     }
     if let Ok(Key::Ctrl('c')) = key {
-      std::process::exit(0);
+      break;
     }
     if let Ok(Key::Ctrl('q')) = key {
-      std::process::exit(0);
+      break;
     }
   }
+
+  drop(stdout);
+  eprintln!("\n\nBye...");
+  std::process::exit(0);
 }
 
 // Output
