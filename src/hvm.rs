@@ -779,9 +779,10 @@ impl Runtime {
     match action {
       Action::Fun { name, arit, func, init } => {
         println!("- fun {} {}", U128_to_name(*name), arit);
-        if let Some(func) = build_func(func) {
+        if let Some(func) = build_func(func, true) {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
+          println!("- arity is -> {}", arit);
           let state = self.create_term(init, 0);
           self.write_disk(*name, state);
           self.heap.absorb(&mut self.draw, true);
@@ -1343,9 +1344,12 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
 }
 
 // Given a vector of rules (lhs/rhs pairs), builds the Func object
-pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
+pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
   // If there are no rules, return none
   if lines.len() == 0 {
+    if debug {
+      println!("- failed to build function: no rules");
+    }
     return None;
   }
 
@@ -1354,6 +1358,9 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
   if let Term::Fun { args, .. } = &lines[0].0 {
     arity = args.len() as u128;
   } else {
+    if debug {
+      println!("- failed to build function: no arity");
+    }
     return None;
   }
 
@@ -1364,8 +1371,8 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for i in 0 .. lines.len() {
-    let rule = &lines[i];
+  for line in 0 .. lines.len() {
+    let rule = &lines[line];
 
     let mut cond = Vec::new();
     let mut vars = Vec::new();
@@ -1376,6 +1383,9 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
+        if debug {
+          println!("  - failed to build function: arity mismatch on rule {}", line);
+        }
         return None;
       }
 
@@ -1395,6 +1405,9 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
                 vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
               // Otherwise..
               } else {
+                if debug {
+                  println!("  - failed to build function: nested match on rule {}, argument {}", line, i);
+                }
                 return None; // return none, because we don't allow nested matches
               }
             }
@@ -1410,6 +1423,9 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
             cond.push(0); // it has no matching condition
           }
           _ => {
+            if debug {
+              println!("  - failed to build function: unsupported match on rule {}, argument {}", line, i);
+            }
             return None;
           }
         }
@@ -1417,6 +1433,9 @@ pub fn build_func(lines: &[(Term,Term)]) -> Option<Func> {
 
     // If lhs isn't a Ctr, return None
     } else {
+      if debug {
+        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}", line);
+      }
       return None;
     }
 
@@ -1495,7 +1514,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
     let term = ask_lnk(rt, host);
 
     if rt.get_mana() > mana {
-      println!("OOM {} > {}", rt.get_mana(), mana);
       return None;
     }
 
@@ -2175,12 +2193,14 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       CTR => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
+        println!("  - arity is: {} {}", U128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
         format!("$({}{})", U128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
+        println!("  - arity is: {} {}", U128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
         format!("!({}{})", U128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
@@ -2477,7 +2497,7 @@ fn read_rules(code: &str) -> (&str, Vec<(Term,Term)>) {
 
 fn read_func(code: &str) -> (&str, Func) {
   let (code, rules) = read_until(code, '\0', read_rule);
-  if let Some(func) = build_func(rules.as_slice()) {
+  if let Some(func) = build_func(rules.as_slice(), false) {
     return (code, func);
   } else {
     panic!("Couldn't parse function.");
@@ -2525,6 +2545,9 @@ fn read_action(code: &str) -> (&str, Action) {
 
 fn read_actions(code: &str) -> (&str, Vec<Action>) {
   let (code, actions) = read_until(code, '\0', read_action);
+  for action in &actions {
+    println!("... action {}", view_action(action));
+  }
   return (code, actions);
 }
 
