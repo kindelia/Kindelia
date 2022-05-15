@@ -86,7 +86,7 @@ pub type Lnk = u128;
 pub enum Action {
   Fun { name: u128, arit: u128, func: Vec<(Term, Term)>, init: Term },
   Ctr { name: u128, arit: u128, },
-  Run { mana: u128, expr: Term },
+  Run { expr: Term },
 }
 
 // A mergeable vector of u128 values
@@ -794,11 +794,12 @@ impl Runtime {
         self.heap.absorb(&mut self.draw, true);
         self.draw.clear();
       }
-      Action::Run { mana, expr } => {
-        println!("- run {} {}", mana, view_term(expr));
+      Action::Run { expr } => {
+        println!("- run {}", view_term(expr));
         //println!("- mana_limit={} current_mana={} run_max_mana={}", self.get_mana_limit(), self.get_mana(), mana);
         let mana_ini = self.get_mana(); 
-        let mana_lim = std::cmp::min(self.get_mana_limit(), mana_ini + mana); // max mana we can reach on this action
+        //let mana_lim = std::cmp::min(self.get_mana_limit(), mana_ini + mana); // max mana we can reach on this action
+        let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
@@ -2510,11 +2511,11 @@ fn read_action(code: &str) -> (&str, Action) {
       let code = tail(code);
       let (code, skip) = read_char(code, 'u');
       let (code, skip) = read_char(code, 'n');
-      let (code, mana) = read_numb(code);
+      //let (code, mana) = read_numb(code);
       let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
-      return (code, Action::Run { mana, expr });
+      return (code, Action::Run { expr });
     }
     _ => {
       panic!("Couldn't parse action.");
@@ -2621,9 +2622,9 @@ pub fn view_action(action: &Action) -> String {
       let name = U128_to_name(*name);
       return format!("ctr {} {}", name, arit);
     }
-    Action::Run { mana, expr } => {
+    Action::Run { expr } => {
       let expr = view_term(expr);
-      return format!("run {} {{\n  {}\n}}", mana, expr);
+      return format!("run {{\n  {}\n}}", expr);
     }
   }
 }

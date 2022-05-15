@@ -39,17 +39,17 @@ pub struct Block {
 pub type Transaction = Vec<u8>;
 
 pub struct Node {
-  pub socket     : UdpSocket,                      // UDP socket
-  pub port       : u16,                            // UDP port
-  pub tip        : (U256, U256),                   // current tip work and block hash
-  pub block      : U256Map<Block>,                 // block hash -> block information
-  pub children   : U256Map<Vec<U256>>,             // block hash -> blocks that have this as its parent
-  pub waiters    : U256Map<Vec<Block>>,            // block hash -> blocks that are waiting for this block info
-  pub work       : U256Map<U256>,                  // block hash -> accumulated work
-  pub target     : U256Map<U256>,                  // block hash -> this block's target
+  pub socket     : UdpSocket,                       // UDP socket
+  pub port       : u16,                             // UDP port
+  pub tip        : (U256, U256),                    // current tip work and block hash
+  pub block      : U256Map<Block>,                  // block hash -> block information
+  pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
+  pub waiters    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
+  pub work       : U256Map<U256>,                   // block hash -> accumulated work
+  pub target     : U256Map<U256>,                   // block hash -> this block's target
   pub height     : U256Map<u128>,                   // block hash -> cached height
-  pub seen       : U256Map<()>,                    // block hash -> have we received it yet?
-  pub was_mined  : U256Map<HashSet<Transaction>>,  // block hash -> set of transaction hashes that were already mined
+  pub seen       : U256Map<()>,                     // block hash -> have we received it yet?
+  pub was_mined  : U256Map<HashSet<Transaction>>,   // block hash -> set of transaction hashes that were already mined
   pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
