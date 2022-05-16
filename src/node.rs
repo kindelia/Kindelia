@@ -31,8 +31,8 @@ pub struct Body {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-  pub time: u128,  // block timestamp
-  pub rand: u128,  // block nonce
+  pub time: u128, // block timestamp
+  pub rand: u128, // block nonce
   pub prev: U256, // previous block (32 bytes)
   pub body: Body, // block contents (1280 bytes)
 }
@@ -287,8 +287,11 @@ pub fn hash_block(block: &Block) -> U256 {
 // Converts a string to a body, terminating with a null character.
 // Truncates if the string length is larger than BODY_SIZE-1.
 pub fn string_to_body(text: &str) -> Body {
+  return bytes_to_body(text.as_bytes());
+}
+
+pub fn bytes_to_body(bytes: &[u8]) -> Body {
   let mut body = Body { value: [0; BODY_SIZE] };
-  let bytes = text.as_bytes();
   for i in 0 .. std::cmp::min(BODY_SIZE, bytes.len()) {
     body.value[i] = bytes[i];
   }
@@ -449,6 +452,8 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
         let new_tip = bhash;
         if node.work[&new_tip] > node.work[&old_tip] {
           node.tip = bhash;
+          println!("\n# new block: {:x}", bhash);
+          println!("- work: {}", node.work[&new_tip]);
           // Block reorganization (* marks blocks for which we have runtime snapshots):
           // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
           // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
@@ -477,6 +482,7 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
           // 3. Reverts the runtime to a state older than that block
           //    On the example above, we'd find `runtime.tick = 1`
           let mut tick = node.height[&old_bhash];
+          println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
           node.runtime.rollback(tick);
           // 4. Finds the last block included on the reverted runtime state
           //    On the example above, we'd find `new_bhash = B`
@@ -513,7 +519,9 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
 pub fn node_compute_block(node: &mut Node, block: &Block) {
   let bits = BitVec::from_bytes(&block.body.value);
   let acts = deserialized_actions(&bits);
+  //println!("Computing block:\n{}", view_actions(&acts));
   node.runtime.run_actions(&acts);
+  node.runtime.tick();
 }
 
 pub fn get_longest_chain(node: &Node) -> Vec<Block> {
@@ -708,12 +716,21 @@ fn node_handle_input(node: &Node, miner_comm: &SharedMinerComm, input: &str) {
 pub fn node_loop(
   mut node: Node,
   miner_comm: SharedMinerComm,
-  input: SharedInput,
-  ui: bool,
+  mine_file: Option<String>,
+  //input: SharedInput,
+  //ui: bool,
 ) {
   let mut mined = 0;
   let mut tick = 0;
-  let mut last_screen: Option<Vec<String>> = None;
+
+  let mine_body = mine_file.map(|file| {
+    let (_rest, acts) = crate::hvm::read_actions(&file);
+    let bits = serialized_actions(&acts);
+    let body = bytes_to_body(&bitvec_to_bytes(&bits));
+    return body;
+  });
+
+  //let mut last_screen: Option<Vec<String>> = None;
 
   loop {
     tick += 1;
@@ -747,17 +764,24 @@ pub fn node_loop(
 
       // Asks the miner to mine a block
       if tick % 10 == 0 {
-        let input = (input.lock().unwrap()).clone();
-        node_handle_input(&node, &miner_comm, &input);
+        if let Some(body) = &mine_body {
+          node_ask_mine(&mut node, &miner_comm, body.clone()); // FIXME: avoid clone
+        }
       }
 
+      // Asks the miner to mine a block
+      //if tick % 10 == 0 {
+        //let input = (input.lock().unwrap()).clone();
+        //node_handle_input(&node, &miner_comm, &input);
+      //}
+
       // Display node info
-      if ui && tick % 10 == 0 {
-        let input = (input.lock().unwrap()).clone();
-        display_tui(&node_get_info(&node, None), &input, &mut last_screen);
-      } else if tick % 60 == 0 {
-        display_simple(&node_get_info(&node, None));
-      }
+      //if ui && tick % 10 == 0 {
+        //let input = (input.lock().unwrap()).clone();
+        //display_tui(&node_get_info(&node, None), &input, &mut last_screen);
+      //} else if tick % 2000 == 0 {
+        //display_simple(&node_get_info(&node, None));
+      //}
     }
 
     // Sleep for 1/100 seconds
@@ -768,6 +792,7 @@ pub fn node_loop(
 // Interface
 // =========
 
+/*
 // Input
 // -----
 
@@ -989,3 +1014,4 @@ fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
   std::io::stdout().flush().ok();
   *old_screen = Some(new_screen.clone());
 }
+*/

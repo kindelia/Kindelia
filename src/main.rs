@@ -30,8 +30,8 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum CliCmd {
   Start {
-    #[clap(long)]
-    ui: bool, 
+    //#[clap(short, long)]
+    file: Option<String>,
   },
   /// Runs a Kindelia file
   Run { 
@@ -43,7 +43,10 @@ pub enum CliCmd {
 }
 
 fn main() -> Result<(), String> {
-  run_cli()
+  //return run_cli();
+
+  start_node(Some("simple.kdl".to_string()));
+  return Ok(());
   
   //hvm::test();
   //return Ok(());
@@ -53,8 +56,8 @@ fn run_cli() -> Result<(), String> {
   let cli_matches = Cli::parse();
 
   match cli_matches.command {
-    CliCmd::Start { ui } => {
-      start_node(ui);
+    CliCmd::Start { file } => {
+      start_node(file);
     }
     CliCmd::Run { file } => {
       let file = std::fs::read_to_string(file);
@@ -69,7 +72,10 @@ fn run_cli() -> Result<(), String> {
   Ok(())
 }
 
-fn start_node(ui: bool) {
+fn start_node(file: Option<String>) {
+  // Reads the file contents
+  let file = file.map(|file| std::fs::read_to_string(file).expect("File not found."));
+
   // Node state object
   let node = new_node();
 
@@ -78,12 +84,12 @@ fn start_node(ui: bool) {
   let miner_comm_1 = miner_comm_0.clone();
 
   // User input object
-  let input_0 = new_input();
-  let input_1 = input_0.clone();
+  //let input_0 = new_input();
+  //let input_1 = input_0.clone();
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node, miner_comm_0, input_0, ui);
+    node_loop(node, miner_comm_0, file);
   });
 
   // Spawns the miner thread
@@ -92,14 +98,14 @@ fn start_node(ui: bool) {
   });
 
   // Spawns the input thread
-  let input_thread = thread::spawn(move || {
-    if ui {
-      input_loop(&input_1);
-    }
-  });
+  //let input_thread = thread::spawn(move || {
+    //if ui {
+      //input_loop(&input_1);
+    //}
+  //});
 
   // Joins all threads
   node_thread.join().unwrap();
   miner_thread.join().unwrap();
-  input_thread.join().unwrap();
+  //input_thread.join().unwrap();
 }

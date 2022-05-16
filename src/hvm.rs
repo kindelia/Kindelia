@@ -819,9 +819,13 @@ impl Runtime {
     self.set_tick(self.get_tick() + 1);
     //self.get_heap_mut(self.curr).absorb_heap(&mut self.get_heap_mut(self.draw), true);
     //self.get_heap_mut(self.draw).clear_heap();
-    let (_, deleted, absorber, rollback) = rollback_push(self.curr, self.back.clone());
-    if let (Some(deleted), Some(absorber)) = (deleted, absorber) {
-      self.absorb_heap(absorber, deleted, false);
+    let (_, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
+    if let Some(deleted) = deleted {
+      if let Some(absorber) = absorber {
+        self.absorb_heap(absorber, deleted, false);
+      }
+      self.clear_heap(deleted);
+      self.nuls.push(deleted);
     }
     self.back = rollback;
     self.curr = match deleted {
@@ -835,29 +839,19 @@ impl Runtime {
   
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
-    // If current heap is older than the target tick
-    if self.get_heap(self.curr).tick > tick {
-      let init_funs = self.get_heap_mut(self.curr).funs;
-      let mut done : bool;
+    // If target tick is older than current tick
+    if tick < self.get_tick() {
+      println!("ROLLING BACK {} < {}", tick, self.get_heap(self.curr).tick);
+      //let init_funs = self.get_heap_mut(self.curr).funs;
       let mut back : Arc<Rollback> = self.back.clone();
-      // Removes all heaps that are older than the target tick
-      loop {
-        (done, back) = match &*back {
-          Rollback::Cons { keep, head, tail } => {
-            if self.get_heap(*head).tick > tick {
-              self.clear_heap(*head);
-              self.nuls.push(*head);
-              (false, tail.clone())
-            } else {
-              (true, Arc::new(Rollback::Cons { keep: *keep, head: *head, tail: tail.clone() }))
-            }
-          }
-          Rollback::Nil => {
-            (true, Arc::new(Rollback::Nil))
-          }
-        };
-        if done {
-          break;
+      // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
+      while tick < self.get_tick() {
+        back = if let Rollback::Cons { keep, head, tail } = &*back {
+          self.clear_heap(*head);
+          self.nuls.push(*head);
+          tail.clone()
+        } else {
+          back
         }
       }
       // Moves the most recent valid heap to `self.get_heap_mut(self.curr)`
@@ -2552,7 +2546,7 @@ fn read_action(code: &str) -> (&str, Action) {
   }
 }
 
-fn read_actions(code: &str) -> (&str, Vec<Action>) {
+pub fn read_actions(code: &str) -> (&str, Vec<Action>) {
   let (code, actions) = read_until(code, '\0', read_action);
   //for action in &actions {
     //println!("... action {}", view_action(action));
