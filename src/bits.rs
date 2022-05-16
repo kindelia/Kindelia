@@ -126,8 +126,7 @@ pub fn serialized_address(address: &Address) -> BitVec {
 }
 
 pub fn deserialized_address(bits: &BitVec) -> Address {
-  let mut index = 0;
-  deserialize_address(bits, &mut index)
+  deserialize_address(bits, &mut 0)
 }
 
 // A peer
@@ -150,8 +149,7 @@ pub fn serialized_peer(peer: &Peer) -> BitVec {
 }
 
 pub fn deserialized_peer(bits: &BitVec) -> Peer {
-  let mut index = 0;
-  deserialize_peer(bits, &mut index)
+  deserialize_peer(bits, &mut 0)
 }
 
 // A block
@@ -182,8 +180,7 @@ pub fn serialized_block(block: &Block) -> BitVec {
 }
 
 pub fn deserialized_block(bits: &BitVec) -> Block {
-  let mut index = 0;
-  deserialize_block(bits, &mut index)
+  deserialize_block(bits, &mut 0)
 }
 
 // A hash
@@ -259,8 +256,7 @@ pub fn serialized_message(message: &Message) -> BitVec {
 }
 
 pub fn deserialized_message(bits: &BitVec) -> Message {
-  let mut index = 0;
-  deserialize_message(bits, &mut index)
+  deserialize_message(bits, &mut 0)
 }
 
 //pub enum Term {
@@ -470,8 +466,7 @@ pub fn serialized_actions(actions: &[Action]) -> BitVec {
 }
 
 pub fn deserialized_actions(bits: &BitVec) -> Vec<Action> {
-  let mut index = 0;
-  deserialize_actions(bits, &mut index)
+  deserialize_actions(bits, &mut 0)
 }
 
 // Tests

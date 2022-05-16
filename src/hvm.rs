@@ -7,7 +7,8 @@ use rand::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
 use std::hash::{Hash, Hasher, BuildHasherDefault};
-use std::rc::Rc;
+//use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 // Types
@@ -64,7 +65,7 @@ pub struct Func {
 // A file is a map of `FuncID -> Function`
 #[derive(Clone, Debug)]
 pub struct File {
-  pub funcs: HashMap<u64, Rc<Func>, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub funcs: HashMap<u64, Arc<Func>, BuildHasherDefault<NoHashHasher<u64>>>,
 }
 
 // A map of `FuncID -> Arity`
@@ -113,22 +114,24 @@ pub struct Heap {
 }
 
 // A list of past heap states, for block-reorg rollback
+// FIXME: this should be replaced by a much simpler index array
 #[derive(Debug)]
 pub enum Rollback {
   Cons {
-    keep: u128,
-    head: Box<Heap>,
-    tail: Box<Rollback>,
+    keep: u64,
+    head: u64,
+    tail: Arc<Rollback>,
   },
   Nil
 }
 
 // The current and past states
 pub struct Runtime {
-  draw: Box<Heap>,      // drawing state
-  heap: Box<Heap>,      // current state
-  back: Box<Rollback>,  // past states
-  nuls: Vec<Box<Heap>>, // empty heaps (for reuse)
+  heap: Vec<Heap>,      // heap objects
+  draw: u64,            // drawing heap index
+  curr: u64,            // current heap index
+  nuls: Vec<u64>,       // reuse heap indices
+  back: Arc<Rollback>,  // past states
 }
 
 // Constants
@@ -138,7 +141,7 @@ const U128_PER_KB: u128 = 0x80;
 const U128_PER_MB: u128 = 0x20000;
 const U128_PER_GB: u128 = 0x8000000;
 
-const HEAP_SIZE: u128 = 16 * U128_PER_MB;
+const HEAP_SIZE: u128 = 512 * U128_PER_MB;
 //const HEAP_SIZE: u128 = 32;
 
 pub const MAX_ARITY: u128 = 16;
@@ -206,6 +209,8 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
     _       => None,
   }
 }
+
+pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
 
 // Mana Table
 // ----------
@@ -348,10 +353,10 @@ impl Heap {
   fn read_disk(&self, fid: u128) -> Option<Lnk> {
     return self.disk.read(fid);
   }
-  fn write_file(&mut self, fid: u128, fun: Rc<Func>) {
+  fn write_file(&mut self, fid: u128, fun: Arc<Func>) {
     return self.file.write(fid, fun);
   }
-  fn read_file(&self, fid: u128) -> Option<Rc<Func>> {
+  fn read_file(&self, fid: u128) -> Option<Arc<Func>> {
     return self.file.read(fid);
   }
   fn write_arit(&mut self, fid: u128, val: u128) {
@@ -524,12 +529,12 @@ impl Disk {
 }
 
 impl File {
-  fn write(&mut self, fid: u128, val: Rc<Func>) {
+  fn write(&mut self, fid: u128, val: Arc<Func>) {
     if !self.funcs.contains_key(&(fid as u64)) {
       self.funcs.insert(fid as u64, val);
     }
   }
-  fn read(&self, fid: u128) -> Option<Rc<Func>> {
+  fn read(&self, fid: u128) -> Option<Arc<Func>> {
     return self.funcs.get(&(fid as u64)).map(|x| x.clone());
   }
   fn clear(&mut self) {
@@ -565,63 +570,17 @@ impl Arit {
   }
 }
 
-pub fn init_rollback() -> Rollback {
-  return Rollback::Nil;
-  //return rollback_push(Box::new(init_heap()), Box::new(Rollback::Nil)).2;
-}
-
-// Attempts to include a heap state on the list of past heap states. It only keeps at most
-// `log_16(tick)` heaps in memory, rejecting heaps that it doesn't need to store. It returns:
-// - included : Bool = true if the heap was included, false if it was rejected
-// - new_heap : Option<Box<Heap>> = either `None` or `Some(drop)`, where `drop` is:
-//   - if the `heap` was included: an empty heap (to be reused)
-//   - if the `heap` was rejected: that heap itself
-// - rollback : Rollback = the updated list of past heap states
-pub fn rollback_push(mut elem: Box<Heap>, back: Box<Rollback>) -> (bool, Option<Box<Heap>>, Rollback) {
-  match *back {
-    Rollback::Nil => {
-      return (true, None, Rollback::Cons {
-        keep: 0,
-        head: elem,
-        tail: Box::new(Rollback::Nil),
-      })
-    }
-    Rollback::Cons { keep, head, tail } => {
-      if keep == 0xF {
-        let (included, mut deleted, tail) = rollback_push(head, tail);
-        if !included {
-          // moves data from deleted heap to kept heap
-          if let Some(deleted) = &mut deleted {
-            elem.absorb(deleted, false);
-            deleted.clear();
-          }
-        }
-        return (true, deleted, Rollback::Cons {
-          keep: 0,
-          head: elem,
-          tail: Box::new(tail),
-        });
-      } else {
-        return (false, Some(elem), Rollback::Cons {
-          keep: keep + 1,
-          head: head,
-          tail: tail,
-        });
-      }
-    }
-  }
-}
-
 pub fn init_runtime() -> Runtime {
-  let mut nuls = Vec::new();
-  for i in 0 .. 8 {
-    nuls.push(Box::new(init_heap()));
+  let mut heap = Vec::new();
+  for i in 0 .. 10 {
+    heap.push(init_heap());
   }
   return Runtime {
-    draw: Box::new(init_heap()),
-    heap: Box::new(init_heap()),
-    back: Box::new(init_rollback()),
-    nuls: nuls,
+    heap,
+    draw: 0,
+    curr: 1,
+    nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
+    back: Arc::new(Rollback::Nil),
   };
 }
 
@@ -630,35 +589,35 @@ impl Runtime {
   // API
   // ---
 
-  fn define_function(&mut self, fid: u128, func: Func) {
-    self.draw.write_arit(fid, func.arity);
-    self.draw.write_file(fid, Rc::new(func));
+  pub fn define_function(&mut self, fid: u128, func: Func) {
+    self.get_heap_mut(self.draw).write_arit(fid, func.arity);
+    self.get_heap_mut(self.draw).write_file(fid, Arc::new(func));
   }
 
-  fn define_constructor(&mut self, cid: u128, arity: u128) {
-    self.draw.write_arit(cid, arity);
+  pub fn define_constructor(&mut self, cid: u128, arity: u128) {
+    self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
-  fn define_function_from_code(&mut self, name: &str, code: &str) {
+  pub fn define_function_from_code(&mut self, name: &str, code: &str) {
     self.define_function(name_to_u128(name), read_func(code).1);
   }
 
-  fn create_term(&mut self, term: &Term, loc: u128) -> Lnk {
+  pub fn create_term(&mut self, term: &Term, loc: u128) -> Lnk {
     return create_term(self, term, loc);
   }
 
-  fn alloc_term(&mut self, term: &Term) -> u128 {
+  pub fn alloc_term(&mut self, term: &Term) -> u128 {
     let loc = alloc(self, 1);
     let lnk = create_term(self, term, loc);
     self.write(loc as usize, lnk);
     return loc;
   }
 
-  fn alloc_term_from_code(&mut self, code: &str) -> u128 {
+  pub fn alloc_term_from_code(&mut self, code: &str) -> u128 {
     self.alloc_term(&read_term(code).1)
   }
 
-  fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
+  pub fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
     collect(self, term, mana)
   }
 
@@ -672,33 +631,59 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  fn run_actions(&mut self, actions: &[Action]) {
+  pub fn run_actions(&mut self, actions: &[Action]) {
     for action in actions {
       self.run_action(action);
     }
   }
 
-  fn run_actions_from_code(&mut self, code: &str) {
+  pub fn run_actions_from_code(&mut self, code: &str) {
     return self.run_actions(&read_actions(code).1);
   }
 
-  fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
+  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
     compute_at(self, loc, mana)
   }
 
-  fn compute(&mut self, lnk: Lnk, mana: u128) -> Option<Lnk> {
+  pub fn compute(&mut self, lnk: Lnk, mana: u128) -> Option<Lnk> {
     let host = alloc_lnk(self, lnk);
     let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Some(done);
   }
 
-  fn show_term(&self, lnk: Lnk) -> String {
+  pub fn show_term(&self, lnk: Lnk) -> String {
     return show_term(self, lnk);
   }
 
-  fn show_term_at(&self, loc: u128) -> String {
+  pub fn show_term_at(&self, loc: u128) -> String {
     return show_term(self, self.read(loc as usize));
+  }
+
+  // Heaps
+  // -----
+
+  pub fn get_heap(&self, index: u64) -> &Heap {
+    return &self.heap[index as usize];
+  }
+
+  pub fn get_heap_mut(&mut self, index: u64) -> &mut Heap {
+    return &mut self.heap[index as usize];
+  }
+
+  // Copies the contents of the absorbed heap into the absorber heap
+  fn absorb_heap(&mut self, absorber: u64, absorbed: u64, overwrite: bool) {
+    // FIXME: can we satisfy the borrow checker without using unsafe pointers?
+    unsafe {
+      let a_arr = &mut self.heap as *mut Vec<Heap>;
+      let a_ref = &mut *(&mut (*a_arr)[absorber as usize] as *mut Heap);
+      let b_ref = &mut *(&mut (*a_arr)[absorbed as usize] as *mut Heap);
+      a_ref.absorb(b_ref, overwrite);
+    }
+  }
+
+  fn clear_heap(&mut self, index: u64) {
+    self.heap[index as usize].clear();
   }
 
   // IO
@@ -775,25 +760,24 @@ impl Runtime {
     }
   }
 
-  fn run_action(&mut self, action: &Action) {
+  pub fn run_action(&mut self, action: &Action) {
     match action {
       Action::Fun { name, arit, func, init } => {
         println!("- fun {} {}", U128_to_name(*name), arit);
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
-          println!("- arity is -> {}", arit);
           let state = self.create_term(init, 0);
           self.write_disk(*name, state);
-          self.heap.absorb(&mut self.draw, true);
-          self.draw.clear();
+          self.absorb_heap(self.curr, self.draw, true);
+          self.clear_heap(self.draw);
         }
       }
       Action::Ctr { name, arit } => {
         println!("- ctr {} {}", U128_to_name(*name), arit);
         self.set_arity(*name, *arit);
-        self.heap.absorb(&mut self.draw, true);
-        self.draw.clear();
+        self.absorb_heap(self.curr, self.draw, true);
+        self.clear_heap(self.draw);
       }
       Action::Run { expr } => {
         println!("- run {}", view_term(expr));
@@ -807,23 +791,23 @@ impl Runtime {
             if let Some(()) = self.collect(done, mana_lim) {
               println!("  - mana: {}", self.get_mana() - mana_ini);
               println!("  - term: {}", self.show_term(done));
-              self.heap.absorb(&mut self.draw, true);
-              self.draw.clear();
+              self.absorb_heap(self.curr, self.draw, true);
+              self.clear_heap(self.draw);
               return;
             }
           }
           //println!("{}", show_rt(self));
         }
         println!("  - fail");
+        self.clear_heap(self.draw);
         //self.collect(done);
-        self.draw.clear();
       }
     }
   }
 
   // Maximum mana = 42m * block_number
-  fn get_mana_limit(&self) -> u128 {
-    (self.get_tick() + 1) * 42000000
+  pub fn get_mana_limit(&self) -> u128 {
+    (self.get_tick() + 1) * BLOCK_MANA_LIMIT
   }
 
 
@@ -831,60 +815,60 @@ impl Runtime {
   // --------
 
   // Advances the heap time counter, saving past states for rollback.
-  fn tick(mut self) {
-    self.draw.set_tick(self.draw.get_tick() + 1);
-    self.heap.absorb(&mut self.draw, true);
-    self.draw.clear();
-    let (_, drop, back) = rollback_push(self.heap, self.back);
-    self.back = Box::new(back);
-    self.heap = match drop {
-      Some(heap) => { heap }
-      None => {
-        match self.nuls.pop() {
-          Some(heap) => { heap }
-          None => { panic!("Not enough heaps."); }
-        }
+  pub fn tick(&mut self) {
+    self.set_tick(self.get_tick() + 1);
+    //self.get_heap_mut(self.curr).absorb_heap(&mut self.get_heap_mut(self.draw), true);
+    //self.get_heap_mut(self.draw).clear_heap();
+    let (_, deleted, absorber, rollback) = rollback_push(self.curr, self.back.clone());
+    if let (Some(deleted), Some(absorber)) = (deleted, absorber) {
+      self.absorb_heap(absorber, deleted, false);
+    }
+    self.back = rollback;
+    self.curr = match deleted {
+      Some(index) => index,
+      None => match self.nuls.pop() {
+        Some(index) => index,
+        None => { panic!("Not enough heaps."); }
       }
     };
   }
-
+  
   // Rolls back to the earliest state before or equal `tick`
-  // FIXME: remove functions from file; actually not necessary, 
-  fn rollback(mut self, tick: u128) {
+  pub fn rollback(&mut self, tick: u128) {
     // If current heap is older than the target tick
-    if self.heap.tick > tick {
-      let init_funs = self.heap.funs;
-      let mut done;
-      let mut back = *self.back;
+    if self.get_heap(self.curr).tick > tick {
+      let init_funs = self.get_heap_mut(self.curr).funs;
+      let mut done : bool;
+      let mut back : Arc<Rollback> = self.back.clone();
       // Removes all heaps that are older than the target tick
       loop {
-        (done, back) = match back {
-          Rollback::Cons { keep, mut head, tail } => {
-            if head.tick > tick {
-              head.clear();
-              self.nuls.push(head);
-              (false, *tail)
+        (done, back) = match &*back {
+          Rollback::Cons { keep, head, tail } => {
+            if self.get_heap(*head).tick > tick {
+              self.clear_heap(*head);
+              self.nuls.push(*head);
+              (false, tail.clone())
             } else {
-              (true, Rollback::Cons { keep, head, tail })
+              (true, Arc::new(Rollback::Cons { keep: *keep, head: *head, tail: tail.clone() }))
             }
           }
           Rollback::Nil => {
-            (true, Rollback::Nil)
+            (true, Arc::new(Rollback::Nil))
           }
         };
         if done {
           break;
         }
       }
-      // Moves the most recent valid heap to `self.heap`
-      match back {
+      // Moves the most recent valid heap to `self.get_heap_mut(self.curr)`
+      match &*back {
         Rollback::Cons { keep, head, tail } => {
-          self.back = tail;
-          self.heap = head;
+          self.back = tail.clone();
+          self.curr = *head;
         }
         Rollback::Nil => {
-          self.back = Box::new(Rollback::Nil);
-          self.heap = self.nuls.pop().expect("Impossible error.");
+          self.back = Arc::new(Rollback::Nil);
+          self.curr = self.nuls.pop().expect("Impossible error.");
         }
       }
     }
@@ -895,12 +879,12 @@ impl Runtime {
 
   // Attempts to read data from the latest heap.
   // If not present, looks for it on past states.
-  fn get_with<A: std::cmp::PartialEq>(&self, zero: A, none: A, get: impl Fn(&Heap) -> A) -> A {
-    let got = get(&self.draw);
+  pub fn get_with<A: std::cmp::PartialEq>(&self, zero: A, none: A, get: impl Fn(&Heap) -> A) -> A {
+    let got = get(&self.get_heap(self.draw));
     if none != got {
       return got;
     }
-    let got = get(&self.heap);
+    let got = get(&self.get_heap(self.curr));
     if none != got {
       return got;
     }
@@ -908,7 +892,7 @@ impl Runtime {
     loop {
       match &**back {
         Rollback::Cons { keep, head, tail } => {
-          let val = get(&head);
+          let val = get(self.get_heap(*head));
           if val != none {
             return val;
           }
@@ -921,23 +905,23 @@ impl Runtime {
     }
   }
 
-  fn write(&mut self, idx: usize, val: u128) {
-    return self.draw.write(idx, val);
+  pub fn write(&mut self, idx: usize, val: u128) {
+    return self.get_heap_mut(self.draw).write(idx, val);
   }
 
-  fn read(&self, idx: usize) -> u128 {
+  pub fn read(&self, idx: usize) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  fn write_disk(&mut self, fid: u128, val: Lnk) {
-    return self.draw.write_disk(fid, val);
+  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
+    return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
-  fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
+  pub fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
     return self.get_with(None, None, |heap| heap.read_disk(fid));
   }
 
-  fn get_arity(&self, fid: u128) -> u128 {
+  pub fn get_arity(&self, fid: u128) -> u128 {
     if let Some(arity) = GET_ARITY(fid) {
       return arity;
     } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
@@ -947,16 +931,16 @@ impl Runtime {
     }
   }
 
-  fn set_arity(&mut self, fid: u128, arity: u128) {
-    self.draw.write_arit(fid, arity);
+  pub fn set_arity(&mut self, fid: u128, arity: u128) {
+    self.get_heap_mut(self.draw).write_arit(fid, arity);
   }
 
-  fn get_func(&self, fid: u128) -> Option<Rc<Func>> {
-    let got = self.draw.read_file(fid);
+  pub fn get_func(&self, fid: u128) -> Option<Arc<Func>> {
+    let got = self.get_heap(self.draw).read_file(fid);
     if let Some(func) = got {
       return Some(func);
     }
-    let got = self.heap.read_file(fid);
+    let got = self.get_heap(self.curr).read_file(fid);
     if let Some(func) = got {
       return Some(func);
     }
@@ -964,7 +948,7 @@ impl Runtime {
     loop {
       match &**back {
         Rollback::Cons { keep, head, tail } => {
-          let got = head.file.read(fid);
+          let got = self.get_heap(*head).file.read(fid);
           if let Some(func) = got {
             return Some(func);
           }
@@ -977,57 +961,84 @@ impl Runtime {
     }
   }
 
-  fn get_dups(&self) -> u128 {
+  pub fn get_dups(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.get_dups());
   }
 
-  fn set_rwts(&mut self, rwts: u128) {
-    self.draw.set_rwts(rwts);
+  pub fn set_rwts(&mut self, rwts: u128) {
+    self.get_heap_mut(self.draw).set_rwts(rwts);
   }
 
-  fn get_rwts(&self) -> u128 {
+  pub fn get_rwts(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.rwts);
   }
 
-  fn set_mana(&mut self, mana: u128) {
-    self.draw.set_mana(mana);
+  pub fn set_mana(&mut self, mana: u128) {
+    self.get_heap_mut(self.draw).set_mana(mana);
   }
 
-  fn get_mana(&self) -> u128 {
+  pub fn get_mana(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.mana);
   }
 
-  fn set_tick(&mut self, tick: u128) {
-    self.draw.set_tick(tick);
+  pub fn set_tick(&mut self, tick: u128) {
+    self.get_heap_mut(self.draw).set_tick(tick);
   }
 
-  fn get_tick(&self) -> u128 {
+  pub fn get_tick(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.tick);
   }
 
-  fn set_size(&mut self, size: i128) {
-    self.draw.size = size;
+  pub fn set_size(&mut self, size: i128) {
+    self.get_heap_mut(self.draw).size = size;
   }
 
-  fn get_size(&self) -> i128 {
+  pub fn get_size(&self) -> i128 {
     return self.get_with(0, I128_NONE, |heap| heap.size);
   }
 
-  fn set_next(&mut self, next: u128) {
-    self.draw.next = next;
+  pub fn set_next(&mut self, next: u128) {
+    self.get_heap_mut(self.draw).next = next;
   }
 
-  fn get_next(&self) -> u128 {
+  pub fn get_next(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.next);
   }
 
-  fn fresh_dups(&mut self) -> u128 {
-    let dups = self.draw.get_dups();
-    self.draw.set_dups(self.draw.get_dups() + 1);
+  pub fn fresh_dups(&mut self) -> u128 {
+    let dups = self.get_heap(self.draw).get_dups();
+    self.get_heap_mut(self.draw).set_dups(dups + 1);
     return dups & 0x3FFFFFFF;
   }
 
 }
+
+// Attempts to include a heap state on the list of past heap states. It only keeps at most
+// `log_16(tick)` heaps in memory, rejecting heaps that it doesn't need to store. It returns:
+// - included : Bool             = true if the heap was included, false if it was rejected
+// - absorber : Option<Box<u64>> = the index of the dropped heap absorber (if any)
+// - deleted  : Option<Box<u64>> = the index of the dropped heap (if any)
+// - rollback : Rollback         = the updated rollback object
+pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
+  match &*back {
+    Rollback::Nil => {
+      let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail: Arc::new(Rollback::Nil) });
+      return (true, None, None, rollback);
+    }
+    Rollback::Cons { keep, head, tail } => {
+      if *keep == 0xF {
+        let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone());
+        let absorber = if !included { Some(elem) } else { absorber };
+        let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail });
+        return (true, absorber, deleted, rollback);
+      } else {
+        let rollback = Arc::new(Rollback::Cons { keep: keep + 1, head: *head, tail: tail.clone() });
+        return (false, None, Some(elem), rollback);
+      }
+    }
+  }
+}
+
 
 // Globals
 // -------
@@ -1117,7 +1128,7 @@ pub fn get_loc(lnk: Lnk, arg: u128) -> u128 {
 
 pub fn ask_lnk(rt: &Runtime, loc: u128) -> Lnk {
   rt.read(loc as usize)
-  //unsafe { *rt.data.get_unchecked(loc as usize) }
+  //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
 pub fn ask_arg(rt: &Runtime, term: Lnk, arg: u128) -> Lnk {
@@ -1126,11 +1137,9 @@ pub fn ask_arg(rt: &Runtime, term: Lnk, arg: u128) -> Lnk {
 
 pub fn link(rt: &mut Runtime, loc: u128, lnk: Lnk) -> Lnk {
   rt.write(loc as usize, lnk);
-  //*rt.data.get_unchecked_mut(loc as usize) = lnk;
   if get_tag(lnk) <= VAR {
     let pos = get_loc(lnk, get_tag(lnk) & 0x01);
     rt.write(pos as usize, Arg(loc));
-    //*rt.data.get_unchecked_mut(pos as usize) = Arg(loc);
   }
   lnk
 }
@@ -1829,7 +1838,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Rc<Func>, host: u128, term: Lnk, mana: u128) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -1964,7 +1973,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
   }
 
   // FIXME: remove this when Runtime is split (see above)
-  //rt.heap.file = file;
+  //rt.get_heap_mut(self.curr).file = file;
 
   return Some(ask_lnk(rt, root));
 }
@@ -2545,9 +2554,9 @@ fn read_action(code: &str) -> (&str, Action) {
 
 fn read_actions(code: &str) -> (&str, Vec<Action>) {
   let (code, actions) = read_until(code, '\0', read_action);
-  for action in &actions {
-    println!("... action {}", view_action(action));
-  }
+  //for action in &actions {
+    //println!("... action {}", view_action(action));
+  //}
   return (code, actions);
 }
 

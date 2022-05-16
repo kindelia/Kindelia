@@ -19,6 +19,7 @@ use termion::{color, style};
 
 use crate::util::*;
 use crate::bits::*;
+use crate::hvm::*;
 
 // Types
 // -----
@@ -41,7 +42,7 @@ pub type Transaction = Vec<u8>;
 pub struct Node {
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
-  pub tip        : (U256, U256),                    // current tip work and block hash
+  pub tip        : U256,                            // current ti
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
   pub waiters    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
@@ -53,6 +54,7 @@ pub struct Node {
   pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
+  pub runtime    : Runtime,                         // Kindelia's runtime
 }
 
 #[derive(Debug, Clone)]
@@ -333,11 +335,12 @@ pub fn new_node() -> Node {
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
     seen       : HashMap::from([(ZERO_HASH(), ())]),
-    tip        : (u256(0), ZERO_HASH()),
+    tip        : ZERO_HASH(),
     was_mined  : HashMap::new(),
     pool       : PriorityQueue::new(),
     peer_id    : HashMap::new(),
     peers      : HashMap::new(),
+    runtime    : init_runtime(),
   };
   node_see_peer(&mut node, Peer {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 },
@@ -442,8 +445,51 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
           node.target.insert(bhash, node.target[&phash]);
         }
         // Updates the tip work and block hash
-        if node.work[&bhash] > node.tip.0 {
-          node.tip = (node.work[&bhash], bhash);
+        let old_tip = node.tip;
+        let new_tip = bhash;
+        if node.work[&new_tip] > node.work[&old_tip] {
+          node.tip = bhash;
+          // Block reorganization (* marks blocks for which we have runtime snapshots):
+          // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
+          // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
+          // hash: |  A |  B |  C |  D |  P |  Q |  R |  S |  T |  <- new timeline
+          //               |         '-> highest common block shared by both timelines
+          //               '-----> highest runtime snapshot before block D
+          let mut must_compute = Vec::new();
+          let mut old_bhash = old_tip;
+          let mut new_bhash = new_tip;
+          // 1. Finds the highest block with same height on both timelines
+          //    On the example above, we'd have `H, S`
+          while node.height[&new_bhash] > node.height[&old_bhash] {
+            must_compute.push(new_bhash);
+            new_bhash = node.block[&new_bhash].prev;
+          }
+          while node.height[&old_bhash] > node.height[&new_bhash] {
+            old_bhash = node.block[&old_bhash].prev;
+          }
+          // 2. Finds highest block with same value on both timelines
+          //    On the example above, we'd have `D`
+          while old_bhash != new_bhash {
+            must_compute.push(new_bhash);
+            old_bhash = node.block[&old_bhash].prev;
+            new_bhash = node.block[&new_bhash].prev;
+          }
+          // 3. Reverts the runtime to a state older than that block
+          //    On the example above, we'd find `runtime.tick = 1`
+          let mut tick = node.height[&old_bhash];
+          node.runtime.rollback(tick);
+          // 4. Finds the last block included on the reverted runtime state
+          //    On the example above, we'd find `new_bhash = B`
+          while tick > node.runtime.get_tick() {
+            must_compute.push(new_bhash);
+            new_bhash = node.block[&new_bhash].prev;
+            tick -= 1;
+          }
+          // 5. Computes every block after that on the new timeline
+          //    On the example above, we'd compute `C, D, P, Q, R, S, T`
+          for block in must_compute.iter().rev() {
+            node_compute_block(node, &node.block[block].clone());
+          }
         }
       }
       // Registers this block as a child of its parent
@@ -464,9 +510,15 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
   }
 }
 
+pub fn node_compute_block(node: &mut Node, block: &Block) {
+  let bits = BitVec::from_bytes(&block.body.value);
+  let acts = deserialized_actions(&bits);
+  node.runtime.run_actions(&acts);
+}
+
 pub fn get_longest_chain(node: &Node) -> Vec<Block> {
   let mut longest = Vec::new();
-  let mut bhash = node.tip.1;
+  let mut bhash = node.tip;
   while node.block.contains_key(&bhash) && bhash != ZERO_HASH() {
     let block = node.block.get(&bhash).unwrap();
     longest.push(block.clone());
@@ -543,7 +595,7 @@ pub fn show_block(block: &Block) -> String {
 
 // Get the current target
 pub fn get_tip_target(node: &Node) -> U256 {
-  node.target[&node.tip.1]
+  node.target[&node.tip]
 }
 
 // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
@@ -592,7 +644,7 @@ pub fn miner_loop(miner_comm: SharedMinerComm) {
 fn node_gossip_tip_block(node: &mut Node, peer_count: u128) {
   let random_peers = get_random_peers(node, peer_count);
   for peer in random_peers {
-    node_send_block_to(node, peer.address, node.block[&node.tip.1].clone());
+    node_send_block_to(node, peer.address, node.block[&node.tip].clone());
   }
 }
 
@@ -639,7 +691,7 @@ fn node_load_longest_chain(node: &mut Node) {
 
 fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
   write_miner_comm(miner_comm, MinerComm::Request {
-    prev: node.tip.1,
+    prev: node.tip,
     body,
     targ: get_tip_target(node),
   });
@@ -766,7 +818,7 @@ pub struct NodeInfo {
 }
 
 fn node_get_info(node: &Node, max_last_blocks: Option<u128>) -> NodeInfo {
-  let tip = node.tip.1;
+  let tip = node.tip;
   let height = *node.height.get(&tip).unwrap();
   let tip_target = *node.target.get(&tip).unwrap();
   let difficulty = target_to_difficulty(tip_target);
