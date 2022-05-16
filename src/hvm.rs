@@ -851,6 +851,7 @@ impl Runtime {
     if tick < self.get_tick() {
       println!("- rolling back from {} to {}", tick, self.get_tick());
       self.clear_heap(self.curr);
+      self.nuls.push(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
         if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
@@ -860,15 +861,12 @@ impl Runtime {
         }
       }
       // Moves the most recent valid heap to `self.curr`
-      match &*self.back.clone() {
-        Rollback::Cons { keep, head, tail } => {
-          self.back = tail.clone();
-          self.curr = *head;
-        }
-        Rollback::Nil => {
-          self.back = Arc::new(Rollback::Nil);
-          self.curr = self.nuls.pop().expect("Impossible error.");
-        }
+      if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
+        self.back = tail.clone();
+        self.curr = *head;
+      } else {
+        self.back = Arc::new(Rollback::Nil);
+        self.curr = self.nuls.pop().expect("Shouldn't happen.");
       }
     }
   }
