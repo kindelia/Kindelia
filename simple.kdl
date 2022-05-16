@@ -1,3 +1,5 @@
 run {
-  $(IO.done (+ #1 #1))
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Get)) λx
+  $(IO.done x)))
 }

@@ -286,15 +286,22 @@ pub fn hash_block(block: &Block) -> U256 {
 
 // Converts a string to a body, terminating with a null character.
 // Truncates if the string length is larger than BODY_SIZE-1.
-pub fn string_to_body(text: &str) -> Body {
-  return bytes_to_body(text.as_bytes());
-}
+//pub fn string_to_body(text: &str) -> Body {
+  //return bytes_to_body(text.as_bytes());
+//}
 
 pub fn bytes_to_body(bytes: &[u8]) -> Body {
   let mut body = Body { value: [0; BODY_SIZE] };
   for i in 0 .. std::cmp::min(BODY_SIZE, bytes.len()) {
     body.value[i] = bytes[i];
   }
+  return body;
+}
+
+pub fn code_to_body(code: &str) -> Body {
+  let (_rest, acts) = crate::hvm::read_actions(code);
+  let bits = serialized_actions(&acts);
+  let body = bytes_to_body(&bitvec_to_bytes(&bits));
   return body;
 }
 
@@ -314,7 +321,7 @@ pub fn ZERO_HASH() -> U256 {
   return hash_u256(u256(0));
 }
 
-pub fn ROOT_BLOCK() -> Block {
+pub fn GENESIS_BLOCK() -> Block {
   return Block {
     prev: ZERO_HASH(),
     time: 0,
@@ -331,7 +338,7 @@ pub fn new_node() -> Node {
   let mut node = Node {
     socket     : socket,
     port       : port,
-    block      : HashMap::from([(ZERO_HASH(), ROOT_BLOCK())]),
+    block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
     children   : HashMap::from([(ZERO_HASH(), vec![])]),
     waiters    : HashMap::new(),
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
@@ -483,7 +490,7 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
           //    On the example above, we'd find `runtime.tick = 1`
           let mut tick = node.height[&old_bhash];
           println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
-          node.runtime.rollback(tick);
+          //node.runtime.rollback(tick);
           // 4. Finds the last block included on the reverted runtime state
           //    On the example above, we'd find `new_bhash = B`
           while tick > node.runtime.get_tick() {
@@ -705,13 +712,13 @@ fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
   });
 }
 
-fn node_handle_input(node: &Node, miner_comm: &SharedMinerComm, input: &str) {
-  if let Some('\n') = input.chars().last() {
-    let mine_body = input.replace("\n", "");
-    let mine_body = string_to_body(&mine_body);
-    node_ask_mine(node, miner_comm, mine_body);
-  }
-}
+//fn node_handle_input(node: &Node, miner_comm: &SharedMinerComm, input: &str) {
+  //if let Some('\n') = input.chars().last() {
+    //let mine_body = input.replace("\n", "");
+    //let mine_body = string_to_body(&mine_body);
+    //node_ask_mine(node, miner_comm, mine_body);
+  //}
+//}
 
 pub fn node_loop(
   mut node: Node,
@@ -723,14 +730,12 @@ pub fn node_loop(
   let mut mined = 0;
   let mut tick = 0;
 
-  let mine_body = mine_file.map(|file| {
-    let (_rest, acts) = crate::hvm::read_actions(&file);
-    let bits = serialized_actions(&acts);
-    let body = bytes_to_body(&bitvec_to_bytes(&bits));
-    return body;
-  });
-
-  //let mut last_screen: Option<Vec<String>> = None;
+  let init_body = code_to_body("fun Count 1 {
+    !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
+    !(Count $(Dob)) = $(IO.load λx $(IO.save (* x #2) λ~ $(IO.done #0)))
+    !(Count $(Get)) = $(IO.load λx $(IO.done x))
+  } = #0");
+  let mine_body = mine_file.map(|x| code_to_body(&x));
 
   loop {
     tick += 1;
@@ -764,8 +769,13 @@ pub fn node_loop(
 
       // Asks the miner to mine a block
       if tick % 10 == 0 {
-        if let Some(body) = &mine_body {
-          node_ask_mine(&mut node, &miner_comm, body.clone()); // FIXME: avoid clone
+        // This branch is here for testing purposes. FIXME: remove
+        if node.tip == ZERO_HASH() {
+          node_ask_mine(&mut node, &miner_comm, init_body.clone()); // FIXME: avoid clone
+        } else {
+          if let Some(mine_body) = &mine_body {
+            node_ask_mine(&mut node, &miner_comm, mine_body.clone()); // FIXME: avoid clone
+          }
         }
       }
 

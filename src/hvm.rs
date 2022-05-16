@@ -817,31 +817,32 @@ impl Runtime {
   // Advances the heap time counter, saving past states for rollback.
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
-    //self.get_heap_mut(self.curr).absorb_heap(&mut self.get_heap_mut(self.draw), true);
-    //self.get_heap_mut(self.draw).clear_heap();
-    let (_, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
-    if let Some(deleted) = deleted {
-      if let Some(absorber) = absorber {
-        self.absorb_heap(absorber, deleted, false);
-      }
-      self.clear_heap(deleted);
-      self.nuls.push(deleted);
-    }
+    //self.absorb_heap(self.curr, self.draw, true);
+    //self.clear_heap(self.draw);
+    //println!("tick self.curr={}", self.curr);
+    let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
+    //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
-    self.curr = match deleted {
-      Some(index) => index,
-      None => match self.nuls.pop() {
-        Some(index) => index,
-        None => { panic!("Not enough heaps."); }
+    if included {
+      if let Some(deleted) = deleted {
+        if let Some(absorber) = absorber {
+          self.absorb_heap(absorber, deleted, false);
+        }
+        self.clear_heap(deleted);
+        self.curr = deleted;
+      } else if let Some(empty) = self.nuls.pop() {
+        self.curr = empty;
+      } else {
+        panic!("Not enough heaps.");
       }
-    };
+    }
   }
   
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("ROLLING BACK {} < {}", tick, self.get_heap(self.curr).tick);
+      println!("- rolling back {} < {}", tick, self.get_heap(self.curr).tick);
       //let init_funs = self.get_heap_mut(self.curr).funs;
       let mut back : Arc<Rollback> = self.back.clone();
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
@@ -1029,6 +1030,17 @@ pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Opti
         let rollback = Arc::new(Rollback::Cons { keep: keep + 1, head: *head, tail: tail.clone() });
         return (false, None, Some(elem), rollback);
       }
+    }
+  }
+}
+
+pub fn view_rollback(back: &Arc<Rollback>) -> String {
+  match &**back {
+    Rollback::Nil => {
+      return format!("");
+    }
+    Rollback::Cons { keep, head, tail } => {
+      return format!("[{:x} {}] {}", keep, head, view_rollback(tail));
     }
   }
 }
