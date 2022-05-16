@@ -42,23 +42,23 @@ pub struct Var {
   pub name : u128,         // this variable's name
   pub param: u128,         // in what parameter is this variable located?
   pub field: Option<u128>, // in what field is this variabled located? (if any)
-  pub erase: bool,        // should this variable be collected (because it is unused)?
+  pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
 // A rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
-  pub cond: Vec<Lnk>,        // left-hand side matching conditions
-  pub vars: Vec<Var>,        // left-hand side variable locations
+  pub cond: Vec<Lnk>,          // left-hand side matching conditions
+  pub vars: Vec<Var>,          // left-hand side variable locations
   pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
-  pub body: Term,            // right-hand side body of rule
+  pub body: Term,              // right-hand side body of rule
 }
 
 // A function is a vector of rules
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Func {
-  arity: u128,       // number of arguments
-  redux: Vec<u128>,  // index of strict arguments
+  arity: u128,      // number of arguments
+  redux: Vec<u128>, // index of strict arguments
   rules: Vec<Rule>, // vector of rules
 }
 
@@ -104,13 +104,13 @@ pub struct Heap {
   pub disk: Disk, // points to stored function states
   pub file: File, // function codes
   pub arit: Arit, // function arities
-  pub tick: u128,  // time counter
-  pub funs: u128,  // total function count
-  pub dups: u128,  // total dups count
-  pub rwts: u128,  // total graph rewrites
-  pub mana: u128,  // total mana cost
-  pub size: i128,  // total used memory (in 64-bit words)
-  pub next: u128,  // memory index that *may* be empty
+  pub tick: u128, // time counter
+  pub funs: u128, // total function count
+  pub dups: u128, // total dups count
+  pub rwts: u128, // total graph rewrites
+  pub mana: u128, // total mana cost
+  pub size: i128, // total used memory (in 64-bit words)
+  pub next: u128, // memory index that *may* be empty
 }
 
 // A list of past heap states, for block-reorg rollback
