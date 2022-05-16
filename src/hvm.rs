@@ -134,6 +134,30 @@ pub struct Runtime {
   back: Arc<Rollback>,  // past states
 }
 
+pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
+  let mut seen = vec![0u8; 10];
+  let mut heaps = vec![0u64; 0];
+  let mut push = |id: u64| {
+    let idx = id as usize;
+    seen[idx] += 1;
+    heaps.push(id);
+  };
+  push(rt.draw);
+  push(rt.curr);
+  for nul in &rt.nuls {
+    push(*nul);
+  }
+  {
+    let mut back = &*rt.back;
+    while let Rollback::Cons { keep, head, tail } = back {
+      push(*head);
+      back = &*tail;
+    }
+  }
+  let failed = seen.iter().all(|c| *c == 1);
+  (failed, seen, heaps)
+}
+
 // Constants
 // ---------
 
@@ -796,7 +820,7 @@ impl Runtime {
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             if let Some(()) = self.collect(done, mana_lim) {
-              println!("- run {} ({} mana)", self.show_term(done), self.get_mana() - mana_ini);
+              println!("- run {} ({} mana) {:?}", self.show_term(done), self.get_mana() - mana_ini, heaps_invariant(self));
               //println!("  - mana: {}", self.get_mana() - mana_ini);
               //println!("  - term: {}", self.show_term(done));
               self.draw();
