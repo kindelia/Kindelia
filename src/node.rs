@@ -45,7 +45,7 @@ pub struct Node {
   pub tip        : U256,                            // current ti
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
-  pub waiters    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
+  pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
   pub work       : U256Map<U256>,                   // block hash -> accumulated work
   pub target     : U256Map<U256>,                   // block hash -> this block's target
   pub height     : U256Map<u128>,                   // block hash -> cached height
@@ -340,7 +340,7 @@ pub fn new_node() -> Node {
     port       : port,
     block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
     children   : HashMap::from([(ZERO_HASH(), vec![])]),
-    waiters    : HashMap::new(),
+    pending    : HashMap::new(),
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
@@ -408,18 +408,22 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
   // While there is a block to add...
   while let Some(block) = must_add.pop() {
     let btime = block.time; // the block timestamp
+    //println!("- add block time={}", btime);
     // If block is too far into the future, ignore it
     if btime >= get_time() + DELAY_TOLERANCE {
+      //println!("# new block: too late");
       continue;
     }
     let bhash = hash_block(&block); // hash of the block
     // If we already registered this block, ignore it
     if node.block.get(&bhash).is_some() {
+      //println!("# new block: already in");
       continue;
     }
     let phash = block.prev; // hash of the previous block
     // If previous block is available, add the block to the chain
     if node.block.get(&phash).is_some() {
+      //println!("- previous available");
       let work = get_hash_work(bhash); // block work score
       node.block.insert(bhash, block.clone()); // inserts the block
       node.work.insert(bhash, u256(0)); // inits the work attr
@@ -433,6 +437,7 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
       let advances_time = btime > node.block[&phash].time;
       // If the PoW hits the target and the block's timestamp is valid...
       if has_enough_work && advances_time {
+        //println!("# new_block: enough work & advances_time");
         node.work.insert(bhash, node.work[&phash] + work); // sets this block accumulated work
         node.height.insert(bhash, node.height[&phash] + 1); // sets this block accumulated height
         // If this block starts a new period, computes the new target
@@ -459,64 +464,72 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
         let new_tip = bhash;
         if node.work[&new_tip] > node.work[&old_tip] {
           node.tip = bhash;
-          println!("\n# new block: {:x}", bhash);
-          println!("- work: {}", node.work[&new_tip]);
-          // Block reorganization (* marks blocks for which we have runtime snapshots):
-          // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
-          // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
-          // hash: |  A |  B |  C |  D |  P |  Q |  R |  S |  T |  <- new timeline
-          //               |         '-> highest common block shared by both timelines
-          //               '-----> highest runtime snapshot before block D
-          let mut must_compute = Vec::new();
-          let mut old_bhash = old_tip;
-          let mut new_bhash = new_tip;
-          // 1. Finds the highest block with same height on both timelines
-          //    On the example above, we'd have `H, S`
-          while node.height[&new_bhash] > node.height[&old_bhash] {
-            must_compute.push(new_bhash);
-            new_bhash = node.block[&new_bhash].prev;
-          }
-          while node.height[&old_bhash] > node.height[&new_bhash] {
-            old_bhash = node.block[&old_bhash].prev;
-          }
-          // 2. Finds highest block with same value on both timelines
-          //    On the example above, we'd have `D`
-          while old_bhash != new_bhash {
-            must_compute.push(new_bhash);
-            old_bhash = node.block[&old_bhash].prev;
-            new_bhash = node.block[&new_bhash].prev;
-          }
-          // 3. Reverts the runtime to a state older than that block
-          //    On the example above, we'd find `runtime.tick = 1`
-          let mut tick = node.height[&old_bhash];
-          println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
-          //node.runtime.rollback(tick);
-          // 4. Finds the last block included on the reverted runtime state
-          //    On the example above, we'd find `new_bhash = B`
-          while tick > node.runtime.get_tick() {
-            must_compute.push(new_bhash);
-            new_bhash = node.block[&new_bhash].prev;
-            tick -= 1;
-          }
-          // 5. Computes every block after that on the new timeline
-          //    On the example above, we'd compute `C, D, P, Q, R, S, T`
-          for block in must_compute.iter().rev() {
-            node_compute_block(node, &node.block[block].clone());
+          //println!("- hash: {:x}", bhash);
+          //println!("- work: {}", node.work[&new_tip]);
+          if true {
+            // Block reorganization (* marks blocks for which we have runtime snapshots):
+            // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
+            // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
+            // hash: |  A |  B |  C |  D |  P |  Q |  R |  S |  T |  <- new timeline
+            //               |         '-> highest common block shared by both timelines
+            //               '-----> highest runtime snapshot before block D
+            let mut must_compute = Vec::new();
+            let mut old_bhash = old_tip;
+            let mut new_bhash = new_tip;
+            // 1. Finds the highest block with same height on both timelines
+            //    On the example above, we'd have `H, S`
+            while node.height[&new_bhash] > node.height[&old_bhash] {
+              must_compute.push(new_bhash);
+              new_bhash = node.block[&new_bhash].prev;
+            }
+            while node.height[&old_bhash] > node.height[&new_bhash] {
+              old_bhash = node.block[&old_bhash].prev;
+            }
+            // 2. Finds highest block with same value on both timelines
+            //    On the example above, we'd have `D`
+            while old_bhash != new_bhash {
+              must_compute.push(new_bhash);
+              old_bhash = node.block[&old_bhash].prev;
+              new_bhash = node.block[&new_bhash].prev;
+            }
+            // 3. Reverts the runtime to a state older than that block
+            //    On the example above, we'd find `runtime.tick = 1`
+            let mut tick = node.height[&old_bhash];
+            //println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
+            node.runtime.rollback(tick);
+            // 4. Finds the last block included on the reverted runtime state
+            //    On the example above, we'd find `new_bhash = B`
+            while tick > node.runtime.get_tick() {
+              must_compute.push(new_bhash);
+              new_bhash = node.block[&new_bhash].prev;
+              tick -= 1;
+            }
+            // 5. Computes every block after that on the new timeline
+            //    On the example above, we'd compute `C, D, P, Q, R, S, T`
+            for block in must_compute.iter().rev() {
+              node_compute_block(node, &node.block[block].clone());
+            }
           }
         }
+      } else {
+        //println!("# new_block: not enough work | not advances_time");
       }
       // Registers this block as a child of its parent
       node.children.insert(phash, vec![bhash]);
       // If there were blocks waiting for this one, mark them for addition
-      for waiter in node.waiters.get(&bhash).unwrap_or(&vec![]) {
-        must_add.push(waiter.clone());
+      for pending in node.pending.get(&bhash).unwrap_or(&vec![]) {
+        must_add.push(pending.clone());
       }
-      // Delete this block's waiters vector
-      node.waiters.remove(&bhash);
+      // Delete this block's pending vector
+      if node.pending.contains_key(&bhash) {
+        node.pending.remove(&bhash);
+        //println!("- NOT PENDING ANYMORE {}", bhash);
+      }
     // Otherwise (if previous block is unavailable), and if it is the
-    // first time we see this block, add it to its parent's waiters list
+    // first time we see this block, add it to its parent's pending list
     } else if node.seen.get(&bhash).is_none() {
-      node.waiters.insert(phash, vec![block.clone()]);
+      //println!("# new block: previous unavailable");
+      node.pending.insert(phash, vec![block.clone()]);
     }
     // Mark this block as seen
     node.seen.insert(bhash, ());
@@ -552,6 +565,7 @@ pub fn node_message_receive(node: &mut Node) {
 // Sends a block to a target address; also share some random peers
 // FIXME: instead of sharing random peers, share recently active peers
 pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
+  //println!("- sending block: {:?}", block);
   let msg = Message::PutBlock {
     block: block,
     peers: get_random_peers(node, 3).clone(),
@@ -560,20 +574,23 @@ pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
 }
 
 pub fn node_message_handle(node: &mut Node, addr: Address, msg: &Message) {
-  node_see_peer(node, Peer { address: addr, seen_at: get_time() });
-  match msg {
-    // Someone asked a block
-    Message::AskBlock { bhash } => {
-      if let Some(block) = node.block.get(&bhash) {
-        let block = block.clone();
-        node_send_block_to(node, addr, block);
+  if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: node.port }) {
+    node_see_peer(node, Peer { address: addr, seen_at: get_time() });
+    match msg {
+      // Someone asked a block
+      Message::AskBlock { bhash } => {
+        if let Some(block) = node.block.get(&bhash) {
+          let block = block.clone();
+          node_send_block_to(node, addr, block);
+        }
       }
-    }
-    // Someone sent us a block
-    Message::PutBlock { block, peers } => {
-      node_add_block(node, &block);
-      for peer in peers {
-        //node_see_peer(node, *peer);
+      // Someone sent us a block
+      Message::PutBlock { block, peers } => {
+        //println!("- getting block: {:?}", block);
+        node_add_block(node, &block);
+        //for peer in peers {
+          //node_see_peer(node, *peer);
+        //}
       }
     }
   }
@@ -677,7 +694,9 @@ fn node_peers_timeout(node: &mut Node) {
 }
 
 fn node_ask_missing_blocks(node: &mut Node) {
-  for bhash in node.waiters.keys().cloned().collect::<Vec<U256>>() {
+  //println!("- ask missing {}", node.pending.keys().len());
+  for bhash in node.pending.keys().cloned().collect::<Vec<U256>>() {
+    //println!("- ask missing {:x}", bhash);
     if let None = node.seen.get(&bhash) {
       gossip(node, MISSING_INFO_ASK_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
     }
@@ -748,7 +767,7 @@ pub fn node_loop(
       }
 
       // Spreads the tip block
-      if tick % 1 == 0 {
+      if tick % 2 == 0 {
         node_gossip_tip_block(&mut node, 8);
       }
 
@@ -758,7 +777,7 @@ pub fn node_loop(
       }
 
       // Requests missing blocks
-      if tick % 1 == 0 {
+      if tick % 2 == 0 {
         node_ask_missing_blocks(&mut node);
       }
 
@@ -779,23 +798,32 @@ pub fn node_loop(
         }
       }
 
-      // Asks the miner to mine a block
-      //if tick % 10 == 0 {
-        //let input = (input.lock().unwrap()).clone();
-        //node_handle_input(&node, &miner_comm, &input);
-      //}
-
       // Display node info
-      //if ui && tick % 10 == 0 {
-        //let input = (input.lock().unwrap()).clone();
-        //display_tui(&node_get_info(&node, None), &input, &mut last_screen);
-      //} else if tick % 2000 == 0 {
-        //display_simple(&node_get_info(&node, None));
-      //}
+      if tick % 100 == 0 {
+        //let tip = node.tip;
+        //let height = *node.height.get(&tip).unwrap();
+        //let tip_target = *node.target.get(&tip).unwrap();
+        //let difficulty = target_to_difficulty(tip_target);
+        //let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
+        let mut num_pending: u128 = 0;
+        let mut num_pending_seen: u128 = 0;
+        for (bhash, _) in node.pending.iter() {
+          if node.seen.get(bhash).is_some() {
+            num_pending_seen += 1;
+          }
+          num_pending += 1;
+        }
+        //let last_blocks = get_longest_chain(node);
+        //print!("{esc}c", esc = 27 as char); // clear screen
+        println!("## peers   : {}", node.peers.len());
+        println!("## pending : {}/{}", num_pending, num_pending_seen);
+        println!("## blocks  : {}", node.height[&node.tip]);
+        println!("## mana    : {}", node.runtime.get_mana());
+      }
     }
 
     // Sleep for 1/100 seconds
-    //std::thread::sleep(std::time::Duration::from_micros(16666));
+    std::thread::sleep(std::time::Duration::from_micros(10000));
   }
 }
 
@@ -861,7 +889,7 @@ fn node_get_info(node: &Node, max_last_blocks: Option<u128>) -> NodeInfo {
 
   let mut num_pending: u128 = 0;
   let mut num_pending_seen: u128 = 0;
-  for (bhash, _) in node.waiters.iter() {
+  for (bhash, _) in node.pending.iter() {
     if node.seen.get(bhash).is_some() {
       num_pending_seen += 1;
     }

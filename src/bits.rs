@@ -156,15 +156,15 @@ pub fn deserialized_peer(bits: &BitVec) -> Peer {
 
 pub fn serialize_block(block: &Block, bits: &mut BitVec) {
   serialize_fixlen(256, &block.prev, bits);
-  serialize_fixlen(64, &u256(block.time), bits);
-  serialize_fixlen(64, &u256(block.rand), bits);
+  serialize_fixlen(128, &u256(block.time), bits);
+  serialize_fixlen(128, &u256(block.rand), bits);
   serialize_bytes(BODY_SIZE as u128, &block.body.value, bits);
 }
 
 pub fn deserialize_block(bits: &BitVec, index: &mut u128) -> Block {
   let prev = deserialize_fixlen(256, bits, index);
-  let time = deserialize_fixlen(64, bits, index).low_u128();
-  let rand = deserialize_fixlen(64, bits, index).low_u128();
+  let time = deserialize_fixlen(128, bits, index).low_u128();
+  let rand = deserialize_fixlen(128, bits, index).low_u128();
   let body = deserialize_bytes(BODY_SIZE as u128, bits, index);
   let mut value : [u8; BODY_SIZE] = [0; BODY_SIZE];
   for i in 0 .. BODY_SIZE {

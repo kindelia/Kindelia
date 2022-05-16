@@ -686,6 +686,15 @@ impl Runtime {
     self.heap[index as usize].clear();
   }
 
+  fn undo(&mut self) {
+    self.clear_heap(self.draw);
+  }
+
+  fn draw(&mut self) {
+    self.absorb_heap(self.curr, self.draw, true);
+    self.clear_heap(self.draw);
+  }
+
   // IO
   // --
 
@@ -769,18 +778,16 @@ impl Runtime {
           self.define_function(*name, func);
           let state = self.create_term(init, 0);
           self.write_disk(*name, state);
-          self.absorb_heap(self.curr, self.draw, true);
-          self.clear_heap(self.draw);
+          self.draw();
         }
       }
       Action::Ctr { name, arit } => {
         println!("- ctr {} {}", U128_to_name(*name), arit);
         self.set_arity(*name, *arit);
-        self.absorb_heap(self.curr, self.draw, true);
-        self.clear_heap(self.draw);
+        self.draw();
       }
       Action::Run { expr } => {
-        println!("- run {}", view_term(expr));
+        //println!("- run {}", view_term(expr));
         //println!("- mana_limit={} current_mana={} run_max_mana={}", self.get_mana_limit(), self.get_mana(), mana);
         let mana_ini = self.get_mana(); 
         //let mana_lim = std::cmp::min(self.get_mana_limit(), mana_ini + mana); // max mana we can reach on this action
@@ -789,17 +796,17 @@ impl Runtime {
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             if let Some(()) = self.collect(done, mana_lim) {
-              println!("  - mana: {}", self.get_mana() - mana_ini);
-              println!("  - term: {}", self.show_term(done));
-              self.absorb_heap(self.curr, self.draw, true);
-              self.clear_heap(self.draw);
+              println!("- run {} ({} mana)", self.show_term(done), self.get_mana() - mana_ini);
+              //println!("  - mana: {}", self.get_mana() - mana_ini);
+              //println!("  - term: {}", self.show_term(done));
+              self.draw();
               return;
             }
           }
           //println!("{}", show_rt(self));
         }
         println!("  - fail");
-        self.clear_heap(self.draw);
+        self.undo();
         //self.collect(done);
       }
     }
@@ -817,8 +824,7 @@ impl Runtime {
   // Advances the heap time counter, saving past states for rollback.
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
-    //self.absorb_heap(self.curr, self.draw, true);
-    //self.clear_heap(self.draw);
+    self.draw();
     //println!("tick self.curr={}", self.curr);
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
@@ -833,6 +839,7 @@ impl Runtime {
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
       } else {
+        println!("- {} {} {:?} {}", self.draw, self.curr, self.nuls, view_rollback(&self.back));
         panic!("Not enough heaps.");
       }
     }
@@ -842,21 +849,18 @@ impl Runtime {
   pub fn rollback(&mut self, tick: u128) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back {} < {}", tick, self.get_heap(self.curr).tick);
-      //let init_funs = self.get_heap_mut(self.curr).funs;
-      let mut back : Arc<Rollback> = self.back.clone();
+      println!("- rolling back from {} to {}", tick, self.get_tick());
+      self.clear_heap(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
-        back = if let Rollback::Cons { keep, head, tail } = &*back {
+        if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
           self.clear_heap(*head);
           self.nuls.push(*head);
-          tail.clone()
-        } else {
-          back
+          self.back = tail.clone();
         }
       }
-      // Moves the most recent valid heap to `self.get_heap_mut(self.curr)`
-      match &*back {
+      // Moves the most recent valid heap to `self.curr`
+      match &*self.back.clone() {
         Rollback::Cons { keep, head, tail } => {
           self.back = tail.clone();
           self.curr = *head;
