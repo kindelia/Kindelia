@@ -20,6 +20,17 @@ use crate::bits::*;
 use crate::node::*;
 use crate::util::*;
 
+fn main() -> Result<(), String> {
+  return run_cli();
+
+  //start_node(Some("simple.kdl".to_string()));
+  //return Ok(());
+  
+  //hvm::test("./example.kdl");
+  //return Ok(());
+}
+
+
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
@@ -40,16 +51,6 @@ pub enum CliCmd {
     // #[clap(short, long)]
     // debug: bool,
   },
-}
-
-fn main() -> Result<(), String> {
-  return run_cli();
-
-  //start_node(Some("simple.kdl".to_string()));
-  //return Ok(());
-  
-  //hvm::test();
-  //return Ok(());
 }
 
 fn run_cli() -> Result<(), String> {
