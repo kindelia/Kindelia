@@ -213,10 +213,10 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
 //   (IO.done retr:r)                                       : (IO r)
-//   (IO.laod        cont:(∀? (IO r))) : (IO r)
-//   (IO.save expr:? cont:(∀? (IO r))) : (IO r)
-//   (IO.call expr:? cont:(∀? (IO r))) : (IO r)
-//   (IO.from        cont:(∀? (IO r))) : (IO r)
+//   (IO.laod               cont:(∀? (IO r))) : (IO r)
+//   (IO.save expr:?        cont:(∀? (IO r))) : (IO r)
+//   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
+//   (IO.from               cont:(∀? (IO r))) : (IO r)
 const IO_DONE : u128 = 0x13640a33ca9;
 const IO_LOAD : u128 = 0x13640c33968;
 const IO_SAVE : u128 = 0x13640de5ea9;
@@ -228,7 +228,7 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
     IO_DONE => Some(1),
     IO_LOAD => Some(1),
     IO_SAVE => Some(2),
-    IO_CALL => Some(2),
+    IO_CALL => Some(3),
     IO_FROM => Some(1),
     _       => None,
   }
@@ -258,6 +258,7 @@ pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
 // | * A is the constructor or function arity             |
 // | * M is the alloc count of the right-hand side        |
 // |------------------------------------------------------|
+
 
 fn AppLamMana() -> u128 {
   return 10;
@@ -352,6 +353,25 @@ fn count_allocs(body: &Term) -> u128 {
     }
   }
 }
+
+const GENESIS : &str = "
+ctr Tuple0 0
+ctr Tuple1 1
+ctr Tuple2 2
+ctr Tuple3 3
+ctr Tuple4 4
+ctr Tuple5 5
+ctr Tuple6 6
+ctr Tuple7 7
+ctr Tuple8 8
+
+ctr Inc 0
+ctr Get 0
+fun Count 1 {
+  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+} = #0
+";
 
 // Rollback
 // --------
@@ -599,13 +619,16 @@ pub fn init_runtime() -> Runtime {
   for i in 0 .. 10 {
     heap.push(init_heap());
   }
-  return Runtime {
+  let mut rt = Runtime {
     heap,
     draw: 0,
     curr: 1,
     nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
     back: Arc::new(Rollback::Nil),
   };
+  rt.run_actions_from_code(GENESIS);
+  rt.snapshot();
+  return rt;
 }
 
 impl Runtime {
@@ -747,11 +770,8 @@ impl Runtime {
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
-            //println!("- saving: {} {}", u128_to_name(subject), self.show_term(term));
             let save = self.compute(expr, mana)?;
-            //println!("- saving: {} {}", u128_to_name(subject), self.show_term(save));
             self.write_disk(subject, save);
-            //println!("- saving: {}", self.show_term(save));
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let done = self.run_io(subject, subject, cont, mana);
@@ -760,21 +780,27 @@ impl Runtime {
             return done;
           }
           IO_CALL => {
-            let expr = ask_arg(self, term, 0);
-            let cont = ask_arg(self, term, 1);
-            if get_tag(expr) == FUN {
-              let fnid = get_ext(expr);
-              let retr = self.run_io(fnid, subject, get_loc(term, 0), mana)?;
-              let cont = alloc_app(self, cont, retr);
-              let done = self.run_io(subject, caller, cont, mana);
-              clear(self, host, 1);
-              clear(self, get_loc(term, 1), 1); // term[0] is already cleared by the "retr" run_io
-              return done;
-            } else {
-              clear(self, host, 1);
-              clear(self, get_loc(term, 0), 2);
-              return None;
+            let fnid = ask_arg(self, term, 0);
+            let tupl = ask_arg(self, term, 1);
+            let cont = ask_arg(self, term, 2);
+            // Builds the argument vector
+            let arit = self.get_arity(get_ext(tupl));
+            let mut args = Vec::new();
+            for i in 0 .. arit {
+              args.push(ask_arg(self, tupl, i));
             }
+            // Calls called function IO, changing the subject
+            //println!("... {} {} {}", fnid, get_num(fnid), u128_to_name(get_num(fnid)));
+            let ioxp = alloc_fun(self, get_num(fnid), &args);
+            let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
+            // Calls the continuation with the value returned
+            let cont = alloc_app(self, cont, retr);
+            let done = self.run_io(subject, caller, cont, mana);
+            // Clears memory
+            clear(self, host, 1);
+            clear(self, get_loc(tupl, 0), arit);
+            clear(self, get_loc(term, 0), 3);
+            return done;
           }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
@@ -814,7 +840,6 @@ impl Runtime {
         self.draw();
       }
       Action::Run { expr } => {
-        //println!("- run {}", view_term(expr));
         let mana_ini = self.get_mana(); 
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
         let host = self.alloc_term(expr);
@@ -831,7 +856,7 @@ impl Runtime {
           }
           //println!("{}", show_rt(self));
         }
-        println!("  - fail");
+        println!("- run fail");
         self.undo();
         //self.collect(done);
       }
@@ -843,7 +868,6 @@ impl Runtime {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
   }
 
-
   // Rollback
   // --------
 
@@ -851,6 +875,10 @@ impl Runtime {
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
     self.draw();
+    self.snapshot();
+  }
+
+  fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
@@ -2739,11 +2767,11 @@ pub fn test_actions_from_code(code: &str) {
   test_actions(&read_actions(code).1);
 }
 
-pub fn test() {
+pub fn test(file: &str) {
   //println!("{:x}", name_to_u128("IO.done"));
   //println!("{:x}", name_to_u128("IO.load"));
   //println!("{:x}", name_to_u128("IO.save"));
   //println!("{:x}", name_to_u128("IO.call"));
   //println!("{:x}", name_to_u128("IO.from"));
-  test_actions_from_code(&std::fs::read_to_string("./example.kdl").expect("example.kdl not found"));
+  test_actions_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }

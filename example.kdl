@@ -55,11 +55,11 @@
 //
 // - The following IO actions are available:
 //
-//     - IO.done value -- completes the IO action
-//     - IO.load       -- returns the internal state
-//     - IO.save value -- sets the internal state
-//     - IO.call ioexp -- calls an IO function
-//     - IO.from       -- returns the caller name
+//     - IO.done value       -- completes the IO action
+//     - IO.load             -- returns the internal state
+//     - IO.save value       -- sets the internal state
+//     - IO.call fname ioexp -- calls an IO function
+//     - IO.from             -- returns the caller name
 // 
 // - This is a prototype. All the above is subject to change!
 
@@ -79,15 +79,15 @@ fun Count 1 {
 
 // Runs a script that increments the Count's state 3 times
 run {
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call @Count $(Tuple1 $(Inc)) λ~
+  $(IO.call @Count $(Tuple1 $(Inc)) λ~
+  $(IO.call @Count $(Tuple1 $(Inc)) λ~
   $(IO.done #0))))
 }
 
 // Runs a script that prints the Count's state
 run {
-  $(IO.call !(Count $(Get)) λx
+  $(IO.call @Count $(Tuple1 $(Get)) λx
   $(IO.done x))
 }
 
@@ -133,12 +133,12 @@ fun WhoIs 0 {
 // LadyAlice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on LadyAlice's behalf.
 fun LadyAlice 1 {
-  !(LadyAlice $(Call expr)) = $(IO.call expr λres $(IO.done res))
+  !(LadyAlice $(Tuple2 name args)) = $(IO.call name args λres $(IO.done res))
 } = #0
 
 // Prints LadyAlice's name
 run {
-  $(IO.call !(LadyAlice $(Call !(WhoIs))) λnam
+  $(IO.call @LadyAlice $(Tuple2 @WhoIs $(Tuple0)) λnam
   $(IO.done nam))
 }
 
@@ -149,13 +149,13 @@ run {
 
 // When a transaction fails, it is fully reversed
 run {
-  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call @Count $(Tuple1 $(Inc)) λ~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
 run {
-  $(IO.call !(Count $(Get)) λx
+  $(IO.call @Count $(Tuple1 $(Get)) λx
   $(IO.done x))
 }
