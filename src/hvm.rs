@@ -2500,7 +2500,7 @@ fn read_oper(code: &str) -> (&str, Option<u128>) {
       let code = tail(code);
       if head(code) == '=' { 
         (tail(code), Some(GTE))
-      } else if head(code) == '<' {
+      } else if head(code) == '>' {
         (tail(code), Some(SHR))
       } else {
         (code, Some(GTN))
