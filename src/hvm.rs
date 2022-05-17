@@ -2290,7 +2290,7 @@ fn skip(code: &str) -> &str {
       }
       continue;
     }
-    if head(code) == '/' {
+    if head(code) == '/' && head(tail(code)) == '/' {
       while head(code) != '\n' && head(code) != '\0' {
         code = tail(code);
       }
