@@ -735,7 +735,7 @@ impl Runtime {
             return Some(retr);
           }
           IO_LOAD => {
-            //println!("- IO_LOAD subject is {} {}", U128_to_name(subject), subject);
+            //println!("- IO_LOAD subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
             let stat = self.read_disk(subject).unwrap_or(Num(0));
             let cont = alloc_app(self, cont, stat);
@@ -745,10 +745,13 @@ impl Runtime {
             return done;
           }
           IO_SAVE => {
-            //println!("- IO_SAVE subject is {} {}", U128_to_name(subject), subject);
+            //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
+            //println!("- saving: {} {}", u128_to_name(subject), self.show_term(term));
             let save = self.compute(expr, mana)?;
+            //println!("- saving: {} {}", u128_to_name(subject), self.show_term(save));
             self.write_disk(subject, save);
+            //println!("- saving: {}", self.show_term(save));
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let done = self.run_io(subject, subject, cont, mana);
@@ -796,7 +799,7 @@ impl Runtime {
   pub fn run_action(&mut self, action: &Action) {
     match action {
       Action::Fun { name, arit, func, init } => {
-        println!("- fun {} {}", U128_to_name(*name), arit);
+        println!("- fun {} {}", u128_to_name(*name), arit);
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
@@ -806,21 +809,20 @@ impl Runtime {
         }
       }
       Action::Ctr { name, arit } => {
-        println!("- ctr {} {}", U128_to_name(*name), arit);
+        println!("- ctr {} {}", u128_to_name(*name), arit);
         self.set_arity(*name, *arit);
         self.draw();
       }
       Action::Run { expr } => {
         //println!("- run {}", view_term(expr));
-        //println!("- mana_limit={} current_mana={} run_max_mana={}", self.get_mana_limit(), self.get_mana(), mana);
         let mana_ini = self.get_mana(); 
-        //let mana_lim = std::cmp::min(self.get_mana_limit(), mana_ini + mana); // max mana we can reach on this action
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
+            let done_code = self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
-              println!("- run {} ({} mana) {:?}", self.show_term(done), self.get_mana() - mana_ini, heaps_invariant(self));
+              println!("- run {} ({} mana)", done_code, self.get_mana() - mana_ini);
               //println!("  - mana: {}", self.get_mana() - mana_ini);
               //println!("  - term: {}", self.show_term(done));
               self.draw();
@@ -1289,7 +1291,7 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // Writes a Term represented as a Rust enum on the Runtime's rt.
 pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk) {
-    //println!("~~ bind {} {}", U128_to_name(name), show_lnk(lnk));
+    //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
     unsafe {
       if name == VAR_NONE {
         link(rt, loc, Era());
@@ -1310,7 +1312,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
   match term {
     Term::Var { name } => {
       unsafe {
-        //println!("~~ var {} {}", U128_to_name(*name), VARS_DATA.len());
+        //println!("~~ var {} {}", u128_to_name(*name), VARS_DATA.len());
         if (*name as usize) < VARS_DATA.len() {
           match VARS_DATA[*name as usize] {
             Some(got) => {
@@ -1951,7 +1953,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                     var = ask_arg(rt, var, field);
                   }
                   unsafe {
-                    //println!("~~ set {} {}", U128_to_name(rule.vars[i].name), show_lnk(var));
+                    //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
                     VARS_DATA[rule.vars[i].name as usize] = Some(var);
                   }
                 }
@@ -2098,7 +2100,7 @@ pub fn show_lnk(x: Lnk) -> String {
       NUM => "NUM",
       _   => "?",
     };
-    format!("{}:{}:{:x}", tgs, U128_to_name(ext), val)
+    format!("{}:{}:{:x}", tgs, u128_to_name(ext), val)
   }
 }
 
@@ -2234,16 +2236,16 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       CTR => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
-        println!("  - arity is: {} {}", U128_to_name(func), arit);
+        //println!("  - arity is: {} {}", u128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("$({}{})", U128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("$({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
-        println!("  - arity is: {} {}", U128_to_name(func), arit);
+        //println!("  - arity is: {} {}", u128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("!({}{})", U128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("!({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
         format!("*")
@@ -2374,7 +2376,7 @@ pub fn name_to_u128(code: &str) -> u128 {
 }
 
 // Inverse of name_to_u128
-pub fn U128_to_name(num: u128) -> String {
+pub fn u128_to_name(num: u128) -> String {
   let mut name = String::new();
   let mut num = num;
   while num > 0 {
@@ -2599,7 +2601,7 @@ pub fn view_name(name: u128) -> String {
   if name == VAR_NONE {
     return "~".to_string();
   } else {
-    return U128_to_name(name);
+    return u128_to_name(name);
   }
 }
 
@@ -2677,13 +2679,13 @@ pub fn view_oper(oper: &u128) -> String {
 pub fn view_action(action: &Action) -> String {
   match action {
     Action::Fun { name, arit, func, init } => {
-      let name = U128_to_name(*name);
+      let name = u128_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
       let init = view_term(init);
       return format!("fun {} {} {{\n{}\n}} = {}", name, arit, func, init);
     }
     Action::Ctr { name, arit } => {
-      let name = U128_to_name(*name);
+      let name = u128_to_name(*name);
       return format!("ctr {} {}", name, arit);
     }
     Action::Run { expr } => {
