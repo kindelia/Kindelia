@@ -2321,7 +2321,7 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
   if head(code) == chr {
     return (tail(code), ());
   } else {
-    panic!("Expected {}, found {}.", chr, head(code));
+    panic!("Expected '{}', found '{}'.", chr, head(code));
   }
 }
 
@@ -2346,6 +2346,9 @@ fn read_name(code: &str) -> (&str, u128) {
     while is_name_char(head(code)) {
       name.push(head(code));
       code = tail(code);
+    }
+    if name.is_empty() {
+      panic!("Expected identifier, found '{}'.", head(code));
     }
     return (code, name_to_u128(&name));
   }
