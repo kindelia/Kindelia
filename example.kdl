@@ -132,8 +132,8 @@ fun WhoIs 0 {
 // that function's 'caller' will be set to LadyAlice, so it works as if
 // LadyAlice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on LadyAlice's behalf.
-fun LadyAlice 1 {
-  !(LadyAlice $(Tuple2 name args)) = $(IO.call name args λres $(IO.done res))
+fun LadyAlice 2 {
+  !(LadyAlice name args) = $(IO.call name args λres $(IO.done res))
 } = #0
 
 // Prints LadyAlice's name
