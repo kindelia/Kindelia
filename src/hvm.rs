@@ -2292,7 +2292,7 @@ fn skip(code: &str) -> &str {
       }
       continue;
     }
-    if head(code) == '/' {
+    if head(code) == '/' && head(tail(code)) == '/' {
       while head(code) != '\n' && head(code) != '\0' {
         code = tail(code);
       }
@@ -2502,7 +2502,7 @@ fn read_oper(code: &str) -> (&str, Option<u128>) {
       let code = tail(code);
       if head(code) == '=' { 
         (tail(code), Some(GTE))
-      } else if head(code) == '<' {
+      } else if head(code) == '>' {
         (tail(code), Some(SHR))
       } else {
         (code, Some(GTN))
