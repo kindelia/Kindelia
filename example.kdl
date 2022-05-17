@@ -27,7 +27,7 @@
 //
 // - Function calls are written as `!(FunName arg_0 arg_1 ...)`
 //
-// - Integers are 60-bit, and are written like `#123`
+// - Integers are 120-bit, and are written like `#123`
 // 
 // - You can also write a number with a name, like `@Foo`
 //
