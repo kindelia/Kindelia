@@ -2379,12 +2379,14 @@ fn read_name(code: &str) -> (&str, u128) {
   }
 }
 
-// Converts a name to a number, using the following table:
-// '.'       =>  0
-// '0' - '9' =>  1 to 10
-// 'A' - 'Z' => 11 to 36
-// 'a' - 'z' => 37 to 62
-// '_'       => 63
+/// Converts a name to a number, using the following table:
+/// ```
+/// '.'       =>  0
+/// '0' - '9' =>  1 to 10
+/// 'A' - 'Z' => 11 to 36
+/// 'a' - 'z' => 37 to 62
+/// '_'       => 63
+/// ```
 pub fn name_to_u128(code: &str) -> u128 {
   let mut num = 0;
   for chr in code.chars() {
@@ -2403,22 +2405,25 @@ pub fn name_to_u128(code: &str) -> u128 {
   return num;
 }
 
-// Inverse of name_to_u128
+/// Inverse of `name_to_u128`
 pub fn u128_to_name(num: u128) -> String {
   let mut name = String::new();
   let mut num = num;
   while num > 0 {
     let chr = (num % 64) as u8;
+    // TODO: Optimize with `match`
     if chr == 0 {
       name.push('.');
-    } else if chr < 10 {
-      name.push((chr + 0 + '0' as u8) as char);
-    } else if chr < 36 {
-      name.push((chr - 11 + 'A' as u8) as char);
-    } else if chr < 62 {
-      name.push((chr - 37 + 'a' as u8) as char);
+    } else if chr <= 10 {
+      name.push((chr - 1 + b'0') as char);
+    } else if chr <= 36 {
+      name.push((chr - 11 + b'A') as char);
+    } else if chr <= 62 {
+      name.push((chr - 37 + b'a') as char);
     } else if chr == 63 {
       name.push('_');
+    } else {
+      panic!("wut");
     }
     num = num / 64;
   }
