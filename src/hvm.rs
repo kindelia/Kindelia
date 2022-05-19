@@ -36,6 +36,9 @@ pub enum Oper {
   Eql, Gte, Gtn, Neq,
 }
 
+// A u64 HashMap
+pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
+
 // A left-hand side variable in a rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
@@ -65,19 +68,19 @@ pub struct Func {
 // A file is a map of `FuncID -> Function`
 #[derive(Clone, Debug)]
 pub struct File {
-  pub funcs: HashMap<u64, Arc<Func>, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub funcs: Map<Arc<Func>>,
 }
 
 // A map of `FuncID -> Arity`
 #[derive(Clone, Debug)]
 pub struct Arit {
-  pub arits: HashMap<u64, u128, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub arits: Map<u128>,
 }
 
 // A map of `FuncID -> Lnk`, pointing to a function's state
 #[derive(Clone, Debug)]
 pub struct Disk {
-  pub links: HashMap<u64, Lnk, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub links: Map<Lnk>,
 }
 
 // Can point to a node, a variable, or hold an unboxed value
@@ -373,6 +376,13 @@ fun Count 1 {
 } = #0
 ";
 
+// Utils
+// -----
+
+fn init_map<A>() -> Map<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
 // Rollback
 // --------
 
@@ -482,9 +492,9 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     data: init_heapdata(U128_NONE),
-    disk: Disk { links: HashMap::with_hasher(BuildHasherDefault::default()) },
-    file: File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) },
-    arit: Arit { arits: HashMap::with_hasher(BuildHasherDefault::default()) },
+    disk: Disk { links: init_map() },
+    file: File { funcs: init_map() },
+    arit: Arit { arits: init_map() },
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
@@ -649,13 +659,13 @@ impl Runtime {
     self.define_function(name_to_u128(name), read_func(code).1);
   }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128) -> Lnk {
-    return create_term(self, term, loc);
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+    return create_term(self, term, loc, vars_data);
   }
 
   pub fn alloc_term(&mut self, term: &Term) -> u128 {
     let loc = alloc(self, 1);
-    let lnk = create_term(self, term, loc);
+    let lnk = create_term(self, term, loc, &mut init_map());
     self.write(loc as usize, lnk);
     return loc;
   }
@@ -829,7 +839,7 @@ impl Runtime {
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
-          let state = self.create_term(init, 0);
+          let state = self.create_term(init, 0, &mut init_map());
           self.write_disk(*name, state);
           self.draw();
         }
@@ -1102,11 +1112,6 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 }
 
 
-// Globals
-// -------
-
-static mut VARS_DATA: [Option<u128>; VARS_SIZE] = [None; VARS_SIZE];
-
 // Constructors
 // ------------
 
@@ -1317,42 +1322,36 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // ----
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk) {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
     //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
-    unsafe {
-      if name == VAR_NONE {
-        link(rt, loc, Era());
-      } else {
-        match VARS_DATA[name as usize] {
-          Some(got) => {
-            VARS_DATA[name as usize] = None;
-            link(rt, got, lnk);
-          }
-          None => {
-            VARS_DATA[name as usize] = Some(lnk);
-            link(rt, loc, Era());
-          }
+    if name == VAR_NONE {
+      link(rt, loc, Era());
+    } else {
+      let got = vars_data.get(&(name as u64)).map(|x| *x);
+      match got {
+        Some(got) => {
+          vars_data.remove(&(name as u64));
+          link(rt, got, lnk);
+        }
+        None => {
+          vars_data.insert(name as u64, lnk);
+          link(rt, loc, Era());
         }
       }
     }
   }
   match term {
     Term::Var { name } => {
-      unsafe {
-        //println!("~~ var {} {}", u128_to_name(*name), VARS_DATA.len());
-        if (*name as usize) < VARS_DATA.len() {
-          match VARS_DATA[*name as usize] {
-            Some(got) => {
-              VARS_DATA[*name as usize] = None;
-              return got;
-            }
-            None => {
-              VARS_DATA[*name as usize] = Some(loc);
-              return Num(0);
-            }
-          }
-        } else {
+      //println!("~~ var {} {}", u128_to_name(*name), vars_data.len());
+      let got = vars_data.get(&(*name as u64)).map(|x| *x);
+      match got {
+        Some(got) => {
+          vars_data.remove(&(*name as u64));
+          return got;
+        }
+        None => {
+          vars_data.insert(*name as u64, loc);
           return Num(0);
         }
       }
@@ -1360,25 +1359,25 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
       let dupk = rt.get_dups();
-      bind(rt, node + 0, *nam0, Dp0(dupk, node));
-      bind(rt, node + 1, *nam1, Dp1(dupk, node));
-      let expr = create_term(rt, expr, node + 2);
+      bind(rt, node + 0, *nam0, Dp0(dupk, node), vars_data);
+      bind(rt, node + 1, *nam1, Dp1(dupk, node), vars_data);
+      let expr = create_term(rt, expr, node + 2, vars_data);
       link(rt, node + 2, expr);
-      let body = create_term(rt, body, loc);
+      let body = create_term(rt, body, loc, vars_data);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
-      bind(rt, node + 0, *name, Var(node));
-      let body = create_term(rt, body, node + 1);
+      bind(rt, node + 0, *name, Var(node), vars_data);
+      let body = create_term(rt, body, node + 1, vars_data);
       link(rt, node + 1, body);
       Lam(node)
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
-      let func = create_term(rt, func, node + 0);
+      let func = create_term(rt, func, node + 0, vars_data);
       link(rt, node + 0, func);
-      let argm = create_term(rt, argm, node + 1);
+      let argm = create_term(rt, argm, node + 1, vars_data);
       link(rt, node + 1, argm);
       App(node)
     }
@@ -1386,7 +1385,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
       let size = args.len() as u128;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128);
+        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
         link(rt, node + i as u128, arg_lnk);
       }
       Fun(*name, node)
@@ -1395,7 +1394,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
       let size = args.len() as u128;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128);
+        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
         link(rt, node + i as u128, arg_lnk);
       }
       Ctr(*name, node)
@@ -1405,9 +1404,9 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
-      let val0 = create_term(rt, val0, node + 0);
+      let val0 = create_term(rt, val0, node + 0, vars_data);
       link(rt, node + 0, val0);
-      let val1 = create_term(rt, val1, node + 1);
+      let val1 = create_term(rt, val1, node + 1, vars_data);
       link(rt, node + 1, val1);
       Op2(*oper, node)
     }
@@ -1572,6 +1571,8 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
 }
 
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
+
+  let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
 
@@ -1900,7 +1901,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -1980,15 +1981,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                   if let Some(field) = rule.vars[i].field {
                     var = ask_arg(rt, var, field);
                   }
-                  unsafe {
-                    //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
-                    VARS_DATA[rule.vars[i].name as usize] = Some(var);
-                  }
+                  //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
+                  vars_data.insert(rule.vars[i].name as u64, var);
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- alloc {:?}", rule.body);
                 //println!("-- vars: {:?}", vars);
-                let done = create_term(rt, &rule.body, host);
+                let done = create_term(rt, &rule.body, host, vars_data);
                 // Links the host location to it
                 link(rt, host, done);
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
@@ -1999,10 +1998,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                 // Collects unused variables (none in this example)
                 for i in 0 .. rule.vars.len() {
                   if rule.vars[i].erase {
-                    unsafe {
-                      if let Some(var) = VARS_DATA[i] {
-                        collect(rt, var, mana)?;
-                      }
+                    if let Some(var) = vars_data.get(&(i as u64)) {
+                      collect(rt, *var, mana)?;
                     }
                   }
                 }
@@ -2014,7 +2011,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
 
           let fun = get_ext(term);
           if let Some(func) = rt.get_func(fun) {
-            if call_function(rt, func, host, term, mana)? {
+            if call_function(rt, func, host, term, mana, &mut vars_data)? {
               init = 1;
               continue;
             }

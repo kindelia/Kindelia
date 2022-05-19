@@ -21,13 +21,13 @@ use crate::node::*;
 use crate::util::*;
 
 fn main() -> Result<(), String> {
-  return run_cli();
+  //return run_cli();
 
   //start_node(Some("simple.kdl".to_string()));
   //return Ok(());
   
-  //hvm::test("./example.kdl");
-  //return Ok(());
+  hvm::test("./example.kdl");
+  return Ok(());
 }
 
 
