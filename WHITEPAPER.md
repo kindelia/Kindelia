@@ -1,57 +1,54 @@
 Kindelia: a peer-to-peer functional computer
 ============================================
 
-Turing-complete blockchains, such as Ethereum, allow users to create
+Turing-complete blockchains, such as Ethereum, allow users to deploy
 decentralized applications (DApps), but recurrent security exploits undermine
-the proposal. Formal verification techniques can be used to ensure a DApp has no
-exploits, but Ethereum's underlying processor, the EVM, make these too expensive
-to be viable. By leveraging a functional virtual machine, the HVM, Kindelia is
-able to run formally verified DApps cheaply and efficiently. Moreover, extensive
-low-level optimizations let it sustain an much higher layer-1 throughput,
-compared to alternatives. Finally, Kindelia has no built-in token, and, thus,
-isn't a cryptocurrency; instead, it is merely a peer-to-peer computer capable of
-hosting secure functional programs.
+their proposals. Formal verification techniques can be used to ensure a DApp is
+exploit-free, but Ethereum's underlying processor, the EVM, make these too
+expensive to be viable. By leveraging a functional virtual machine, the HVM,
+Kindelia is able to run formally verified DApps cheaply and efficiently, making
+it the most secure peer-to-peer computer in existence. Moreover, by storing the
+global state as reversible runtime heaps, it can run stateful applications with
+massively reduced costs, making layer 1 virtual worlds economically viable.
+Finally, there is no built-in token, and, thus, **it isn't a cryptocurrency**.
+Instead, Kindelia is merely a peer-to-peer functional computer capable of
+efficiently hosting hack-proof programs that can't ever be turned off.
 
 Introduction
 ============
 
 Bitcoin was released in 2009, and became the first successful decentralized
-application, or DApp. Soon enough, the community started forking it to create
-all sorts of special-purpose coins; for example, NameCoin allowed purchasing and
-selling names, and ColorCoin allowed for multiple tokens in a single network. In
-2013, Ethereum generalized this concept by including a stateful, Turing complete
-virtual machine on its network. Arbitrary DApps could be easily created as
-Ethereum contracts, without launching a new network, and making cross-DApp
-communication possible. More than a decentralized application, Ethereum was the
-first decentralized computer.
+program. Soon enough, forks emerged aiming to create special-purpose coins such
+as NameCoin, which allowed purchasing and selling names, and ColorCoin, which
+featured multiple tokens. In 2013, Ethereum generalized this concept by
+including a stateful, Turing complete virtual machine. Arbitrary apps could be
+easily created as Ethereum contracts, without launching a new network. More than
+a decentralized application, Ethereum was the first decentralized computer. Due
+to its quick development, though, it launched with several design mistakes that
+made its base layer considerably less scalable and secure than it could be. In
+2021, the average Ethereum transaction fee rose to as much as 70 USD [citation],
+and millionaire smart-contract exploits were so common that websites reported
+their ocurrences daily [citation].
 
-Due to its quick development, though, Ethereum launched with several
-inefficiencies and design mistakes that made it considerably less scalable and,
-most importantly, secure than it should. In 2021, the average Ethereum
-transaction fee rose to as much as 70 USD [citation], and multi-millionaire
-smart-contract exploits became so common that websites were designed to track
-their ocurrences [citation].
-
-- Regarding **scalability**, layer-2 techniques are proposed as a solution, but
+- Regarding **scalability**, layer 2 techniques are proposed as a solution, but
   these come with their own compromises. There is value in a more scalable
-  layer-1, but Ethereum's historical mistakes leave little room for improvement.
+  layer 1, but Ethereum's historical mistakes leave little room for improvement.
 
 - Regarding **security**, formal verification techniques allow developers to
-  deploy contracts with zero bugs on their first version; which is invaluable,
-  since they can't be patched or reversed; but the EVM makes these prohibitively
+  deploy contracts with zero bugs on their first version, which is invaluable,
+  since they can't be patched or reversed, but the EVM makes these prohibitively
   expensive [citation].
 
-Kindelia is a complete rework of Ethereum's unrelying concept, taking in account
-what was learned in the last years, with the intent of making the most efficient
-and secure decentralized computer physically possible. It doesn't bring any
-novel concept; instead, it just employs a wide range of low-level optimizations
-over consolidated ideas in order to make a stable, inexpensive, safe layer-1
-computation network, saving every possible bit and making conservative choices
-when needed. Computationally, it replaces the EVM by the HVM, a blazingly fast
-functional virtual machine that makes ultra-secure, formally verified contracts
-economically viable, and enables structural changes that further improve the
-efficiency, security and scalability of stateful virtual worlds like games and
-markets.
+Kindelia is a complete redesign of Ethereum's base layer. It replaces the EVM by
+the HVM, a blazingly fast functional virtual machine that makes hack-proof,
+formally verified contracts economically viable. It also treats state
+differently, allowing for a very cheap SSTORE operation, which makes state-heavy
+apps such as virtual game worlds and markets economically viable on layer 1. The
+blockchain structure is extremelly simplified, there is no native currency,
+accounts are fully abstracted, and fancy ideas are avoided in favor of
+consolidated algorithms. A wide range of low-level optimizations are employed,
+saving every bit possible in order to make the most stable, efficient, secure
+and, arguably, boring layer 1 computation network.
 
 Comparisons to Ethereum
 =======================
@@ -60,32 +57,28 @@ Comparisons to Ethereum
 
 Formal verification can be used to mathematically ensure that a program can't be
 exploited, which is invaluable for a network where programs can't be patched or
-reversed. Ethereum's virtual machine is too inefficient for functional programs
-[citation], making formal verification unpractical, because one must either
-verify the generated bytecode (expensive development) or use a proof language
-such as Idris (expensive transactions).
-
-Kindelia adopts the blazingly fast High-order Virtual Machine (HVM), which
-features beta-reduction and pattern-matching as native opcodes, allowing
-developers to write formally verified programs in a proper proof assistant, and
-execute these programs directly and cheaply onchain.
+reversed, but Ethereum's virtual machine is too inefficient for functional
+programs [citation], making it unpractical: devs must either verify the
+generated bytecode, which is extremelly hard and laborious, or compile a proof
+language such as Idris, which results in expensive EVM contracts. Thanks to the
+HVM, Kindelia is able to perform beta-reduction and pattern-matching natively,
+making functional programs much cheaper, which, in turn, makes formally verified
+contracts economically viable.
 
 **Reversible heaps make stateful DApps much cheaper.**
 
 One of the most expensive operations on Ethereum is SSTORE, which saves
-persistent state to `U256 -> U256` maps. It costs 20000 gas (4k MULs) for a new
+persistent states to `U256 -> U256` maps. It costs 20000 gas (4k MULs) for a new
 store, and 5000 (1k MULs) for a reused store. That cost is high for two reasons:
 first, to limit the state growth; second, because a single store demands a
 Merkle Patricia Tree insertion, which requires expensive hashes and disk writes.
-
 Kindelia treats state differently: it just saves reversible snapshots of HVM's
-heap. Because of that, a SSTORE is a single hashmap insertion, which is
-computationally negligible. Increasing the state is still expensive, but reused
-stores are, essentially, free. This enables a whole new world of applications
-that were prohibitely expensive on Ethereum. That also means contracts can
-persist states directly, as immutable structures, with no need for
-serialization. This further decreases computational costs, and makes bugs even
-less likely.
+heap. Because of that, a SSTORE is a single array write, which is much cheaper
+than a Merkle Tree insertion. Increasing the state is still expensive, but
+reused stores are, essentially, free. Because of that, heavily stateful DApps
+like games and markets are much cheaper. Also, contracts skip U256 serialization
+and store HVM structures (trees, maps, JSONs) directly, which is much more
+convenient to work with, and considerably less error-prone.
 
 **The block structure is astonishingly simpler.**
 
@@ -93,52 +86,183 @@ There are no merkle roots, bloom filters, logs, receipts. Kindelia's blocks are
 refreshingly simple: just a timestamp, the previous hash, a nonce, the miner id,
 and a body of statements (transactions). The body is only *1280 bytes* long, and
 is fully included in the header. The entire block fits in a single UDP packet,
-enabling fast propagation and short block times, with minimal uncle rate.
-
-**Transactions are replaced by arbitrary code blocks.**
-
-Instead of monetary "from/to" transactions, Kindelia blocks are just lists of
+enabling fast propagation and short block times, with minimal uncle rate. Also,
+instead of monetary "from/to" transactions, Kindelia blocks are just lists of
 statements that perform an action on Kindelia's global state. In other words,
 blocks can be seen as pages of code that are executed on Kindelia's REPL
 (read-eval-print loop). That flexibility enables important optimizations, such
 as unsigned transactions, making certain interactions, such as contract
 deployment, considerably cheaper.
 
-**Contract functions are globally reusable.**
+**Functions are reusable, accounts are abstracted, there is no native currency.**
 
-Instead of compiling every function in a contract to a flat bytecode, Kindelia
+Instead of compiling contracts to monolithic blobs of assembly code, Kindelia
 programs are broken into pure functions that are deployed separately, in a
 modular fashion. That means that any program can call any function from any
-other program, as if it was their own. This enables an enourmous amount of code
-reuse, making contracts even more lightweight and cheap.
+other program directly, enabling an enourmous amount of code reuse. There is no
+built-in account system: Kindelia accounts are just user-deployed functions that
+can use arbitrary signature schemes. This is not only flexible, but makes
+Kindelia immune to quantum attacks, which would irreversibly collapse both
+Ethereum and Bitcoin. There is no built-in currency either: Kindelia isn't a
+cryptocurrency! To prevent spam, it imposes 3 limits on its resource usage: the
+blockchain size grows about `40 GB` per year, the state size grows about `2 GB`
+per year, and the computation budget grows about `1.3 * 10^18 mana` per year.
+When the maximum capacity is reached, a fee market will emerge, and users can
+pay miners to include their transactions in any on-chain asset, not just the
+"official currency".
 
-**Accounts are fully abstracted.**
+Examples
+========
 
-There is no built-in account system; in fact, a full node doesn't need to import
-a single signature algorithm! Kindelia accounts are just user-deployed functions
-that conditionally call other functions based on whatever signature schemes they
-choose. This not only enables all sorts of login schemes to be designed, but
-also makes Kindelia inherently immune to quantum attacks, which would
-irreversibly collapse both Ethereum and Bitcoin.
+Technically, Kindelia is just a decentralized REPL that interprets statements,
+and Kindelia blocks are just files in its programming language. These blocks are
+efficiently compressed, propagated on a network following a PoW consensus
+algorithm, and computed by nodes efficiently and measurably using the HVM. And
+that's all.  There is no native currency, account system, no complex crypto
+primitives or fancy sci-fi-sounding ideas. Just a pure, permanent functional
+runtime running in a peer-to-peer network.
 
-**There is no native currency.**
+Below are some example blocks. Keep in mind that the code shown, while
+high-level looking, is just a **textual representation Kindelia's low-level
+machine language**; i.e., it is equivalent to EVM's assembly, and **is not the
+language developers are meant to use**. Instead, they should compile higher
+level functional languages such as Haskell or, if they care about formal
+verification, a proof language like [Kind](https://github.com/kindelia/kind).
 
-There is no built-in currency either, which means Kindelia isn't a
-cryptocurrency and, by definition, has no premine. To prevent spam, Kindelia
-imposes 3 hard limits on a full node's resource usage: the blockchain growth
-(about `40 GB` per year), the state growth (about `2 GB` per year) and the
-computation growth (about `1.3 * 10^18 mana` per year). When the maximum
-capacity is reached, miners will start cherry picking transactions, thus a fee
-market will naturally emerge, allowing users to pay miners in any internal asset
-they like, instead of just a single official token.
+Pure function (tree sum)
+------------------------
+
+The block below defines and uses some global functions that operate on immutable trees:
+
+```c
+// Declares a constructor, Leaf, with arity (size) 1
+ctr Leaf 1
+
+// Declares a constructor, Node, with arity (size) 2
+ctr Node 2
+
+// Returns a tree with 2^num copies of #1
+fun Gen 1 {
+  !(Gen #0) = $(Leaf #1)
+  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+} = #0
+
+// Sums a tree
+fun Sum 1 {
+  !(Sum $(Leaf x))   = x
+  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
+} = #0
+
+// Allocates a big tree and sums it:
+run {
+  $(IO.done !(Sum !(Gen #10)))
+}
+```
+
+When a Kindelia node runs that block, the global functions `Gen` and `Sum` will
+be defined forever inside the network. Note how they are written in a functional
+style, closely resembling Haskell's equational, pattern-matching notation. These
+functions are not compiled to stack machines, but, instead, run natively on the
+HVM. Note also that the language is linear: variables aren't used more than
+once. This is essential to keep Kindelia's computations efficient and
+measurable. In order to make that practical, there is a lazy duplication
+operation, written as `&{a b} = x`, which allows values to be cloned
+incrementally.
+
+Other than defining constructors and functions, blocks can also evaluate
+side-effective actions inside `run {}` statements. These operate like Haskell's
+`IO` monad. Inside them, users can query information from the blockchain, call
+other functions, save and load a persistent state. Note that the `run{}`
+statement shown here is "useless": it just performs a computation and returns.
+
+Stateful function (counter)
+---------------------------
+
+Actual contracts must hold a state. In Kindelia, every function holds an
+internal state, which is just any native HVM structure. That state can be loaded
+and saved using `IO.load` and `IO.save`. With just that, we are able to create
+smart-contracts by using stateful functions.
+
+Below, we define a `Count` contract that has two actions: one to increment a
+counter, and one to return the current counter. We then run two scripts: one
+that increments the counter 3 times, and other that just outputs the current
+counter, i.e., 3.
+
+```c
+// Creates a Count function with 2 actions:
+// - Inc: increment its counter, return 0
+// - Get: return its counter
+// And an initial state of zero (#0)
+ctr Inc 0
+ctr Get 0
+fun Count 1 {
+  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+} = #0
+
+// Runs a script that increments the Count's state 3 times
+run {
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call !(Count $(Inc)) λ~
+  $(IO.done #0))))
+}
+
+// Runs a script that prints the Count's state
+run {
+  $(IO.call !(Count $(Get)) λx
+  $(IO.done x))
+}
+```
+
+Note that `IO.load` and `IO.save` just save/load the state stored on the "active
+function", i.e., the one currently being called. A function's state can be any
+arbitrary HVM structure: a number, a list, a tree. There is no `U256`
+serialization. If a contract requires a map-like structure, it can, for example,
+store an immutable map as its state.
+
+`IO.load` and `IO.save` have no cost, but the user still needs to pay for
+computations. For example, updating a balance requires paying for the cost of
+the immutable `Map.insert` operation (whichs, usually, is pretty cheap). To
+avoid state bloat, though, there is a heavy tax on state growth. The good news
+is that updating states without allocating more space is extremelly cheap,
+compared to Ethereum.
+
+Account
+-------
+
+A Kindelia account is just a function that receives an action and a signature,
+and, if the signature checks, calls another function to perform that action. For
+example:
+
+```c
+fun Alice 1 {
+  !(Alice $(SendCoin amount to nonce signature)) =
+    
+    let pub_key = ... alice key here ...
+    let sig_key = !(ECDSA.recv signature !(Hash [amount to nonce]))
+
+    if (== sig_key pub_key) then
+      $(Coin.send amount to nonce)
+    else
+      $(IO.done #0)
+} = #0
+```
+
+As soon as the function above is deployed, Alice may use it as her own account
+to send coins in an hypothetical "Coin" contract, because only herself is able
+to call it with a signature that enters the `Coin.send` branch. Of course, this
+account is extremelly limited, but anything is possible. Alice could have a
+collection of signature schemes, she could impose limitations, and could extend
+her own account's functionality by storing lambdas on its internal state.
+
 
 Technical Overview
 ==================
 
-Technically, Kindelia is just a REPL that interprets sequential blocks of
-statements in a functional language to compute a final state. These blocks are
-ordered by a network of miners following a consensus algorithm. Statements can
-be one of 4 variants:
+Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
+(Proof of Work). Kindelia blocks are just groups of statements.  Kindelia
+statements can be one of 4 variants:
 
 - **use**: defines a block-wide name alias
 
@@ -249,8 +373,13 @@ actual terms that run inside Kindelia's HVM. It should be seen as Kindelia's
 low-level assembly, and developers should use higher-level languages (such as
 Kind, Haskell, Idris, Agda, Coq and Lean) that compile to it.
 
-Numbers are written with a `#`, but, as a syntax sugar, they can be also be
-written with a `@` followed by a list of 6-bit letters, as follows:
+Native numbers are 120-bit. The reason is that Kindelia's HVM uses 128-bit
+pointers with a 8-bit tag. This allows storing numbers unboxed, as long as they
+aren't larger than 120 bits. Any other size would less efficient: less than 120
+bits would waste space, and more would require a pointer indirection. Numbers
+are written with a `#`, followed by a decimal literal. For example, `#123456789`
+is a valid number. As a syntax sugar, numbers can be also be written with a `@`
+followed by a list of 6-bit letters, as follows:
 
       | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F | 
     --|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -261,10 +390,8 @@ written with a `@` followed by a list of 6-bit letters, as follows:
 
 So, for example, `@Bar` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
-human-readable source codes.
-
-Finally, Kindelia has side-effective operations that allow functions to save
-states, request information from the network, etc.:
+human-readable source codes. Finally, Kindelia has side-effective operations
+that allow functions to save states, request information from the network, etc.:
 
 ```c
 $(IO.load       λr ...) // loads this function's internal state
@@ -276,50 +403,105 @@ $(IO.done value)        // returns from the IO action
 ```
 
 Note that, since Kindelia's language is pure, these side-effects are only
-performed when placed directly inside top-level `run{}` blocks, otherwise they
-are treated as pure expressions, exactly like Haskell's IO type. To receive
+performed when placed directly inside top-level `run{}` statements, otherwise
+they are treated as pure expressions, exactly like Haskell's IO type. To receive
 values from the external environment, a continuation (`λr ...`) is used.
 
 Operations
 ==========
 
-TODO: write explanations
+Kindelia expressions are evaluated by the HVM, a functional virtual machine.
+The primitive operations in that machine are called rewrite rules, and they
+include beta-reduction (lambda application), pattern-matching, numeric
+operators, and primitives for cloning and erasing data. It is important to
+stress that all these operations are constant-time, which is essential to make
+computation measurable: see the gas table in the next section. For more info on
+how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
+
+In addition to the 8 term variants, the HVM also has an internal superposition
+construct, which is just a pair that can show up as a byproduct of its
+lazy-cloning operation. This has nothing to do with quantum mechanics, we just
+borrow the name because it is a good intuition of their behaviors; again, see
+[HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for a study. That
+construct will be written as `{a b}`. It also has an erasure construct, which
+may appear as a byproduct of erasing data.
+
+Kindelia's rewrite rules are:
+
+### Lambda Application
+
+Applies a linear lambda to an argument. 
 
 ```
 (λx body a)
 ----------- APP-LAM
 x <- a
 body
+```
 
+### Superposition Application
+
+Applies a superposition to an argument.
+
+```
 ({a b} c)
 --------------- APP-SUP
 &{x0 x1} = c
 {(a x0) (b x1)}
+```
 
+### Lambda Duplication
+
+Lazily, incrementally clones a lambda.
+
+```
 &{r s} = λx f
 ------------- DUP-LAM
 &{f0 f1} = f
 r <- λx0 f0
 s <- λx1 f1
 x <- {x0 x1}
+```
 
+### Superposition Duplication
+
+Superpositions and duplications hold a 60-bit integer label. If the label is
+equal, this rule collapses the superposition.
+
+```
 &{x y} = {a b}
--------------- DUP-SUP equal
+-------------- DUP-SUP (identical labels)
 x <- a
 y <- b
+```
 
+Otherwise, this rule duplicates the superposition.
+
+```
 &{x y} = {a b}
--------------- DUP-SUP (different)
+-------------- DUP-SUP (different labels)
 x <- {xA xB}
 y <- {yA yB}
 &{xA yA} = a
 &{xB yB} = b
+```
 
+### Number Duplication
+
+Clones a 120-bit number.
+
+```
 &{x y} = N
 ---------- DUP-NUM
 x <- N
 y <- N
+```
 
+### Constructor Duplication
+
+Lazily, incrementally clones a constructor.
+
+```
 ${x y} = (K a b c ...)
 ---------------------- DUP-CTR
 ${a0 a1} = a
@@ -328,37 +510,81 @@ ${c0 c1} = c
 ...
 x <- (K a0 b0 c0 ...)
 y <- (K a1 b1 c1 ...)
+```
 
+### Erasure Duplication
+
+```
 ${x y} = *
 ---------- DUP-ERA
 x <- *
 y <- *
+```
 
+### Numeric Operation
+
+A binary operation on 120-bit numbers.
+
+```
 (+ a b)
 --------- OP2-NUM
 add(a, b)
+```
 
+### Superposed Operation
+
+A binary operation on a superposition.
+
+```
 (+ {a0 a1} b)
 --------------------- OP2-SUP-0
 let b0 b1 = b
 {(+ a0 b0) (+ a1 b1)}
+```
 
+```
 (+ a {b0 b1})
 --------------------- OP2-SUP-1
 ${a0 a1} = a
 {(+ a0 b0) (+ a1 b1)}
+```
 
+### Superposed Matching
+
+Pattern-matching on a superposition.
+
+```
 (F {a0 a1} b c ...)
 ----------------------------------- FUN-SUP
 ${b0 b1} = b
 ${c0 c1} = c
 ...
 {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
+```
 
+### Constructor Matching
+
+Pattern-matching on a constructor. Each user-defined equation installs a new,
+global pattern-matching rewrite rule.
+
+```
 (user-defined)
 -------------- FUN-CTR
 (user-defined)
 ```
+
+### Garbage Collection
+
+Whenever a value goes out of scope, which happens when, and only when, a
+function or lambda that doesn't use its variable is applied to said value,
+a garbage-collection procedure is initiated, freeing its data recursively.
+That operation is described below:
+
+TODO: pseudocode of the GC procedure
+
+TODO: explanation on interaction with duplication nodes
+
+TODO: explanation on how it is NOT a global GC pass
 
 Cost Table
 ==========
@@ -397,106 +623,51 @@ TODO: explain the state growth limit
 
 TODO: explain the blockchain growth limit
 
-Examples
-========
-
-Trees Sum
----------
-
-The block below defines a binary tree type, functions to alloc and sum trees,
-and runs a script that sums a tree with `2^10` copies of the number `1`:
-
-```c
-// Declares a constructor, Leaf, with arity (size) 1
-ctr Leaf 1
-
-// Declares a constructor, Node, with arity (size) 2
-ctr Node 2
-
-// Returns a tree with 2^num copies of #1
-fun Gen 1 {
-  !(Gen #0) = $(Leaf #1)
-  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
-} = #0
-
-// Sums a tree
-fun Sum 1 {
-  !(Sum $(Leaf x))   = x
-  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
-} = #0
-
-// Allocates a big tree and sums it:
-run {
-  $(IO.done !(Sum !(Gen #10)))
-}
-```
-
-Note that the script at the end of the block above doesn't have any persistent
-effect, since it doesn't invoke `IO.save`. It just performs a pure computation
-on-chain.
-
-Counter
--------
-
-To be useful, contracts must be able to hold a state. Below, we define a `Count`
-contract that has two actions: one to increment a counter, and one to return the
-current counter. We then run two scripts: one that increments the counter 3
-times, and other that just outputs the current counter, i.e., 3.
-
-```c
-// Creates a Count function with 2 actions:
-// - Inc: increment its counter, return 0
-// - Get: return its counter
-// And an initial state of zero (#0)
-fun Count 1 {
-  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load λx $(IO.done x))
-} = #0
-
-// Runs a script that increments the Count's state 3 times
-run {
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.done #0))))
-}
-
-// Runs a script that prints the Count's state
-run {
-  $(IO.call !(Count $(Get)) λx
-  $(IO.done x))
-}
-```
-
-Account
--------
-
-A Kindelia account is just a function that receives an action and a signature,
-and, if the signature checks, calls another function to perform that action. For
-example:
-
-```c
-fun Alice 1 {
-  !(Alice $(SendCoin amount to nonce signature)) =
-    
-    let pub_key = ... alice key here ...
-    let sig_key = !(ECDSA.recv signature !(Hash [amount to nonce]))
-
-    if (== sig_key pub_key) then
-      $(Coin.send amount to nonce)
-    else
-      $(IO.done #0)
-} = #0
-```
-
-As soon as the function above is deployed, Alice may use it as her own account
-to send coins in an hypothetical "Coin" contract, because only herself is able
-to call it with a signature that enters the `Coin.send` branch. Of course, this
-account is extremelly limited, but anything is possible. Alice could have a
-collection of signature schemes, she could impose limitations, and could extend
-her own account's functionality by storing lambdas on its internal state.
-
 Serialization
 =============
 
 TODO: write the serialization format
+
+Notes
+=====
+
+TODO: Additional notes, disclaimers go here.
+
+### 1. Why?
+
+*“Your scientists were so preoccupied with whether they could, they didn't stop to think if they should.”*
+
+99% of all blockchain projects are a solution looking for a problem. Yet, I
+believe there is still some value to be found in them. For one, "conventional
+currencies rely on the trust that central banks won't debase them, but their
+history is full of breaches of that trust". Countries go through periods of
+crisis, money is printed by humans. No form of human-controlled money has lasted
+more than a few centuries. A global currency that isn't controlled or affected
+by human actions and emotions surely can't be less stable on the very long term,
+right? And there is some value in that longevity factor. That is why Bitcoin is
+valuable to me.
+
+As for applications, having a place where anyone can host forums, files, games,
+in such a manner that can't be censored by anyone is also a comfortable
+safeguard in the case things go terribly wrong in the world; even if they
+probably won't. Ethereum is such a place, but what is the point of an eternal
+application if it only lasts until a bug is found? Formal verification is the
+act of mathematically proving that given software has zero bugs, and that goes
+really well with the idea of eternal apps. That is why Kindelia is valuable.
+
+Finally, the notion of virtual worlds that can't ever be turned off is also
+pretty sexy to a gaming nerd like me. I can't leave a legendary sword on World
+of Warcraft to my grandchildren. After all, who knows if Blizzard will even
+exist by then? But I surely can do so on a virtual world hosted on Kindelia.
+The fact a sword will never cease to exist makes it more valuable today, which
+gives birth to markets where digital assets are valued just like physical
+assets, and that sounds extremelly cool to my inner nerd. Kindelia's cheap
+states lets these world exist without complicated layer 2 indirections.
+
+All these things have **some** value. It is just not the absurd value that the
+ticker says it has. But who is to blame, the tech, or the greed of speculative
+markets?
+
+### 2. Why Nakamoto Consensus (Proof of Work)?
+
+TODO: writeup
