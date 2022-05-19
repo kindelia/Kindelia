@@ -2418,7 +2418,7 @@ pub fn u128_to_name(num: u128) -> String {
             11 ..= 36 => (chr - 11 + b'A') as char,
             37 ..= 62 => (chr - 37 + b'a') as char,
             63        => '_',
-            _         => panic!("impossible character value")
+            64 ..     => panic!("impossible character value")
         };
     name.push(chr);
     num = num / 64;
