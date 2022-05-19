@@ -2411,20 +2411,16 @@ pub fn u128_to_name(num: u128) -> String {
   let mut num = num;
   while num > 0 {
     let chr = (num % 64) as u8;
-    // TODO: Optimize with `match`
-    if chr == 0 {
-      name.push('.');
-    } else if chr <= 10 {
-      name.push((chr - 1 + b'0') as char);
-    } else if chr <= 36 {
-      name.push((chr - 11 + b'A') as char);
-    } else if chr <= 62 {
-      name.push((chr - 37 + b'a') as char);
-    } else if chr == 63 {
-      name.push('_');
-    } else {
-      panic!("wut");
-    }
+    let chr =
+        match chr {
+            0         => '.',
+            1  ..= 10 => (chr -  1 + b'0') as char,
+            11 ..= 36 => (chr - 11 + b'A') as char,
+            37 ..= 62 => (chr - 37 + b'a') as char,
+            63        => '_',
+            _         => panic!("impossible character value")
+        };
+    name.push(chr);
     num = num / 64;
   }
   name.chars().rev().collect()
