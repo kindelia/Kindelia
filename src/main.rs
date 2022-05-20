@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
+#![allow(clippy::style)]
 
 mod util;
 mod hvm;
