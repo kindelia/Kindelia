@@ -196,21 +196,21 @@ counter, i.e., 3.
 ctr Inc 0
 ctr Get 0
 fun Count 1 {
-  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load @x $(IO.done x))
 } = #0
 
 // Runs a script that increments the Count's state 3 times
 run {
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
-  $(IO.call !(Count $(Inc)) λ~
+  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
   $(IO.done #0))))
 }
 
 // Runs a script that prints the Count's state
 run {
-  $(IO.call !(Count $(Get)) λx
+  $(IO.call 'Count' !(Tuple1 $(Get)) @x
   $(IO.done x))
 }
 ```
@@ -331,7 +331,7 @@ Oper ::=
 Term ::=
 
   // A lambda
-  λ <var0: Bind> <body: Term>
+  @ <var0: Bind> <body: Term>
   
   // An application
   (<func: Term> <argm: Term>)
@@ -358,7 +358,7 @@ Term ::=
 For example,
 
 ```
-λx λy $(Pair (+ x #42) !(F y))
+@x @y $(Pair (+ x #42) !(F y))
 ```
 
 Denotes a function that receives two values, `x`, and `y`, and returns a pair
@@ -378,8 +378,8 @@ pointers with a 8-bit tag. This allows storing numbers unboxed, as long as they
 aren't larger than 120 bits. Any other size would less efficient: less than 120
 bits would waste space, and more would require a pointer indirection. Numbers
 are written with a `#`, followed by a decimal literal. For example, `#123456789`
-is a valid number. As a syntax sugar, numbers can be also be written with a `@`
-followed by a list of 6-bit letters, as follows:
+is a valid number. As a syntax sugar, numbers can be also be written with single
+quotes, containing a list of 6-bit letters, as follows:
 
       | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F | 
     --|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -388,24 +388,24 @@ followed by a list of 6-bit letters, as follows:
     2 | f | g | h | i | j | k | l | m | n | o | p | q | r | s | t | u | 
     3 | v | w | x | y | z | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | _ | 
 
-So, for example, `@Bar` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
+So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
 human-readable source codes. Finally, Kindelia has side-effective operations
 that allow functions to save states, request information from the network, etc.:
 
 ```c
-$(IO.load       λr ...) // loads this function's internal state
-$(IO.save value λr ...) // saves this function's internal state
-$(IO.call iofun λr ...) // calls another IO function
-$(IO.from       λr ...) // gets the caller 60-bit name
-... TODO ...            // ...
-$(IO.done value)        // returns from the IO action
+$(IO.load           @r ...) // loads this function's internal state
+$(IO.save expr      @r ...) // saves this function's internal state
+$(IO.call func args @r ...) // calls another IO function
+$(IO.from           @r ...) // gets the caller 60-bit name
+... TODO ...                // ...
+$(IO.done expr)             // returns from the IO action
 ```
 
 Note that, since Kindelia's language is pure, these side-effects are only
 performed when placed directly inside top-level `run{}` statements, otherwise
 they are treated as pure expressions, exactly like Haskell's IO type. To receive
-values from the external environment, a continuation (`λr ...`) is used.
+values from the external environment, a continuation (`@r ...`) is used.
 
 Operations
 ==========
@@ -433,7 +433,7 @@ Kindelia's rewrite rules are:
 Applies a linear lambda to an argument. 
 
 ```
-(λx body a)
+(@x body a)
 ----------- APP-LAM
 x <- a
 body
@@ -455,11 +455,11 @@ Applies a superposition to an argument.
 Lazily, incrementally clones a lambda.
 
 ```
-&{r s} = λx f
+&{r s} = @x f
 ------------- DUP-LAM
 &{f0 f1} = f
-r <- λx0 f0
-s <- λx1 f1
+r <- @x0 f0
+s <- @x1 f1
 x <- {x0 x1}
 ```
 

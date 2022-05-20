@@ -1,5 +1,5 @@
 run {
-  $(IO.call @Count !(Tuple1 $(Inc)) λ~
-  $(IO.call @Count !(Tuple1 $(Get)) λx
+  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' !(Tuple1 $(Get)) @x
   $(IO.done x)))
 }

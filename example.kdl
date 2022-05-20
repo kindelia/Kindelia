@@ -29,7 +29,7 @@
 //
 // - Integers are 120-bit, and are written like `#123`
 // 
-// - You can also write a number with a name, like `@Foo`
+// - You can also write a number with a name, like `'Foo'`
 //
 // - Functions can hold an internal state
 //
@@ -72,22 +72,22 @@
 // - Get: return its counter
 // And an initial state of zero (#0)
 fun Count 1 {
-  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-  !(Count $(Dob)) = $(IO.load λx $(IO.save (* x #2) λ~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Dob)) = $(IO.load @x $(IO.save (* x #2) @~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load @x $(IO.done x))
 } = #0
 
 // Runs a script that increments the Count's state 3 times
 run {
-  $(IO.call @Count $(Tuple1 $(Inc)) λ~
-  $(IO.call @Count $(Tuple1 $(Inc)) λ~
-  $(IO.call @Count $(Tuple1 $(Inc)) λ~
+  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
   $(IO.done #0))))
 }
 
 // Runs a script that prints the Count's state
 run {
-  $(IO.call @Count $(Tuple1 $(Get)) λx
+  $(IO.call 'Count' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }
 
@@ -124,7 +124,7 @@ run {
 
 // Utility that, when called, returns the caller name
 fun WhoIs 0 {
-  !(WhoIs) = $(IO.from λwho $(IO.done who))
+  !(WhoIs) = $(IO.from @who $(IO.done who))
 } = #0
 
 // Creates the LadyAlice account. It just receives a `$(CallN ...)`
@@ -133,12 +133,12 @@ fun WhoIs 0 {
 // LadyAlice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on LadyAlice's behalf.
 fun LadyAlice 2 {
-  !(LadyAlice name args) = $(IO.call name args λres $(IO.done res))
+  !(LadyAlice name args) = $(IO.call name args @res $(IO.done res))
 } = #0
 
 // Prints LadyAlice's name
 run {
-  $(IO.call @LadyAlice $(Tuple2 @WhoIs $(Tuple0)) λnam
+  $(IO.call 'LadyAlice' $(Tuple2 'WhoIs' $(Tuple0)) @nam
   $(IO.done nam))
 }
 
@@ -149,13 +149,13 @@ run {
 
 // When a transaction fails, it is fully reversed
 run {
-  $(IO.call @Count $(Tuple1 $(Inc)) λ~
+  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
 run {
-  $(IO.call @Count $(Tuple1 $(Get)) λx
+  $(IO.call 'Count' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }

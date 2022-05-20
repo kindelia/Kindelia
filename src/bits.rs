@@ -50,6 +50,31 @@ pub fn deserialize_varlen(bits: &BitVec, index: &mut u128) -> U256 {
   return val;
 }
 
+// A name is grouped by 6-bit letters
+
+pub fn serialize_name(name: &u128, bits: &mut BitVec) {
+  let mut name = *name;
+  while name > 0 {
+    bits.push(true);
+    serialize_fixlen(6, &u256(name & 0x3F), bits);
+    name = name >> 6;
+  }
+  bits.push(false);
+}
+
+pub fn deserialize_name(bits: &BitVec, index: &mut u128) -> u128 {
+  let mut nam : u128 = 0;
+  let mut add : u128 = 1;
+  while bits[*index as usize] {
+    *index += 1;
+    let got = deserialize_fixlen(6, bits, index).low_u128();
+    nam = nam + add * got;
+    add = add.saturating_mul(64);
+  }
+  *index = *index + 1;
+  return nam;
+}
+
 // A bitvec with an unknown amount of bits
 
 pub fn serialize_bits(data: &BitVec, bits: &mut BitVec) {
@@ -288,18 +313,18 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
   match term {
     Term::Var { name } => {
       serialize_fixlen(3, &u256(0), bits);
-      serialize_fixlen(18, &u256(*name as u128), bits);
+      serialize_name(name, bits);
     }
     Term::Dup { nam0, nam1, expr, body } => {
       serialize_fixlen(3, &u256(1), bits);
-      serialize_fixlen(18, &u256(*nam0 as u128), bits);
-      serialize_fixlen(18, &u256(*nam1 as u128), bits);
+      serialize_name(nam0, bits);
+      serialize_name(nam1, bits);
       serialize_term(expr, bits);
       serialize_term(body, bits);
     }
     Term::Lam { name, body } => {
       serialize_fixlen(3, &u256(2), bits);
-      serialize_fixlen(18, &u256(*name as u128), bits);
+      serialize_name(name, bits);
       serialize_term(body, bits);
     }
     Term::App { func, argm } => {
@@ -309,17 +334,17 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
     }
     Term::Ctr { name, args } => {
       serialize_fixlen(3, &u256(4), bits);
-      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_name(name, bits);
       serialize_many(serialize_term, args, bits);
     }
     Term::Fun { name, args } => {
       serialize_fixlen(3, &u256(5), bits);
-      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_name(name, bits);
       serialize_many(serialize_term, args, bits);
     }
     Term::Num { numb } => {
       serialize_fixlen(3, &u256(6), bits);
-      serialize_fixlen(60, &u256(*numb as u128), bits);
+      serialize_varlen(&u256(*numb), bits);
     }
     Term::Op2 { oper, val0, val1 } => {
       serialize_fixlen(3, &u256(7), bits);
@@ -335,18 +360,18 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
   //println!("- tag.: {} {:?}", tag, bits.clone().split_off(*index as usize));
   match tag.low_u128() {
     0 => {
-      let name = deserialize_fixlen(18, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       Term::Var { name }
     }
     1 => {
-      let nam0 = deserialize_fixlen(18, bits, index).low_u128();
-      let nam1 = deserialize_fixlen(18, bits, index).low_u128();
+      let nam0 = deserialize_name(bits, index);
+      let nam1 = deserialize_name(bits, index);
       let expr = Box::new(deserialize_term(bits, index));
       let body = Box::new(deserialize_term(bits, index));
       Term::Dup { nam0, nam1, expr, body }
     }
     2 => {
-      let name = deserialize_fixlen(18, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       let body = Box::new(deserialize_term(bits, index));
       Term::Lam { name, body }
     }
@@ -356,7 +381,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
       Term::App { func, argm }
     }
     4 => {
-      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       let args = deserialize_many(|bits, index| {
         let term = deserialize_term(bits, index);
         return term;
@@ -364,12 +389,12 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
       Term::Ctr { name, args }
     }
     5 => {
-      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       let args = deserialize_many(deserialize_term, bits, index);
       Term::Fun { name, args }
     }
     6 => {
-      let numb = deserialize_fixlen(60, bits, index).low_u128();
+      let numb = deserialize_varlen(bits, index).low_u128();
       Term::Num { numb }
     }
     7 => {
@@ -388,7 +413,7 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
   match action {
     Action::Fun { name, arit, func, init } => {
       serialize_fixlen(4, &u256(0), bits);
-      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_name(name, bits);
       serialize_fixlen(4, &u256(*arit as u128), bits);
       serialize_many(|rule, bits| {
         serialize_term(&rule.0, bits);
@@ -398,7 +423,7 @@ pub fn serialize_action(action: &Action, bits: &mut BitVec) {
     }
     Action::Ctr { name, arit } => {
       serialize_fixlen(4, &u256(1), bits);
-      serialize_fixlen(60, &u256(*name as u128), bits);
+      serialize_name(name, bits);
       serialize_fixlen(4, &u256(*arit as u128), bits);
     }
     Action::Run { expr } => {
@@ -413,7 +438,7 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Action {
   let tag = deserialize_fixlen(4, bits, index);
   match tag.low_u128() {
     0 => {
-      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       let arit = deserialize_fixlen(4, bits, index).low_u128();
       let func = deserialize_many(|bits, index| {
         let lhs  = deserialize_term(bits, index);
@@ -425,7 +450,7 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Action {
       Action::Fun { name, arit, func, init }
     }
     1 => {
-      let name = deserialize_fixlen(60, bits, index).low_u128();
+      let name = deserialize_name(bits, index);
       let arit = deserialize_fixlen(4, bits, index).low_u128();
       Action::Ctr { name, arit }
     }

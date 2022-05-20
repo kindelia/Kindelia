@@ -371,8 +371,8 @@ ctr Tuple8 8
 ctr Inc 0
 ctr Get 0
 fun Count 1 {
-  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Get)) = $(IO.load @x $(IO.done x))
 } = #0
 ";
 
@@ -1640,7 +1640,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
       match get_tag(term) {
         APP => {
           let arg0 = ask_arg(rt, term, 0);
-          // (λx(body) a)
+          // (@x(body) a)
           // ------------ APP-LAM
           // x <- a
           // body
@@ -1680,11 +1680,11 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         DP0 | DP1 => {
           let arg0 = ask_arg(rt, term, 2);
-          // dup r s = λx(f)
+          // dup r s = @x(f)
           // --------------- DUP-LAM
           // dup f0 f1 = f
-          // r <- λx0(f0)
-          // s <- λx1(f1)
+          // r <- @x0(f0)
+          // s <- @x1(f1)
           // x <- {x0 x1}
           if get_tag(arg0) == LAM {
             //println!("dup-lam");
@@ -2211,7 +2211,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       }
       LAM => {
         let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-        format!("λ{} {}", name, go(rt, ask_arg(rt, term, 1), names))
+        format!("@{} {}", name, go(rt, ask_arg(rt, term, 1), names))
       }
       APP => {
         let func = go(rt, ask_arg(rt, term, 0), names);
@@ -2437,7 +2437,7 @@ fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, 
 fn read_term(code: &str) -> (&str, Term) {
   let code = skip(code);
   match head(code) {
-    'λ' => {
+    '@' => {
       let code         = tail(code);
       let (code, name) = read_name(code);
       let (code, body) = read_term(code);
@@ -2490,14 +2490,15 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, numb) = read_numb(code);
       return (code, Term::Num { numb });
     },
-    '@' => {
+    '\'' => {
       let code = tail(code);
       let (code, numb) = read_name(code);
+      let (code, skip) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
     _ => {
       let (code, name) = read_name(code);
-      return (code, Term::Var { name: name % 0x3FFFF });
+      return (code, Term::Var { name });
     }
   }
 }
@@ -2645,7 +2646,7 @@ pub fn view_term(term: &Term) -> String {
     Term::Lam { name, body } => {
       let name = view_name(*name);
       let body = view_term(body);
-      return format!("λ{} {}", name, body);
+      return format!("@{} {}", name, body);
     }
     Term::App { func, argm } => {
       let func = view_term(func);
@@ -2734,17 +2735,12 @@ pub fn view_actions(actions: &[Action]) -> String {
 
 // Serializes, deserializes and evaluates actions
 pub fn test_actions(actions: &[Action]) {
-  //println!("[Actions]");
-  //let str_0 = view_actions(actions);
-  //println!("{}", str_0);
-
-  //let s = crate::serializer::serialized_actions(&actions);
   //println!("[Serialization]");
-  //println!("{:?}\n", s);
-
-  //let a = crate::serializer::deserialized_actions(&s);
-  //let str_1 = view_actions(&a);
-  //println!("[Deserialization] {}", if str_0 == str_1 { "" } else { "(error: not equal)" });
+  //let str_0 = view_actions(actions);
+  //let str_1 = view_actions(&crate::bits::deserialized_actions(&crate::bits::serialized_actions(&actions)));
+  //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
+  //println!("{}", str_0);
+  //println!("---------------");
   //println!("{}", str_1);
 
   println!("[Evaluation]");
