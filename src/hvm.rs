@@ -216,7 +216,7 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
 //   (IO.done retr:r)                                       : (IO r)
-//   (IO.laod               cont:(∀? (IO r))) : (IO r)
+//   (IO.load               cont:(∀? (IO r))) : (IO r)
 //   (IO.save expr:?        cont:(∀? (IO r))) : (IO r)
 //   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
 //   (IO.from               cont:(∀? (IO r))) : (IO r)
@@ -757,7 +757,7 @@ impl Runtime {
 
   pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
     let term = reduce(self, host, mana)?;
-    //println!("-- {}", show_term(self, term));
+    println!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -2263,7 +2263,17 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         let arit = rt.get_arity(func);
         //println!("  - arity is: {} {}", u128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("$({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        let ctr_name = u128_to_name(func);
+        let mut args_it = args.iter();
+        let func_name = 
+          if ctr_name == "IO.call" {
+            let called = args_it.next().expect("IO.call missing argument");
+            let called = called[1..].parse().unwrap();
+            format!(" '{}'", u128_to_name(called))
+          } else {
+            "".to_string()
+          };
+        format!("$({}{}{})", ctr_name, func_name, args_it.map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
@@ -2288,7 +2298,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!("\n& {} {} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" | & {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }
