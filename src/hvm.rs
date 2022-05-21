@@ -87,7 +87,7 @@ pub struct Disk {
 pub type Lnk = u128;
 
 // A global action that alters the state of the blockchain
-pub enum Action {
+pub enum Statement {
   Fun { name: u128, arit: u128, func: Vec<(Term, Term)>, init: Term },
   Ctr { name: u128, arit: u128, },
   Run { expr: Term },
@@ -688,7 +688,7 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_actions(&mut self, actions: &[Action]) {
+  pub fn run_actions(&mut self, actions: &[Statement]) {
     for action in actions {
       self.run_action(action);
     }
@@ -832,9 +832,9 @@ impl Runtime {
     }
   }
 
-  pub fn run_action(&mut self, action: &Action) {
+  pub fn run_action(&mut self, action: &Statement) {
     match action {
-      Action::Fun { name, arit, func, init } => {
+      Statement::Fun { name, arit, func, init } => {
         println!("- fun {} {}", u128_to_name(*name), arit);
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, *arit);
@@ -844,12 +844,12 @@ impl Runtime {
           self.draw();
         }
       }
-      Action::Ctr { name, arit } => {
+      Statement::Ctr { name, arit } => {
         println!("- ctr {} {}", u128_to_name(*name), arit);
         self.set_arity(*name, *arit);
         self.draw();
       }
-      Action::Run { expr } => {
+      Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
         let host = self.alloc_term(expr);
@@ -2438,7 +2438,7 @@ fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, 
   return (code, elems);
 }
 
-fn read_term(code: &str) -> (&str, Term) {
+pub fn read_term(code: &str) -> (&str, Term) {
   let code = skip(code);
   match head(code) {
     '@' => {
@@ -2577,7 +2577,7 @@ fn read_func(code: &str) -> (&str, Func) {
   }
 }
 
-fn read_action(code: &str) -> (&str, Action) {
+fn read_action(code: &str) -> (&str, Statement) {
   let code = skip(code);
   match head(code) {
     'f' => {
@@ -2590,7 +2590,7 @@ fn read_action(code: &str) -> (&str, Action) {
       let (code, func) = read_until(code, '}', read_rule);
       let (code, skip) = read_char(code, '=');
       let (code, init) = read_term(code);
-      return (code, Action::Fun { name, arit, func, init });
+      return (code, Statement::Fun { name, arit, func, init });
     }
     'c' => {
       let code = tail(code);
@@ -2598,7 +2598,7 @@ fn read_action(code: &str) -> (&str, Action) {
       let (code, skip) = read_char(code, 'r');
       let (code, name) = read_name(code);
       let (code, arit) = read_numb(code);
-      return (code, Action::Ctr { name, arit });
+      return (code, Statement::Ctr { name, arit });
     }
     'r' => {
       let code = tail(code);
@@ -2608,7 +2608,7 @@ fn read_action(code: &str) -> (&str, Action) {
       let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
-      return (code, Action::Run { expr });
+      return (code, Statement::Run { expr });
     }
     _ => {
       panic!("Couldn't parse action.");
@@ -2616,7 +2616,7 @@ fn read_action(code: &str) -> (&str, Action) {
   }
 }
 
-pub fn read_actions(code: &str) -> (&str, Vec<Action>) {
+pub fn read_actions(code: &str) -> (&str, Vec<Statement>) {
   let (code, actions) = read_until(code, '\0', read_action);
   //for action in &actions {
     //println!("... action {}", view_action(action));
@@ -2706,26 +2706,26 @@ pub fn view_oper(oper: &u128) -> String {
   }
 }
 
-pub fn view_action(action: &Action) -> String {
+pub fn view_action(action: &Statement) -> String {
   match action {
-    Action::Fun { name, arit, func, init } => {
+    Statement::Fun { name, arit, func, init } => {
       let name = u128_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
       let init = view_term(init);
       return format!("fun {} {} {{\n{}\n}} = {}", name, arit, func, init);
     }
-    Action::Ctr { name, arit } => {
+    Statement::Ctr { name, arit } => {
       let name = u128_to_name(*name);
       return format!("ctr {} {}", name, arit);
     }
-    Action::Run { expr } => {
+    Statement::Run { expr } => {
       let expr = view_term(expr);
       return format!("run {{\n  {}\n}}", expr);
     }
   }
 }
 
-pub fn view_actions(actions: &[Action]) -> String {
+pub fn view_actions(actions: &[Statement]) -> String {
   let mut result = String::new();
   for action in actions {
     result.push_str(&view_action(action));
@@ -2738,16 +2738,16 @@ pub fn view_actions(actions: &[Action]) -> String {
 // -----
 
 // Serializes, deserializes and evaluates actions
-pub fn test_actions(actions: &[Action]) {
+pub fn test_actions(actions: &[Statement]) {
   //println!("[Serialization]");
-  //let str_0 = view_actions(actions);
-  //let str_1 = view_actions(&crate::bits::deserialized_actions(&crate::bits::serialized_actions(&actions)));
+  let str_0 = view_actions(actions);
+  let str_1 = view_actions(&crate::bits::deserialized_actions(&crate::bits::serialized_actions(&actions)));
   //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
   //println!("{}", str_0);
   //println!("---------------");
   //println!("{}", str_1);
 
-  println!("[Evaluation]");
+  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialiation error, please report)" });
   let mut rt = init_runtime();
   let init = Instant::now();
   rt.run_actions(&actions);

@@ -262,13 +262,7 @@ Technical Overview
 
 Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
 (Proof of Work). Kindelia blocks are just groups of statements.  Kindelia
-statements can be one of 4 variants:
-
-- **use**: defines a block-wide name alias
-
-    ```c
-    use ShortName = LongName 
-    ```
+statements can be one of 3 variants:
 
 - **ctr**: declares a new constructor
 
@@ -290,7 +284,7 @@ statements can be one of 4 variants:
 - **run**: runs an IO expression
 
     ```c
-    run ManaLimit {
+    run {
       <io_expression>
     }
     ```
@@ -302,11 +296,8 @@ language with 8 variants. Its grammar is described below:
 // A native number
 Numb = Uint<120>
 
-// a full name
+// A name
 Name = Uint<60>
-
-// A short name
-Bind = Uint<12>
 
 // A native int operation
 Oper ::=
@@ -331,7 +322,7 @@ Oper ::=
 Term ::=
 
   // A lambda
-  @ <var0: Bind> <body: Term>
+  @ <var0: Name> <body: Term>
   
   // An application
   (<func: Term> <argm: Term>)
@@ -349,10 +340,10 @@ Term ::=
   (<oper: Oper> <val0: Term> <val1: Term>)
 
   // A cloning operation
-  &{<var0: Bind> <var1: Bind>} = <expr: Term>; <body: Term>
+  &{<var0: Name> <var1: Name>} = <expr: Term>; <body: Term>
 
   // A variable
-  <bind: Bind>
+  <bind: Name>
 ```
 
 For example,
@@ -397,7 +388,7 @@ that allow functions to save states, request information from the network, etc.:
 $(IO.load           @r ...) // loads this function's internal state
 $(IO.save expr      @r ...) // saves this function's internal state
 $(IO.call func args @r ...) // calls another IO function
-$(IO.from           @r ...) // gets the caller 60-bit name
+$(IO.from           @r ...) // gets the caller name
 ... TODO ...                // ...
 $(IO.done expr)             // returns from the IO action
 ```
@@ -626,7 +617,230 @@ TODO: explain the blockchain growth limit
 Serialization
 =============
 
-TODO: write the serialization format
+Kindelia blocks are serialized to binary following the procedures below:
+
+## Fixlen
+
+The Fixlen encoding serializes unsigned integers of known length by their binary
+representation, except reversed.
+
+```
+serialize_fixlen(s, n) = right_pad(0, s, n.to_binary())
+```
+
+It is reversed in order to represent the least significant bit first, making it
+consistent with the varlen encoding. Example:
+
+```
+serialize_fixlen(8, 19) = 11001000
+```
+
+That's because `19` in binary is `10011`. Reversing, we get `11001`. Padding 3
+zeroes right, we get `11001000`.
+
+## Varlen
+
+The Varlen encoding serializes unsigned integers of unknown length as a list of
+bits containing the reversed binary representation of the number.
+
+```
+serialize_varlen(n) = serialize_list(n.to_binary())
+```
+
+Since the size is unknown, the bit `1` means there is a bit to read, and the bit
+`0` means the sequence has ended. Example:
+
+```
+fixlen(5,19) =  1  0  0  0  1
+varlen(  19) = 11 10 10 10 11 0
+```
+
+The number `19` is represented as `11101010110`, which is just the
+`fixlen(5,19)` representation with `1`'s before each significant bit, and `0` at
+the end. In this case, `varlen` uses `6` bits more than `fixlen`, which is the
+cost of not knowning the size statically.
+
+## List
+
+The List encoding serializes a list of unknown length, by using `1` to introduce
+a new list element, and `0` to denote the end of the list. It is parametric on
+the function that serializes a single element, `serialize_elem`.
+
+```
+serialize_list(serialize_elem, cons(x,xs)) = 1 | serialize_elem(x) | serialize_list(xs)
+serialize_list(serialize_elem, nil)        = 0
+```
+
+Note that this format is different than the usual encoding of sequences, where
+the size is encoded, followed by a series of serialized values. It is more
+efficient when the list length is smaller than 64, which is the typical case in
+every instance where `serialize_list` is used.
+
+## Number
+
+The Number encoding serializes unsigned integers in a compressed form.
+
+```
+serialize_number(n) = varlen(bit_size(n)) | fixlen(n)
+```
+
+It is used to serialize numbers of unknown length, and is more efficient than
+`serialize_varlen` when the number is larger than 63. For example:
+
+```
+bit_size(1337) = 11
+serialize_number(1337) = 11 11 10 11 0 | 10011100101
+                         '-----------'   '---------'
+                          varlen(11)      fixlen(11,1337)
+```
+
+Here, encoding `1337` requires 20 bits, which is 3 bits less than varlen would
+use, and 100 bits less than encoding all the 120 bits would require.
+
+## Name
+
+The Name encoding serializes names as lists of 6-bit letters.
+
+```
+serialize_name(name) = 0 | serialize_list(λ x => serialize_fixlen(6,x), name)
+```
+
+It uses the letter table shown earlier to represent names tersely.
+
+```
+serialize_name('Dog') = 0 1 110101 1 110011 1 011100 0
+                            '----'   '----'   '----'
+                             'D'      'o'      'g'
+```
+
+Since all names are smaller than 64 characters, using `serialize_list` is more
+efficient than encoding the length of the name, followed by the character.
+
+Note this encoding starts with a `0` bit that isn't used yet. That is a
+compressed-name flag. Names are the most data-hungry part of Kindelia's
+serialization, yet, there are many instances where names can be compressed
+considerably. For example, variable names can be compressed using De Bruijn
+indices, and constructor/function names can be compressed by local name aliases
+when these are used repeatedly. These optimizations aren't implemented yet, but,
+in order to make that possible in a future, we reserve a bit for this flag.
+
+Note also that, while the serialization of a name allows for an arbitrary number
+of letters, HVM constructors and functions reserve 60 bits for the name, which
+means the maximum constructor name is 10 letters long, and that it is impossible
+to call a function with a name larger than 10 letters directly. Functions with
+11-20 letters are deployable, but they can only be called with `IO.call`, which
+receives a 120-bit number.
+
+## Term
+
+The Term encoding serializes an HVM term, or expression. It uses a 3-bit tag to
+represent the term variant, followed by the serialization of each field.
+
+```
+serialize_term(Var(name))
+  = serialize_fixlen(3,0)
+  | serialize_name(name)
+
+serialize_term(Dup(nam0,nam1,expr,body))
+  = serialize_fixlen(3,1)
+  | serialize_name(nam0)
+  | serialize_name(nam1)
+  | serialize_term(expr)
+  | serialize_term(body)
+
+serialize_term(Lam(name,body))
+  = serialize_fixlen(3,2)
+  | serialize_name(name)
+  | serialize_term(body)
+
+serialize_term(App(func,argm))
+  = serialize_fixlen(3,3)
+  | serialize_term(func)
+  | serialize_term(argm)
+
+serialize_term(Ctr(name,args))
+  = serialize_fixlen(3,4)
+  | serialize_name(name)
+  | serialize_list(serialize_term, args)
+
+serialize_term(Fun(name,args))
+  = serialize_fixlen(3,5)
+  | serialize_name(name)
+  | serialize_list(serialize_term, args)
+
+serialize_term(Num(numb))
+  = serialize_fixlen(3,6)
+  | serialize_number(numb)
+
+serialize_term(Op2(oper, val0, val1))
+  = serialize_fixlen(3,7)
+  | serialize_fixlen(4, oper)
+  | serialize_term(val0)
+  | serialize_term(val1)
+```
+
+Note that constructors and function calls can't have more than 15 fields or
+arguments, thus, using `serialize_list` is optimal here too. Note also how
+`serialize_number` is used to serialize numeric constants, which is typically
+more efficient than `serialize_varlen` and `serialize_fixlen` would be. Finally,
+numeric operations are serialized using 4 bits, which is enough to store the 16
+primitives that the HVM has.
+
+Since constructor tags only use 3 bits, this allows for compact serialization of
+expressions and functions. For example:
+
+```
+                                Lam 'x'       Lam 'y'       Op2 Add  Var 'x'       Var 'y'
+serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 010011110 000 011011110
+```
+
+This is an anonymous function that adds two numbers. It only uses 55 bits, or
+less than 7 bytes. Notice, though, how names use most of the space. In a future
+update, compressed names will shorten that to 27 bits, or about 3 bytes:
+
+```
+                                Lam   Lam   Op2 Add  Var 1    Var 0
+serialize_term(@x @y (+ x y)) = 010 1 010 1 111 0000 000 1101 000 10
+```
+
+Here, the compressed-name flag is used to both make anonymous functions with no
+variable name, and to let variables address their binding lambdas using De
+Bruijn indices.
+
+## Statement
+
+The Statement encoding serializes a top-level statement in a Kindelia block.
+
+```
+serialize_rule((lhs,rhs))
+  = serialize_term(lhs)
+  | serialize_term(rhs)
+
+serialize_statement(Fun(name,arit,func,init))
+  = serialize_fixlen(4, 0)
+  | serialize_name(name)
+  | serialize_fixlen(4, arit)
+  | serialize_list(serialize_rule, func)
+  | serialize_term(init)
+
+serialize_statement(Ctr(name,ctrs))
+  = serialize_fixlen(4, 1)
+  | serialize_name(name)
+  | serialize_list(serialize_name, ctrs)
+
+serialize_statement(Run(expr))
+  = serialize_fixlen(4, 2)
+  | serialize_term(expr)
+```
+
+
+## Block
+
+The Block encoding serializes a list of top-level statements, i.e., a block.
+
+```
+serialize_block(statements) = serialize_list(serialize_statement, statements)
+```
 
 Notes
 =====
