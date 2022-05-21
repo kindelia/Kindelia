@@ -749,11 +749,7 @@ pub fn node_loop(
   let mut mined = 0;
   let mut tick = 0;
 
-  let init_body = code_to_body("fun Count 1 {
-    !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-    !(Count $(Dob)) = $(IO.load λx $(IO.save (* x #2) λ~ $(IO.done #0)))
-    !(Count $(Get)) = $(IO.load λx $(IO.done x))
-  } = #0");
+  let init_body = code_to_body("");
   let mine_body = mine_file.map(|x| code_to_body(&x));
 
   loop {
