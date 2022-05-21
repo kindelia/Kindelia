@@ -14,6 +14,9 @@ pub type Hash = U256;
 // Numerics
 // ========
 
+// Size of a u128, in bytes
+pub const U128_SIZE : usize = 128 / 8;
+
 pub fn u256(x: u128) -> U256 {
   return U256::from(x);
 }

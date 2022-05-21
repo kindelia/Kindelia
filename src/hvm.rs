@@ -7,9 +7,10 @@ use rand::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
 use std::hash::{Hash, Hasher, BuildHasherDefault};
-//use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
+
+use crate::util::U128_SIZE;
 
 // Types
 // -----
@@ -164,21 +165,20 @@ pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
 // Constants
 // ---------
 
-const U128_PER_KB: u128 = 0x80;
-const U128_PER_MB: u128 = 0x20000;
-const U128_PER_GB: u128 = 0x8000000;
+const U128_PER_KB: u128 = (1024 / U128_SIZE) as u128;
+const U128_PER_MB: u128 = U128_PER_KB << 10;
+const U128_PER_GB: u128 = U128_PER_MB << 10;
 
 const HEAP_SIZE: u128 = 32 * U128_PER_MB;
-//const HEAP_SIZE: u128 = 32;
 
 pub const MAX_ARITY: u128 = 16;
-pub const MAX_FUNCS: u128 = 16777216; // TODO: increase to 2^30 once arity is moved out
+pub const MAX_FUNCS: u128 = 1 << 24; // TODO: increase to 2^30 once arity is moved out
 
-pub const VARS_SIZE: usize = 262144; // maximum variables per rule
+pub const VARS_SIZE: usize = 1 << 18; // maximum variables per rule
 
-pub const VAL: u128 = 1;
-pub const EXT: u128 = 0b1000000000000000000000000000000000000000000000000000000000000;
-pub const TAG: u128 = 0b1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000;
+pub const VAL: u128 = 1 << 0;
+pub const EXT: u128 = 1 << 60;
+pub const TAG: u128 = 1 << 120;
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -1418,6 +1418,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       Ctr(*name, node)
     }
     Term::Num { numb } => {
+      // TODO: assert numb size
       Num(*numb as u128)
     }
     Term::Op2 { oper, val0, val1 } => {
