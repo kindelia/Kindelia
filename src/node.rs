@@ -112,7 +112,7 @@ pub const UDP_PORT : u16 = 42000;
 pub const HASH_SIZE : usize = 32;
 
 // Size of a u128, in bytes
-pub const U128_SIZE : usize = 64 / 8;
+pub const U128_SIZE : usize = 128 / 8;
 
 // Size of a block's body, in bytes
 pub const BODY_SIZE : usize = 1280;
