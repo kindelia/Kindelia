@@ -23,13 +23,13 @@ use crate::node::*;
 use crate::util::*;
 
 fn main() -> Result<(), String> {
-  //return run_cli();
+  return run_cli();
 
-  //start_node(Some("simple.kdl".to_string()));
+  //start_node(Some("simple.kindelia".to_string()));
   //return Ok(());
   
-  hvm::test("./example.kdl");
-  return Ok(());
+  //hvm::test("./example/example.kindelia");
+  //return Ok(());
 
   //let mut a = bit_vec::BitVec::new();
   //serialize_term(&read_term("@x @y (+ x y)").1, &mut a);
@@ -83,7 +83,7 @@ fn run_cli() -> Result<(), String> {
       match file {
         Err(err) => return Err(format!("{}", err)),
         Ok(code) => {
-          hvm::test_actions_from_code(&code);
+          hvm::test_statements_from_code(&code);
         }
       }
     }

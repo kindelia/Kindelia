@@ -35,28 +35,31 @@
 //
 // - Files are groups of statements, each altering the blockchain state
 //
-// - Constructors must be declared with 'ctr' statements:
+// - Constructors must be declared on the top-level, including name and fields:
 //
-//     ctr Name arity
+//     $(Name field_0 field_1 ...)
 // 
-// - Functions must be declared with 'fun' statements:
+// - Functions must be declared on the top-level, including:
+//   - Its name and arguments
+//   - As a set of equations
+//   - An initial state
 //
-//     fun Name arity {
-//       !(Name arg_0 arg_1) = return
-//       !(Name arg_0 arg_1) = return
+//     !(Function arg0 arg1 ...) {
+//       !(Ctor0 arg_0 arg_1 ...) = return_0
+//       !(Ctor1 arg_0 arg_1 ...) = return_1
 //       ...
 //     } = initial_state
 // 
-// - IO actions can be performed with Run statements:
+// - IO actions can be performed with IO statements:
 //
-//     run {
+//     {
 //       IO_expression
 //     }
 //
 // - The following IO actions are available:
 //
 //     - IO.done value       -- completes the IO action
-//     - IO.load             -- returns the internal state
+//     - IO.take             -- returns the internal state
 //     - IO.save value       -- sets the internal state
 //     - IO.call fname ioexp -- calls an IO function
 //     - IO.from             -- returns the caller name
@@ -66,28 +69,25 @@
 // Example counter function (contract)
 // ===================================
 
-// Creates a Count function with 3 actions:
-// - Inc: increment its counter, return 0
-// - Dec: decrement its counter, return 0
-// - Get: return its counter
-// And an initial state of zero (#0)
-fun Count 1 {
-  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Dob)) = $(IO.take @x $(IO.save (* x #2) @~ $(IO.done #0)))
-  !(Count $(Get)) = !(IO.load @x $(IO.done x))
-} = #0
+// Creates a Counter function with 2 actions:
+$(Inc) // incs its counter
+$(Get) // reads its counter
+!(Counter action) {
+  !(Counter $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Counter $(Get)) = !(IO.load @x $(IO.done x))
+} = #0 // initial state = #0
 
-// Runs a script that increments the Count's state 3 times
-run {
-  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
+// Runs a script that increments the Counter's state 3 times
+{
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
   $(IO.done #0))))
 }
 
-// Runs a script that prints the Count's state
-run {
-  $(IO.call 'Count' $(Tuple1 $(Get)) @x
+// Runs a script that prints the Counter's state
+{
+  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }
 
@@ -95,27 +95,27 @@ run {
 // ==============================
 
 // Declares a constructor, Leaf, with arity (size) 1
-ctr Leaf 1
+$(Leaf value)
 
 // Declares a constructor, Node, with arity (size) 2
-ctr Node 2
+$(Node left right)
 
 // Declares a pure function, Gen, that receives a
 // num and returns a tree with 2^num copies of #1
-fun Gen 1 {
+!(Gen depth) {
   !(Gen #0) = $(Leaf #1)
   !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
 } = #0
 
 // Declares a pure function that sums a tree
-fun Sum 1 {
+!(Sum tree) {
   !(Sum $(Leaf x))   = x
   !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
 } = #0
 
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
-run {
+{
   $(IO.done !(Sum !(Gen #21)))
 }
 
@@ -123,7 +123,7 @@ run {
 // ===============
 
 // Utility that, when called, returns the caller name
-fun WhoIs 0 {
+!(WhoIs) {
   !(WhoIs) = $(IO.from @who $(IO.done who))
 } = #0
 
@@ -132,12 +132,12 @@ fun WhoIs 0 {
 // that function's 'caller' will be set to LadyAlice, so it works as if
 // LadyAlice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on LadyAlice's behalf.
-fun LadyAlice 2 {
+!(LadyAlice name args) {
   !(LadyAlice name args) = $(IO.call name args @res $(IO.done res))
 } = #0
 
 // Prints LadyAlice's name
-run {
+{
   $(IO.call 'LadyAlice' $(Tuple2 'WhoIs' $(Tuple0)) @nam
   $(IO.done nam))
 }
@@ -148,14 +148,14 @@ run {
 // ===============
 
 // When a transaction fails, it is fully reversed
-run {
+{
   $(IO.call 'Count' $(Tuple1 $(Inc)) @~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
-run {
+{
   $(IO.call 'Count' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }

@@ -136,26 +136,28 @@ The block below defines and uses some global functions that operate on immutable
 
 ```c
 // Declares a constructor, Leaf, with arity (size) 1
-ctr Leaf 1
+$(Leaf value)
 
 // Declares a constructor, Node, with arity (size) 2
-ctr Node 2
+$(Node left right)
 
-// Returns a tree with 2^num copies of #1
-fun Gen 1 {
+// Declares a pure function, Gen, that receives a
+// num and returns a tree with 2^num copies of #1
+!(Gen depth) {
   !(Gen #0) = $(Leaf #1)
   !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
 } = #0
 
-// Sums a tree
-fun Sum 1 {
+// Declares a pure function that sums a tree
+!(Sum tree) {
   !(Sum $(Leaf x))   = x
   !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
 } = #0
 
-// Allocates a big tree and sums it:
-run {
-  $(IO.done !(Sum !(Gen #10)))
+// Run statement that creates a tree with 2^21
+// numbers, sums them all and prints the result:
+{
+  $(IO.done !(Sum !(Gen #21)))
 }
 ```
 
@@ -184,33 +186,30 @@ and saved using `IO.load` and `IO.save`. With just that, we are able to create
 smart-contracts by using stateful functions.
 
 Below, we define a `Count` contract that has two actions: one to increment a
-counter, and one to return the current counter. We then run two scripts: one
+counter, and one to return the current counter. We then run two IO blocks: one
 that increments the counter 3 times, and other that just outputs the current
 counter, i.e., 3.
 
 ```c
-// Creates a Count function with 2 actions:
-// - Inc: increment its counter, return 0
-// - Get: return its counter
-// And an initial state of zero (#0)
-ctr Inc 0
-ctr Get 0
-fun Count 1 {
-  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load @x $(IO.done x))
-} = #0
+// Creates a Counter function with 2 actions:
+$(Inc) // incs its counter
+$(Get) // reads its counter
+!(Counter action) {
+  !(Counter $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Counter $(Get)) = !(IO.load @x $(IO.done x))
+} = #0 // initial state = #0
 
-// Runs a script that increments the Count's state 3 times
-run {
-  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
-  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
-  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
+// Runs a script that increments the Counter's state 3 times
+{
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
   $(IO.done #0))))
 }
 
-// Runs a script that prints the Count's state
-run {
-  $(IO.call 'Count' !(Tuple1 $(Get)) @x
+// Runs a script that prints the Counter's state
+{
+  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }
 ```
@@ -236,7 +235,7 @@ and, if the signature checks, calls another function to perform that action. For
 example:
 
 ```c
-fun Alice 1 {
+!(Alice action) {
   !(Alice $(SendCoin amount to nonce signature)) =
     
     let pub_key = ... alice key here ...
@@ -261,31 +260,31 @@ Technical Overview
 ==================
 
 Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
-(Proof of Work). Kindelia blocks are just groups of statements.  Kindelia
+(Proof of Work). Kindelia blocks are just groups of statements. Kindelia
 statements can be one of 3 variants:
 
 - **ctr**: declares a new constructor
 
     ```c
-    ctr Name(field_0_name, field_1_name, ...)
+    $(ConstructorName field_0_name field_1_name ...)
     ```
 
 
 - **fun**: declares a new function 
 
     ```c
-    fun Name arity {
-      !(Name arg_0 arg_1 ...) = <returned_value>
-      !(Name arg_0 arg_1 ...) = <returned_value>
+    !(FunctionName argument_0_name argument_1_name ...) {
+      !(ConstructorName arg_0 arg_1 ...) = returned_value_0
+      !(ConstructorName arg_0 arg_1 ...) = returned_value_1
       ...
-    } = <initial_state>
+    } = initial_state
     ```
 
 - **run**: runs an IO expression
 
     ```c
-    run {
-      <io_expression>
+    {
+      IO_expression
     }
     ```
 
@@ -322,7 +321,7 @@ Oper ::=
 Term ::=
 
   // A lambda
-  @ <var0: Name> <body: Term>
+  @<var0: Name> <body: Term>
   
   // An application
   (<func: Term> <argm: Term>)
@@ -816,10 +815,10 @@ serialize_rule((lhs,rhs))
   = serialize_term(lhs)
   | serialize_term(rhs)
 
-serialize_statement(Fun(name,arit,func,init))
+serialize_statement(Fun(name,args,func,init))
   = serialize_fixlen(4, 0)
   | serialize_name(name)
-  | serialize_fixlen(4, arit)
+  | serialize_list(serialize_name, args)
   | serialize_list(serialize_rule, func)
   | serialize_term(init)
 

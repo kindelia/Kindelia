@@ -86,10 +86,10 @@ pub struct Disk {
 // Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u128;
 
-// A global action that alters the state of the blockchain
+// A global statement that alters the state of the blockchain
 pub enum Statement {
-  Fun { name: u128, arit: u128, func: Vec<(Term, Term)>, init: Term },
-  Ctr { name: u128, arit: u128, },
+  Fun { name: u128, args: Vec<u128>, func: Vec<(Term, Term)>, init: Term },
+  Ctr { name: u128, args: Vec<u128>, },
   Run { expr: Term },
 }
 
@@ -168,7 +168,7 @@ const U128_PER_KB: u128 = 0x80;
 const U128_PER_MB: u128 = 0x20000;
 const U128_PER_GB: u128 = 0x8000000;
 
-const HEAP_SIZE: u128 = 8 * U128_PER_MB;
+const HEAP_SIZE: u128 = 32 * U128_PER_MB;
 //const HEAP_SIZE: u128 = 32;
 
 pub const MAX_ARITY: u128 = 16;
@@ -358,23 +358,23 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
-ctr Tuple0 0
-ctr Tuple1 1
-ctr Tuple2 2
-ctr Tuple3 3
-ctr Tuple4 4
-ctr Tuple5 5
-ctr Tuple6 6
-ctr Tuple7 7
-ctr Tuple8 8
+$(Tuple0)
+$(Tuple1 x0)
+$(Tuple2 x0 x1)
+$(Tuple3 x0 x1 x2)
+$(Tuple4 x0 x1 x2 x3)
+$(Tuple5 x0 x1 x2 x3 x4)
+$(Tuple6 x0 x1 x2 x3 x4 x5)
+$(Tuple7 x0 x1 x2 x3 x4 x5 x6)
+$(Tuple8 x0 x1 x2 x3 x4 x5 x6 x7)
 
-fun IO.load 1 {
+!(IO.load cont) {
   !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
 } = #0
 
-ctr Inc 0
-ctr Get 0
-fun Count 1 {
+$(Inc)
+$(Get)
+!(Count action) {
   !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
   !(Count $(Get)) = !(IO.load @x $(IO.done x))
 } = #0
@@ -647,7 +647,7 @@ pub fn init_runtime() -> Runtime {
     nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
     back: Arc::new(Rollback::Nil),
   };
-  rt.run_actions_from_code(GENESIS);
+  rt.run_statements_from_code(GENESIS);
   rt.snapshot();
   return rt;
 }
@@ -699,14 +699,14 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_actions(&mut self, actions: &[Statement]) {
-    for action in actions {
-      self.run_action(action);
+  pub fn run_statements(&mut self, statements: &[Statement]) {
+    for statement in statements {
+      self.run_statement(statement);
     }
   }
 
-  pub fn run_actions_from_code(&mut self, code: &str) {
-    return self.run_actions(&read_actions(code).1);
+  pub fn run_statements_from_code(&mut self, code: &str) {
+    return self.run_statements(&read_statements(code).1);
   }
 
   pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
@@ -850,26 +850,26 @@ impl Runtime {
     }
   }
 
-  pub fn run_action(&mut self, action: &Statement) {
-    match action {
-      Statement::Fun { name, arit, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), arit);
+  pub fn run_statement(&mut self, statement: &Statement) {
+    match statement {
+      Statement::Fun { name, args, func, init } => {
+        println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
-          self.set_arity(*name, *arit);
+          self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
           let state = self.create_term(init, 0, &mut init_map());
           self.write_disk(*name, Some(state));
           self.draw();
         }
       }
-      Statement::Ctr { name, arit } => {
-        println!("- ctr {} {}", u128_to_name(*name), arit);
-        self.set_arity(*name, *arit);
+      Statement::Ctr { name, args } => {
+        println!("- ctr {} {}", u128_to_name(*name), args.len());
+        self.set_arity(*name, args.len() as u128);
         self.draw();
       }
       Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
-        let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
+        let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
@@ -2364,7 +2364,7 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
   if head(code) == chr {
     return (tail(code), ());
   } else {
-    panic!("Expected '{}', found '{}'.", chr, head(code));
+    panic!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(256).collect::<String>());
   }
 }
 
@@ -2595,51 +2595,45 @@ fn read_func(code: &str) -> (&str, Func) {
   }
 }
 
-fn read_action(code: &str) -> (&str, Statement) {
+fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
   match head(code) {
-    'f' => {
+    '!' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 'u');
-      let (code, skip) = read_char(code, 'n');
+      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, arit) = read_numb(code);
+      let (code, args) = read_until(code, ')', read_name);
       let (code, skip) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
       let (code, skip) = read_char(code, '=');
       let (code, init) = read_term(code);
-      return (code, Statement::Fun { name, arit, func, init });
+      return (code, Statement::Fun { name, args, func, init });
     }
-    'c' => {
+    '$' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 't');
-      let (code, skip) = read_char(code, 'r');
+      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, arit) = read_numb(code);
-      return (code, Statement::Ctr { name, arit });
+      let (code, args) = read_until(code, ')', read_name);
+      return (code, Statement::Ctr { name, args });
     }
-    'r' => {
+    '{' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 'u');
-      let (code, skip) = read_char(code, 'n');
-      //let (code, mana) = read_numb(code);
-      let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
       return (code, Statement::Run { expr });
     }
     _ => {
-      panic!("Couldn't parse action.");
+      panic!("Couldn't parse statement.");
     }
   }
 }
 
-pub fn read_actions(code: &str) -> (&str, Vec<Statement>) {
-  let (code, actions) = read_until(code, '\0', read_action);
-  //for action in &actions {
-    //println!("... action {}", view_action(action));
+pub fn read_statements(code: &str) -> (&str, Vec<Statement>) {
+  let (code, statements) = read_until(code, '\0', read_statement);
+  //for statement in &statements {
+    //println!("... statement {}", view_statement(statement));
   //}
-  return (code, actions);
+  return (code, statements);
 }
 
 // View
@@ -2724,29 +2718,32 @@ pub fn view_oper(oper: &u128) -> String {
   }
 }
 
-pub fn view_action(action: &Statement) -> String {
-  match action {
-    Statement::Fun { name, arit, func, init } => {
+pub fn view_statement(statement: &Statement) -> String {
+  match statement {
+    Statement::Fun { name, args, func, init } => {
       let name = u128_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
+      let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      return format!("fun {} {} {{\n{}\n}} = {}", name, arit, func, init);
+      return format!("!({} {}) {{\n{}\n}} = {}", name, args, func, init);
     }
-    Statement::Ctr { name, arit } => {
+    Statement::Ctr { name, args } => {
+      // correct:
       let name = u128_to_name(*name);
-      return format!("ctr {} {}", name, arit);
+      let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
+      return format!("$({} {})", name, args);
     }
     Statement::Run { expr } => {
       let expr = view_term(expr);
-      return format!("run {{\n  {}\n}}", expr);
+      return format!("{{\n  {}\n}}", expr);
     }
   }
 }
 
-pub fn view_actions(actions: &[Statement]) -> String {
+pub fn view_statements(statements: &[Statement]) -> String {
   let mut result = String::new();
-  for action in actions {
-    result.push_str(&view_action(action));
+  for statement in statements {
+    result.push_str(&view_statement(statement));
     result.push_str("\n");
   }
   return result;
@@ -2755,11 +2752,11 @@ pub fn view_actions(actions: &[Statement]) -> String {
 // Tests
 // -----
 
-// Serializes, deserializes and evaluates actions
-pub fn test_actions(actions: &[Statement]) {
+// Serializes, deserializes and evaluates statements
+pub fn test_statements(statements: &[Statement]) {
   //println!("[Serialization]");
-  let str_0 = view_actions(actions);
-  let str_1 = view_actions(&crate::bits::deserialized_actions(&crate::bits::serialized_actions(&actions)));
+  let str_0 = view_statements(statements);
+  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
   //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
   //println!("{}", str_0);
   //println!("---------------");
@@ -2768,7 +2765,7 @@ pub fn test_actions(actions: &[Statement]) {
   println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialiation error, please report)" });
   let mut rt = init_runtime();
   let init = Instant::now();
-  rt.run_actions(&actions);
+  rt.run_statements(&statements);
   println!("");
 
   println!("[Stats]");
@@ -2778,10 +2775,10 @@ pub fn test_actions(actions: &[Statement]) {
 
 }
 
-pub fn test_actions_from_code(code: &str) {
-  test_actions(&read_actions(code).1);
+pub fn test_statements_from_code(code: &str) {
+  test_statements(&read_statements(code).1);
 }
 
 pub fn test(file: &str) {
-  test_actions_from_code(&std::fs::read_to_string(file).expect("file not found"));
+  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }

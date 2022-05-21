@@ -299,8 +299,8 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
 }
 
 pub fn code_to_body(code: &str) -> Body {
-  let (_rest, acts) = crate::hvm::read_actions(code);
-  let bits = serialized_actions(&acts);
+  let (_rest, acts) = crate::hvm::read_statements(code);
+  let bits = serialized_statements(&acts);
   let body = bytes_to_body(&bitvec_to_bytes(&bits));
   return body;
 }
@@ -538,9 +538,9 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
 
 pub fn node_compute_block(node: &mut Node, block: &Block) {
   let bits = BitVec::from_bytes(&block.body.value);
-  let acts = deserialized_actions(&bits);
-  //println!("Computing block:\n{}", view_actions(&acts));
-  node.runtime.run_actions(&acts);
+  let acts = deserialized_statements(&bits);
+  //println!("Computing block:\n{}", view_statements(&acts));
+  node.runtime.run_statements(&acts);
   node.runtime.tick();
 }
 

@@ -426,22 +426,22 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
 
 // An Statement
 
-pub fn serialize_action(action: &Statement, bits: &mut BitVec) {
-  match action {
-    Statement::Fun { name, arit, func, init } => {
+pub fn serialize_statement(statement: &Statement, bits: &mut BitVec) {
+  match statement {
+    Statement::Fun { name, args, func, init } => {
       serialize_fixlen(4, &u256(0), bits);
       serialize_name(name, bits);
-      serialize_fixlen(4, &u256(*arit as u128), bits);
+      serialize_list(serialize_name, args, bits);
       serialize_list(|rule, bits| {
         serialize_term(&rule.0, bits);
         serialize_term(&rule.1, bits);
       }, func, bits);
       serialize_term(init, bits);
     }
-    Statement::Ctr { name, arit } => {
+    Statement::Ctr { name, args } => {
       serialize_fixlen(4, &u256(1), bits);
       serialize_name(name, bits);
-      serialize_fixlen(4, &u256(*arit as u128), bits);
+      serialize_list(serialize_name, args, bits);
     }
     Statement::Run { expr } => {
       //serialize_fixlen(32, &u256(*mana as u128), bits);
@@ -451,12 +451,12 @@ pub fn serialize_action(action: &Statement, bits: &mut BitVec) {
   }
 }
 
-pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Statement {
+pub fn deserialize_statement(bits: &BitVec, index: &mut u128) -> Statement {
   let tag = deserialize_fixlen(4, bits, index);
   match tag.low_u128() {
     0 => {
       let name = deserialize_name(bits, index);
-      let arit = deserialize_fixlen(4, bits, index).low_u128();
+      let args = deserialize_list(deserialize_name, bits, index);
       let func = deserialize_list(|bits, index| {
         let lhs  = deserialize_term(bits, index);
         let rhs  = deserialize_term(bits, index);
@@ -464,51 +464,51 @@ pub fn deserialize_action(bits: &BitVec, index: &mut u128) -> Statement {
         return rule;
       }, bits, index);
       let init = deserialize_term(bits, index);
-      Statement::Fun { name, arit, func, init }
+      Statement::Fun { name, args, func, init }
     }
     1 => {
       let name = deserialize_name(bits, index);
-      let arit = deserialize_fixlen(4, bits, index).low_u128();
-      Statement::Ctr { name, arit }
+      let args = deserialize_list(deserialize_name, bits, index);
+      Statement::Ctr { name, args }
     }
     2 => {
       //let mana = deserialize_fixlen(32, bits, index).low_u128();
       let expr = deserialize_term(bits, index);
       Statement::Run { expr }
     }
-    _ => panic!("unknown action tag"),
+    _ => panic!("unknown statement tag"),
   }
 }
 
-pub fn serialized_action(action: &Statement) -> BitVec {
+pub fn serialized_statement(statement: &Statement) -> BitVec {
   let mut bits = BitVec::new();
-  serialize_action(action, &mut bits);
+  serialize_statement(statement, &mut bits);
   return bits;
 }
 
-pub fn deserialized_action(bits: &BitVec) -> Statement {
+pub fn deserialized_statement(bits: &BitVec) -> Statement {
   let mut index = 0;
-  deserialize_action(bits, &mut index)
+  deserialize_statement(bits, &mut index)
 }
 
-// Many actions
+// Many statements
 
-pub fn serialize_actions(actions: &[Statement], bits: &mut BitVec) {
-  serialize_list(serialize_action, actions, bits);
+pub fn serialize_statements(statements: &[Statement], bits: &mut BitVec) {
+  serialize_list(serialize_statement, statements, bits);
 }
 
-pub fn deserialize_actions(bits: &BitVec, index: &mut u128) -> Vec<Statement> {
-  deserialize_list(deserialize_action, bits, index)
+pub fn deserialize_statements(bits: &BitVec, index: &mut u128) -> Vec<Statement> {
+  deserialize_list(deserialize_statement, bits, index)
 }
 
-pub fn serialized_actions(actions: &[Statement]) -> BitVec {
+pub fn serialized_statements(statements: &[Statement]) -> BitVec {
   let mut bits = BitVec::new();
-  serialize_actions(actions, &mut bits);
+  serialize_statements(statements, &mut bits);
   return bits;
 }
 
-pub fn deserialized_actions(bits: &BitVec) -> Vec<Statement> {
-  deserialize_actions(bits, &mut 0)
+pub fn deserialized_statements(bits: &BitVec) -> Vec<Statement> {
+  deserialize_statements(bits, &mut 0)
 }
 
 // Tests
