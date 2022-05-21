@@ -397,8 +397,8 @@ performed when placed directly inside top-level `run{}` statements, otherwise
 they are treated as pure expressions, exactly like Haskell's IO type. To receive
 values from the external environment, a continuation (`@r ...`) is used.
 
-Operations
-==========
+Computation Rules
+-----------------
 
 Kindelia expressions are evaluated by the HVM, a functional virtual machine.
 The primitive operations in that machine are called rewrite rules, and they
@@ -577,7 +577,7 @@ TODO: explanation on interaction with duplication nodes
 TODO: explanation on how it is NOT a global GC pass
 
 Cost Table
-==========
+----------
 
 Since Kindelia's built-in language is Turing complete, it must have a way to
 account for, and limit, performed computations; otherwise anyone could freeze
@@ -614,11 +614,11 @@ TODO: explain the state growth limit
 TODO: explain the blockchain growth limit
 
 Serialization
-=============
+-------------
 
 Kindelia blocks are serialized to binary following the procedures below:
 
-## Fixlen
+### Fixlen
 
 The Fixlen encoding serializes unsigned integers of known length by their binary
 representation, except reversed.
@@ -637,7 +637,7 @@ serialize_fixlen(8, 19) = 11001000
 That's because `19` in binary is `10011`. Reversing, we get `11001`. Padding 3
 zeroes right, we get `11001000`.
 
-## Varlen
+### Varlen
 
 The Varlen encoding serializes unsigned integers of unknown length as a list of
 bits containing the reversed binary representation of the number.
@@ -659,7 +659,7 @@ The number `19` is represented as `11101010110`, which is just the
 the end. In this case, `varlen` uses `6` bits more than `fixlen`, which is the
 cost of not knowning the size statically.
 
-## List
+### List
 
 The List encoding serializes a list of unknown length, by using `1` to introduce
 a new list element, and `0` to denote the end of the list. It is parametric on
@@ -675,7 +675,7 @@ the size is encoded, followed by a series of serialized values. It is more
 efficient when the list length is smaller than 64, which is the typical case in
 every instance where `serialize_list` is used.
 
-## Number
+### Number
 
 The Number encoding serializes unsigned integers in a compressed form.
 
@@ -696,7 +696,7 @@ serialize_number(1337) = 11 11 10 11 0 | 10011100101
 Here, encoding `1337` requires 20 bits, which is 3 bits less than varlen would
 use, and 100 bits less than encoding all the 120 bits would require.
 
-## Name
+### Name
 
 The Name encoding serializes names as lists of 6-bit letters.
 
@@ -730,7 +730,7 @@ to call a function with a name larger than 10 letters directly. Functions with
 11-20 letters are deployable, but they can only be called with `IO.call`, which
 receives a 120-bit number.
 
-## Term
+### Term
 
 The Term encoding serializes an HVM term, or expression. It uses a 3-bit tag to
 represent the term variant, followed by the serialization of each field.
@@ -738,44 +738,44 @@ represent the term variant, followed by the serialization of each field.
 ```
 serialize_term(Var(name))
   = serialize_fixlen(3,0)
-  | serialize_name(name)
+  + serialize_name(name)
 
 serialize_term(Dup(nam0,nam1,expr,body))
   = serialize_fixlen(3,1)
-  | serialize_name(nam0)
-  | serialize_name(nam1)
-  | serialize_term(expr)
-  | serialize_term(body)
+  + serialize_name(nam0)
+  + serialize_name(nam1)
+  + serialize_term(expr)
+  + serialize_term(body)
 
 serialize_term(Lam(name,body))
   = serialize_fixlen(3,2)
-  | serialize_name(name)
-  | serialize_term(body)
+  + serialize_name(name)
+  + serialize_term(body)
 
 serialize_term(App(func,argm))
   = serialize_fixlen(3,3)
-  | serialize_term(func)
-  | serialize_term(argm)
+  + serialize_term(func)
+  + serialize_term(argm)
 
 serialize_term(Ctr(name,args))
   = serialize_fixlen(3,4)
-  | serialize_name(name)
-  | serialize_list(serialize_term, args)
+  + serialize_name(name)
+  + serialize_list(serialize_term, args)
 
 serialize_term(Fun(name,args))
   = serialize_fixlen(3,5)
-  | serialize_name(name)
-  | serialize_list(serialize_term, args)
+  + serialize_name(name)
+  + serialize_list(serialize_term, args)
 
 serialize_term(Num(numb))
   = serialize_fixlen(3,6)
-  | serialize_number(numb)
+  + serialize_number(numb)
 
 serialize_term(Op2(oper, val0, val1))
   = serialize_fixlen(3,7)
-  | serialize_fixlen(4, oper)
-  | serialize_term(val0)
-  | serialize_term(val1)
+  + serialize_fixlen(4, oper)
+  + serialize_term(val0)
+  + serialize_term(val1)
 ```
 
 Note that constructors and function calls can't have more than 15 fields or
@@ -806,34 +806,34 @@ Here, the compressed-name flag is used to both make anonymous functions with no
 variable name, and to let variables address their binding lambdas using De
 Bruijn indices.
 
-## Statement
+### Statement
 
 The Statement encoding serializes a top-level statement in a Kindelia block.
 
 ```
 serialize_rule((lhs,rhs))
   = serialize_term(lhs)
-  | serialize_term(rhs)
+  + serialize_term(rhs)
 
 serialize_statement(Fun(name,args,func,init))
   = serialize_fixlen(4, 0)
-  | serialize_name(name)
-  | serialize_list(serialize_name, args)
-  | serialize_list(serialize_rule, func)
-  | serialize_term(init)
+  + serialize_name(name)
+  + serialize_list(serialize_name, args)
+  + serialize_list(serialize_rule, func)
+  + serialize_term(init)
 
 serialize_statement(Ctr(name,ctrs))
   = serialize_fixlen(4, 1)
-  | serialize_name(name)
-  | serialize_list(serialize_name, ctrs)
+  + serialize_name(name)
+  + serialize_list(serialize_name, ctrs)
 
 serialize_statement(Run(expr))
   = serialize_fixlen(4, 2)
-  | serialize_term(expr)
+  + serialize_term(expr)
 ```
 
 
-## Block
+### Block
 
 The Block encoding serializes a list of top-level statements, i.e., a block.
 
@@ -846,7 +846,8 @@ Notes
 
 TODO: Additional notes, disclaimers go here.
 
-### 1. Why?
+1. Why?
+-------
 
 *“Your scientists were so preoccupied with whether they could, they didn't stop to think if they should.”*
 
@@ -881,6 +882,7 @@ All these things have **some** value. It is just not the absurd value that the
 ticker says it has. But who is to blame, the tech, or the greed of speculative
 markets?
 
-### 2. Why Nakamoto Consensus (Proof of Work)?
+2. Why Nakamoto Consensus (Proof of Work)?
+------------------------------------------
 
 TODO: writeup
