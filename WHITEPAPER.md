@@ -521,6 +521,30 @@ A binary operation on 120-bit numbers.
 add(a, b)
 ```
 
+There are 16 numeric operations available:
+
+ID | Name | Symbol | Operation
+-- | ---- | ------ | ---------
+ 0 | ADD  | `+`    | addition
+ 1 | SUB  | `-`    | subtraction
+ 2 | MUL  | `*`    | multiplication
+ 3 | DIV  | `/`    | division
+ 4 | MOD  | `%`    | modulus
+ 5 | AND  | `&`    | bitwise and
+ 6 | OR   | `\|`   | bitwise or
+ 7 | XOR  | `^`    | bitwise xor
+ 8 | SHL  | `<<`   | bitwise left shift
+ 9 | SHR  | `>>`   | bitwise right shift
+10 | LE   | `<=`   | less than or equal
+11 | LT   | `<`    | less than
+12 | EQ   | `==`   | equal
+13 | GT   | `>`    | greater than or equal
+14 | GE   | `>=`   | greater than
+15 | NE   | `!=`   | not equal
+
+Operations have type `fn(u120,u120) -> u120`, and work like integer arithmetic
+in C. Comparisons return 0 for false and 1 for true.
+
 ### Superposed Operation
 
 A binary operation on a superposition.
@@ -846,8 +870,7 @@ Notes
 
 TODO: Additional notes, disclaimers go here.
 
-1. Why?
--------
+## 1. Why?
 
 *“Your scientists were so preoccupied with whether they could, they didn't stop to think if they should.”*
 
@@ -862,7 +885,7 @@ right? And there is some value in that longevity factor. That is why Bitcoin is
 valuable to me.
 
 As for applications, having a place where anyone can host forums, files, games,
-in such a manner that can't be censored by anyone is also a comfortable
+in such a manner that can't be censored by anything is also a comfortable
 safeguard in the case things go terribly wrong in the world; even if they
 probably won't. Ethereum is such a place, but what is the point of an eternal
 application if it only lasts until a bug is found? Formal verification is the
@@ -873,16 +896,27 @@ Finally, the notion of virtual worlds that can't ever be turned off is also
 pretty sexy to a gaming nerd like me. I can't leave a legendary sword on World
 of Warcraft to my grandchildren. After all, who knows if Blizzard will even
 exist by then? But I surely can do so on a virtual world hosted on Kindelia.
-The fact a sword will never cease to exist makes it more valuable today, which
-gives birth to markets where digital assets are valued just like physical
-assets, and that sounds extremelly cool to my inner nerd. Kindelia's cheap
-states lets these world exist without complicated layer 2 indirections.
+The fact an item will never cease to exist makes it more valuable today, which
+results in markets where digital assets are valued just like physical assets,
+which is really cool. Kindelia's cheap states lets these virtual worlds exist
+without complicated layer 2 indirections.
 
-All these things have **some** value. It is just not the absurd value that the
-ticker says it has. But who is to blame, the tech, or the greed of speculative
-markets?
+Kindelia is a functional, worldwide computer, capable of hosting eternal
+applications that can't ever be turned off; not by their owners, not by
+governments. And, with formal verification, these applications can remain
+bug-free during their endless lifespans. In exchange, Kindelia is, unavoidably,
+resource limited, with a computation budget that, while larger than Ethereum, is
+still smaller than a modern CPU. Similarly, Kindelia's memory is capable of
+storing up to a few GBs of new data every year, which is little compared to
+conventional servers.
 
-2. Why Nakamoto Consensus (Proof of Work)?
-------------------------------------------
+Kindelia, Ethereum, Cardano and similar aren't meant to beat cloud servers in
+performance, and anyone who thinks that simply doesn't get the point. But only
+these can grant, to their hosted applications, the power of living forever,
+which, surely, comes at a major efficiency cost, but is still valuable. Perhaps
+not as valuable as the hype and price tickers let us believe. But who is to
+blame, the tech, or the greed of speculative markets?
+
+## 2. Why Nakamoto Consensus (Proof of Work)?
 
 TODO: writeup
