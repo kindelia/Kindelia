@@ -5,7 +5,7 @@ Turing-complete blockchains, such as Ethereum, allow users to deploy
 decentralized applications (DApps), but recurrent security exploits undermine
 their proposals. Formal verification techniques can be used to ensure a DApp is
 exploit-free, but Ethereum's underlying processor, the EVM, make these too
-expensive to be viable. By leveraging a functional virtual machine, the HVM,
+expensive to be viable. By leveraging a functional virtual machine, the [HVM](https://github.com/kindelia/hvm),
 Kindelia is able to run formally verified DApps cheaply and efficiently, making
 it the most secure peer-to-peer computer in existence. Moreover, by storing the
 global state as reversible runtime heaps, it can run stateful applications with
@@ -40,7 +40,7 @@ their ocurrences daily [citation].
   expensive [citation].
 
 Kindelia is a complete redesign of Ethereum's base layer. It replaces the EVM by
-the HVM, a blazingly fast functional virtual machine that makes hack-proof,
+the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual machine that makes hack-proof,
 formally verified contracts economically viable. It also treats state
 differently, allowing for a very cheap SSTORE operation, which makes state-heavy
 apps such as virtual game worlds and markets economically viable on layer 1. The
