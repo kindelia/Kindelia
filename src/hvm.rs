@@ -180,6 +180,11 @@ pub const VAL: u128 = 1 << 0;
 pub const EXT: u128 = 1 << 60;
 pub const TAG: u128 = 1 << 120;
 
+pub const VAL_MASK: u128 = EXT - 1;
+pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
+pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
+pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
+
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
 pub const VAR: u128 = 0x2;
@@ -1170,6 +1175,7 @@ pub fn Op2(ope: u128, pos: u128) -> Lnk {
 }
 
 pub fn Num(val: u128) -> Lnk {
+  debug_assert!((!NUM_MASK & val) == 0, "Num overflow");
   (NUM * TAG) | val
 }
 
