@@ -385,7 +385,7 @@ human-readable source codes. Finally, Kindelia has side-effective operations
 that allow functions to save states, request information from the network, etc.:
 
 ```c
-$(IO.load           @r ...) // loads this function's internal state
+$(IO.take           @r ...) // takes this function's internal state
 $(IO.save expr      @r ...) // saves this function's internal state
 $(IO.call func args @r ...) // calls another IO function
 $(IO.from           @r ...) // gets the caller name

@@ -80,7 +80,7 @@ pub struct Arit {
 // A map of `FuncID -> Lnk`, pointing to a function's state
 #[derive(Clone, Debug)]
 pub struct Disk {
-  pub links: Map<Lnk>,
+  pub links: Map<Option<Lnk>>,
 }
 
 // Can point to a node, a variable, or hold an unboxed value
@@ -221,7 +221,7 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
 //   (IO.from               cont:(∀? (IO r))) : (IO r)
 const IO_DONE : u128 = 0x13640a33ca9;
-const IO_LOAD : u128 = 0x13640c33968;
+const IO_TAKE : u128 = 0x13640e25be9;
 const IO_SAVE : u128 = 0x13640de5ea9;
 const IO_CALL : u128 = 0x136409e5c30;
 const IO_FROM : u128 = 0x13640ab6cf1;
@@ -229,7 +229,7 @@ const IO_FROM : u128 = 0x13640ab6cf1;
 const fn GET_ARITY(fid: u128) -> Option<u128> {
   match fid {
     IO_DONE => Some(1),
-    IO_LOAD => Some(1),
+    IO_TAKE => Some(1),
     IO_SAVE => Some(2),
     IO_CALL => Some(3),
     IO_FROM => Some(1),
@@ -368,11 +368,15 @@ ctr Tuple6 6
 ctr Tuple7 7
 ctr Tuple8 8
 
+fun IO.load 1 {
+  !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
+} = #0
+
 ctr Inc 0
 ctr Get 0
 fun Count 1 {
-  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load @x $(IO.done x))
+  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Get)) = !(IO.load @x $(IO.done x))
 } = #0
 ";
 
@@ -401,7 +405,7 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.data.read(idx);
   }
-  fn write_disk(&mut self, fid: u128, val: Lnk) {
+  fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.disk.write(fid, val);
   }
   fn read_disk(&self, fid: u128) -> Option<Lnk> {
@@ -564,11 +568,18 @@ fn show_buff(vec: &[u128]) -> String {
 
 
 impl Disk {
-  fn write(&mut self, fid: u128, val: Lnk) {
+  fn write(&mut self, fid: u128, val: Option<Lnk>) {
+    //println!("--- write {} {:?}", u128_to_name(fid), val);
     self.links.insert(fid as u64, val);
   }
   fn read(&self, fid: u128) -> Option<Lnk> {
-    return self.links.get(&(fid as u64)).map(|x| *x);
+    match self.links.get(&(fid as u64)) {
+      None => None, // data is on a previous heap
+      Some(x) => match *x {
+        None => Some(0), // data has been erased here
+        Some(x) => Some(x), // data is available here
+      }
+    }
   }
   fn clear(&mut self) {
     self.links.clear();
@@ -767,21 +778,28 @@ impl Runtime {
             clear(self, get_loc(term, 0), 1);
             return Some(retr);
           }
-          IO_LOAD => {
-            //println!("- IO_LOAD subject is {} {}", u128_to_name(subject), subject);
+          IO_TAKE => {
+            //println!("- IO_TAKE subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
-            let stat = self.read_disk(subject).unwrap_or(Num(0));
-            let cont = alloc_app(self, cont, stat);
-            let done = self.run_io(subject, subject, cont, mana);
+            if let Some(state) = self.read_disk(subject) {
+              if state != 0 {
+                self.write_disk(subject, None);
+                let cont = alloc_app(self, cont, state);
+                let done = self.run_io(subject, subject, cont, mana);
+                clear(self, host, 1);
+                clear(self, get_loc(term, 0), 1);
+                return done;
+              }
+            }
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
-            return done;
+            return None;
           }
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
             let save = self.compute(expr, mana)?;
-            self.write_disk(subject, save);
+            self.write_disk(subject, Some(save));
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let done = self.run_io(subject, subject, cont, mana);
@@ -840,7 +858,7 @@ impl Runtime {
           self.set_arity(*name, *arit);
           self.define_function(*name, func);
           let state = self.create_term(init, 0, &mut init_map());
-          self.write_disk(*name, state);
+          self.write_disk(*name, Some(state));
           self.draw();
         }
       }
@@ -974,12 +992,12 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
+  pub fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
   pub fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
-    return self.get_with(None, None, |heap| heap.read_disk(fid));
+    return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
@@ -2765,10 +2783,5 @@ pub fn test_actions_from_code(code: &str) {
 }
 
 pub fn test(file: &str) {
-  //println!("{:x}", name_to_u128("IO.done"));
-  //println!("{:x}", name_to_u128("IO.load"));
-  //println!("{:x}", name_to_u128("IO.save"));
-  //println!("{:x}", name_to_u128("IO.call"));
-  //println!("{:x}", name_to_u128("IO.from"));
   test_actions_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }

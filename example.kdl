@@ -72,9 +72,9 @@
 // - Get: return its counter
 // And an initial state of zero (#0)
 fun Count 1 {
-  !(Count $(Inc)) = $(IO.load @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Dob)) = $(IO.load @x $(IO.save (* x #2) @~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load @x $(IO.done x))
+  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Dob)) = $(IO.take @x $(IO.save (* x #2) @~ $(IO.done #0)))
+  !(Count $(Get)) = !(IO.load @x $(IO.done x))
 } = #0
 
 // Runs a script that increments the Count's state 3 times

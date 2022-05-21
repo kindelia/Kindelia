@@ -1,5 +1,8 @@
+ctr Pair 2
+
 run {
   $(IO.call 'Count' !(Tuple1 $(Inc)) @~
   $(IO.call 'Count' !(Tuple1 $(Get)) @x
-  $(IO.done x)))
+  $(IO.call 'Count' !(Tuple1 $(Get)) @y
+  $(IO.done $(Pair x y)))))
 }
