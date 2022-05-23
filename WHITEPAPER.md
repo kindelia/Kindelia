@@ -14,6 +14,24 @@ Finally, there is no built-in token, and, thus, **it isn't a cryptocurrency**.
 Instead, Kindelia is merely a peer-to-peer functional computer capable of
 efficiently hosting hack-proof programs that can't ever be turned off.
 
+Sections
+========
+
+* [Introduction](#introduction)
+* [Comparisons to Ethereum](#comparisons-to-ethereum)
+* [Examples](#examples)
+  * [Pure function](#pure-function-tree-sum)
+  * [Stateful function](#stateful-function-counter)
+* [Technical Overview](#technical-overview)
+  * [Blocks and Statements](#blocks-and-statements)
+  * [Expressions](#expressions)
+  * [Effects](#effects)
+  * [Computation Rules](#computation-rules)
+  * [Garbage Collection](#garbage-collection)
+  * [Computation and Space Limits](#computation-and-space-limits)
+  * [Serialization](#serialization)
+* [Notes](#notes)
+
 Introduction
 ============
 
@@ -259,6 +277,9 @@ her own account's functionality by storing lambdas on its internal state.
 Technical Overview
 ==================
 
+Blocks and Statements
+---------------------
+
 Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
 (Proof of Work). Kindelia blocks are just groups of statements. Kindelia
 statements can be one of 3 variants:
@@ -287,6 +308,9 @@ statements can be one of 3 variants:
       IO_expression
     }
     ```
+
+Expressions
+-----------
 
 A Kindelia expression is a term in a pure, side-effect free, affine functional
 language with 8 variants. Its grammar is described below:
@@ -380,8 +404,13 @@ quotes, containing a list of 6-bit letters, as follows:
 
 So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
-human-readable source codes. Finally, Kindelia has side-effective operations
-that allow functions to save states, request information from the network, etc.:
+human-readable source codes.
+
+Effects
+-------
+
+Finally, Kindelia has side-effective operations that allow functions to save
+states, request information from the network, etc.:
 
 ```c
 $(IO.take           @r ...) // takes this function's internal state
@@ -587,7 +616,8 @@ global pattern-matching rewrite rule.
 (user-defined)
 ```
 
-### Garbage Collection
+Garbage Collection
+------------------
 
 Whenever a value goes out of scope, which happens when, and only when, a
 function or lambda that doesn't use its variable is applied to said value,
@@ -600,8 +630,8 @@ TODO: explanation on interaction with duplication nodes
 
 TODO: explanation on how it is NOT a global GC pass
 
-Preventing spam: mana and size limits
--------------------------------------
+Computation and Space Limits
+----------------------------
 
 Since Kindelia's built-in language is Turing complete, it must have a way to
 account for, and limit, performed computations; otherwise anyone could freeze
