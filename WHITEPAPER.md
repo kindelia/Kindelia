@@ -405,7 +405,7 @@ The primitive operations in that machine are called rewrite rules, and they
 include beta-reduction (lambda application), pattern-matching, numeric
 operators, and primitives for cloning and erasing data. It is important to
 stress that all these operations are constant-time, which is essential to make
-computation measurable: see the gas table in the next section. For more info on
+computation measurable: see the mana table in the next section. For more info on
 how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
 In addition to the 8 term variants, the HVM also has an internal superposition
@@ -600,8 +600,8 @@ TODO: explanation on interaction with duplication nodes
 
 TODO: explanation on how it is NOT a global GC pass
 
-Cost Table
-----------
+Preventing spam: mana and size limits
+-------------------------------------
 
 Since Kindelia's built-in language is Turing complete, it must have a way to
 account for, and limit, performed computations; otherwise anyone could freeze
@@ -630,12 +630,65 @@ transactions, but with the block as a whole.
     | * M is the alloc count of the right-hand side        |
     '------------------------------------------------------'
 
-Each block has a limit of 42 billion mana. If that limit is passed, nodes will
-reject that block.
+Kindelia has an accumulated mana limit computed by the following formula:
 
-TODO: explain the state growth limit
+```
+mana_limit = 42000000 * (block_number + 1)
+```
 
-TODO: explain the blockchain growth limit
+Note that this limit isn't per block, but for the entire network, as a function
+of the current block weight. If a block passes that limit, it is rejected by
+nodes. Note that this limit accumulates: if a block doesn't fully use it, the
+next block can use, it, and so on. That is good, because, in effect, that causes
+times of low usage to "lend" computation to times of high usage, making Kindelia
+somewhat resistant to performance losses due to high-traffic applications or
+periods, while still keeping the maximum synchronization computation in check.
+
+The current Rust implementation is capable of computing about 16 million mana
+per second in an Apple M1 processor. This is about 2.6x larger than the mana
+limit per block. That means that, for every 2.6 seconds a node spends offline,
+it must spend 1 second catching up, if single threaded. That isn't a huge
+margin, but notice that blocks can be processed in a massively parallel fashion,
+allowing nodes to catch up with the network state in much less time. Moreover,
+future optimizations and processors will improve these numbers.
+
+As for space, Kindelia also has an accumulated state size limit:
+
+```
+bits_limit = 1024 * (block_number + 1)
+```
+
+That means that, for every second that passes, the state size is allowed to grow
+1024 bits. That is equivalent to an HVM constructor with 8 numeric fields, or 4
+HVM lambdas. That amounts to a blockchain state growth of about 4 GB per year.
+Just like mana, this accumulates, so, for example, if there are 3 empty blocks,
+the 4th block will be able to let the blockchain size grow up to 4096 bits.
+
+### About miner fees
+
+An attentive reader may have noticed that there is no miner fee mechanism
+included on this implementation. That is by design. Kindelia restricts how much
+computation and space the network may use in total as a function of its age, but
+it says nothing about individual transactions. Kindelia relies on the principle
+that, during the early ages of the network, users will be mining their own
+blocks directly. After all, with 1 second per block, there are 86400 blocks per
+day. Until there are thousands of active users, mining a block won't be an issue
+for an average user.
+
+Once there are that many users, people will start mining Kindelia blocks
+professionally, looking to collect block rewards, which will be offered by apps
+and currencies as a way to incentive the network security. For example, a coin
+hosted on Kindelia may have a `.mint()` transaction that can be called once per
+block, and grants brand new tokens to the block miner.
+
+Once that happens, these miners will have plenty of unused space and
+computations in their blocks, so, they'll start selling that space to the
+community. Contracts will be created to facilitate that market, allowing users
+to pay miners to include their transactions in blocks. In other words, the
+hardcoded miner-fee mechanism that Ethereum currently has will be naturally
+replaced by mere contracts, and a fee market will naturally emerge. That is only
+possible due to Kindelia's flexibility, and, as a healthy side effect, users
+will pay miner fees in any asset, not just "the official coin".
 
 Serialization
 -------------
