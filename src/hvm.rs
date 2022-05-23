@@ -573,7 +573,6 @@ fn show_buff(vec: &[u128]) -> String {
 
 impl Disk {
   fn write(&mut self, fid: u128, val: Option<Lnk>) {
-    //println!("--- write {} {:?}", u128_to_name(fid), val);
     self.links.insert(fid as u64, val);
   }
   fn read(&self, fid: u128) -> Option<Lnk> {
@@ -691,6 +690,10 @@ impl Runtime {
 
   pub fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
     collect(self, term, mana)
+  }
+
+  pub fn collect_at(&mut self, loc: u128, mana: u128) -> Option<()> {
+    collect(self, self.read(loc as usize), mana)
   }
 
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
@@ -822,7 +825,6 @@ impl Runtime {
               args.push(ask_arg(self, tupl, i));
             }
             // Calls called function IO, changing the subject
-            //println!("... {} {} {}", fnid, get_num(fnid), u128_to_name(get_num(fnid)));
             let ioxp = alloc_fun(self, get_num(fnid), &args);
             let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
             // Calls the continuation with the value returned
@@ -886,8 +888,6 @@ impl Runtime {
               let size_dif = size_end - size_ini;
               if size_end <= size_lim {
                 println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
-                //println!("  - mana: {}", self.get_mana() - mana_ini);
-                //println!("  - term: {}", self.show_term(done));
                 self.draw();
                 return;
               }
@@ -1285,16 +1285,17 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
 pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
   let mut stack : Vec<Lnk> = Vec::new();
   let mut next = term;
+  let mut dups : Vec<u128> = Vec::new();
   loop {
     let term = next;
     match get_tag(term) {
       DP0 => {
         link(rt, get_loc(term, 0), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,1),0), mana)?;
+        dups.push(term);
       }
       DP1 => {
         link(rt, get_loc(term, 1), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,0),0), mana)?;
+        dups.push(term);
       }
       VAR => {
         link(rt, get_loc(term, 0), Era());
@@ -1346,6 +1347,14 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
       next = got;
     } else {
       break;
+    }
+  }
+  for dup in dups {
+    let fst = ask_arg(rt, dup, 0);
+    let snd = ask_arg(rt, dup, 1);
+    if get_tag(fst) == ERA && get_tag(snd) == ERA {
+      collect(rt, ask_arg(rt, dup, 2), mana);
+      clear(rt, get_loc(dup, 0), 3);
     }
   }
   return Some(());
@@ -1604,7 +1613,6 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
 }
 
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
-
   let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
@@ -2018,7 +2026,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                   vars_data.insert(rule.vars[i].name as u64, var);
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
-                //println!("-- alloc {:?}", rule.body);
                 //println!("-- vars: {:?}", vars);
                 let done = create_term(rt, &rule.body, host, vars_data);
                 // Links the host location to it
@@ -2321,7 +2328,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!("\n& {} {} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }

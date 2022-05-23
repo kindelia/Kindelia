@@ -30,24 +30,7 @@ fn main() -> Result<(), String> {
   
   //hvm::test("./example/example.kindelia");
   //return Ok(());
-
-  //let mut a = bit_vec::BitVec::new();
-  //serialize_term(&read_term("@x @y (+ x y)").1, &mut a);
-  ////serialize_name(&crate::hvm::name_to_u128("Dog"), &mut a);
-  //println!("- {:?}", a);
-  //println!("- {:?}", deserialize_term(&a, &mut 0));
-  //return Ok(());
-  //for i in 0 .. 64 {
-    //let mut a = bit_vec::BitVec::new();
-    //serialize_varlen(&u256(i), &mut a);
-    //let mut b = bit_vec::BitVec::new();
-    //serialize_number(&u256(i), &mut b);
-    //println!("- {} | {} {} | {:?} {} | {:?} {}", i, deserialize_varlen(&a, &mut 0), deserialize_number(&b, &mut 0), a, a.len(), b, b.len());
-  //}
-  //return Ok(());
-
 }
-
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
