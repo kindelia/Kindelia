@@ -8,6 +8,7 @@ use sha3::Digest;
 
 use std::collections::HashMap;
 use std::net::*;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -40,6 +41,7 @@ pub struct Block {
 pub type Transaction = Vec<u8>;
 
 pub struct Node {
+  pub base_dir   : PathBuf,
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
   pub tip        : U256,                            // current ti
@@ -329,10 +331,11 @@ pub fn GENESIS_BLOCK() -> Block {
   }
 }
 
-pub fn new_node() -> Node {
+pub fn new_node(base_dir: PathBuf) -> Node {
   let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
   let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
   let mut node = Node {
+    base_dir   : base_dir,
     socket     : socket,
     port       : port,
     block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
@@ -599,11 +602,10 @@ pub fn gossip(node: &mut Node, peer_count: u128, message: &Message) {
   }
 }
 
-pub fn get_blocks_dir() -> String {
-  let mut dir = dirs::home_dir().unwrap();
-  dir.push(".kindelia");
+pub fn get_blocks_dir(base_dir: &PathBuf) -> PathBuf {
+  let mut dir = base_dir.clone();
   dir.push("blocks");
-  return dir.to_str().unwrap().to_string();
+  dir
 }
 
 pub fn show_block(block: &Block) -> String {
@@ -701,17 +703,18 @@ fn node_ask_missing_blocks(node: &mut Node) {
 }
 
 fn node_save_longest_chain(node: &mut Node) {
+  let bdir = get_blocks_dir(&node.base_dir);
+  std::fs::create_dir_all(&bdir).ok();
   for (index, block) in get_longest_chain(node).iter().enumerate() {
-    let bdir = get_blocks_dir();
-    let path = format!("{}/{}", bdir, index);
+    let mut path = bdir.clone();
+    path.push(format!("{}", index));
     let buff = bitvec_to_bytes(&serialized_block(&block));
-    std::fs::create_dir_all(bdir).ok();
     std::fs::write(path, buff).ok();
   }
 }
 
 fn node_load_longest_chain(node: &mut Node) {
-  let bdir = get_blocks_dir();
+  let bdir = get_blocks_dir(&node.base_dir);
   std::fs::create_dir_all(&bdir).ok();
   for entry in std::fs::read_dir(&bdir).unwrap() {
     let buffer = std::fs::read(entry.unwrap().path()).unwrap();
