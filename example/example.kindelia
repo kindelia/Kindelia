@@ -149,13 +149,13 @@ $(Node left right)
 
 // When a transaction fails, it is fully reversed
 {
-  $(IO.call 'Count' $(Tuple1 $(Inc)) @~
+  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
   $(Foo))
 }
 
 // Here, the count wasn't incremented, even though
 // the last transaction called `!(Count $(Inc))`
 {
-  $(IO.call 'Count' $(Tuple1 $(Get)) @x
+  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
   $(IO.done x))
 }

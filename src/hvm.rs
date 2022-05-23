@@ -237,7 +237,11 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
   }
 }
 
+// Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
+
+// Maximum state growth per block, in bits
+pub const BLOCK_BITS_LIMIT : i128 = 1024; // 1024 bits per sec = about 4 GB per year
 
 // Mana Table
 // ----------
@@ -870,19 +874,25 @@ impl Runtime {
       Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
+        let size_ini = self.get_size();
+        let size_lim = self.get_size_limit(); // max size we can reach on this statement
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             let done_code = self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
-              println!("- run {} ({} mana)", done_code, self.get_mana() - mana_ini);
-              //println!("  - mana: {}", self.get_mana() - mana_ini);
-              //println!("  - term: {}", self.show_term(done));
-              self.draw();
-              return;
+              let size_end = self.get_size();
+              let mana_dif = self.get_mana() - mana_ini;
+              let size_dif = size_end - size_ini;
+              if size_end <= size_lim {
+                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                //println!("  - mana: {}", self.get_mana() - mana_ini);
+                //println!("  - term: {}", self.show_term(done));
+                self.draw();
+                return;
+              }
             }
           }
-          //println!("{}", show_rt(self));
         }
         println!("- run fail");
         self.undo();
@@ -894,6 +904,11 @@ impl Runtime {
   // Maximum mana = 42m * block_number
   pub fn get_mana_limit(&self) -> u128 {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
+  }
+
+  // Maximum size =  * block_number
+  pub fn get_size_limit(&self) -> i128 {
+    (self.get_tick() as i128 + 1) * (BLOCK_BITS_LIMIT / 128)
   }
 
   // Rollback
