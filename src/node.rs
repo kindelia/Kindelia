@@ -352,6 +352,24 @@ pub fn new_node(base_dir: PathBuf) -> Node {
     peers      : HashMap::new(),
     runtime    : init_runtime(),
   };
+
+  let DEFAULT_PEERS: Vec<&str> = vec![
+    "167.71.249.16",
+    "167.71.254.138",
+    "167.71.242.43",
+    "167.71.255.151",
+  ];
+  let default_peers = DEFAULT_PEERS.iter()
+    .map(|p| p.split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>())
+    .map(|p| {
+        let val0 = p[0]; let val1 = p[1]; let val2 = p[2]; let val3 = p[3];
+        Address::IPv4 { val0, val1, val2, val3, port: UDP_PORT }
+      }
+    );
+
+  let seen_at = get_time();
+  default_peers.for_each(|address| node_see_peer(&mut node, Peer { address, seen_at }));
+
   node_see_peer(&mut node, Peer {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 },
     seen_at: get_time(),
@@ -364,6 +382,7 @@ pub fn new_node(base_dir: PathBuf) -> Node {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 2 },
     seen_at: get_time(),
   });
+
   return node;
 }
 
