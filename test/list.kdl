@@ -1,0 +1,32 @@
+$(Cons head tail)
+$(Add x)
+
+!(DaList act) {
+  !(DaList $(Get))   = !(IO.load @x $(IO.done x))
+  !(DaList $(Add x)) = 
+    $(IO.take @xs
+    $(IO.save $(Cons x xs) @~
+    $(IO.done #0)
+    ))
+} 
+  = $(Cons #42 $(Nil))
+
+{
+  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+}
+
+{
+  $(IO.call 'DaList' $(Tuple1 $(Add #69)) @~ $(IO.done #0))
+}
+
+{
+  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+}
+
+{
+  $(IO.call 'DaList' $(Tuple1 $(Add #111)) @~ $(IO.done #0))
+}
+
+{
+  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+}
