@@ -31,6 +31,8 @@ Sections
   * [Computation and Space Limits](#computation-and-space-limits)
   * [Serialization](#serialization)
 * [Notes](#notes)
+  * [Why?](#why)
+  * [Why Nakamoto Consensus (Proof of Work)?](#why-nakamoto-consensus-proof-of-work?)
 
 Introduction
 ============
@@ -619,16 +621,26 @@ global pattern-matching rewrite rule.
 Garbage Collection
 ------------------
 
-Whenever a value goes out of scope, which happens when, and only when, a
-function or lambda that doesn't use its variable is applied to said value,
-a garbage-collection procedure is initiated, freeing its data recursively.
-That operation is described below:
+Kindelia represents its state as reversible runtime heaps. In other words, it
+would be as if we stored the memory of a JavaScript engine, or of Haskell's STG
+runtime, as the network state. A `IO.save` operation merely links the active
+function name to a pointer to a runtime expression. That is why it is has
+basically no cost, and is only restricted by the total state size limit.
 
-TODO: pseudocode of the GC procedure
+This idea has an obvious problem, though: if there is any kind of space leak on
+the runtime, the blockchain size will grow permanently. This could be fixed with
+a global garbage collector, but that raises the question: who pays for it?
+Fortunatelly, we don't have to deal with this question, since HVM is garbage
+collection free. In other words, running an IO statement will always remove free
+the data it used, so, the only way the heap can grow is by using `IO.save`.
 
-TODO: explanation on interaction with duplication nodes
-
-TODO: explanation on how it is NOT a global GC pass
+In order for that to be possible, the HVM has an auxiliary garbage collection
+procedure that is triggered whenever a value goes out of scope. This happens
+when, and only when, a function or lambda that doesn't use its variable is
+applied to some value. In that case, that value must be freed. Note that there
+is no global "search" procedure, nor reference counting system, required to find
+what memory must be freed. As soon as a value is unreachable, its memory is
+released, cheaply and efficiently.
 
 Computation and Space Limits
 ----------------------------
@@ -667,7 +679,7 @@ mana_limit = 42000000 * (block_number + 1)
 ```
 
 Note that this limit isn't per block, but for the entire network, as a function
-of the current block weight. If a block passes that limit, it is rejected by
+of the current block number. If a block passes that limit, it is rejected by
 nodes. Note that this limit accumulates: if a block doesn't fully use it, the
 next block can use, it, and so on. That is good, because, in effect, that causes
 times of low usage to "lend" computation to times of high usage, making Kindelia
