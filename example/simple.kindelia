@@ -1,0 +1,8 @@
+$(Pair fst snd)
+
+{
+  $(IO.call 'Count' !(Tuple1 $(Inc)) @~
+  $(IO.call 'Count' !(Tuple1 $(Get)) @x
+  $(IO.call 'Count' !(Tuple1 $(Get)) @y
+  $(IO.done $(Pair x y)))))
+}

@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
+#![allow(clippy::style)]
 
 mod util;
 mod hvm;
@@ -17,19 +18,19 @@ use std::thread;
 pub use clap::{Parser, Subcommand};
 
 use crate::bits::*;
+use crate::hvm::*;
 use crate::node::*;
 use crate::util::*;
 
 fn main() -> Result<(), String> {
   return run_cli();
 
-  //start_node(Some("simple.kdl".to_string()));
+  //start_node(Some("simple.kindelia".to_string()));
   //return Ok(());
   
-  //hvm::test("./example.kdl");
+  //hvm::test("./example/example.kindelia");
   //return Ok(());
 }
-
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -65,7 +66,7 @@ fn run_cli() -> Result<(), String> {
       match file {
         Err(err) => return Err(format!("{}", err)),
         Ok(code) => {
-          hvm::test_actions_from_code(&code);
+          hvm::test_statements_from_code(&code);
         }
       }
     }

@@ -111,9 +111,6 @@ pub const UDP_PORT : u16 = 42000;
 // Size of a hash, in bytes
 pub const HASH_SIZE : usize = 32;
 
-// Size of a u128, in bytes
-pub const U128_SIZE : usize = 64 / 8;
-
 // Size of a block's body, in bytes
 pub const BODY_SIZE : usize = 1280;
 
@@ -299,8 +296,8 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
 }
 
 pub fn code_to_body(code: &str) -> Body {
-  let (_rest, acts) = crate::hvm::read_actions(code);
-  let bits = serialized_actions(&acts);
+  let (_rest, acts) = crate::hvm::read_statements(code);
+  let bits = serialized_statements(&acts);
   let body = bytes_to_body(&bitvec_to_bytes(&bits));
   return body;
 }
@@ -538,9 +535,9 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
 
 pub fn node_compute_block(node: &mut Node, block: &Block) {
   let bits = BitVec::from_bytes(&block.body.value);
-  let acts = deserialized_actions(&bits);
-  //println!("Computing block:\n{}", view_actions(&acts));
-  node.runtime.run_actions(&acts);
+  let acts = deserialized_statements(&bits);
+  //println!("Computing block:\n{}", view_statements(&acts));
+  node.runtime.run_statements(&acts);
   node.runtime.tick();
 }
 
@@ -749,11 +746,7 @@ pub fn node_loop(
   let mut mined = 0;
   let mut tick = 0;
 
-  let init_body = code_to_body("fun Count 1 {
-    !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-    !(Count $(Dob)) = $(IO.load λx $(IO.save (* x #2) λ~ $(IO.done #0)))
-    !(Count $(Get)) = $(IO.load λx $(IO.done x))
-  } = #0");
+  let init_body = code_to_body("");
   let mine_body = mine_file.map(|x| code_to_body(&x));
 
   loop {

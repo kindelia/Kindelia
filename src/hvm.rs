@@ -7,9 +7,10 @@ use rand::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
 use std::hash::{Hash, Hasher, BuildHasherDefault};
-//use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
+
+use crate::util::U128_SIZE;
 
 // Types
 // -----
@@ -35,6 +36,9 @@ pub enum Oper {
   Shl, Shr, Ltn, Lte,
   Eql, Gte, Gtn, Neq,
 }
+
+// A u64 HashMap
+pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 
 // A left-hand side variable in a rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
@@ -65,28 +69,28 @@ pub struct Func {
 // A file is a map of `FuncID -> Function`
 #[derive(Clone, Debug)]
 pub struct File {
-  pub funcs: HashMap<u64, Arc<Func>, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub funcs: Map<Arc<Func>>,
 }
 
 // A map of `FuncID -> Arity`
 #[derive(Clone, Debug)]
 pub struct Arit {
-  pub arits: HashMap<u64, u128, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub arits: Map<u128>,
 }
 
 // A map of `FuncID -> Lnk`, pointing to a function's state
 #[derive(Clone, Debug)]
 pub struct Disk {
-  pub links: HashMap<u64, Lnk, BuildHasherDefault<NoHashHasher<u64>>>,
+  pub links: Map<Option<Lnk>>,
 }
 
 // Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u128;
 
-// A global action that alters the state of the blockchain
-pub enum Action {
-  Fun { name: u128, arit: u128, func: Vec<(Term, Term)>, init: Term },
-  Ctr { name: u128, arit: u128, },
+// A global statement that alters the state of the blockchain
+pub enum Statement {
+  Fun { name: u128, args: Vec<u128>, func: Vec<(Term, Term)>, init: Term },
+  Ctr { name: u128, args: Vec<u128>, },
   Run { expr: Term },
 }
 
@@ -161,21 +165,25 @@ pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
 // Constants
 // ---------
 
-const U128_PER_KB: u128 = 0x80;
-const U128_PER_MB: u128 = 0x20000;
-const U128_PER_GB: u128 = 0x8000000;
+const U128_PER_KB: u128 = (1024 / U128_SIZE) as u128;
+const U128_PER_MB: u128 = U128_PER_KB << 10;
+const U128_PER_GB: u128 = U128_PER_MB << 10;
 
-const HEAP_SIZE: u128 = 8 * U128_PER_MB;
-//const HEAP_SIZE: u128 = 32;
+const HEAP_SIZE: u128 = 32 * U128_PER_MB;
 
 pub const MAX_ARITY: u128 = 16;
-pub const MAX_FUNCS: u128 = 16777216; // TODO: increase to 2^30 once arity is moved out
+pub const MAX_FUNCS: u128 = 1 << 24; // TODO: increase to 2^30 once arity is moved out
 
-pub const VARS_SIZE: usize = 262144; // maximum variables per rule
+pub const VARS_SIZE: usize = 1 << 18; // maximum variables per rule
 
-pub const VAL: u128 = 1;
-pub const EXT: u128 = 0b1000000000000000000000000000000000000000000000000000000000000;
-pub const TAG: u128 = 0b1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000;
+pub const VAL: u128 = 1 << 0;
+pub const EXT: u128 = 1 << 60;
+pub const TAG: u128 = 1 << 120;
+
+pub const VAL_MASK: u128 = EXT - 1;
+pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
+pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
+pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -218,7 +226,7 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
 //   (IO.from               cont:(∀? (IO r))) : (IO r)
 const IO_DONE : u128 = 0x13640a33ca9;
-const IO_LOAD : u128 = 0x13640c33968;
+const IO_TAKE : u128 = 0x13640e25be9;
 const IO_SAVE : u128 = 0x13640de5ea9;
 const IO_CALL : u128 = 0x136409e5c30;
 const IO_FROM : u128 = 0x13640ab6cf1;
@@ -226,7 +234,7 @@ const IO_FROM : u128 = 0x13640ab6cf1;
 const fn GET_ARITY(fid: u128) -> Option<u128> {
   match fid {
     IO_DONE => Some(1),
-    IO_LOAD => Some(1),
+    IO_TAKE => Some(1),
     IO_SAVE => Some(2),
     IO_CALL => Some(3),
     IO_FROM => Some(1),
@@ -234,7 +242,11 @@ const fn GET_ARITY(fid: u128) -> Option<u128> {
   }
 }
 
+// Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
+
+// Maximum state growth per block, in bits
+pub const BLOCK_BITS_LIMIT : i128 = 1024; // 1024 bits per sec = about 4 GB per year
 
 // Mana Table
 // ----------
@@ -355,23 +367,34 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
-ctr Tuple0 0
-ctr Tuple1 1
-ctr Tuple2 2
-ctr Tuple3 3
-ctr Tuple4 4
-ctr Tuple5 5
-ctr Tuple6 6
-ctr Tuple7 7
-ctr Tuple8 8
+$(Tuple0)
+$(Tuple1 x0)
+$(Tuple2 x0 x1)
+$(Tuple3 x0 x1 x2)
+$(Tuple4 x0 x1 x2 x3)
+$(Tuple5 x0 x1 x2 x3 x4)
+$(Tuple6 x0 x1 x2 x3 x4 x5)
+$(Tuple7 x0 x1 x2 x3 x4 x5 x6)
+$(Tuple8 x0 x1 x2 x3 x4 x5 x6 x7)
 
-ctr Inc 0
-ctr Get 0
-fun Count 1 {
-  !(Count $(Inc)) = $(IO.load λx $(IO.save (+ x #1) λ~ $(IO.done #0)))
-  !(Count $(Get)) = $(IO.load λx $(IO.done x))
+!(IO.load cont) {
+  !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
+} = #0
+
+$(Inc)
+$(Get)
+!(Count action) {
+  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Get)) = !(IO.load @x $(IO.done x))
 } = #0
 ";
+
+// Utils
+// -----
+
+fn init_map<A>() -> Map<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
 
 // Rollback
 // --------
@@ -391,7 +414,7 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.data.read(idx);
   }
-  fn write_disk(&mut self, fid: u128, val: Lnk) {
+  fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.disk.write(fid, val);
   }
   fn read_disk(&self, fid: u128) -> Option<Lnk> {
@@ -482,9 +505,9 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     data: init_heapdata(U128_NONE),
-    disk: Disk { links: HashMap::with_hasher(BuildHasherDefault::default()) },
-    file: File { funcs: HashMap::with_hasher(BuildHasherDefault::default()) },
-    arit: Arit { arits: HashMap::with_hasher(BuildHasherDefault::default()) },
+    disk: Disk { links: init_map() },
+    file: File { funcs: init_map() },
+    arit: Arit { arits: init_map() },
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
@@ -554,11 +577,17 @@ fn show_buff(vec: &[u128]) -> String {
 
 
 impl Disk {
-  fn write(&mut self, fid: u128, val: Lnk) {
+  fn write(&mut self, fid: u128, val: Option<Lnk>) {
     self.links.insert(fid as u64, val);
   }
   fn read(&self, fid: u128) -> Option<Lnk> {
-    return self.links.get(&(fid as u64)).map(|x| *x);
+    match self.links.get(&(fid as u64)) {
+      None => None, // data is on a previous heap
+      Some(x) => match *x {
+        None => Some(0), // data has been erased here
+        Some(x) => Some(x), // data is available here
+      }
+    }
   }
   fn clear(&mut self) {
     self.links.clear();
@@ -626,7 +655,7 @@ pub fn init_runtime() -> Runtime {
     nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
     back: Arc::new(Rollback::Nil),
   };
-  rt.run_actions_from_code(GENESIS);
+  rt.run_statements_from_code(GENESIS);
   rt.snapshot();
   return rt;
 }
@@ -649,13 +678,13 @@ impl Runtime {
     self.define_function(name_to_u128(name), read_func(code).1);
   }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128) -> Lnk {
-    return create_term(self, term, loc);
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+    return create_term(self, term, loc, vars_data);
   }
 
   pub fn alloc_term(&mut self, term: &Term) -> u128 {
     let loc = alloc(self, 1);
-    let lnk = create_term(self, term, loc);
+    let lnk = create_term(self, term, loc, &mut init_map());
     self.write(loc as usize, lnk);
     return loc;
   }
@@ -668,6 +697,10 @@ impl Runtime {
     collect(self, term, mana)
   }
 
+  pub fn collect_at(&mut self, loc: u128, mana: u128) -> Option<()> {
+    collect(self, self.read(loc as usize), mana)
+  }
+
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
     //let main = self.alloc_term(term);
     //let done = self.run_io(subject, caller, main);
@@ -678,14 +711,14 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_actions(&mut self, actions: &[Action]) {
-    for action in actions {
-      self.run_action(action);
+  pub fn run_statements(&mut self, statements: &[Statement]) {
+    for statement in statements {
+      self.run_statement(statement);
     }
   }
 
-  pub fn run_actions_from_code(&mut self, code: &str) {
-    return self.run_actions(&read_actions(code).1);
+  pub fn run_statements_from_code(&mut self, code: &str) {
+    return self.run_statements(&read_statements(code).1);
   }
 
   pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
@@ -757,21 +790,28 @@ impl Runtime {
             clear(self, get_loc(term, 0), 1);
             return Some(retr);
           }
-          IO_LOAD => {
-            //println!("- IO_LOAD subject is {} {}", u128_to_name(subject), subject);
+          IO_TAKE => {
+            //println!("- IO_TAKE subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
-            let stat = self.read_disk(subject).unwrap_or(Num(0));
-            let cont = alloc_app(self, cont, stat);
-            let done = self.run_io(subject, subject, cont, mana);
+            if let Some(state) = self.read_disk(subject) {
+              if state != 0 {
+                self.write_disk(subject, None);
+                let cont = alloc_app(self, cont, state);
+                let done = self.run_io(subject, subject, cont, mana);
+                clear(self, host, 1);
+                clear(self, get_loc(term, 0), 1);
+                return done;
+              }
+            }
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
-            return done;
+            return None;
           }
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
             let save = self.compute(expr, mana)?;
-            self.write_disk(subject, save);
+            self.write_disk(subject, Some(save));
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let done = self.run_io(subject, subject, cont, mana);
@@ -790,7 +830,6 @@ impl Runtime {
               args.push(ask_arg(self, tupl, i));
             }
             // Calls called function IO, changing the subject
-            //println!("... {} {} {}", fnid, get_num(fnid), u128_to_name(get_num(fnid)));
             let ioxp = alloc_fun(self, get_num(fnid), &args);
             let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
             // Calls the continuation with the value returned
@@ -822,39 +861,43 @@ impl Runtime {
     }
   }
 
-  pub fn run_action(&mut self, action: &Action) {
-    match action {
-      Action::Fun { name, arit, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), arit);
+  pub fn run_statement(&mut self, statement: &Statement) {
+    match statement {
+      Statement::Fun { name, args, func, init } => {
+        println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
-          self.set_arity(*name, *arit);
+          self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
-          let state = self.create_term(init, 0);
-          self.write_disk(*name, state);
+          let state = self.create_term(init, 0, &mut init_map());
+          self.write_disk(*name, Some(state));
           self.draw();
         }
       }
-      Action::Ctr { name, arit } => {
-        println!("- ctr {} {}", u128_to_name(*name), arit);
-        self.set_arity(*name, *arit);
+      Statement::Ctr { name, args } => {
+        println!("- ctr {} {}", u128_to_name(*name), args.len());
+        self.set_arity(*name, args.len() as u128);
         self.draw();
       }
-      Action::Run { expr } => {
+      Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
-        let mana_lim = self.get_mana_limit(); // max mana we can reach on this action
+        let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
+        let size_ini = self.get_size();
+        let size_lim = self.get_size_limit(); // max size we can reach on this statement
         let host = self.alloc_term(expr);
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             let done_code = self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
-              println!("- run {} ({} mana)", done_code, self.get_mana() - mana_ini);
-              //println!("  - mana: {}", self.get_mana() - mana_ini);
-              //println!("  - term: {}", self.show_term(done));
-              self.draw();
-              return;
+              let size_end = self.get_size();
+              let mana_dif = self.get_mana() - mana_ini;
+              let size_dif = size_end - size_ini;
+              if size_end <= size_lim {
+                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                self.draw();
+                return;
+              }
             }
           }
-          //println!("{}", show_rt(self));
         }
         println!("- run fail");
         self.undo();
@@ -866,6 +909,11 @@ impl Runtime {
   // Maximum mana = 42m * block_number
   pub fn get_mana_limit(&self) -> u128 {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
+  }
+
+  // Maximum size =  * block_number
+  pub fn get_size_limit(&self) -> i128 {
+    (self.get_tick() as i128 + 1) * (BLOCK_BITS_LIMIT / 128)
   }
 
   // Rollback
@@ -964,12 +1012,12 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
+  pub fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
   pub fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
-    return self.get_with(None, None, |heap| heap.read_disk(fid));
+    return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
@@ -1102,11 +1150,6 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 }
 
 
-// Globals
-// -------
-
-static mut VARS_DATA: [Option<u128>; VARS_SIZE] = [None; VARS_SIZE];
-
 // Constructors
 // ------------
 
@@ -1147,6 +1190,7 @@ pub fn Op2(ope: u128, pos: u128) -> Lnk {
 }
 
 pub fn Num(val: u128) -> Lnk {
+  debug_assert!((!NUM_MASK & val) == 0, "Num overflow");
   (NUM * TAG) | val
 }
 
@@ -1247,16 +1291,17 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
 pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
   let mut stack : Vec<Lnk> = Vec::new();
   let mut next = term;
+  let mut dups : Vec<u128> = Vec::new();
   loop {
     let term = next;
     match get_tag(term) {
       DP0 => {
         link(rt, get_loc(term, 0), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,1),0), mana)?;
+        dups.push(term);
       }
       DP1 => {
         link(rt, get_loc(term, 1), Era());
-        reduce(rt, get_loc(ask_arg(rt,term,0),0), mana)?;
+        dups.push(term);
       }
       VAR => {
         link(rt, get_loc(term, 0), Era());
@@ -1310,6 +1355,14 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
       break;
     }
   }
+  for dup in dups {
+    let fst = ask_arg(rt, dup, 0);
+    let snd = ask_arg(rt, dup, 1);
+    if get_tag(fst) == ERA && get_tag(snd) == ERA {
+      collect(rt, ask_arg(rt, dup, 2), mana);
+      clear(rt, get_loc(dup, 0), 3);
+    }
+  }
   return Some(());
 }
 
@@ -1317,42 +1370,36 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // ----
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk) {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
     //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
-    unsafe {
-      if name == VAR_NONE {
-        link(rt, loc, Era());
-      } else {
-        match VARS_DATA[name as usize] {
-          Some(got) => {
-            VARS_DATA[name as usize] = None;
-            link(rt, got, lnk);
-          }
-          None => {
-            VARS_DATA[name as usize] = Some(lnk);
-            link(rt, loc, Era());
-          }
+    if name == VAR_NONE {
+      link(rt, loc, Era());
+    } else {
+      let got = vars_data.get(&(name as u64)).map(|x| *x);
+      match got {
+        Some(got) => {
+          vars_data.remove(&(name as u64));
+          link(rt, got, lnk);
+        }
+        None => {
+          vars_data.insert(name as u64, lnk);
+          link(rt, loc, Era());
         }
       }
     }
   }
   match term {
     Term::Var { name } => {
-      unsafe {
-        //println!("~~ var {} {}", u128_to_name(*name), VARS_DATA.len());
-        if (*name as usize) < VARS_DATA.len() {
-          match VARS_DATA[*name as usize] {
-            Some(got) => {
-              VARS_DATA[*name as usize] = None;
-              return got;
-            }
-            None => {
-              VARS_DATA[*name as usize] = Some(loc);
-              return Num(0);
-            }
-          }
-        } else {
+      //println!("~~ var {} {}", u128_to_name(*name), vars_data.len());
+      let got = vars_data.get(&(*name as u64)).map(|x| *x);
+      match got {
+        Some(got) => {
+          vars_data.remove(&(*name as u64));
+          return got;
+        }
+        None => {
+          vars_data.insert(*name as u64, loc);
           return Num(0);
         }
       }
@@ -1360,25 +1407,25 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
       let dupk = rt.get_dups();
-      bind(rt, node + 0, *nam0, Dp0(dupk, node));
-      bind(rt, node + 1, *nam1, Dp1(dupk, node));
-      let expr = create_term(rt, expr, node + 2);
+      bind(rt, node + 0, *nam0, Dp0(dupk, node), vars_data);
+      bind(rt, node + 1, *nam1, Dp1(dupk, node), vars_data);
+      let expr = create_term(rt, expr, node + 2, vars_data);
       link(rt, node + 2, expr);
-      let body = create_term(rt, body, loc);
+      let body = create_term(rt, body, loc, vars_data);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
-      bind(rt, node + 0, *name, Var(node));
-      let body = create_term(rt, body, node + 1);
+      bind(rt, node + 0, *name, Var(node), vars_data);
+      let body = create_term(rt, body, node + 1, vars_data);
       link(rt, node + 1, body);
       Lam(node)
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
-      let func = create_term(rt, func, node + 0);
+      let func = create_term(rt, func, node + 0, vars_data);
       link(rt, node + 0, func);
-      let argm = create_term(rt, argm, node + 1);
+      let argm = create_term(rt, argm, node + 1, vars_data);
       link(rt, node + 1, argm);
       App(node)
     }
@@ -1386,7 +1433,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
       let size = args.len() as u128;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128);
+        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
         link(rt, node + i as u128, arg_lnk);
       }
       Fun(*name, node)
@@ -1395,19 +1442,20 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128) -> Lnk {
       let size = args.len() as u128;
       let node = alloc(rt, size);
       for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128);
+        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
         link(rt, node + i as u128, arg_lnk);
       }
       Ctr(*name, node)
     }
     Term::Num { numb } => {
+      // TODO: assert numb size
       Num(*numb as u128)
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
-      let val0 = create_term(rt, val0, node + 0);
+      let val0 = create_term(rt, val0, node + 0, vars_data);
       link(rt, node + 0, val0);
-      let val1 = create_term(rt, val1, node + 1);
+      let val1 = create_term(rt, val1, node + 1, vars_data);
       link(rt, node + 1, val1);
       Op2(*oper, node)
     }
@@ -1572,6 +1620,7 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
 }
 
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
+  let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
 
@@ -1639,7 +1688,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
       match get_tag(term) {
         APP => {
           let arg0 = ask_arg(rt, term, 0);
-          // (λx(body) a)
+          // (@x(body) a)
           // ------------ APP-LAM
           // x <- a
           // body
@@ -1679,11 +1728,11 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         DP0 | DP1 => {
           let arg0 = ask_arg(rt, term, 2);
-          // dup r s = λx(f)
+          // dup r s = @x(f)
           // --------------- DUP-LAM
           // dup f0 f1 = f
-          // r <- λx0(f0)
-          // s <- λx1(f1)
+          // r <- @x0(f0)
+          // s <- @x1(f1)
           // x <- {x0 x1}
           if get_tag(arg0) == LAM {
             //println!("dup-lam");
@@ -1900,7 +1949,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -1980,15 +2029,12 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                   if let Some(field) = rule.vars[i].field {
                     var = ask_arg(rt, var, field);
                   }
-                  unsafe {
-                    //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
-                    VARS_DATA[rule.vars[i].name as usize] = Some(var);
-                  }
+                  //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
+                  vars_data.insert(rule.vars[i].name as u64, var);
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
-                //println!("-- alloc {:?}", rule.body);
                 //println!("-- vars: {:?}", vars);
-                let done = create_term(rt, &rule.body, host);
+                let done = create_term(rt, &rule.body, host, vars_data);
                 // Links the host location to it
                 link(rt, host, done);
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
@@ -1999,10 +2045,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                 // Collects unused variables (none in this example)
                 for i in 0 .. rule.vars.len() {
                   if rule.vars[i].erase {
-                    unsafe {
-                      if let Some(var) = VARS_DATA[i] {
-                        collect(rt, var, mana)?;
-                      }
+                    if let Some(var) = vars_data.get(&(i as u64)) {
+                      collect(rt, *var, mana)?;
                     }
                   }
                 }
@@ -2014,7 +2058,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
 
           let fun = get_ext(term);
           if let Some(func) = rt.get_func(fun) {
-            if call_function(rt, func, host, term, mana)? {
+            if call_function(rt, func, host, term, mana, &mut vars_data)? {
               init = 1;
               continue;
             }
@@ -2214,7 +2258,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       }
       LAM => {
         let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-        format!("λ{} {}", name, go(rt, ask_arg(rt, term, 1), names))
+        format!("@{} {}", name, go(rt, ask_arg(rt, term, 1), names))
       }
       APP => {
         let func = go(rt, ask_arg(rt, term, 0), names);
@@ -2291,7 +2335,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!("\n& {} {} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }
@@ -2349,7 +2393,7 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
   if head(code) == chr {
     return (tail(code), ());
   } else {
-    panic!("Expected {}, found {}.", chr, head(code));
+    panic!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(256).collect::<String>());
   }
 }
 
@@ -2375,16 +2419,21 @@ fn read_name(code: &str) -> (&str, u128) {
       name.push(head(code));
       code = tail(code);
     }
+    if name.is_empty() {
+      panic!("Expected identifier, found '{}'.", head(code));
+    }
     return (code, name_to_u128(&name));
   }
 }
 
-// Converts a name to a number, using the following table:
-// '.'       =>  0
-// '0' - '9' =>  1 to 10
-// 'A' - 'Z' => 11 to 36
-// 'a' - 'z' => 37 to 62
-// '_'       => 63
+/// Converts a name to a number, using the following table:
+/// ```
+/// '.'       =>  0
+/// '0' - '9' =>  1 to 10
+/// 'A' - 'Z' => 11 to 36
+/// 'a' - 'z' => 37 to 62
+/// '_'       => 63
+/// ```
 pub fn name_to_u128(code: &str) -> u128 {
   let mut num = 0;
   for chr in code.chars() {
@@ -2403,23 +2452,22 @@ pub fn name_to_u128(code: &str) -> u128 {
   return num;
 }
 
-// Inverse of name_to_u128
+/// Inverse of `name_to_u128`
 pub fn u128_to_name(num: u128) -> String {
   let mut name = String::new();
   let mut num = num;
   while num > 0 {
     let chr = (num % 64) as u8;
-    if chr == 0 {
-      name.push('.');
-    } else if chr < 10 {
-      name.push((chr + 0 + '0' as u8) as char);
-    } else if chr < 36 {
-      name.push((chr - 11 + 'A' as u8) as char);
-    } else if chr < 62 {
-      name.push((chr - 37 + 'a' as u8) as char);
-    } else if chr == 63 {
-      name.push('_');
-    }
+    let chr =
+        match chr {
+            0         => '.',
+            1  ..= 10 => (chr -  1 + b'0') as char,
+            11 ..= 36 => (chr - 11 + b'A') as char,
+            37 ..= 62 => (chr - 37 + b'a') as char,
+            63        => '_',
+            64 ..     => panic!("impossible character value")
+        };
+    name.push(chr);
     num = num / 64;
   }
   name.chars().rev().collect()
@@ -2437,10 +2485,10 @@ fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, 
   return (code, elems);
 }
 
-fn read_term(code: &str) -> (&str, Term) {
+pub fn read_term(code: &str) -> (&str, Term) {
   let code = skip(code);
   match head(code) {
-    'λ' => {
+    '@' => {
       let code         = tail(code);
       let (code, name) = read_name(code);
       let (code, body) = read_term(code);
@@ -2493,14 +2541,15 @@ fn read_term(code: &str) -> (&str, Term) {
       let (code, numb) = read_numb(code);
       return (code, Term::Num { numb });
     },
-    '@' => {
+    '\'' => {
       let code = tail(code);
       let (code, numb) = read_name(code);
+      let (code, skip) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
     _ => {
       let (code, name) = read_name(code);
-      return (code, Term::Var { name: name % 0x3FFFF });
+      return (code, Term::Var { name });
     }
   }
 }
@@ -2575,51 +2624,45 @@ fn read_func(code: &str) -> (&str, Func) {
   }
 }
 
-fn read_action(code: &str) -> (&str, Action) {
+fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
   match head(code) {
-    'f' => {
+    '!' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 'u');
-      let (code, skip) = read_char(code, 'n');
+      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, arit) = read_numb(code);
+      let (code, args) = read_until(code, ')', read_name);
       let (code, skip) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
       let (code, skip) = read_char(code, '=');
       let (code, init) = read_term(code);
-      return (code, Action::Fun { name, arit, func, init });
+      return (code, Statement::Fun { name, args, func, init });
     }
-    'c' => {
+    '$' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 't');
-      let (code, skip) = read_char(code, 'r');
+      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, arit) = read_numb(code);
-      return (code, Action::Ctr { name, arit });
+      let (code, args) = read_until(code, ')', read_name);
+      return (code, Statement::Ctr { name, args });
     }
-    'r' => {
+    '{' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, 'u');
-      let (code, skip) = read_char(code, 'n');
-      //let (code, mana) = read_numb(code);
-      let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
-      return (code, Action::Run { expr });
+      return (code, Statement::Run { expr });
     }
     _ => {
-      panic!("Couldn't parse action.");
+      panic!("Couldn't parse statement.");
     }
   }
 }
 
-pub fn read_actions(code: &str) -> (&str, Vec<Action>) {
-  let (code, actions) = read_until(code, '\0', read_action);
-  //for action in &actions {
-    //println!("... action {}", view_action(action));
+pub fn read_statements(code: &str) -> (&str, Vec<Statement>) {
+  let (code, statements) = read_until(code, '\0', read_statement);
+  //for statement in &statements {
+    //println!("... statement {}", view_statement(statement));
   //}
-  return (code, actions);
+  return (code, statements);
 }
 
 // View
@@ -2648,7 +2691,7 @@ pub fn view_term(term: &Term) -> String {
     Term::Lam { name, body } => {
       let name = view_name(*name);
       let body = view_term(body);
-      return format!("λ{} {}", name, body);
+      return format!("@{} {}", name, body);
     }
     Term::App { func, argm } => {
       let func = view_term(func);
@@ -2704,29 +2747,32 @@ pub fn view_oper(oper: &u128) -> String {
   }
 }
 
-pub fn view_action(action: &Action) -> String {
-  match action {
-    Action::Fun { name, arit, func, init } => {
+pub fn view_statement(statement: &Statement) -> String {
+  match statement {
+    Statement::Fun { name, args, func, init } => {
       let name = u128_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
+      let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      return format!("fun {} {} {{\n{}\n}} = {}", name, arit, func, init);
+      return format!("!({} {}) {{\n{}\n}} = {}", name, args, func, init);
     }
-    Action::Ctr { name, arit } => {
+    Statement::Ctr { name, args } => {
+      // correct:
       let name = u128_to_name(*name);
-      return format!("ctr {} {}", name, arit);
+      let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
+      return format!("$({} {})", name, args);
     }
-    Action::Run { expr } => {
+    Statement::Run { expr } => {
       let expr = view_term(expr);
-      return format!("run {{\n  {}\n}}", expr);
+      return format!("{{\n  {}\n}}", expr);
     }
   }
 }
 
-pub fn view_actions(actions: &[Action]) -> String {
+pub fn view_statements(statements: &[Statement]) -> String {
   let mut result = String::new();
-  for action in actions {
-    result.push_str(&view_action(action));
+  for statement in statements {
+    result.push_str(&view_statement(statement));
     result.push_str("\n");
   }
   return result;
@@ -2735,25 +2781,20 @@ pub fn view_actions(actions: &[Action]) -> String {
 // Tests
 // -----
 
-// Serializes, deserializes and evaluates actions
-pub fn test_actions(actions: &[Action]) {
-  //println!("[Actions]");
-  //let str_0 = view_actions(actions);
-  //println!("{}", str_0);
-
-  //let s = crate::serializer::serialized_actions(&actions);
+// Serializes, deserializes and evaluates statements
+pub fn test_statements(statements: &[Statement]) {
   //println!("[Serialization]");
-  //println!("{:?}\n", s);
-
-  //let a = crate::serializer::deserialized_actions(&s);
-  //let str_1 = view_actions(&a);
-  //println!("[Deserialization] {}", if str_0 == str_1 { "" } else { "(error: not equal)" });
+  let str_0 = view_statements(statements);
+  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
+  //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
+  //println!("{}", str_0);
+  //println!("---------------");
   //println!("{}", str_1);
 
-  println!("[Evaluation]");
+  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialiation error, please report)" });
   let mut rt = init_runtime();
   let init = Instant::now();
-  rt.run_actions(&actions);
+  rt.run_statements(&statements);
   println!("");
 
   println!("[Stats]");
@@ -2763,15 +2804,10 @@ pub fn test_actions(actions: &[Action]) {
 
 }
 
-pub fn test_actions_from_code(code: &str) {
-  test_actions(&read_actions(code).1);
+pub fn test_statements_from_code(code: &str) {
+  test_statements(&read_statements(code).1);
 }
 
 pub fn test(file: &str) {
-  //println!("{:x}", name_to_u128("IO.done"));
-  //println!("{:x}", name_to_u128("IO.load"));
-  //println!("{:x}", name_to_u128("IO.save"));
-  //println!("{:x}", name_to_u128("IO.call"));
-  //println!("{:x}", name_to_u128("IO.from"));
-  test_actions_from_code(&std::fs::read_to_string(file).expect("file not found"));
+  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }

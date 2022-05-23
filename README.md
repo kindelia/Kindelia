@@ -1,7 +1,7 @@
 Kindelia
 ========
 
-A peer-to-peer functional computer.
+A peer-to-peer functional computer in development. ETA: Q3 2022.
 
 Whitepaper
 ----------
