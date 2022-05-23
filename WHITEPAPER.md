@@ -155,6 +155,8 @@ Pure function (tree sum)
 The block below defines and uses some global functions that operate on immutable trees:
 
 ```c
+// TODO: should we use syntax sugars on the paper examples?
+
 // Declares a constructor, Leaf, with arity (size) 1
 $(Leaf value)
 
@@ -211,6 +213,8 @@ that increments the counter 3 times, and other that just outputs the current
 counter, i.e., 3.
 
 ```c
+// TODO: should we use syntax sugars on the paper examples?
+
 // Creates a Counter function with 2 actions:
 $(Inc) // incs its counter
 $(Get) // reads its counter
@@ -255,6 +259,8 @@ and, if the signature checks, calls another function to perform that action. For
 example:
 
 ```c
+// TODO: should we use syntax sugars on the paper examples?
+
 !(Alice action) {
   !(Alice $(SendCoin amount to nonce signature)) =
     
@@ -631,8 +637,8 @@ This idea has an obvious problem, though: if there is any kind of space leak on
 the runtime, the blockchain size will grow permanently. This could be fixed with
 a global garbage collector, but that raises the question: who pays for it?
 Fortunatelly, we don't have to deal with this question, since HVM is garbage
-collection free. In other words, running an IO statement will always remove free
-the data it used, so, the only way the heap can grow is by using `IO.save`.
+collection free. In other words, running an IO statement will always free all
+the memory it used, so, the only way the heap can grow is by using `IO.save`.
 
 In order for that to be possible, the HVM has an auxiliary garbage collection
 procedure that is triggered whenever a value goes out of scope. This happens
@@ -731,6 +737,47 @@ hardcoded miner-fee mechanism that Ethereum currently has will be naturally
 replaced by mere contracts, and a fee market will naturally emerge. That is only
 possible due to Kindelia's flexibility, and, as a healthy side effect, users
 will pay miner fees in any asset, not just "the official coin".
+
+Finally, note that, while Ethereum has only one cost, "gas", in Kindelia, this
+would be split in "mana" and "space", reflecting the fact these are two
+different limits that a block must respect. For example:
+
+```c
+// TODO: should we use syntax sugars on the paper examples?
+
+run {
+
+  // Sends 500 Cat Coins, from Alice to Bob
+  !(ECDSA.check @alice
+  $(IO.call alice (Tuple4 'send_cat_coin' 'Bob' 500) @~
+  $(IO.done #0)))
+
+} then {
+
+  // Gets the used mana, bits and the block miner
+  $(IO.get_used_mana @used_mana
+  $(IO.get_used_bits @used_bits
+  $(IO.get_miner_name @miner_name
+
+  // Pays '7 * used_mana + 3 * used_bits + 1 ultra sword' to the block miner
+  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 7 used_mana)) @~
+  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 3 used_bits)) @~
+  $(IO.call alice (Tuple4 'send_item' 'UltraSword' miner_name) @~
+  $(IO.done #0)))))))
+  
+} sign {
+  alices_signature
+}
+```
+
+The transaction above, signed by Alice, sends 500 cat coins to Bob. When it is
+done, it pays `3 * mana_used + 7 * space_used` CatCoins, plus `1 DogSword`, as
+fees. Rather than a single `gasPrice`, the user may have a price in function of
+both the used mana and space; and anything else, since the payment formula is an
+arbitrary script. Moreover, by being able to pay in any asset directly, there is
+no need to convert his assets (such as `DogSword`) in an exchange. Of course,
+the miner should consult such exchange to figure out the value of the
+transaction.
 
 Serialization
 -------------
