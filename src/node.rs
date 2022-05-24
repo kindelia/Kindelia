@@ -173,7 +173,7 @@ pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
 
 pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   for port in ports {
-    if let Ok(socket) = UdpSocket::bind(&format!("127.0.0.1:{}",port)) {
+    if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
       socket.set_nonblocking(true).ok();
       return Some((socket, *port));
     }
