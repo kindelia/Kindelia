@@ -12,6 +12,7 @@ mod bits;
 use primitive_types::U256;
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -21,6 +22,9 @@ use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
 use crate::util::*;
+
+const KINDELIA_DIR_ENV: &str = "KINDELIA_DIR";
+const KINDELIA_HOME_DEFAULT: &str = ".kindelia";
 
 fn main() -> Result<(), String> {
   return run_cli();
@@ -35,6 +39,8 @@ fn main() -> Result<(), String> {
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
+  #[clap(long)]
+  dir: Option<String>,
   #[clap(subcommand)]
   pub command: CliCmd,
 }
@@ -46,7 +52,7 @@ pub enum CliCmd {
     file: Option<String>,
   },
   /// Runs a Kindelia file
-  Run { 
+  Run {
     /// Input file
     file: String,
     // #[clap(short, long)]
@@ -57,9 +63,11 @@ pub enum CliCmd {
 fn run_cli() -> Result<(), String> {
   let cli_matches = Cli::parse();
 
+  let base_dir = get_base_dir(cli_matches.dir)?;
+
   match cli_matches.command {
     CliCmd::Start { file } => {
-      start_node(file);
+      start_node(base_dir, file);
     }
     CliCmd::Run { file } => {
       let file = std::fs::read_to_string(file);
@@ -74,12 +82,12 @@ fn run_cli() -> Result<(), String> {
   Ok(())
 }
 
-fn start_node(file: Option<String>) {
+fn start_node(base_dir: PathBuf, file: Option<String>) {
   // Reads the file contents
   let file = file.map(|file| std::fs::read_to_string(file).expect("File not found."));
 
   // Node state object
-  let node = new_node();
+  let node = new_node(base_dir);
 
   // Node to Miner communication object
   let miner_comm_0 = new_miner_comm();
@@ -110,4 +118,26 @@ fn start_node(file: Option<String>) {
   node_thread.join().unwrap();
   miner_thread.join().unwrap();
   //input_thread.join().unwrap();
+}
+
+fn get_base_dir(dir_cli: Option<String>) -> Result<PathBuf, String> {
+  let dir_env = std::env::var(KINDELIA_DIR_ENV);
+  let dir_env =
+    match dir_env {
+      Ok(dir) => Some(dir),
+      Err(err) =>
+        if let std::env::VarError::NotPresent = err {
+          None
+        } else {
+          return Err(format!("{} environment variable is not valid: '{}'", KINDELIA_DIR_ENV, err))
+        }
+    };
+
+  let mut dir_home = dirs::home_dir().unwrap();
+  dir_home.push(KINDELIA_HOME_DEFAULT);
+
+  let base_dir =
+    dir_cli.or(dir_env).map(|x| PathBuf::from(x)).unwrap_or(dir_home);
+
+  Ok(base_dir)
 }
