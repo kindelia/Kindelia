@@ -289,7 +289,7 @@ fn Op2SupMana() -> u128 {
 }
 
 fn FunCtrMana(body: &Term) -> u128 {
-  return 10 + count_allocs(body);
+  return 10 + count_allocs(body) * 5;
 }
 
 fn FunSupMana(arity: u128) -> u128 {
