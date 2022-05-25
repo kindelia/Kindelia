@@ -67,6 +67,7 @@ fn run_cli() -> Result<(), String> {
 
   match cli_matches.command {
     CliCmd::Start { file } => {
+      eprintln!("Starting node on directory: {:?}", base_dir);
       start_node(base_dir, file);
     }
     CliCmd::Run { file } => {
@@ -87,7 +88,7 @@ fn start_node(base_dir: PathBuf, file: Option<String>) {
   let file = file.map(|file| std::fs::read_to_string(file).expect("File not found."));
 
   // Node state object
-  let node = new_node(base_dir);
+  let node = new_node(base_dir.clone());
 
   // Node to Miner communication object
   let miner_comm_0 = new_miner_comm();
@@ -99,7 +100,7 @@ fn start_node(base_dir: PathBuf, file: Option<String>) {
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node, miner_comm_0, file);
+    node_loop(node, base_dir.clone(), miner_comm_0, file);
   });
 
   // Spawns the miner thread

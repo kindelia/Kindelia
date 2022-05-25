@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher, BuildHasherDefault};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::dbg_println;
 use crate::util::U128_SIZE;
 
 // Types
@@ -864,7 +865,7 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), args.len());
+        dbg_println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
@@ -874,7 +875,7 @@ impl Runtime {
         }
       }
       Statement::Ctr { name, args } => {
-        println!("- ctr {} {}", u128_to_name(*name), args.len());
+        dbg_println!("- ctr {} {}", u128_to_name(*name), args.len());
         self.set_arity(*name, args.len() as u128);
         self.draw();
       }
@@ -892,14 +893,14 @@ impl Runtime {
               let mana_dif = self.get_mana() - mana_ini;
               let size_dif = size_end - size_ini;
               if size_end <= size_lim {
-                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                dbg_println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
                 return;
               }
             }
           }
         }
-        println!("- run fail");
+        dbg_println!("- run fail");
         self.undo();
         //self.collect(done);
       }
@@ -1279,8 +1280,8 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //println!("- clear {} {}", loc, size);
   for i in 0 .. size {
     if rt.read((loc + i) as usize) == 0 {
-      println!("- clear again {}", loc);
-      panic!("nope");
+      eprintln!("- clear again {}", loc);
+      panic!("clear happened twice");
     }
     rt.write((loc + i) as usize, 0);
   }

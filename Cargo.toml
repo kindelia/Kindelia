@@ -3,9 +3,8 @@ name = "kindelia"
 version = "0.1.0"
 edition = "2021"
 
-[profile.profiler]
-inherits = "release"
-debug = true
+[profile.dev_fast]
+inherits = "dev"
 opt-level = 3
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

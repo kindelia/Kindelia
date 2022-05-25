@@ -11,6 +11,22 @@ use crate::bits::*;
 pub type U256Map<T> = HashMap<U256, T>;
 pub type Hash = U256;
 
+// Logs
+// ====
+
+#[macro_export]
+macro_rules! dbg_println {
+    () => {
+        #[cfg(debug_assertions)]
+        std::eprint!("\n")
+    };
+    ($($arg:tt)*) => {{
+        #[cfg(debug_assertions)]
+        // $crate::io::_eprint($crate::format_args_nl!($($arg)*));
+        eprintln!($($arg)*);
+    }};
+}
+
 // Numerics
 // ========
 
