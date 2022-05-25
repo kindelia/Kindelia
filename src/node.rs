@@ -1,5 +1,6 @@
 use bit_vec::BitVec;
 use im::HashSet;
+use json::object;
 use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
@@ -45,6 +46,7 @@ pub struct Node {
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
   pub tip        : U256,                            // current ti
+  // TODO: refactor as map to struct? Better safety, less unwraps. Why not?
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
   pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
@@ -830,25 +832,19 @@ pub fn node_loop(
 
       // Display node info
       if tick % TICKS_PER_SEC == 0 {
-        //let tip = node.tip;
-        //let height = *node.height.get(&tip).unwrap();
-        //let tip_target = *node.target.get(&tip).unwrap();
-        //let difficulty = target_to_difficulty(tip_target);
-        //let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
-        let mut num_pending: u128 = 0;
-        let mut num_pending_seen: u128 = 0;
-        for (bhash, _) in node.pending.iter() {
-          if node.seen.get(bhash).is_some() {
-            num_pending_seen += 1;
-          }
-          num_pending += 1;
-        }
-        //let last_blocks = get_longest_chain(node);
-        //print!("{esc}c", esc = 27 as char); // clear screen
-        println!("## peers   : {}", node.peers.len());
-        println!("## pending : {}/{}", num_pending, num_pending_seen);
-        println!("## blocks  : {}", node.height[&node.tip]);
-        println!("## mana    : {}", node.runtime.get_mana());
+        log_heartbeat(&node);
+        // let mut num_pending: u64 = 0;
+        // let mut num_pending_seen: u64 = 0;
+        // for (bhash, _) in node.pending.iter() {
+        //   if node.seen.get(bhash).is_some() {
+        //     num_pending_seen += 1;
+        //   }
+        //   num_pending += 1;
+        // }
+        // println!("## peers   : {}", node.peers.len());
+        // println!("## pending : {}/{}", num_pending_seen, num_pending);
+        // println!("## blocks  : {}", node.height[&node.tip]);
+        // println!("## mana    : {}", node.runtime.get_mana());
       }
     }
 
@@ -856,6 +852,45 @@ pub fn node_loop(
     // TODO: just sleep remaining time
     std::thread::sleep(std::time::Duration::from_micros(10000));
   }
+}
+
+fn log_heartbeat(node: &Node) {
+  let blocks_num = node.block.keys().count();
+
+  let tip = node.tip;
+  let tip_height = *node.height.get(&tip).unwrap() as u64;
+
+  let tip_target = *node.target.get(&tip).unwrap();
+  let difficulty = target_to_difficulty(tip_target);
+  let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
+
+  let mut pending_num: u64 = 0;
+  let mut pending_seen_num: u64 = 0;
+  for (bhash, _) in node.pending.iter() {
+    if node.seen.get(bhash).is_some() {
+      pending_seen_num += 1;
+    }
+    pending_num += 1;
+  }
+  //let last_blocks = get_longest_chain(node);
+
+  let log = object!{
+    event: "heartbeat",
+    num_peers: node.peers.len(),
+    tip: {
+      height: tip_height,
+      // target: u256_to_hex(tip_target),
+      difficulty: difficulty.low_u64(),
+      hash_rate: hash_rate.low_u64(),
+    },
+    blocks: {
+      num: blocks_num,
+      pending: { num: pending_num, seen: { num: pending_seen_num }, },
+    },
+    total_mana: node.runtime.get_mana() as u64,
+  };
+
+  println!("{}", log);
 }
 
 // Interface

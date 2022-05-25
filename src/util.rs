@@ -46,11 +46,16 @@ pub fn u128_to_bytes(value: u128) -> Vec<u8> {
 }
 
 pub fn u256_to_bytes(value: U256) -> Vec<u8> {
+  // TODO: primitive_types::U256::to_big_endian ?
   let mut bytes = Vec::new();
   for i in 0 .. 32 {
     bytes.push(value.byte(32 - i - 1));
   }
   return bytes;
+}
+
+pub fn u256_to_hex(value: U256) -> String {
+  hex::encode(u256_to_bytes(value))
 }
 
 pub fn bitvec_to_bytes(bits: &BitVec) -> Vec<u8> {
