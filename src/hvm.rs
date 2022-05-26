@@ -675,9 +675,9 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
-  pub fn define_function_from_code(&mut self, name: &str, code: &str) {
-    self.define_function(name_to_u128(name), read_func(code).1);
-  }
+  // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
+  //   self.define_function(name_to_u128(name), read_func(code).1);
+  // }
 
   pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
     return create_term(self, term, loc, vars_data);
@@ -1191,7 +1191,7 @@ pub fn Op2(ope: u128, pos: u128) -> Lnk {
 }
 
 pub fn Num(val: u128) -> Lnk {
-  debug_assert!((!NUM_MASK & val) == 0, "Num overflow");
+  debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
   (NUM * TAG) | val
 }
 
@@ -1200,6 +1200,8 @@ pub fn Ctr(fun: u128, pos: u128) -> Lnk {
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Lnk {
+  debug_assert!(fun < 1<<60,
+    "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
 
@@ -2421,8 +2423,9 @@ fn read_name(code: &str) -> (&str, u128) {
       code = tail(code);
     }
     if name.is_empty() {
-      panic!("Expected identifier, found '{}'.", head(code));
+      panic!("Expected identifier, found `{}`.", head(code));
     }
+    // TODO: check identifier size and propagate error
     return (code, name_to_u128(&name));
   }
 }
@@ -2435,9 +2438,10 @@ fn read_name(code: &str) -> (&str, u128) {
 /// 'a' - 'z' => 37 to 62
 /// '_'       => 63
 /// ```
-pub fn name_to_u128(code: &str) -> u128 {
-  let mut num = 0;
-  for chr in code.chars() {
+pub fn name_to_u128(name: &str) -> u128 {
+  let mut num: u128 = 0;
+  for (i, chr) in name.chars().enumerate() {
+    debug_assert!(i < 20, "Name too big: `{}`.", name);
     if chr == '.' {
       num = num * 64 + 0;
     } else if chr >= '0' && chr <= '9' {
@@ -2535,6 +2539,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_term);
+      // TODO: check function name size _on direct calling_, and propagate error
       return (code, Term::Fun { name, args });
     },
     '#' => {
