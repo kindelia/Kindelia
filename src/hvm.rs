@@ -781,7 +781,7 @@ impl Runtime {
 
   pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
     let term = reduce(self, host, mana)?;
-    //println!("-- {}", show_term(self, term));
+    // eprintln!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -885,6 +885,7 @@ impl Runtime {
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
         let host = self.alloc_term(expr);
+        // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             let done_code = self.show_term(done);
@@ -892,17 +893,20 @@ impl Runtime {
               let size_end = self.get_size();
               let mana_dif = self.get_mana() - mana_ini;
               let size_dif = size_end - size_ini;
+              // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
                 dbg_println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
-                return;
+              } else {
+                dbg_println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                self.undo();
               }
+              return;
             }
           }
         }
         dbg_println!("- run fail");
         self.undo();
-        //self.collect(done);
       }
     }
   }
@@ -2026,14 +2030,19 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                 rt.set_rwts(rt.get_rwts() + 1);
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
-                for i in 0 .. rule.vars.len() {
+                for (i, rule_var) in rule.vars.iter().enumerate() {
                   let mut var = term;
-                  var = ask_arg(rt, var, rule.vars[i].param);
-                  if let Some(field) = rule.vars[i].field {
+                  var = ask_arg(rt, var, rule_var.param);
+                  if let Some(field) = rule_var.field {
                     var = ask_arg(rt, var, field);
                   }
-                  //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
-                  vars_data.insert(rule.vars[i].name as u64, var);
+                  //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_lnk(var));
+                  if !rule_var.erase {
+                    vars_data.insert(rule_var.name as u64, var);
+                  } else {
+                    // Collects unused argument
+                    collect(rt, var, mana)?;
+                  }
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- vars: {:?}", vars);
@@ -2045,17 +2054,18 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                   clear(rt, get_loc(ask_arg(rt, term, *eras_index), 0), *eras_arity);
                 }
                 clear(rt, get_loc(term, 0), func.arity);
-                // Collects unused variables (none in this example)
-                for i in 0 .. rule.vars.len() {
-                  if rule.vars[i].erase {
-                    if let Some(var) = vars_data.get(&(i as u64)) {
-                      collect(rt, *var, mana)?;
-                    }
-                  }
-                }
+                // // Collects unused variables (none in this example)
+                // for i in 0 .. rule.vars.len() {
+                //   if rule.vars[i].erase {
+                //     if let Some(var) = vars_data.get(&(i as u64)) {
+                //       collect(rt, *var, mana)?;
+                //     }
+                //   }
+                // }
                 return Some(true);
               }
             }
+            // ?? clear vars_data ?
             return Some(false);
           }
 
@@ -2338,7 +2348,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(" &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" | &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }

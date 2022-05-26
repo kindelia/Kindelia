@@ -75,6 +75,7 @@ fn run_cli() -> Result<(), String> {
       match file {
         Err(err) => return Err(format!("{}", err)),
         Ok(code) => {
+          // TODO: flag to disable size limit / debug
           hvm::test_statements_from_code(&code);
         }
       }
