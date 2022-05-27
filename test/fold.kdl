@@ -1,0 +1,11 @@
+$(Nil)
+$(Cons x xs)
+
+!(Fold f i l) {
+  !(Fold ~ i $(Nil)) = i
+  !(Fold f i $(Cons x xs)) = &{f0 f1} = f; ((f0 x) !(Fold f1 i xs))
+} = #0
+
+{
+  $(IO.done !(Fold @x @y (+ x y) #0 $(Cons #2 $(Cons #1 $(Nil)))))
+}
