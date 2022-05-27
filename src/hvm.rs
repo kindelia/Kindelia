@@ -855,6 +855,7 @@ impl Runtime {
               args.push(ask_arg(self, tupl, i));
             }
             // Calls called function IO, changing the subject
+            // TODO: this should not alloc a Fun as it's limited to 60-bit names
             let ioxp = alloc_fun(self, get_num(fnid), &args);
             let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
             // Calls the continuation with the value returned

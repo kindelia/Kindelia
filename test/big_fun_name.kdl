@@ -6,8 +6,14 @@
 }
   = #0
 
-// {
-  // $(IO.call `____________________` $(Tuple0) @x
-  // $(IO.done x)
-  // )
-// }
+// this should work
+{
+  $(IO.call '____________________' $(Tuple0) @x
+  $(IO.done x)
+  )
+}
+
+// this should fail
+{
+  $(IO.done !(____________________ 42))
+}
