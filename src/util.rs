@@ -94,6 +94,16 @@ pub trait Ser<T: Copy, E = String> {
 // Serialization Implementations
 // -----------------------------
 
+impl Sink<u128> for std::fs::File
+{
+  fn write_val(&mut self, val: u128) -> Result<(), String> {
+    use std::io::Write;
+    let bytes = val.to_le_bytes();
+    self.write_all(&bytes).map_err(|e| e.to_string())?;
+    Ok(())
+  }
+}
+
 impl <T: Copy> Sink<T> for Vec<T> {
   fn write_val(&mut self, val: T) -> Result<(), String> {
     self.push(val);

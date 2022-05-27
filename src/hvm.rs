@@ -132,8 +132,8 @@ pub enum Rollback {
 // The current and past states
 pub struct Runtime {
   heap: Vec<Heap>,      // heap objects
-  draw: u64,            // drawing heap index
-  curr: u64,            // current heap index
+  pub draw: u64,        // drawing heap index
+  pub curr: u64,        // current heap index
   nuls: Vec<u64>,       // reuse heap indices
   back: Arc<Rollback>,  // past states
 }
@@ -2795,54 +2795,82 @@ pub fn view_statements(statements: &[Statement]) -> String {
 // Tests
 // -----
 
-// Serializes, deserializes and evaluates statements
-pub fn test_statements(statements: &[Statement]) {
-  //println!("[Serialization]");
-  let str_0 = view_statements(statements);
-  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
-  //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
-  //println!("{}", str_0);
-  //println!("---------------");
-  //println!("{}", str_1);
-
-  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
-  let mut rt = init_runtime();
-  let init = Instant::now();
-  rt.run_statements(&statements);
-  println!();
-
-  println!("[Stats]");
-  println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());
-  println!("- size: {} words", rt.get_size());
-  println!("- time: {} ms", init.elapsed().as_millis());
-
-}
-
-pub fn test_statements_from_code(code: &str) {
-  test_statements(&read_statements(code).1);
-}
-
-pub fn test(file: &str) {
-  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
-}
 
 // Serialization
 // =============
 
 impl Ser<u128> for Var {
-    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
-      self.name.serialize(output)?;
-      self.param.serialize(output)?;
-      self.field.serialize(output)?;
-      self.erase.serialize(output)?;
-      Ok(())
-    }
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+    self.name.serialize(output)?;
+    self.param.serialize(output)?;
+    self.field.serialize(output)?;
+    self.erase.serialize(output)?;
+    Ok(())
+  }
 }
 
 impl Ser<u128> for Term {
-    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
-        todo!() // TODO
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+      match self {
+      Term::Var { name } => {
+        let code = 0_u128;
+        code.serialize(output)?;
+        name.serialize(output)?;
+        Ok(())
+      },
+      Term::Dup { nam0, nam1, expr, body } => {
+        let code = 1_u128;
+        code.serialize(output)?;
+        nam0.serialize(output)?;
+        nam1.serialize(output)?;
+        expr.serialize(output)?;
+        body.serialize(output)?;
+        Ok(())
+      },
+      Term::Lam { name, body } => {
+        let code = 2_u128;
+        code.serialize(output)?;
+        name.serialize(output)?;
+        body.serialize(output)?;
+        Ok(())
+      },
+      Term::App { func, argm } => {
+        let code = 3_u128;
+        code.serialize(output)?;
+        func.serialize(output)?;
+        argm.serialize(output)?;
+        Ok(())
+      },
+      Term::Ctr { name, args } => {
+        let code = 4_u128;
+        code.serialize(output)?;
+        name.serialize(output)?;
+        args.serialize(output)?;
+        Ok(())
+      },
+      Term::Fun { name, args } => {
+        let code = 5_u128;
+        code.serialize(output)?;
+        name.serialize(output)?;
+        args.serialize(output)?;
+        Ok(())
+      },
+      Term::Num { numb } => {
+        let code = 6_u128;
+        code.serialize(output)?;
+        numb.serialize(output)?;
+        Ok(())
+      },
+      Term::Op2 { oper, val0, val1 } => {
+        let code = 7_u128;
+        code.serialize(output)?;
+        oper.serialize(output)?;
+        val0.serialize(output)?;
+        val1.serialize(output)?;
+        Ok(())
+      },
     }
+  }
 }
 
 impl Ser<u128> for Rule {
