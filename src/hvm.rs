@@ -9,6 +9,7 @@ use nohash_hasher::NoHashHasher;
 
 use crate::dbg_println;
 use crate::util::U128_SIZE;
+use crate::util::{Ser, Sink};
 
 // Types
 // -----
@@ -413,28 +414,7 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.blob.read(idx);
   }
-  fn serialize(&self) -> Vec<u8> {
-    let blob_used_len = self.blob.used.len() as u128;
-    let mut buffer : Vec<u128> = vec![blob_used_len];
-    for used_index in &self.blob.used {
-      buffer.push(*used_index as u128);
-      buffer.push(self.blob.data[*used_index]);
-    }
-    // TODO: serialize Disk (should be easy, map from u128 to u128)
-    // TODO: serialize each function in File and add to the buffer
-    //for func_name in self.file {
-      // ...
-    //}
-    // TODO: serialize Arit and include too 
-    // TODO: serialize the numbers
-    panic!("TODO");
-  }
-  fn save(&self, path: &str) {
-    // TODO: serialize and save
-  }
-  fn load(&self, path: &str) {
-    // TODO: serialize and load
-  }
+  
   fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.disk.write(fid, val);
   }
@@ -2360,7 +2340,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
   find_lets(rt, term, &mut lets, &mut kinds, &mut names, &mut count);
   let mut text = go(rt, term, &names);
   for (_key, pos) in lets {
-    // todo: reverse
+    // TODO: reverse
     let what = String::from("?h");
     //let kind = kinds.get(&key).unwrap_or(&0);
     let name = names.get(&pos).unwrap_or(&what);
@@ -2844,4 +2824,90 @@ pub fn test_statements_from_code(code: &str) {
 
 pub fn test(file: &str) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
+}
+
+// Serialization
+// =============
+
+impl Ser<u128> for Var {
+    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+      self.name.serialize(output)?;
+      self.param.serialize(output)?;
+      self.field.serialize(output)?;
+      self.erase.serialize(output)?;
+      Ok(())
+    }
+}
+
+impl Ser<u128> for Term {
+    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+        todo!() // TODO
+    }
+}
+
+impl Ser<u128> for Rule {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+    self.cond.serialize(output)?;
+    self.vars.serialize(output)?;
+    self.eras.serialize(output)?;
+    Ok(())
+  }
+}
+
+impl Ser<u128> for Func {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+    let arity = self.arity as u128;
+    arity.serialize(output)?;
+    self.redux.serialize(output)?;
+    self.rules.serialize(output)?;
+    Ok(())
+  }
+}
+
+impl Ser<u128> for Heap {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+    // Serializes Blob
+    let blob_used_size = self.blob.used.len() as u128;
+    blob_used_size.serialize(output)?;
+    for &used_index in &self.blob.used {
+      output.write_val(used_index as u128)?;
+      output.write_val(self.blob.data[used_index])?;
+    }
+    // Serializes Disk, a map from (function name) to (Lnk)
+    let disk_size = self.disk.links.len() as u128;
+    disk_size.serialize(output)?;
+    for (name, val) in &self.disk.links {
+      if let Some(val) = val {
+        let name = *name as u128;
+        name.serialize(output)?;
+        val.serialize(output)?;
+      }
+    }
+    // Serializes each Func in File
+    let funcs_size = self.file.funcs.len() as u128;
+    funcs_size.serialize(output)?;
+    for (name, func) in &self.file.funcs {
+      let name = *name as u128;
+      name.serialize(output)?;
+      func.serialize(output)?;
+    }
+    // Serializes arities
+    let arit_size = self.arit.arits.len() as u128;
+    arit_size.serialize(output)?;
+    for (name, arity) in &self.arit.arits {
+      let name = *name as u128;
+      name.serialize(output)?;
+      arity.serialize(output)?;
+    }
+    // Serialize counters
+    self.tick.serialize(output)?;
+    self.funs.serialize(output)?;
+    self.dups.serialize(output)?;
+    self.rwts.serialize(output)?;
+    self.mana.serialize(output)?;
+    self.size.serialize(output)?;
+    // Serialize next memory index
+    self.next.serialize(output)?; // ?? Needed?
+    Ok(())
+  }
 }

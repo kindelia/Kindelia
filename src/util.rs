@@ -73,3 +73,83 @@ pub fn bytes_to_bitvec(bytes: &[u8]) -> BitVec {
 pub fn get_time() -> u128 {
   return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u128;
 }
+
+// Serialization
+// =============
+
+pub trait Sink<T: Copy, E = String> {
+  fn write_val(&mut self, val: T) -> Result<(), E>;
+  fn write_vals(&mut self, vals: &[T]) -> Result<(), E> {
+    for &v in vals {
+      self.write_val(v)?;
+    }
+    Ok(())
+  }
+}
+
+pub trait Ser<T: Copy, E = String> {
+  fn serialize<O: Sink<T>>(&self, output: &mut O) -> Result<(), E>;
+}
+
+// Serialization Implementations
+// -----------------------------
+
+impl <T: Copy> Sink<T> for Vec<T> {
+  fn write_val(&mut self, val: T) -> Result<(), String> {
+    self.push(val);
+    Ok(())
+  }
+}
+
+impl Ser<u128> for u128 {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+     output.write_val(*self)
+  }
+}
+
+impl Ser<u128> for i128 {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+     output.write_val(*self as u128)
+  }
+}
+
+impl Ser<u128> for (u128, u128) {
+  fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+    output.write_val(self.0)?;
+    output.write_val(self.1)?;
+    Ok(())
+  }
+}
+
+impl Ser<u128> for bool {
+    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+      output.write_val(u128::from(*self))
+    }
+}
+
+impl <T> Ser<u128> for Option<T>
+  where T: Ser<u128>
+{
+    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+        match self {
+            None => output.write_val(0),
+            Some(value) => {
+              output.write_val(1)?;
+              value.serialize(output)?;
+              Ok(())
+            },
+        }
+    }
+}
+
+impl <T> Ser<u128> for Vec<T>
+  where T: Ser<u128>
+{
+    fn serialize<O: Sink<u128>>(&self, output: &mut O) -> Result<(), String> {
+      output.write_val(self.len() as u128)?;
+      for v in self {
+        v.serialize(output)?;
+      }
+      Ok(())
+    }
+}
