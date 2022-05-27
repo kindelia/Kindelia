@@ -3,6 +3,10 @@ name = "kindelia"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev_fast]
+inherits = "dev"
+opt-level = 3
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -21,3 +25,4 @@ sha3 = "0.9.1"
 termion = "1.5.6"
 fastrand = "1.7.0"
 nohash-hasher = "0.2.0"
+json = "0.12.4"

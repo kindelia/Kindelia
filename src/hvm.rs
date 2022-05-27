@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher, BuildHasherDefault};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::dbg_println;
 use crate::util::U128_SIZE;
 
 // Types
@@ -698,9 +699,9 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
-  pub fn define_function_from_code(&mut self, name: &str, code: &str) {
-    self.define_function(name_to_u128(name), read_func(code).1);
-  }
+  // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
+  //   self.define_function(name_to_u128(name), read_func(code).1);
+  // }
 
   pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
     return create_term(self, term, loc, vars_data);
@@ -804,7 +805,7 @@ impl Runtime {
 
   pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
     let term = reduce(self, host, mana)?;
-    //println!("-- {}", show_term(self, term));
+    // eprintln!("-- {}", show_term(self, term));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -888,7 +889,7 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), args.len());
+        dbg_println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
@@ -898,7 +899,7 @@ impl Runtime {
         }
       }
       Statement::Ctr { name, args } => {
-        println!("- ctr {} {}", u128_to_name(*name), args.len());
+        dbg_println!("- ctr {} {}", u128_to_name(*name), args.len());
         self.set_arity(*name, args.len() as u128);
         self.draw();
       }
@@ -908,6 +909,7 @@ impl Runtime {
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
         let host = self.alloc_term(expr);
+        // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
             let done_code = self.show_term(done);
@@ -915,17 +917,20 @@ impl Runtime {
               let size_end = self.get_size();
               let mana_dif = self.get_mana() - mana_ini;
               let size_dif = size_end - size_ini;
+              // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
-                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                dbg_println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
-                return;
+              } else {
+                dbg_println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                self.undo();
               }
+              return;
             }
           }
         }
-        println!("- run fail");
+        dbg_println!("- run fail");
         self.undo();
-        //self.collect(done);
       }
     }
   }
@@ -1214,7 +1219,7 @@ pub fn Op2(ope: u128, pos: u128) -> Lnk {
 }
 
 pub fn Num(val: u128) -> Lnk {
-  debug_assert!((!NUM_MASK & val) == 0, "Num overflow");
+  debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
   (NUM * TAG) | val
 }
 
@@ -1223,6 +1228,8 @@ pub fn Ctr(fun: u128, pos: u128) -> Lnk {
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Lnk {
+  debug_assert!(fun < 1<<60,
+    "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
 
@@ -1303,8 +1310,8 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //println!("- clear {} {}", loc, size);
   for i in 0 .. size {
     if rt.read((loc + i) as usize) == 0 {
-      println!("- clear again {}", loc);
-      panic!("nope");
+      eprintln!("- clear again {}", loc);
+      panic!("clear happened twice");
     }
     rt.write((loc + i) as usize, 0);
   }
@@ -2047,14 +2054,19 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                 rt.set_rwts(rt.get_rwts() + 1);
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
-                for i in 0 .. rule.vars.len() {
+                for (i, rule_var) in rule.vars.iter().enumerate() {
                   let mut var = term;
-                  var = ask_arg(rt, var, rule.vars[i].param);
-                  if let Some(field) = rule.vars[i].field {
+                  var = ask_arg(rt, var, rule_var.param);
+                  if let Some(field) = rule_var.field {
                     var = ask_arg(rt, var, field);
                   }
-                  //println!("~~ set {} {}", u128_to_name(rule.vars[i].name), show_lnk(var));
-                  vars_data.insert(rule.vars[i].name as u64, var);
+                  //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_lnk(var));
+                  if !rule_var.erase {
+                    vars_data.insert(rule_var.name as u64, var);
+                  } else {
+                    // Collects unused argument
+                    collect(rt, var, mana)?;
+                  }
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- vars: {:?}", vars);
@@ -2066,17 +2078,18 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
                   clear(rt, get_loc(ask_arg(rt, term, *eras_index), 0), *eras_arity);
                 }
                 clear(rt, get_loc(term, 0), func.arity);
-                // Collects unused variables (none in this example)
-                for i in 0 .. rule.vars.len() {
-                  if rule.vars[i].erase {
-                    if let Some(var) = vars_data.get(&(i as u64)) {
-                      collect(rt, *var, mana)?;
-                    }
-                  }
-                }
+                // // Collects unused variables (none in this example)
+                // for i in 0 .. rule.vars.len() {
+                //   if rule.vars[i].erase {
+                //     if let Some(var) = vars_data.get(&(i as u64)) {
+                //       collect(rt, *var, mana)?;
+                //     }
+                //   }
+                // }
                 return Some(true);
               }
             }
+            // ?? clear vars_data ?
             return Some(false);
           }
 
@@ -2359,7 +2372,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(" &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" | &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }
@@ -2444,8 +2457,9 @@ fn read_name(code: &str) -> (&str, u128) {
       code = tail(code);
     }
     if name.is_empty() {
-      panic!("Expected identifier, found '{}'.", head(code));
+      panic!("Expected identifier, found `{}`.", head(code));
     }
+    // TODO: check identifier size and propagate error
     return (code, name_to_u128(&name));
   }
 }
@@ -2458,9 +2472,10 @@ fn read_name(code: &str) -> (&str, u128) {
 /// 'a' - 'z' => 37 to 62
 /// '_'       => 63
 /// ```
-pub fn name_to_u128(code: &str) -> u128 {
-  let mut num = 0;
-  for chr in code.chars() {
+pub fn name_to_u128(name: &str) -> u128 {
+  let mut num: u128 = 0;
+  for (i, chr) in name.chars().enumerate() {
+    debug_assert!(i < 20, "Name too big: `{}`.", name);
     if chr == '.' {
       num = num * 64 + 0;
     } else if chr >= '0' && chr <= '9' {
@@ -2558,6 +2573,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_term);
+      // TODO: check function name size _on direct calling_, and propagate error
       return (code, Term::Fun { name, args });
     },
     '#' => {

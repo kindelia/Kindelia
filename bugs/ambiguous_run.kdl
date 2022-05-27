@@ -1,0 +1,5 @@
+
+$(IThinkThisIsFun) {             // This is actually constructor followed by run
+  $(IThinkThisIsFun) = $(IO.done #42)           // And this parses
+}
+  = #0 // Parse error happens actually here. Kinda confusing.
