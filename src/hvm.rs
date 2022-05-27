@@ -1,14 +1,11 @@
 #![allow(clippy::identity_op)]
-#![allow(dead_code)]
-#![allow(non_snake_case)]
 
-use nohash_hasher::NoHashHasher;
-use rand::prelude::*;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
-use std::hash::{Hash, Hasher, BuildHasherDefault};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
+
+use nohash_hasher::NoHashHasher;
 
 use crate::dbg_println;
 use crate::util::U128_SIZE;
@@ -46,7 +43,7 @@ pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 pub struct Var {
   pub name : u128,         // this variable's name
   pub param: u128,         // in what parameter is this variable located?
-  pub field: Option<u128>, // in what field is this variabled located? (if any)
+  pub field: Option<u128>, // in what field is this variable located? (if any)
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
@@ -417,8 +414,8 @@ impl Heap {
     return self.blob.read(idx);
   }
   fn serialize(&self) -> Vec<u8> {
-    let mut buffer : Vec<u128> = Vec::new();
-    buffer.push(self.blob.used.len() as u128);
+    let blob_used_len = self.blob.used.len() as u128;
+    let mut buffer : Vec<u128> = vec![blob_used_len];
     for used_index in &self.blob.used {
       buffer.push(*used_index as u128);
       buffer.push(self.blob.data[*used_index]);
@@ -529,7 +526,7 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
-    blob: init_heapdata(U128_NONE),
+    blob: init_heap_data(U128_NONE),
     disk: Disk { links: init_map() },
     file: File { funcs: init_map() },
     arit: Arit { arits: init_map() },
@@ -543,7 +540,7 @@ pub fn init_heap() -> Heap {
   }
 }
 
-pub fn init_heapdata(zero: u128) -> Blob {
+pub fn init_heap_data(zero: u128) -> Blob {
   return Blob {
     data: vec![zero; HEAP_SIZE as usize],
     used: vec![],
@@ -592,7 +589,7 @@ fn show_buff(vec: &[u128]) -> String {
   let mut result = String::new();
   for x in vec {
     if *x == U128_NONE {
-      result.push_str(&format!("_ "));
+      result.push_str("_ ");
     } else {
       result.push_str(&format!("{:x} ", *x));
     }
@@ -628,9 +625,7 @@ impl Disk {
 
 impl File {
   fn write(&mut self, fid: u128, val: Arc<Func>) {
-    if !self.funcs.contains_key(&(fid as u64)) {
-      self.funcs.insert(fid as u64, val);
-    }
+    self.funcs.entry(fid as u64).or_insert(val);
   }
   fn read(&self, fid: u128) -> Option<Arc<Func>> {
     return self.funcs.get(&(fid as u64)).map(|x| x.clone());
@@ -649,9 +644,7 @@ impl File {
 
 impl Arit {
   fn write(&mut self, fid: u128, val: u128) {
-    if !self.arits.contains_key(&(fid as u64)) {
-      self.arits.insert(fid as u64, val);
-    }
+    self.arits.entry(fid as u64).or_insert(val);
   }
   fn read(&self, fid: u128) -> Option<u128> {
     return self.arits.get(&(fid as u64)).map(|x| *x);
@@ -998,7 +991,7 @@ impl Runtime {
         self.curr = *head;
       } else {
         self.back = Arc::new(Rollback::Nil);
-        self.curr = self.nuls.pop().expect("Shouldn't happen.");
+        self.curr = self.nuls.pop().expect("No heap available!");
       }
     }
   }
@@ -1171,7 +1164,7 @@ pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Opti
 pub fn view_rollback(back: &Arc<Rollback>) -> String {
   match &**back {
     Rollback::Nil => {
-      return format!("");
+      return String::new();
     }
     Rollback::Cons { keep, head, tail } => {
       return format!("[{:x} {}] {}", keep, head, view_rollback(tail));
@@ -2358,7 +2351,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         format!("!({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
-        format!("*")
+        "*".to_string()
       }
       _ => format!("?g({})", get_tag(term)),
     };
@@ -2414,7 +2407,7 @@ fn skip(code: &str) -> &str {
 }
 
 fn hash(name: &str) -> u128 {
-  let mut hasher = DefaultHasher::new();
+  let mut hasher = hash_map::DefaultHasher::new();
   name.hash(&mut hasher);
   hasher.finish() as u128
 }
@@ -2832,11 +2825,11 @@ pub fn test_statements(statements: &[Statement]) {
   //println!("---------------");
   //println!("{}", str_1);
 
-  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialiation error, please report)" });
+  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   let mut rt = init_runtime();
   let init = Instant::now();
   rt.run_statements(&statements);
-  println!("");
+  println!();
 
   println!("[Stats]");
   println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());

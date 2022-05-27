@@ -210,9 +210,7 @@ pub fn deserialize_block(bits: &BitVec, index: &mut u128) -> Block {
   let rand = deserialize_fixlen(128, bits, index).low_u128();
   let body = deserialize_bytes(BODY_SIZE as u128, bits, index);
   let mut value : [u8; BODY_SIZE] = [0; BODY_SIZE];
-  for i in 0 .. BODY_SIZE {
-    value[i] = body[i];
-  }
+  value[..BODY_SIZE].copy_from_slice(&body[..BODY_SIZE]);
   return Block { prev, time, rand, body: Body { value } };
 }
 
