@@ -200,6 +200,7 @@ pub fn serialize_block(block: &Block, bits: &mut BitVec) {
   serialize_fixlen(256, &block.prev, bits);
   serialize_fixlen(128, &u256(block.time), bits);
   serialize_fixlen(128, &u256(block.rand), bits);
+  // TODO: optimize
   serialize_bytes(BODY_SIZE as u128, &block.body.value, bits);
 }
 
@@ -513,6 +514,8 @@ pub fn deserialized_statements(bits: &BitVec) -> Vec<Statement> {
 
 // Tests
 // =====
+
+// TODO: integrate on cargo tests
 
 pub fn test_serializer_0() {
   let mut bits = BitVec::new();

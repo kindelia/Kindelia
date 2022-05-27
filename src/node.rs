@@ -1,5 +1,6 @@
 use bit_vec::BitVec;
 use im::HashSet;
+use json::object;
 use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
@@ -45,6 +46,7 @@ pub struct Node {
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
   pub tip        : U256,                            // current ti
+  // TODO: refactor as map to struct? Better safety, less unwraps. Why not?
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
   pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
@@ -173,7 +175,7 @@ pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
 
 pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   for port in ports {
-    if let Ok(socket) = UdpSocket::bind(&format!("127.0.0.1:{}",port)) {
+    if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
       socket.set_nonblocking(true).ok();
       return Some((socket, *port));
     }
@@ -352,6 +354,24 @@ pub fn new_node(base_dir: PathBuf) -> Node {
     peers      : HashMap::new(),
     runtime    : init_runtime(),
   };
+
+  let DEFAULT_PEERS: Vec<&str> = vec![
+    "167.71.249.16",
+    "167.71.254.138",
+    "167.71.242.43",
+    "167.71.255.151",
+  ];
+  let default_peers = DEFAULT_PEERS.iter()
+    .map(|p| p.split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>())
+    .map(|p| {
+        let val0 = p[0]; let val1 = p[1]; let val2 = p[2]; let val3 = p[3];
+        Address::IPv4 { val0, val1, val2, val3, port: UDP_PORT }
+      }
+    );
+
+  let seen_at = get_time();
+  default_peers.for_each(|address| node_see_peer(&mut node, Peer { address, seen_at }));
+
   node_see_peer(&mut node, Peer {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 },
     seen_at: get_time(),
@@ -364,6 +384,7 @@ pub fn new_node(base_dir: PathBuf) -> Node {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 2 },
     seen_at: get_time(),
   });
+
   return node;
 }
 
@@ -604,6 +625,7 @@ pub fn gossip(node: &mut Node, peer_count: u128, message: &Message) {
 
 pub fn get_blocks_dir(base_dir: &PathBuf) -> PathBuf {
   let mut dir = base_dir.clone();
+  dir.push("data");
   dir.push("blocks");
   dir
 }
@@ -702,21 +724,19 @@ fn node_ask_missing_blocks(node: &mut Node) {
   }
 }
 
-fn node_save_longest_chain(node: &mut Node) {
-  let bdir = get_blocks_dir(&node.base_dir);
-  std::fs::create_dir_all(&bdir).ok();
+// ?? How to handle corrupted files?
+
+fn node_save_longest_chain(node: &mut Node, blocks_dir: &PathBuf) {
   for (index, block) in get_longest_chain(node).iter().enumerate() {
-    let mut path = bdir.clone();
+    let mut path = blocks_dir.clone();
     path.push(format!("{}", index));
-    let buff = bitvec_to_bytes(&serialized_block(&block));
-    std::fs::write(path, buff).ok();
+    let buffer = bitvec_to_bytes(&serialized_block(&block));
+    std::fs::write(path, buffer).ok();
   }
 }
 
-fn node_load_longest_chain(node: &mut Node) {
-  let bdir = get_blocks_dir(&node.base_dir);
-  std::fs::create_dir_all(&bdir).ok();
-  for entry in std::fs::read_dir(&bdir).unwrap() {
+fn node_load_longest_chain(node: &mut Node, blocks_dir: &PathBuf) {
+  for entry in std::fs::read_dir(&blocks_dir).unwrap() {
     let buffer = std::fs::read(entry.unwrap().path()).unwrap();
     let block = deserialized_block(&bytes_to_bitvec(&buffer));
     node_add_block(node, &block);
@@ -741,16 +761,27 @@ fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
 
 pub fn node_loop(
   mut node: Node,
+  base_dir: PathBuf,
   miner_comm: SharedMinerComm,
   mine_file: Option<String>,
   //input: SharedInput,
   //ui: bool,
-) {
-  let mut mined = 0;
-  let mut tick = 0;
+) -> ! {
+  const TICKS_PER_SEC: u64 = 100;
+
+  let mut tick: u64 = 0;
+  let mut mined: u64 = 0;
 
   let init_body = code_to_body("");
   let mine_body = mine_file.map(|x| code_to_body(&x));
+
+  let blocks_dir = get_blocks_dir(&base_dir);
+  std::fs::create_dir_all(&blocks_dir).ok();
+
+  // Loads all stored blocks
+  eprintln!("Loading blocks from disk...");
+  node_load_longest_chain(&mut node, &blocks_dir);
+  eprintln!("{} blocks loaded", node.block.keys().len());
 
   loop {
     tick += 1;
@@ -777,16 +808,11 @@ pub fn node_loop(
         node_ask_missing_blocks(&mut node);
       }
 
-      // Peer timeout
-      if tick % 1000 == 0 {
-        node_peers_timeout(&mut node);
-      }
-
       // Asks the miner to mine a block
       if tick % 10 == 0 {
         // This branch is here for testing purposes. FIXME: remove
         if node.tip == ZERO_HASH() {
-          node_ask_mine(&mut node, &miner_comm, init_body.clone()); // FIXME: avoid clone
+          node_ask_mine(&mut node, &miner_comm, init_body.clone());
         } else {
           if let Some(mine_body) = &mine_body {
             node_ask_mine(&mut node, &miner_comm, mine_body.clone()); // FIXME: avoid clone
@@ -794,33 +820,77 @@ pub fn node_loop(
         }
       }
 
+      // Peer timeout
+      if tick % (10 * TICKS_PER_SEC) == 0 {
+        node_peers_timeout(&mut node);
+      }
+
+      // Saves blocks to disk
+      if tick % (60 * TICKS_PER_SEC) == 0 {
+        node_save_longest_chain(&mut node, &blocks_dir);
+      }
+
       // Display node info
-      if tick % 100 == 0 {
-        //let tip = node.tip;
-        //let height = *node.height.get(&tip).unwrap();
-        //let tip_target = *node.target.get(&tip).unwrap();
-        //let difficulty = target_to_difficulty(tip_target);
-        //let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
-        let mut num_pending: u128 = 0;
-        let mut num_pending_seen: u128 = 0;
-        for (bhash, _) in node.pending.iter() {
-          if node.seen.get(bhash).is_some() {
-            num_pending_seen += 1;
-          }
-          num_pending += 1;
-        }
-        //let last_blocks = get_longest_chain(node);
-        //print!("{esc}c", esc = 27 as char); // clear screen
-        println!("## peers   : {}", node.peers.len());
-        println!("## pending : {}/{}", num_pending, num_pending_seen);
-        println!("## blocks  : {}", node.height[&node.tip]);
-        println!("## mana    : {}", node.runtime.get_mana());
+      if tick % TICKS_PER_SEC == 0 {
+        log_heartbeat(&node);
+        // let mut num_pending: u64 = 0;
+        // let mut num_pending_seen: u64 = 0;
+        // for (bhash, _) in node.pending.iter() {
+        //   if node.seen.get(bhash).is_some() {
+        //     num_pending_seen += 1;
+        //   }
+        //   num_pending += 1;
+        // }
+        // println!("## peers   : {}", node.peers.len());
+        // println!("## pending : {}/{}", num_pending_seen, num_pending);
+        // println!("## blocks  : {}", node.height[&node.tip]);
+        // println!("## mana    : {}", node.runtime.get_mana());
       }
     }
 
     // Sleep for 1/100 seconds
+    // TODO: just sleep remaining time
     std::thread::sleep(std::time::Duration::from_micros(10000));
   }
+}
+
+fn log_heartbeat(node: &Node) {
+  let blocks_num = node.block.keys().count();
+
+  let tip = node.tip;
+  let tip_height = *node.height.get(&tip).unwrap() as u64;
+
+  let tip_target = *node.target.get(&tip).unwrap();
+  let difficulty = target_to_difficulty(tip_target);
+  let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
+
+  let mut pending_num: u64 = 0;
+  let mut pending_seen_num: u64 = 0;
+  for (bhash, _) in node.pending.iter() {
+    if node.seen.get(bhash).is_some() {
+      pending_seen_num += 1;
+    }
+    pending_num += 1;
+  }
+  //let last_blocks = get_longest_chain(node);
+
+  let log = object!{
+    event: "heartbeat",
+    num_peers: node.peers.len(),
+    tip: {
+      height: tip_height,
+      // target: u256_to_hex(tip_target),
+      difficulty: difficulty.low_u64(),
+      hash_rate: hash_rate.low_u64(),
+    },
+    blocks: {
+      num: blocks_num,
+      pending: { num: pending_num, seen: { num: pending_seen_num }, },
+    },
+    total_mana: node.runtime.get_mana() as u64,
+  };
+
+  println!("{}", log);
 }
 
 // Interface

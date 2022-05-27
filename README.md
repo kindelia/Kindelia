@@ -22,7 +22,7 @@ Usage
 1. Testing a block offline:
 
 ```
-kindelia run example.kdl
+kindelia run example/example.kindelia
 ```
 
 2. Starting a node:
