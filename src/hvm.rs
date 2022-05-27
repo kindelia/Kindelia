@@ -104,7 +104,8 @@ pub struct Blob {
 // HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug)]
 pub struct Heap {
-  pub data: Blob, // memory block holding HVM nodes
+  pub uuid: u128, // unique identifier
+  pub blob: Blob, // memory block holding HVM nodes
   pub disk: Disk, // points to stored function states
   pub file: File, // function codes
   pub arit: Arit, // function arities
@@ -409,10 +410,32 @@ fn absorb_i128(a: i128, b: i128, overwrite: bool) -> i128 {
 
 impl Heap {
   fn write(&mut self, idx: usize, val: u128) {
-    return self.data.write(idx, val);
+    return self.blob.write(idx, val);
   }
   fn read(&self, idx: usize) -> u128 {
-    return self.data.read(idx);
+    return self.blob.read(idx);
+  }
+  fn serialize(&self) -> Vec<u8> {
+    let mut buffer : Vec<u128> = Vec::new();
+    buffer.push(self.blob.used.len() as u128);
+    for used_index in &self.blob.used {
+      buffer.push(*used_index as u128);
+      buffer.push(self.blob.data[*used_index]);
+    }
+    // TODO: serialize Disk (should be easy, map from u128 to u128)
+    // TODO: serialize each function in File and add to the buffer
+    //for func_name in self.file {
+      // ...
+    //}
+    // TODO: serialize Arit and include too 
+    // TODO: serialize the numbers
+    panic!("TODO");
+  }
+  fn save(&self, path: &str) {
+    // TODO: serialize and save
+  }
+  fn load(&self, path: &str) {
+    // TODO: serialize and load
   }
   fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
     return self.disk.write(fid, val);
@@ -475,7 +498,7 @@ impl Heap {
     return self.next;
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
-    self.data.absorb(&mut other.data, overwrite);
+    self.blob.absorb(&mut other.blob, overwrite);
     self.disk.absorb(&mut other.disk, overwrite);
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
@@ -488,7 +511,7 @@ impl Heap {
     self.next = absorb_u128(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
-    self.data.clear();
+    self.blob.clear();
     self.disk.clear();
     self.file.clear();
     self.arit.clear();
@@ -504,7 +527,8 @@ impl Heap {
 
 pub fn init_heap() -> Heap {
   Heap {
-    data: init_heapdata(U128_NONE),
+    uuid: fastrand::u128(..),
+    blob: init_heapdata(U128_NONE),
     disk: Disk { links: init_map() },
     file: File { funcs: init_map() },
     arit: Arit { arits: init_map() },
