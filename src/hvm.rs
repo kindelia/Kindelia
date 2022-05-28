@@ -7,6 +7,8 @@ use std::time::Instant;
 
 use nohash_hasher::NoHashHasher;
 
+use crate::util;
+use crate::bits;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
 
@@ -35,6 +37,9 @@ pub enum Oper {
   Eql, Gte, Gtn, Neq,
 }
 
+// A
+//[(Term,Term)]
+
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 
@@ -48,26 +53,33 @@ pub struct Var {
 }
 
 // A rewrite rule (equation)
+pub type Rule = (Term, Term);
+
+// A function (vector of rules)
+pub type Func = Vec<(Term, Term)>;
+
+// A compiled rewrite rule
 #[derive(Clone, Debug, PartialEq)]
-pub struct Rule {
+pub struct CompRule {
   pub cond: Vec<Lnk>,          // left-hand side matching conditions
   pub vars: Vec<Var>,          // left-hand side variable locations
   pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
   pub body: Term,              // right-hand side body of rule
 }
 
-// A function is a vector of rules
+// A compiled function
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Func {
-  arity: u128,      // number of arguments
-  redux: Vec<u128>, // index of strict arguments
-  rules: Vec<Rule>, // vector of rules
+pub struct CompFunc {
+  func: Func,           // the original function
+  arity: u128,          // number of arguments
+  redux: Vec<u128>,     // index of strict arguments
+  rules: Vec<CompRule>, // vector of rules
 }
 
 // A file is a map of `FuncID -> Function`
 #[derive(Clone, Debug)]
 pub struct File {
-  pub funcs: Map<Arc<Func>>,
+  pub funcs: Map<Arc<CompFunc>>,
 }
 
 // A map of `FuncID -> Arity`
@@ -79,7 +91,7 @@ pub struct Arit {
 // A map of `FuncID -> Lnk`, pointing to a function's state
 #[derive(Clone, Debug)]
 pub struct Disk {
-  pub links: Map<Option<Lnk>>,
+  pub links: Map<Lnk>,
 }
 
 // Can point to a node, a variable, or hold an unboxed value
@@ -114,6 +126,16 @@ pub struct Heap {
   pub mana: u128, // total mana cost
   pub size: i128, // total used memory (in 64-bit words)
   pub next: u128, // memory index that *may* be empty
+}
+
+// A serialized Heap
+pub struct SerializedHeap {
+  pub uuid: u128,
+  pub blob: Vec<u128>,
+  pub disk: Vec<u128>,
+  pub file: Vec<u128>,
+  pub arit: Vec<u128>,
+  pub nums: Vec<u128>,
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -413,38 +435,16 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.blob.read(idx);
   }
-  fn serialize(&self) -> Vec<u8> {
-    let blob_used_len = self.blob.used.len() as u128;
-    let mut buffer : Vec<u128> = vec![blob_used_len];
-    for used_index in &self.blob.used {
-      buffer.push(*used_index as u128);
-      buffer.push(self.blob.data[*used_index]);
-    }
-    // TODO: serialize Disk (should be easy, map from u128 to u128)
-    // TODO: serialize each function in File and add to the buffer
-    //for func_name in self.file {
-      // ...
-    //}
-    // TODO: serialize Arit and include too 
-    // TODO: serialize the numbers
-    panic!("TODO");
-  }
-  fn save(&self, path: &str) {
-    // TODO: serialize and save
-  }
-  fn load(&self, path: &str) {
-    // TODO: serialize and load
-  }
-  fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
+  fn write_disk(&mut self, fid: u128, val: Lnk) {
     return self.disk.write(fid, val);
   }
   fn read_disk(&self, fid: u128) -> Option<Lnk> {
     return self.disk.read(fid);
   }
-  fn write_file(&mut self, fid: u128, fun: Arc<Func>) {
+  fn write_file(&mut self, fid: u128, fun: Arc<CompFunc>) {
     return self.file.write(fid, fun);
   }
-  fn read_file(&self, fid: u128) -> Option<Arc<Func>> {
+  fn read_file(&self, fid: u128) -> Option<Arc<CompFunc>> {
     return self.file.read(fid);
   }
   fn write_arit(&mut self, fid: u128, val: u128) {
@@ -509,6 +509,7 @@ impl Heap {
     self.next = absorb_u128(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
+    self.uuid = fastrand::u128(..);
     self.blob.clear();
     self.disk.clear();
     self.file.clear();
@@ -520,6 +521,125 @@ impl Heap {
     self.mana = U128_NONE;
     self.size = I128_NONE;
     self.next = U128_NONE;
+  }
+  fn serialize(&self) -> SerializedHeap {
+    // Serializes Blob
+    let mut blob_buff : Vec<u128> = vec![];
+    for used_index in &self.blob.used {
+      blob_buff.push(*used_index as u128);
+      blob_buff.push(self.blob.data[*used_index]);
+    }
+    // Serializes Disk
+    let mut disk_buff : Vec<u128> = vec![];
+    for (fnid, lnk) in &self.disk.links {
+      disk_buff.push(*fnid as u128);
+      disk_buff.push(*lnk as u128);
+    }
+    // Serializes File
+    let mut file_buff : Vec<u128> = vec![];
+    for (fnid, func) in &self.file.funcs {
+      let mut func_buff = util::u8s_to_u128s(&mut bits::serialized_func(&func.func).to_bytes());
+      file_buff.push(*fnid as u128);
+      file_buff.push(func_buff.len() as u128);
+      file_buff.append(&mut func_buff);
+    }
+    // Serializes Arit
+    let mut arit_buff : Vec<u128> = vec![];
+    for (fnid, arit) in &self.arit.arits {
+      arit_buff.push(*fnid as u128);
+      arit_buff.push(*arit);
+    }
+    // Serializes Nums
+    let mut nums_buff : Vec<u128> = vec![];
+    nums_buff.push(self.tick);
+    nums_buff.push(self.funs);
+    nums_buff.push(self.dups);
+    nums_buff.push(self.rwts);
+    nums_buff.push(self.mana);
+    nums_buff.push(self.size as u128);
+    nums_buff.push(self.next);
+    // Returns the serialized heap
+    return SerializedHeap {
+      uuid: self.uuid,
+      blob: blob_buff,
+      disk: disk_buff,
+      file: file_buff,
+      arit: arit_buff,
+      nums: nums_buff,
+    };
+  }
+  fn deserialize(&mut self, serial: &SerializedHeap) {
+    // Deserializes Blob
+    let mut i = 0;
+    while i < serial.blob.len() {
+      let idx = serial.blob[i + 0];
+      let val = serial.blob[i + 1];
+      self.write(idx as usize, val);
+      i += 2;
+    }
+    // Deserializes Disk
+    let mut i = 0;
+    while i < serial.disk.len() {
+      let fnid = serial.disk[i + 0];
+      let lnk  = serial.disk[i + 1];
+      self.write_disk(fnid, lnk);
+      i += 2;
+    }
+    // Deserializes File
+    let mut i = 0;
+    while i < serial.file.len() {
+      let fnid = serial.file[i * 2 + 0];
+      let size = serial.file[i * 2 + 1];
+      let buff = &serial.file[i * 2 + 2 .. i * 2 + 2 + size as usize];
+      let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))),false).unwrap();
+      self.write_file(fnid, Arc::new(func));
+      i += 1;
+    }
+    // Deserializes Arit
+    for i in 0 .. serial.arit.len() / 2 {
+      let fnid = serial.file[i * 2 + 0];
+      let arit = serial.file[i * 2 + 1];
+      self.write_arit(fnid, arit);
+    }
+  }
+  fn heap_path(&self) -> String {
+    "~/kindelia/state/heap/".to_string()
+  }
+  fn save_buffers(&self) -> std::io::Result<()> {
+    self.append_buffers(self.uuid)
+  }
+  fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
+    fn save_buffer(path: &str, uuid: u128, name: &str, buffer: &[u128]) -> std::io::Result<()> {
+      use std::io::Write;
+      let file_path = format!("{}/{}.{}.bin", path, uuid, name);
+      let mut file = std::fs::OpenOptions::new().append(true).create(true).open(file_path)?;
+      file.write_all(&util::u128s_to_u8s(buffer))?;
+      return Ok(());
+    }
+    let path = &self.heap_path();
+    let serial = self.serialize();
+    std::fs::create_dir_all(path)?;
+    save_buffer(path, uuid, "blob", &serial.blob)?;
+    save_buffer(path, uuid, "disk", &serial.disk)?;
+    save_buffer(path, uuid, "file", &serial.file)?;
+    save_buffer(path, uuid, "arit", &serial.arit)?;
+    save_buffer(path, uuid, "nums", &serial.nums)?;
+    return Ok(());
+  }
+  fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
+    fn load_buffer(path: &str, uuid: u128, name: &str) -> std::io::Result<Vec<u128>> {
+      std::fs::read(format!("{}/{}.{}.bin", path, uuid, name)).map(|x| util::u8s_to_u128s(&x))
+    }
+    let path = &self.heap_path();
+    self.deserialize(&SerializedHeap {
+      uuid: uuid,
+      blob: load_buffer(path, uuid, "blob")?,
+      disk: load_buffer(path, uuid, "disk")?,
+      file: load_buffer(path, uuid, "file")?,
+      arit: load_buffer(path, uuid, "arit")?,
+      nums: load_buffer(path, uuid, "nums")?,
+    });
+    return Ok(());
   }
 }
 
@@ -597,19 +717,12 @@ fn show_buff(vec: &[u128]) -> String {
   return result;
 }
 
-
 impl Disk {
-  fn write(&mut self, fid: u128, val: Option<Lnk>) {
+  fn write(&mut self, fid: u128, val: Lnk) {
     self.links.insert(fid as u64, val);
   }
   fn read(&self, fid: u128) -> Option<Lnk> {
-    match self.links.get(&(fid as u64)) {
-      None => None, // data is on a previous heap
-      Some(x) => match *x {
-        None => Some(0), // data has been erased here
-        Some(x) => Some(x), // data is available here
-      }
-    }
+    self.links.get(&(fid as u64)).map(|x| *x)
   }
   fn clear(&mut self) {
     self.links.clear();
@@ -624,10 +737,10 @@ impl Disk {
 }
 
 impl File {
-  fn write(&mut self, fid: u128, val: Arc<Func>) {
+  fn write(&mut self, fid: u128, val: Arc<CompFunc>) {
     self.funcs.entry(fid as u64).or_insert(val);
   }
-  fn read(&self, fid: u128) -> Option<Arc<Func>> {
+  fn read(&self, fid: u128) -> Option<Arc<CompFunc>> {
     return self.funcs.get(&(fid as u64)).map(|x| x.clone());
   }
   fn clear(&mut self) {
@@ -683,7 +796,7 @@ impl Runtime {
   // API
   // ---
 
-  pub fn define_function(&mut self, fid: u128, func: Func) {
+  pub fn define_function(&mut self, fid: u128, func: CompFunc) {
     self.get_heap_mut(self.draw).write_arit(fid, func.arity);
     self.get_heap_mut(self.draw).write_file(fid, Arc::new(func));
   }
@@ -813,7 +926,7 @@ impl Runtime {
             let cont = ask_arg(self, term, 0);
             if let Some(state) = self.read_disk(subject) {
               if state != 0 {
-                self.write_disk(subject, None);
+                self.write_disk(subject, 0);
                 let cont = alloc_app(self, cont, state);
                 let done = self.run_io(subject, subject, cont, mana);
                 clear(self, host, 1);
@@ -829,7 +942,7 @@ impl Runtime {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
             let expr = ask_arg(self, term, 0);
             let save = self.compute(expr, mana)?;
-            self.write_disk(subject, Some(save));
+            self.write_disk(subject, save);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
             let done = self.run_io(subject, subject, cont, mana);
@@ -883,17 +996,17 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        dbg_println!("- fun {} {}", u128_to_name(*name), args.len());
+        println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
           let state = self.create_term(init, 0, &mut init_map());
-          self.write_disk(*name, Some(state));
+          self.write_disk(*name, state);
           self.draw();
         }
       }
       Statement::Ctr { name, args } => {
-        dbg_println!("- ctr {} {}", u128_to_name(*name), args.len());
+        println!("- ctr {} {}", u128_to_name(*name), args.len());
         self.set_arity(*name, args.len() as u128);
         self.draw();
       }
@@ -913,17 +1026,17 @@ impl Runtime {
               let size_dif = size_end - size_ini;
               // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
-                dbg_println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
               } else {
-                dbg_println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
                 self.undo();
               }
               return;
             }
           }
         }
-        dbg_println!("- run fail");
+        println!("- run fail");
         self.undo();
       }
     }
@@ -955,9 +1068,11 @@ impl Runtime {
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     if included {
+      //self.save_buffers(); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
+          //deleted.append_buffers(absorber.uuid); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
         self.curr = deleted;
@@ -1035,7 +1150,7 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, fid: u128, val: Option<Lnk>) {
+  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
@@ -1057,7 +1172,7 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(fid, arity);
   }
 
-  pub fn get_func(&self, fid: u128) -> Option<Arc<Func>> {
+  pub fn get_func(&self, fid: u128) -> Option<Arc<CompFunc>> {
     let got = self.get_heap(self.draw).read_file(fid);
     if let Some(func) = got {
       return Some(func);
@@ -1488,9 +1603,9 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 }
 
 // Given a vector of rules (lhs/rhs pairs), builds the Func object
-pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
+pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   // If there are no rules, return none
-  if lines.len() == 0 {
+  if func.len() == 0 {
     if debug {
       println!("- failed to build function: no rules");
     }
@@ -1499,7 +1614,7 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
 
   // Find the function arity
   let arity;
-  if let Term::Fun { args, .. } = &lines[0].0 {
+  if let Term::Fun { args, .. } = &func[0].0 {
     arity = args.len() as u128;
   } else {
     if debug {
@@ -1509,26 +1624,26 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
   }
 
   // The resulting vector
-  let mut rules = Vec::new();
+  let mut comp_rules = Vec::new();
 
   // A vector with the indices that are strict
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for line in 0 .. lines.len() {
-    let rule = &lines[line];
+  for rule in 0 .. func.len() {
+    let comp_rule = &func[rule];
 
     let mut cond = Vec::new();
     let mut vars = Vec::new();
     let mut eras = Vec::new();
 
     // If the lhs is a Fun
-    if let Term::Fun { ref name, ref args } = rule.0 {
+    if let Term::Fun { ref name, ref args } = comp_rule.0 {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
         if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", line);
+          println!("  - failed to build function: arity mismatch on rule {}", rule);
         }
         return None;
       }
@@ -1550,7 +1665,7 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
               // Otherwise..
               } else {
                 if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}", line, i);
+                  println!("  - failed to build function: nested match on rule {}, argument {}", rule, i);
                 }
                 return None; // return none, because we don't allow nested matches
               }
@@ -1568,7 +1683,7 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
           }
           _ => {
             if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}", line, i);
+              println!("  - failed to build function: unsupported match on rule {}, argument {}", rule, i);
             }
             return None;
           }
@@ -1578,16 +1693,16 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
     // If lhs isn't a Ctr, return None
     } else {
       if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}", line);
+        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}", rule);
       }
       return None;
     }
 
     // Creates the rhs body
-    let body = rule.1.clone();
+    let body = comp_rule.1.clone();
 
     // Adds the rule to the result vector
-    rules.push(Rule { cond, vars, eras, body });
+    comp_rules.push(CompRule { cond, vars, eras, body });
   }
 
   // Builds the redux object, with the index of strict arguments
@@ -1598,7 +1713,7 @@ pub fn build_func(lines: &[(Term,Term)], debug: bool) -> Option<Func> {
     }
   }
 
-  return Some(Func { arity, redux, rules });
+  return Some(CompFunc { func: func.clone(), arity, redux, rules: comp_rules });
 }
 
 pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
@@ -1652,8 +1767,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
   let mut init = 1;
   let mut host = root;
 
-  let mut func_val : Option<Func>;
-  let mut func_ref : Option<&mut Func>;
+  let mut func_val : Option<CompFunc>;
+  let mut func_ref : Option<&mut CompFunc>;
 
   loop {
     let term = ask_lnk(rt, host);
@@ -1974,7 +2089,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<Func>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -2649,9 +2764,9 @@ fn read_rules(code: &str) -> (&str, Vec<(Term,Term)>) {
   return (code, rules);
 }
 
-fn read_func(code: &str) -> (&str, Func) {
+fn read_func(code: &str) -> (&str, CompFunc) {
   let (code, rules) = read_until(code, '\0', read_rule);
-  if let Some(func) = build_func(rules.as_slice(), false) {
+  if let Some(func) = build_func(&rules, false) {
     return (code, func);
   } else {
     panic!("Couldn't parse function.");

@@ -423,6 +423,40 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
   }
 }
 
+// A Rule
+
+pub fn serialize_rule(rule: &Rule, bits: &mut BitVec) {
+  serialize_term(&rule.0, bits);
+  serialize_term(&rule.1, bits);
+}
+
+pub fn deserialize_rule(bits: &BitVec, index: &mut u128) -> Rule {
+  let lhs  = deserialize_term(bits, index);
+  let rhs  = deserialize_term(bits, index);
+  let rule = (lhs, rhs);
+  return rule;
+}
+
+// A Func
+
+pub fn serialize_func(func: &Func, bits: &mut BitVec) {
+  serialize_list(serialize_rule, func, bits);
+}
+
+pub fn deserialize_func(bits: &BitVec, index: &mut u128) -> Func {
+  deserialize_list(deserialize_rule, bits, index)
+}
+
+pub fn serialized_func(func: &Func) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_func(func, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_func(bits: &BitVec) -> Func {
+  deserialize_func(bits, &mut 0)
+}
+
 // An Statement
 
 pub fn serialize_statement(statement: &Statement, bits: &mut BitVec) {
@@ -431,10 +465,7 @@ pub fn serialize_statement(statement: &Statement, bits: &mut BitVec) {
       serialize_fixlen(4, &u256(0), bits);
       serialize_name(name, bits);
       serialize_list(serialize_name, args, bits);
-      serialize_list(|rule, bits| {
-        serialize_term(&rule.0, bits);
-        serialize_term(&rule.1, bits);
-      }, func, bits);
+      serialize_func(func, bits);
       serialize_term(init, bits);
     }
     Statement::Ctr { name, args } => {
@@ -456,12 +487,7 @@ pub fn deserialize_statement(bits: &BitVec, index: &mut u128) -> Statement {
     0 => {
       let name = deserialize_name(bits, index);
       let args = deserialize_list(deserialize_name, bits, index);
-      let func = deserialize_list(|bits, index| {
-        let lhs  = deserialize_term(bits, index);
-        let rhs  = deserialize_term(bits, index);
-        let rule = (lhs, rhs);
-        return rule;
-      }, bits, index);
+      let func = deserialize_func(bits, index);
       let init = deserialize_term(bits, index);
       Statement::Fun { name, args, func, init }
     }
@@ -486,8 +512,7 @@ pub fn serialized_statement(statement: &Statement) -> BitVec {
 }
 
 pub fn deserialized_statement(bits: &BitVec) -> Statement {
-  let mut index = 0;
-  deserialize_statement(bits, &mut index)
+  deserialize_statement(bits, &mut 0)
 }
 
 // Many statements
