@@ -1,8 +1,17 @@
 {
+  "cSpell.ignoreRegExpList": [
+    "(\\b|(?<=_))[a-z]{1,5}(\\b|(?=_))"
+  ],
   "cSpell.words": [
-    "bitvec",
     "kindelia",
-    "recv",
-    "termion"
-  ]
+  ],
+  "cSpell.ignoreWords": [
+    "bitvec",
+    "termion",
+    "bhash",
+    "fastrand",
+    "fixlen",
+    "nohash",
+    "varlen",
+  ],
 }

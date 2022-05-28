@@ -78,6 +78,7 @@ pub type Shared<T> = Arc<Mutex<T>>;
 pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
 pub type SharedInput = Arc<Mutex<String>>;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Message {
   PutBlock {
@@ -293,9 +294,8 @@ pub fn hash_block(block: &Block) -> U256 {
 
 pub fn bytes_to_body(bytes: &[u8]) -> Body {
   let mut body = Body { value: [0; BODY_SIZE] };
-  for i in 0 .. std::cmp::min(BODY_SIZE, bytes.len()) {
-    body.value[i] = bytes[i];
-  }
+  let size = std::cmp::min(BODY_SIZE, bytes.len());
+  body.value[..size].copy_from_slice(&bytes[..size]);
   return body;
 }
 
@@ -373,7 +373,7 @@ pub fn new_node(base_dir: PathBuf) -> Node {
   default_peers.for_each(|address| node_see_peer(&mut node, Peer { address, seen_at }));
 
   node_see_peer(&mut node, Peer {
-    address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT + 0 },
+    address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT },
     seen_at: get_time(),
   });
   node_see_peer(&mut node, Peer {
@@ -398,7 +398,7 @@ pub fn node_see_peer(node: &mut Node, peer: Peer) {
       // FIXME: `index` can't be generated from length as `.peers` is a map and
       // peers can be deleted
       let index = node.peers.len() as u128;
-      node.peers.insert(index, peer.clone());
+      node.peers.insert(index, peer);
       node.peer_id.insert(peer.address, index);
     }
     Some(index) => {
@@ -589,7 +589,7 @@ pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
   //println!("- sending block: {:?}", block);
   let msg = Message::PutBlock {
     block: block,
-    peers: get_random_peers(node, 3).clone(),
+    peers: get_random_peers(node, 3),
   };
   udp_send(&mut node.socket, addr, &msg);
 }
@@ -719,7 +719,7 @@ fn node_ask_missing_blocks(node: &mut Node) {
   for bhash in node.pending.keys().cloned().collect::<Vec<U256>>() {
     //println!("- ask missing {:x}", bhash);
     if let None = node.seen.get(&bhash) {
-      gossip(node, MISSING_INFO_ASK_FACTOR, &Message::AskBlock { bhash: bhash.clone() });
+      gossip(node, MISSING_INFO_ASK_FACTOR, &Message::AskBlock { bhash });
     }
   }
 }
