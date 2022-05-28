@@ -19,9 +19,12 @@ Sections
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
-* [Examples](#examples)
-  * [Pure function](#pure-function-tree-sum)
-  * [Stateful function](#stateful-function-counter)
+* [Example blocks](#example-blocks)
+  * [Block #1: defining pure functions](#defining-pure-functions)
+  * [Block #2: defining stateful functions](#defining-stateful-functions)
+  * [Block #3: creating some accounts](#creating-some-accounts)
+  * [Block #4: installing a game](#installing-a-game)
+  * [Block #5: playing the game](#playing-the-game)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -114,22 +117,22 @@ blocks can be seen as pages of code that are executed on Kindelia's REPL
 as unsigned transactions, making certain interactions, such as contract
 deployment, considerably cheaper.
 
-**Functions are reusable, accounts are abstracted, there is no native currency.**
+**An elegant design: modular functions, abstracted accounts, no native currency...**
 
-Instead of compiling contracts to monolithic blobs of assembly code, Kindelia
-programs are broken into pure functions that are deployed separately, in a
-modular fashion. That means that any program can call any function from any
-other program directly, enabling an enourmous amount of code reuse. There is no
-built-in account system: Kindelia accounts are just user-deployed functions that
-can use arbitrary signature schemes. This is not only flexible, but makes
-Kindelia immune to quantum attacks, which would irreversibly collapse both
-Ethereum and Bitcoin. There is no built-in currency either: Kindelia isn't a
-cryptocurrency! To prevent spam, it imposes 3 limits on its resource usage: the
-blockchain size grows about `40 GB` per year, the state size grows about `2 GB`
-per year, and the computation budget grows about `1.3 * 10^18 mana` per year.
-When the maximum capacity is reached, a fee market will emerge, and users can
-pay miners to include their transactions in any on-chain asset, not just the
-"official currency".
+Kindelia is as well-designed as a software can be. Instead of compiling
+contracts to monolithic blobs of assembly code, programs are broken into pure
+functions that are deployed separately, in a modular fashion. That means that
+any program can call any function from any other program directly, enabling an
+enourmous amount of code reuse. There is no built-in account system: Kindelia
+accounts are just user-deployed functions that can use arbitrary signature
+schemes. This is not only flexible, but makes Kindelia immune to quantum
+attacks, which would irreversibly collapse both Ethereum and Bitcoin. There is
+no built-in currency either: Kindelia isn't a cryptocurrency! To prevent spam,
+it imposes 3 limits on its resource usage: the blockchain size grows about `40
+GB` per year, the state size grows about `2 GB` per year, and the computation
+budget grows about `1.3 * 10^18 mana` per year.  When the maximum capacity is
+reached, a fee market will emerge, and users can pay miners to include their
+transactions in any on-chain asset, not just the "official currency".
 
 Examples
 ========
@@ -149,14 +152,12 @@ language developers are meant to use**. Instead, they should compile higher
 level functional languages such as Haskell or, if they care about formal
 verification, a proof language like [Kind](https://github.com/kindelia/kind).
 
-Pure function (tree sum)
-------------------------
+Block #1: defining pure functions
+---------------------------------
 
-The block below defines and uses some global functions that operate on immutable trees:
+The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// TODO: should we use syntax sugars on the paper examples?
-
 // Declares a constructor, Leaf, with arity (size) 1
 $(Leaf value)
 
@@ -199,8 +200,8 @@ side-effective actions inside `run {}` statements. These operate like Haskell's
 other functions, save and load a persistent state. Note that the `run{}`
 statement shown here is "useless": it just performs a computation and returns.
 
-Stateful function (counter)
----------------------------
+Block #2: defining stateful functions
+-------------------------------------
 
 Actual contracts must hold a state. In Kindelia, every function holds an
 internal state, which is just any native HVM structure. That state can be loaded
@@ -213,8 +214,6 @@ that increments the counter 3 times, and other that just outputs the current
 counter, i.e., 3.
 
 ```c
-// TODO: should we use syntax sugars on the paper examples?
-
 // Creates a Counter function with 2 actions:
 $(Inc) // incs its counter
 $(Get) // reads its counter
@@ -251,27 +250,15 @@ avoid state bloat, though, there is a heavy tax on state growth. The good news
 is that updating states without allocating more space is extremelly cheap,
 compared to Ethereum.
 
-Account
--------
+Block #3: creating some accounts
+--------------------------------
 
 A Kindelia account is just a function that receives an action and a signature,
 and, if the signature checks, calls another function to perform that action. For
 example:
 
 ```c
-// TODO: should we use syntax sugars on the paper examples?
-
-!(Alice action) {
-  !(Alice $(SendCoin amount to nonce signature)) =
-    
-    let pub_key = ... alice key here ...
-    let sig_key = !(ECDSA.recv signature !(Hash [amount to nonce]))
-
-    if (== sig_key pub_key) then
-      $(Coin.send amount to nonce)
-    else
-      $(IO.done #0)
-} = #0
+// TODO
 ```
 
 As soon as the function above is deployed, Alice may use it as her own account
@@ -281,6 +268,19 @@ account is extremelly limited, but anything is possible. Alice could have a
 collection of signature schemes, she could impose limitations, and could extend
 her own account's functionality by storing lambdas on its internal state.
 
+Block #4: installing a game
+---------------------------
+
+```c
+// TODO
+```
+
+Block #5: playing the game
+--------------------------
+
+```c
+// TODO
+```
 
 Technical Overview
 ==================
@@ -652,7 +652,7 @@ Computation and Space Limits
 ----------------------------
 
 Since Kindelia's built-in language is Turing complete, it must have a way to
-account for, and limit, performed computations; otherwise anyone could freeze
+account for, and limit, performed computations; otherwise, anyone could freeze
 the entire network by deploying infinite loops, or expensive computations. Like
 Ethereum, it has a cost table linking primitive operations to a number, which is
 called mana instead of gas. Unlike Ethereum, that cost isn't associated with
@@ -678,29 +678,29 @@ transactions, but with the block as a whole.
     | * M is the alloc count of the right-hand side        |
     '------------------------------------------------------'
 
-Kindelia has an accumulated mana limit computed by the following formula:
+Kindelia's elegant runtime is reflected by the simplicity of this table. In
+order to limit computations, nodes impose a hard ceiling on the amount of
+computation performed, as a function of the block number:
 
 ```
 mana_limit = 42000000 * (block_number + 1)
 ```
 
-Note that this limit isn't per block, but for the entire network, as a function
-of the current block number. If a block passes that limit, it is rejected by
-nodes. Note that this limit accumulates: if a block doesn't fully use it, the
-next block can use, it, and so on. That is good, because, in effect, that causes
-times of low usage to "lend" computation to times of high usage, making Kindelia
-somewhat resistant to performance losses due to high-traffic applications or
-periods, while still keeping the maximum synchronization computation in check.
+If a block passes that limit, it is rejected by nodes. Note that this limit
+accumulates: if a block doesn't fully use it, the next block can use, it, and so
+on. In effect, that causes times of low usage to "lend" computation to times of
+high usage, making Kindelia somewhat resistant to performance losses due to
+high-traffic applications or periods, while still keeping the maximum
+synchronization computation in check.
 
-The current Rust implementation is capable of computing about 16 million mana
-per second in an Apple M1 processor. This is about 2.6x larger than the mana
-limit per block. That means that, for every 2.6 seconds a node spends offline,
-it must spend 1 second catching up, if single threaded. That isn't a huge
-margin, but notice that blocks can be processed in a massively parallel fashion,
-allowing nodes to catch up with the network state in much less time. Moreover,
-future optimizations and processors will improve these numbers.
+The current Rust implementation is capable of computing about 300 million mana
+per second in an Apple M1 processor. This is about 7 times larger than the mana
+limit per block. That means that, for every 7 seconds a node spends offline, it
+must spend 1 second catching up, if single threaded. While that isn't a huge
+margin, blocks could be processed in a parallel fashion, and future improvements
+on the HVM and processors will improve this margin.
 
-As for space, Kindelia also has an accumulated state size limit:
+Kindelia also has a hard ceiling on the state size, i.e., the size of its heap:
 
 ```
 bits_limit = 1024 * (block_number + 1)
