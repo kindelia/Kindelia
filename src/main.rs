@@ -29,7 +29,7 @@ const KINDELIA_HOME_DEFAULT: &str = ".kindelia";
 fn main() -> Result<(), String> {
   return run_cli();
 
-  //start_node(Some("simple.kindelia".to_string()));
+  //start_node(std::env::current_dir().unwrap(), Some("example/simple.kindelia".to_string()));
   //return Ok(());
   
   //hvm::test("./example/example.kindelia");

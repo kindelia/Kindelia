@@ -41,6 +41,10 @@ pub fn next_power_of_two(x: f64) -> f64 {
   if x <= 1.0 { x } else { (2.0_f64).powf(x.log2().floor() + 1.0) }
 }
 
+pub fn u64_to_bytes(value: u64) -> Vec<u8> {
+  return Vec::from(value.to_le_bytes());
+}
+
 pub fn u128_to_bytes(value: u128) -> Vec<u8> {
   return Vec::from(value.to_le_bytes());
 }
@@ -64,6 +68,24 @@ pub fn bitvec_to_bytes(bits: &BitVec) -> Vec<u8> {
 
 pub fn bytes_to_bitvec(bytes: &[u8]) -> BitVec {
   return BitVec::from_bytes(bytes);
+}
+
+pub fn u128s_to_u8s(u128s: &[u128]) -> Vec<u8> {
+  let mut u8s : Vec<u8> = vec![];
+  for i in 0 .. u128s.len() {
+    u8s.extend_from_slice(&mut u128s[i].to_le_bytes());
+  }
+  return u8s;
+}
+
+pub fn u8s_to_u128s(u8s: &[u8]) -> Vec<u128> {
+  let mut u8s = u8s.to_vec();
+  u8s.resize((u8s.len() + 15) / 16 * 16, 0);
+  let mut u128s : Vec<u128> = vec![];
+  for i in 0 .. u8s.len() / 16 {
+    u128s.push(u128::from_le_bytes(u8s[i * 16 .. i * 16 + 16].try_into().unwrap()));
+  }
+  return u128s;
 }
 
 // System
