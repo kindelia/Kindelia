@@ -2,6 +2,7 @@
 
 use std::collections::{hash_map, HashMap};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -602,16 +603,18 @@ impl Heap {
       self.write_arit(fnid, arit);
     }
   }
-  fn heap_path(&self) -> String {
-    "~/kindelia/state/heap/".to_string()
+  fn heap_path(&self) -> PathBuf {
+    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heap")
   }
   fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
-    fn save_buffer(path: &str, uuid: u128, name: &str, buffer: &[u128]) -> std::io::Result<()> {
+    fn save_buffer(path: &PathBuf, uuid: u128, name: &str, buffer: &[u128]) -> std::io::Result<()> {
       use std::io::Write;
-      let file_path = format!("{}/{}.{}.bin", path, uuid, name);
+      let file_path = path.join(format!("{}.{}.bin", uuid, name));
+      //format!("{}/{}.{}.bin", path, uuid, name);
+      println!("saving: {:?}", file_path);
       let mut file = std::fs::OpenOptions::new().append(true).create(true).open(file_path)?;
       file.write_all(&util::u128s_to_u8s(buffer))?;
       return Ok(());
@@ -627,8 +630,9 @@ impl Heap {
     return Ok(());
   }
   fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    fn load_buffer(path: &str, uuid: u128, name: &str) -> std::io::Result<Vec<u128>> {
-      std::fs::read(format!("{}/{}.{}.bin", path, uuid, name)).map(|x| util::u8s_to_u128s(&x))
+    fn load_buffer(path: &PathBuf, uuid: u128, name: &str) -> std::io::Result<Vec<u128>> {
+      let file_path = path.join(format!("{}.{}.bin", uuid, name));
+      std::fs::read(file_path).map(|x| util::u8s_to_u128s(&x))
     }
     let path = &self.heap_path();
     self.deserialize(&SerializedHeap {
@@ -640,6 +644,9 @@ impl Heap {
       nums: load_buffer(path, uuid, "nums")?,
     });
     return Ok(());
+  }
+  fn delete_buffers(&mut self) {
+    // TODO
   }
 }
 
@@ -1068,11 +1075,12 @@ impl Runtime {
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     if included {
-      //self.save_buffers(); // TODO: persistence-WIP
+      self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
           //deleted.append_buffers(absorber.uuid); // TODO: persistence-WIP
+          //deleted.delete_buffers(); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
         self.curr = deleted;
