@@ -204,6 +204,18 @@ pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
 pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
 pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
 
+// | --------- | -----------------------|
+// | TAG = NUM |        num (u120)      |
+// | --------- | ---------------------- |
+// | TAG = CTR |                        |
+// | TAG = APP | ext (u60) | val (u60)  |
+// | TAG = OP2 |                        |
+// ...
+// | --------- | ---------------------- |
+// | TAG = LAM |       pos (u120)       |
+// ...
+// | --------- | -----------------------|
+
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
 pub const VAR: u128 = 0x2;
@@ -224,6 +236,7 @@ pub const NUM: u128 = 0xB;
 // - 32 iTUP operations
 // where uTUP = (u8,u16,u32,u64)
 //       iTUP = (i8,i16,i32,i64)
+
 pub const U120_ADD: u128 = 0x00;
 pub const U120_SUB: u128 = 0x01;
 pub const U120_MUL: u128 = 0x02;
@@ -242,6 +255,9 @@ pub const U120_GTN: u128 = 0x0E;
 pub const U120_NEQ: u128 = 0x0F;
 pub const U120_RTL: u128 = 0x10;
 pub const U120_RTR: u128 = 0x11;
+
+// TODO: I120
+
 pub const UTUP_ADD: u128 = 0x40;
 pub const UTUP_SUB: u128 = 0x41;
 pub const UTUP_MUL: u128 = 0x42;
@@ -260,6 +276,8 @@ pub const UTUP_GTN: u128 = 0x4E;
 pub const UTUP_NEQ: u128 = 0x4F;
 pub const UTUP_RTL: u128 = 0x50;
 pub const UTUP_RTR: u128 = 0x51;
+
+// TODO: ITUP
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -2090,29 +2108,47 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
               let x64 = (x64 as u128) << 56;
               return x8 | x16 | x32 | x64;
             }
+            fn itup(x8: i8, x16: i16, x32: i32, x64: i64) -> u128 {
+              // TODO: test
+              let x8  = (x8  as u128) <<  0;
+              let x16 = (x16 as u128) <<  8;
+              let x32 = (x32 as u128) << 24;
+              let x64 = (x64 as u128) << 56;
+              return x8 | x16 | x32 | x64;
+            }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             rt.set_rwts(rt.get_rwts() + 1);
             let a = get_num(arg0);
             let b = get_num(arg1);
-            let c = match get_ext(term) {
-              U120_ADD => (a + b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SUB => (a - b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MUL => (a * b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_DIV => (a / b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MOD => (a % b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_AND => (a & b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_OR  => (a | b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_XOR => (a ^ b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHL => (a << b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHR => (a >> b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+            // let u08a = gu8(a);
+            // let u16a = gu16(a);
+            // ... u a
+            // let u08a = gu8(b);
+            // ...
+            // let i08a = gi8(a);
+
+            let op = get_ext(term);
+            let res = match op {
+              // (+ #20 #7) => #27
+              U120_ADD => (a + b)  & NUM_MASK,
+              U120_SUB => (a - b)  & NUM_MASK,
+              U120_MUL => (a * b)  & NUM_MASK,
+              U120_DIV => (a / b)  & NUM_MASK,
+              U120_MOD => (a % b)  & NUM_MASK,
+              U120_AND => (a & b)  & NUM_MASK,
+              U120_OR  => (a | b)  & NUM_MASK,
+              U120_XOR => (a ^ b)  & NUM_MASK,
+              U120_SHL => (a << b) & NUM_MASK,
+              U120_SHR => (a >> b) & NUM_MASK,
               U120_LTN => u128::from(a <  b),
               U120_LTE => u128::from(a <= b),
               U120_EQL => u128::from(a == b),
               U120_GTE => u128::from(a >= b),
               U120_GTN => u128::from(a >  b),
               U120_NEQ => u128::from(a != b),
-              U120_RTL => panic!("TODO"),
-              U120_RTR => panic!("TODO"),
+              U120_RTL => todo!("U120_RTL"), // TODO
+              U120_RTR => todo!("U120_RTR"), // TODO
+              // TODO: I120
               UTUP_ADD => utup(gu8(a) + gu8(b), gu16(a) + gu16(b), gu32(a) + gu32(b), gu64(a) + gu64(b)),
               UTUP_SUB => utup(gu8(a) - gu8(b), gu16(a) - gu16(b), gu32(a) - gu32(b), gu64(a) - gu64(b)),
               UTUP_MUL => utup(gu8(a) * gu8(b), gu16(a) * gu16(b), gu32(a) * gu32(b), gu64(a) * gu64(b)),
@@ -2131,9 +2167,11 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
               UTUP_NEQ => utup(u8::from(gu8(a) != gu8(b)), u16::from(gu16(a) != gu16(b)), u32::from(gu32(a) != gu32(b)), u64::from(gu64(a) != gu64(b))),
               UTUP_RTL => utup(gu8(a).rotate_left(gu8(b) as u32), gu16(a).rotate_left(gu16(b) as u32), gu32(a).rotate_left(gu32(b) as u32), gu64(a).rotate_left(gu64(b) as u32)),
               UTUP_RTR => utup(gu8(a).rotate_right(gu8(b) as u32), gu16(a).rotate_right(gu16(b) as u32), gu32(a).rotate_right(gu32(b) as u32), gu64(a).rotate_right(gu64(b) as u32)),
-              _        => 0,
+              // TODO: ITUP
+              // ITUP_ADD => itup(giu(a) + ...)
+              _ => panic!("Invalid operation!"),
             };
-            let done = Num(c);
+            let done = Num(res);
             clear(rt, get_loc(term, 0), 2);
             link(rt, host, done);
           // (+ {a0 a1} b)
