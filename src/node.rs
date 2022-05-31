@@ -41,12 +41,12 @@ pub struct Block {
 
 pub type Transaction = Vec<u8>;
 
+// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 pub struct Node {
-  pub base_dir   : PathBuf,
+  pub path       : PathBuf,                         // path where files are saved
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
   pub tip        : U256,                            // current ti
-  // TODO: refactor as map to struct? Better safety, less unwraps. Why not?
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
   pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
@@ -217,6 +217,19 @@ pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
 // Stringification
 // ===============
 
+pub fn read_address(code: &str) -> Address {
+  let strs = code.split(':').collect::<Vec<&str>>();
+  let vals = strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
+  let port = strs[1].parse::<u16>().unwrap();
+  Address::IPv4 {
+    val0: vals[0],
+    val1: vals[1],
+    val2: vals[2],
+    val3: vals[3],
+    port: port,
+  }
+}
+
 pub fn show_address_hostname(address: &Address) -> String {
   match address {
     Address::IPv4{ val0, val1, val2, val3, port } => {
@@ -313,7 +326,7 @@ pub fn body_to_string(body: &Body) -> String {
   }
 }
 
-// initial target of 256 hashes per block
+// Initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
   return difficulty_to_target(u256(INITIAL_DIFFICULTY));
 }
@@ -333,11 +346,11 @@ pub fn GENESIS_BLOCK() -> Block {
   }
 }
 
-pub fn new_node(base_dir: PathBuf) -> Node {
+pub fn new_node(kindelia_path: PathBuf) -> Node {
   let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
   let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
   let mut node = Node {
-    base_dir   : base_dir,
+    path       : kindelia_path,
     socket     : socket,
     port       : port,
     block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
@@ -355,22 +368,18 @@ pub fn new_node(base_dir: PathBuf) -> Node {
     runtime    : init_runtime(),
   };
 
-  let DEFAULT_PEERS: Vec<&str> = vec![
-    "167.71.249.16",
-    "167.71.254.138",
-    "167.71.242.43",
-    "167.71.255.151",
-  ];
-  let default_peers = DEFAULT_PEERS.iter()
-    .map(|p| p.split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>())
-    .map(|p| {
-        let val0 = p[0]; let val1 = p[1]; let val2 = p[2]; let val3 = p[3];
-        Address::IPv4 { val0, val1, val2, val3, port: UDP_PORT }
-      }
-    );
+  // UDP_PORT is the local port, it doesn't change existing node ports
+  let default_peers: Vec<Address> = vec![
+    "167.71.249.16:42000",
+    "167.71.254.138:42000",
+    "167.71.242.43:42000",
+    "167.71.255.151:42000",
+  ].iter().map(|x| read_address(x)).collect::<Vec<Address>>();
 
   let seen_at = get_time();
-  default_peers.for_each(|address| node_see_peer(&mut node, Peer { address, seen_at }));
+  default_peers.iter().for_each(|address| {
+    return node_see_peer(&mut node, Peer { address: *address, seen_at });
+  });
 
   node_see_peer(&mut node, Peer {
     address: Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: UDP_PORT },
@@ -421,6 +430,17 @@ pub fn get_random_peers(node: &mut Node, amount: u128) -> Vec<Peer> {
   node.peers.values().cloned().choose_multiple(&mut rng, amount)
 }
 
+// Registers a block on the node's database. This performs several actions:
+// - If this block is too far into the future, ignore it.
+// - If this block's parent isn't available:
+//   - Add this block to the parent's pending list
+//   - When the parent is available, register this block again
+// - If this block's parent is available:
+//   - Compute the block accumulated work, target, etc.
+//   - If this block is the new tip:
+//     - In case of a reorg, rollback to the block before it
+//     - Run that block's code, updating the HVM state
+//     - Updates the longest chain saved on disk
 pub fn node_add_block(node: &mut Node, block: &Block) {
   // Adding a block might trigger the addition of other blocks
   // that were waiting for it. Because of that, we loop here.
@@ -513,19 +533,25 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
               old_bhash = node.block[&old_bhash].prev;
               new_bhash = node.block[&new_bhash].prev;
             }
-            // 3. Reverts the runtime to a state older than that block
+            // 3. Saves overwritten blocks to disk
+            for bhash in must_compute.iter().rev() {
+              let file_path = get_blocks_path(node).join(format!("{:0>32x}.kindelia_block.bin", node.height[bhash]));
+              let file_buff = bitvec_to_bytes(&serialized_block(&node.block[bhash]));
+              std::fs::write(file_path, file_buff).expect("Couldn't save block to disk.");
+            }
+            // 4. Reverts the runtime to a state older than that block
             //    On the example above, we'd find `runtime.tick = 1`
             let mut tick = node.height[&old_bhash];
             //println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
             node.runtime.rollback(tick);
-            // 4. Finds the last block included on the reverted runtime state
+            // 5. Finds the last block included on the reverted runtime state
             //    On the example above, we'd find `new_bhash = B`
             while tick > node.runtime.get_tick() {
               must_compute.push(new_bhash);
               new_bhash = node.block[&new_bhash].prev;
               tick -= 1;
             }
-            // 5. Computes every block after that on the new timeline
+            // 6. Computes every block after that on the new timeline
             //    On the example above, we'd compute `C, D, P, Q, R, S, T`
             for block in must_compute.iter().rev() {
               node_compute_block(node, &node.block[block].clone());
@@ -623,11 +649,8 @@ pub fn gossip(node: &mut Node, peer_count: u128, message: &Message) {
   }
 }
 
-pub fn get_blocks_dir(base_dir: &PathBuf) -> PathBuf {
-  let mut dir = base_dir.clone();
-  dir.push("data");
-  dir.push("blocks");
-  dir
+pub fn get_blocks_path(node: &Node) -> PathBuf {
+  node.path.join("state").join("blocks")
 }
 
 pub fn show_block(block: &Block) -> String {
@@ -724,21 +747,18 @@ fn node_ask_missing_blocks(node: &mut Node) {
   }
 }
 
-// ?? How to handle corrupted files?
-
-fn node_save_longest_chain(node: &mut Node, blocks_dir: &PathBuf) {
-  for (index, block) in get_longest_chain(node).iter().enumerate() {
-    let mut path = blocks_dir.clone();
-    path.push(format!("{}", index));
-    let buffer = bitvec_to_bytes(&serialized_block(&block));
-    std::fs::write(path, buffer).ok();
-  }
-}
-
-fn node_load_longest_chain(node: &mut Node, blocks_dir: &PathBuf) {
+fn node_load_blocks(node: &mut Node) {
+  let blocks_dir = get_blocks_path(&node);
+  std::fs::create_dir_all(&blocks_dir).ok();
+  let mut file_paths : Vec<PathBuf> = vec![];
   for entry in std::fs::read_dir(&blocks_dir).unwrap() {
-    let buffer = std::fs::read(entry.unwrap().path()).unwrap();
+    file_paths.push(entry.unwrap().path());
+  }
+  file_paths.sort();
+  for file_path in file_paths {
+    let buffer = std::fs::read(file_path.clone()).unwrap();
     let block = deserialized_block(&bytes_to_bitvec(&buffer));
+    println!("Adding block: {}", file_path.into_os_string().into_string().unwrap());
     node_add_block(node, &block);
   }
 }
@@ -751,21 +771,11 @@ fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
   });
 }
 
-//fn node_handle_input(node: &Node, miner_comm: &SharedMinerComm, input: &str) {
-  //if let Some('\n') = input.chars().last() {
-    //let mine_body = input.replace("\n", "");
-    //let mine_body = string_to_body(&mine_body);
-    //node_ask_mine(node, miner_comm, mine_body);
-  //}
-//}
-
 pub fn node_loop(
   mut node: Node,
-  base_dir: PathBuf,
+  kindelia_path: PathBuf,
   miner_comm: SharedMinerComm,
   mine_file: Option<String>,
-  //input: SharedInput,
-  //ui: bool,
 ) -> ! {
   const TICKS_PER_SEC: u64 = 100;
 
@@ -775,13 +785,9 @@ pub fn node_loop(
   let init_body = code_to_body("");
   let mine_body = mine_file.map(|x| code_to_body(&x));
 
-  let blocks_dir = get_blocks_dir(&base_dir);
-  std::fs::create_dir_all(&blocks_dir).ok();
-
   // Loads all stored blocks
   eprintln!("Loading blocks from disk...");
-  node_load_longest_chain(&mut node, &blocks_dir);
-  eprintln!("{} blocks loaded", node.block.keys().len());
+  node_load_blocks(&mut node);
 
   loop {
     tick += 1;
@@ -825,31 +831,14 @@ pub fn node_loop(
         node_peers_timeout(&mut node);
       }
 
-      // Saves blocks to disk
-      if tick % (60 * TICKS_PER_SEC) == 0 {
-        node_save_longest_chain(&mut node, &blocks_dir);
-      }
-
       // Display node info
       if tick % TICKS_PER_SEC == 0 {
         log_heartbeat(&node);
-        // let mut num_pending: u64 = 0;
-        // let mut num_pending_seen: u64 = 0;
-        // for (bhash, _) in node.pending.iter() {
-        //   if node.seen.get(bhash).is_some() {
-        //     num_pending_seen += 1;
-        //   }
-        //   num_pending += 1;
-        // }
-        // println!("## peers   : {}", node.peers.len());
-        // println!("## pending : {}/{}", num_pending_seen, num_pending);
-        // println!("## blocks  : {}", node.height[&node.tip]);
-        // println!("## mana    : {}", node.runtime.get_mana());
       }
     }
 
     // Sleep for 1/100 seconds
-    // TODO: just sleep remaining time
+    // TODO: just sleep remaining time <- good idea
     std::thread::sleep(std::time::Duration::from_micros(10000));
   }
 }
@@ -892,230 +881,3 @@ fn log_heartbeat(node: &Node) {
 
   println!("{}", log);
 }
-
-// Interface
-// =========
-
-/*
-// Input
-// -----
-
-pub fn new_input() -> SharedInput {
-  Arc::new(Mutex::new(String::new()))
-}
-
-pub fn input_loop(input: &SharedInput) {
-  let mut stdout = stdout().into_raw_mode().unwrap();
-
-  for key in stdin().keys() {
-    //print!("got {:?}\n\r", key);
-    if let Ok(Key::Char(chr)) = key {
-      (input.lock().unwrap()).push(chr);
-      stdout.flush().unwrap();
-    }
-    if let Ok(Key::Backspace) = key {
-      (input.lock().unwrap()).pop();
-      stdout.flush().unwrap();
-    }
-    if let Ok(Key::Ctrl('c')) = key {
-      break;
-    }
-    if let Ok(Key::Ctrl('q')) = key {
-      break;
-    }
-  }
-
-  drop(stdout);
-  eprintln!("\n\nBye...");
-  std::process::exit(0);
-}
-
-// Output
-// ------
-
-pub struct NodeInfo {
-  pub time: u128,
-  pub num_peers: u128,
-  pub num_blocks: u128,
-  pub num_pending: u128,
-  pub num_pending_seen: u128,
-  pub height: u128,
-  pub difficulty: U256,
-  pub hash_rate: U256,
-  pub tip_hash: U256,
-  pub last_blocks: Vec<Block>,
-}
-
-fn node_get_info(node: &Node, max_last_blocks: Option<u128>) -> NodeInfo {
-  let tip = node.tip;
-  let height = *node.height.get(&tip).unwrap();
-  let tip_target = *node.target.get(&tip).unwrap();
-  let difficulty = target_to_difficulty(tip_target);
-  let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
-
-  let mut num_pending: u128 = 0;
-  let mut num_pending_seen: u128 = 0;
-  for (bhash, _) in node.pending.iter() {
-    if node.seen.get(bhash).is_some() {
-      num_pending_seen += 1;
-    }
-    num_pending += 1;
-  }
-
-  // TODO: max_last_blocks
-  let last_blocks = get_longest_chain(node);
-
-  NodeInfo {
-    time: get_time(),
-    num_peers: node.peers.len() as u128,
-    num_blocks: node.block.len() as u128,
-    num_pending,
-    num_pending_seen,
-    height,
-    difficulty,
-    hash_rate,
-    tip_hash: tip,
-    last_blocks,
-  }
-}
-
-fn display_simple(info: &NodeInfo) {
-  let time = get_time();
-  println!("{{");
-  println!(r#"  "time": "{}","#, time);
-  println!(r#"  "num_peers: {},"#, info.num_peers);
-  println!(r#"  "tip_hash": "{}","#, info.tip_hash);
-  println!(r#"  "tip_height": {}"#, info.height);
-  println!("}}");
-}
-
-#[allow(clippy::useless_format)]
-pub fn display_tui(info: &NodeInfo, input: &str, last_screen: &mut Option<Vec<String>>) {
-  //─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾
-
-  fn bold(text: &str) -> String {
-    return format!("{}{}{}", "\x1b[1m", text, "\x1b[0m");
-  }
-
-  fn display_block(block: &Block, index: usize, width: u16) -> String {
-    let zero = u256(0);
-    let b_hash = hash_block(block);
-    let show_index = format!("{}", index).pad(6, ' ', Alignment::Right, true);
-    let show_time = format!("{}", block.time).pad(13, ' ', Alignment::Left, true);
-    let show_hash = format!("{}", hex::encode(u256_to_bytes(b_hash)));
-    let show_body = format!(
-      "{}",
-      body_to_string(&block.body).pad(
-        std::cmp::max(width as i32 - 110, 0) as usize,
-        ' ',
-        Alignment::Left,
-        true
-      )
-    );
-    return format!("{} | {} | {} | {}", show_index, show_time, show_hash, show_body);
-  }
-
-  fn display_input(input: &str) -> String {
-    let mut input: String = input.to_string();
-    if let Some('\n') = input.chars().last() {
-      input = bold(&input);
-    }
-    input.replace('\n', "")
-  }
-
-  // Gets the terminal width and height
-  let (width, height) = termion::terminal_size().unwrap();
-  let menu_width = 17;
-
-  let mut menu_lines: Vec<(String, bool)> = vec![];
-  macro_rules! menu_block {
-    ($title:expr, $val:expr) => {
-      menu_lines.push((format!("{}", $title), true));
-      menu_lines.push((format!("{}", $val), false));
-      menu_lines.push((format!("{}", "-------------"), false));
-    };
-  }
-
-  menu_block!("Time", get_time());
-  menu_block!("Peers", info.num_peers);
-  menu_block!("Difficulty", info.difficulty);
-  menu_block!("Hash Rate", info.hash_rate);
-  menu_block!("Blocks", info.num_blocks);
-  menu_block!("Height", info.height);
-  menu_block!("Pending", format!("{} / {}", info.num_pending_seen, info.num_pending));
-
-  let mut body_lines: Vec<String> = vec![];
-  let blocks = &info.last_blocks;
-  body_lines.push(format!("#block | time          | hash                                                             | body "));
-  body_lines.push(format!("------ | ------------- | ---------------------------------------------------------------- | {}", "-".repeat(std::cmp::max(width as i64 - menu_width as i64 - 93, 0) as usize)));
-  let min = std::cmp::max(blocks.len() as i64 - (height as i64 - 5), 0) as usize;
-  let max = blocks.len();
-  for i in min..max {
-    body_lines.push(display_block(&blocks[i as usize], i as usize, width));
-  }
-
-  let mut screen = Vec::new();
-
-  // Draws top bar
-  screen.push(format!("  ╻╻           │"));
-  screen.push(format!(" ╻┣┓  {} │ {}", bold("Kindelia"), { display_input(input) }));
-  screen.push(format!("╺┛╹┗╸──────────┼{}", "─".repeat(width as usize - 16)));
-
-  // Draws each line
-  for i in 0..height - 4 {
-    let mut line = String::new();
-
-    // Draws menu item
-    line.push_str(&format!(" "));
-    if let Some((menu_line, menu_bold)) = menu_lines.get(i as usize) {
-      let text = menu_line.pad(menu_width - 4, ' ', Alignment::Left, true);
-      let text = if *menu_bold { bold(&text) } else { text };
-      line.push_str(&format!("{}", text));
-    } else {
-      line.push_str(&format!("{}", " ".repeat(menu_width - 4)));
-    }
-
-    // Draws separator
-    line.push_str(&format!(" │ "));
-
-    // Draws body item
-    line.push_str(&format!("{}", body_lines.get(i as usize).unwrap_or(&"".to_string())));
-
-    // Draws line break
-    screen.push(line);
-  }
-
-  render(last_screen, &screen);
-}
-
-// Prints screen, only re-printing lines that change
-fn render(old_screen: &mut Option<Vec<String>>, new_screen: &Vec<String>) {
-  fn redraw(screen: &Vec<String>) {
-    print!("{esc}c", esc = 27 as char); // clear screen
-    for line in screen {
-      print!("{}\n\r", line);
-    }
-  }
-  match old_screen {
-    None => redraw(new_screen),
-    Some(old_screen) => {
-      if old_screen.len() != new_screen.len() {
-        redraw(new_screen);
-      } else {
-        for y in 0..new_screen.len() {
-          if let (Some(old_line), Some(new_line)) = (old_screen.get(y), new_screen.get(y)) {
-            if old_line != new_line {
-              print!("{}", termion::cursor::Hide);
-              print!("{}", termion::cursor::Goto(1, (y + 1) as u16));
-              print!("{}", new_line);
-              print!("{}", termion::clear::UntilNewline);
-            }
-          }
-        }
-      }
-    }
-  }
-  std::io::stdout().flush().ok();
-  *old_screen = Some(new_screen.clone());
-}
-*/

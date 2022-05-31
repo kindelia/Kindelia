@@ -300,29 +300,6 @@ pub fn deserialized_message(bits: &BitVec) -> Message {
   deserialize_message(bits, &mut 0)
 }
 
-//pub enum Term {
-  //Var { name: u128 },
-  //Dup { nam0: u128, nam1: u128, expr: Box<Term>, body: Box<Term> },
-  //Lam { name: u128, body: Box<Term> },
-  //App { func: Box<Term>, argm: Box<Term> },
-  //Ctr { name: u128, args: Vec<Term> },
-  //Fun { name: u128, args: Vec<Term> },
-  //U60 { numb: u128 },
-  //Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
-//}
-
-//pub enum Oper {
-  //Add, Sub, Mul, Div,
-  //Mod, And, Or,  Xor,
-  //Shl, Shr, Lte, Ltn,
-  //Eql, Gte, Gtn, Neq,
-//}
-
-//pub enum Statement {
-  //Def { name: u128, func: Vec<(Term, Term)> },
-  //Run { name: u128, expr: Term },
-//}
-
 // A Term
 
 pub fn serialize_term(term: &Term, bits: &mut BitVec) {
@@ -364,7 +341,7 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
     }
     Term::Op2 { oper, val0, val1 } => {
       serialize_fixlen(3, &u256(7), bits);
-      serialize_fixlen(4, &u256(*oper as u128), bits);
+      serialize_fixlen(8, &u256(*oper as u128), bits);
       serialize_term(val0, bits);
       serialize_term(val1, bits);
     }
@@ -414,7 +391,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
       Term::Num { numb }
     }
     7 => {
-      let oper = deserialize_fixlen(4, bits, index).low_u128();
+      let oper = deserialize_fixlen(8, bits, index).low_u128();
       let val0 = Box::new(deserialize_term(bits, index));
       let val1 = Box::new(deserialize_term(bits, index));
       Term::Op2 { oper, val0, val1 }
