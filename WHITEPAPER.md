@@ -19,12 +19,12 @@ Sections
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
-* [Example blocks](#example-blocks)
-  * [Block #1: defining pure functions](#defining-pure-functions)
-  * [Block #2: defining stateful functions](#defining-stateful-functions)
-  * [Block #3: creating some accounts](#creating-some-accounts)
-  * [Block #4: installing a game](#installing-a-game)
-  * [Block #5: playing the game](#playing-the-game)
+* [Example blocks](#examples)
+  * [Block #1: defining pure functions](#block-1-defining-pure-functions)
+  * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
+  * [Block #3: creating some accounts](#block-3-creating-some-accounts)
+  * [Block #4: installing a game](#block-4-installing-a-game)
+  * [Block #5: playing the game](#block-5-playing-the-game)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -34,8 +34,8 @@ Sections
   * [Computation and Space Limits](#computation-and-space-limits)
   * [Serialization](#serialization)
 * [Notes](#notes)
-  * [Why?](#why)
-  * [Why Nakamoto Consensus (Proof of Work)?](#why-nakamoto-consensus-proof-of-work?)
+  * [Why?](#1-why)
+  * [Why Nakamoto Consensus (Proof of Work)?](#2-why-nakamoto-consensus-proof-of-work)
 
 Introduction
 ============
