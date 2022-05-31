@@ -219,8 +219,8 @@ pub const NUM: u128 = 0xB;
 
 // Numeric primitives. Up to:
 // - 32 u120 operations
-// - 32 uTUP operations
 // - 32 i120 operations
+// - 32 uTUP operations
 // - 32 iTUP operations
 // where uTUP = (u8,u16,u32,u64)
 //       iTUP = (i8,i16,i32,i64)
@@ -242,24 +242,24 @@ pub const U120_GTN: u128 = 0x0E;
 pub const U120_NEQ: u128 = 0x0F;
 pub const U120_RTL: u128 = 0x10;
 pub const U120_RTR: u128 = 0x11;
-pub const UTUP_ADD: u128 = 0x20;
-pub const UTUP_SUB: u128 = 0x21;
-pub const UTUP_MUL: u128 = 0x22;
-pub const UTUP_DIV: u128 = 0x23;
-pub const UTUP_MOD: u128 = 0x24;
-pub const UTUP_AND: u128 = 0x25;
-pub const UTUP_OR : u128 = 0x26;
-pub const UTUP_XOR: u128 = 0x27;
-pub const UTUP_SHL: u128 = 0x28;
-pub const UTUP_SHR: u128 = 0x29;
-pub const UTUP_LTN: u128 = 0x2A;
-pub const UTUP_LTE: u128 = 0x2B;
-pub const UTUP_EQL: u128 = 0x2C;
-pub const UTUP_GTE: u128 = 0x2D;
-pub const UTUP_GTN: u128 = 0x2E;
-pub const UTUP_NEQ: u128 = 0x2F;
-pub const UTUP_RTL: u128 = 0x30;
-pub const UTUP_RTR: u128 = 0x31;
+pub const UTUP_ADD: u128 = 0x40;
+pub const UTUP_SUB: u128 = 0x41;
+pub const UTUP_MUL: u128 = 0x42;
+pub const UTUP_DIV: u128 = 0x43;
+pub const UTUP_MOD: u128 = 0x44;
+pub const UTUP_AND: u128 = 0x45;
+pub const UTUP_OR : u128 = 0x46;
+pub const UTUP_XOR: u128 = 0x47;
+pub const UTUP_SHL: u128 = 0x48;
+pub const UTUP_SHR: u128 = 0x49;
+pub const UTUP_LTN: u128 = 0x4A;
+pub const UTUP_LTE: u128 = 0x4B;
+pub const UTUP_EQL: u128 = 0x4C;
+pub const UTUP_GTE: u128 = 0x4D;
+pub const UTUP_GTN: u128 = 0x4E;
+pub const UTUP_NEQ: u128 = 0x4F;
+pub const UTUP_RTL: u128 = 0x50;
+pub const UTUP_RTR: u128 = 0x51;
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -2655,14 +2655,35 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
 }
 
 fn read_numb(code: &str) -> (&str, u128) {
-  let code = skip(code);
-  let mut numb = 0;
-  let mut code = code;
-  while head(code) >= '0' && head(code) <= '9' {
-    numb = numb * 10 + head(code) as u128 - 0x30;
+  let mut code = skip(code);
+  if head(code) == 'x' {
+    println!("is hex");
     code = tail(code);
+    let mut numb = 0;
+    let mut code = code;
+    loop {
+      if head(code) >= '0' && head(code) <= '9' {
+        numb = numb * 16 + head(code) as u128 - 0x30;
+        code = tail(code);
+      } else if head(code) >= 'a' && head(code) <= 'f' {
+        numb = numb * 16 + head(code) as u128 - 0x61 + 10;
+        code = tail(code);
+      } else if head(code) >= 'A' && head(code) <= 'F' {
+        numb = numb * 16 + head(code) as u128 - 0x41 + 10;
+        code = tail(code);
+      } else {
+        break;
+      }
+    }
+    return (code, numb);
+  } else {
+    let mut numb = 0;
+    while head(code) >= '0' && head(code) <= '9' {
+      numb = numb * 10 + head(code) as u128 - 0x30;
+      code = tail(code);
+    }
+    return (code, numb);
   }
-  return (code, numb);
 }
 
 fn read_name(code: &str) -> (&str, u128) {
