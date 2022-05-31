@@ -1,0 +1,131 @@
+// ============================================================================
+// Bank
+
+!(WhoIs) {
+  !(WhoIs) = $(IO.from @who $(IO.done who))
+} = #0
+
+$(Leaf)
+$(Node k v lft rgt)
+!(Obs t) {
+  !(Obs $(Node k v l r)) = $(Node !(Obs k) !(Obs v) !(Obs l) !(Obs v))
+  !(Obs x) = x
+} = #0
+
+!(AddEq cond key t) {
+  !(AddEq #1 key $(Node k v l r)) = $(Node k (+ v #1) l r)
+  !(AddEq #0 key $(Node k v l r)) = 
+    &{k.0 k.1} = k;
+    &{key.0 key.1} = key;
+    !(AddChild (> key.0 k.0) key.1 $(Node k.1 v l r))
+} = #0
+
+!(AddChild cond key t) {
+  !(AddChild #1 key $(Node k v l r)) = $(Node k v l !(AddAcc key r))
+  !(AddChild #0 key $(Node k v l r)) = $(Node k v !(AddAcc key l) r)
+} = #0
+
+!(AddAcc key t) {
+  !(AddAcc key $(Node k v lft rgt)) =
+    &{k.0 k.1} = k;
+    &{key.0 key.1} = key;
+    !(AddEq (== k.0 key.0) key.1 $(Node k.1 v lft rgt))
+  !(AddAcc key $(Leaf)) = $(Node key #1 $(Leaf) $(Leaf))
+} = #0
+
+!(Bank action) {
+  !(Bank $(AddMoney acc)) = 
+    $(IO.call acc $(Tuple2 'WhoIs' $(Tuple0)) @nam
+    $(IO.take @t 
+    $(IO.save !(AddAcc nam t) @~ 
+    $(IO.done #0))))
+  !(Bank $(Get)) =
+    !(IO.load @x 
+    $(IO.done x))
+} = $(Leaf)
+
+// ===========================================================================
+// Accounts
+
+!(Acc1 name args) {
+  !(Acc1 name args) = $(IO.call name args @res $(IO.done res))
+} = #0
+
+!(Acc2 name args) {
+  !(Acc2 name args) = $(IO.call name args @res $(IO.done res))
+} = #0
+
+!(Acc3 name args) {
+  !(Acc3 name args) = $(IO.call name args @res $(IO.done res))
+} = #0
+
+!(Acc4 name args) {
+  !(Acc4 name args) = $(IO.call name args @res $(IO.done res))
+} = #0
+
+// ===========================================================================
+// Storage selling
+
+$(Succ p)
+$(Zero)
+!(Add n) {
+  !(Add n) = $(Succ n)
+} = #0
+
+!(Sub n) {
+  !(Sub $(Succ p)) = p
+  !(Sub $(Zero)) = $(Zero)
+} = #0
+
+!(Store action) {
+  !(Store $(Add)) =
+    $(IO.take @l 
+    $(IO.save !(Add l) @~
+    $(IO.done #0)))
+  !(Store $(Sub)) =
+    $(IO.take @l 
+    $(IO.save !(Sub l) @~
+    $(IO.done #0)))
+  !(Store $(Get)) = !(IO.load @l $(IO.done l))
+} = $(Zero)
+
+// ===========================================================================
+// Runs
+
+// Add money to a new account costs 4 size units
+// because of the node creation
+{
+  $(IO.call 'Bank' $(Tuple1 $(AddMoney 'Acc2')) @~
+  $(IO.call 'Bank' $(Tuple1 $(Get)) @x
+  $(IO.done x)))
+}
+
+// Adding some fake storage to complete 8 size units
+// {
+//  $(IO.call 'Store' $(Tuple1 $(Add)) @~
+//  $(IO.call 'Store' $(Tuple1 $(Add)) @~
+//  $(IO.call 'Store' $(Tuple1 $(Add)) @~
+//  $(IO.call 'Store' $(Tuple1 $(Add)) @~
+//  $(IO.call 'Store' $(Tuple1 $(Get)) @x
+//  $(IO.done x))))))
+// }
+
+// This will fail because size is full to the limit
+// so i cannot create another bank account
+{
+  $(IO.call 'Bank' $(Tuple1 $(AddMoney 'Acc1')) @~
+  $(IO.call 'Bank' $(Tuple1 $(Get)) @x
+  $(IO.done x)))
+}
+
+// This will not fail because size was released from
+// the storage
+{
+  $(IO.call 'Store' $(Tuple1 $(Sub)) @~
+  $(IO.call 'Store' $(Tuple1 $(Sub)) @~
+  $(IO.call 'Store' $(Tuple1 $(Sub)) @~
+  $(IO.call 'Store' $(Tuple1 $(Sub)) @~
+  $(IO.call 'Bank' $(Tuple1 $(AddMoney 'Acc1')) @~
+  $(IO.call 'Bank' $(Tuple1 $(Get)) @x
+  $(IO.done x)))))))
+}

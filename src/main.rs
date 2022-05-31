@@ -9,6 +9,9 @@ mod hvm;
 mod node;
 mod bits;
 
+#[cfg(test)]
+mod test;
+
 use primitive_types::U256;
 
 use std::io::Write;

@@ -1005,7 +1005,7 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), args.len());
+        // println!("- fun {} {}", u128_to_name(*name), args.len());
         if let Some(func) = build_func(func, true) {
           self.set_arity(*name, args.len() as u128);
           self.define_function(*name, func);
@@ -1015,7 +1015,7 @@ impl Runtime {
         }
       }
       Statement::Ctr { name, args } => {
-        println!("- ctr {} {}", u128_to_name(*name), args.len());
+        // println!("- ctr {} {}", u128_to_name(*name), args.len());
         self.set_arity(*name, args.len() as u128);
         self.draw();
       }
@@ -1028,7 +1028,7 @@ impl Runtime {
         // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
-            // let done_code = self.show_term(done);
+            let done_code =  self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
               let size_end = self.get_size();
               let mana_dif = self.get_mana() - mana_ini;
@@ -2345,155 +2345,187 @@ pub fn show_rt(rt: &Runtime) -> String {
 }
 
 pub fn show_term(rt: &Runtime, term: Lnk) -> String {
-  let mut lets: HashMap<u128, u128> = HashMap::new();
-  let mut kinds: HashMap<u128, u128> = HashMap::new();
+  enum StackItem {
+    Term(Lnk),
+    Str(String),
+  }
   let mut names: HashMap<u128, String> = HashMap::new();
-  let mut count: u128 = 0;
   fn find_lets(
     rt: &Runtime,
     term: Lnk,
-    lets: &mut HashMap<u128, u128>,
-    kinds: &mut HashMap<u128, u128>,
     names: &mut HashMap<u128, String>,
-    count: &mut u128,
-  ) {
-    match get_tag(term) {
-      LAM => {
-        names.insert(get_loc(term, 0), format!("{}", count));
-        *count += 1;
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      APP => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      SUP => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      DP0 => {
-        if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+  ) -> String {
+    let mut lets: HashMap<u128, u128> = HashMap::new();
+    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut count: u128 = 0;
+    let mut stack = vec![term];
+    while !stack.is_empty() {
+      let term = stack.pop().unwrap();
+      match get_tag(term) {
+        LAM => {
           names.insert(get_loc(term, 0), format!("{}", count));
-          *count += 1;
-          kinds.insert(get_loc(term, 0), get_ext(term));
-          e.insert(get_loc(term, 0));
-          find_lets(rt, ask_arg(rt, term, 2), lets, kinds, names, count);
+          count += 1;
+          stack.push(ask_arg(rt, term, 1));
         }
-      }
-      DP1 => {
-        if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-          names.insert(get_loc(term, 0), format!("{}", count));
-          *count += 1;
-          kinds.insert(get_loc(term, 0), get_ext(term));
-          e.insert(get_loc(term, 0));
-          find_lets(rt, ask_arg(rt, term, 2), lets, kinds, names, count);
+        APP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
         }
-      }
-      OP2 => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      CTR | FUN => {
-        let arity = rt.get_arity(get_ext(term));
-        for i in 0 .. arity {
-          find_lets(rt, ask_arg(rt, term, i), lets, kinds, names, count);
+        SUP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
         }
+        DP0 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        DP1 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        OP2 => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        CTR | FUN => {
+          let arity = rt.get_arity(get_ext(term));
+          for i in (0..arity).rev() {
+            stack.push(ask_arg(rt, term, i));
+          }
+        }
+        _ => {}
       }
-      _ => {}
     }
+
+    let mut text = String::new();
+    for (_key, pos) in lets {
+      // todo: reverse
+      let what = String::from("?h");
+      //let kind = kinds.get(&key).unwrap_or(&0);
+      let name = names.get(&pos).unwrap_or(&what);
+      let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
+      let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+      text.push_str(&format!("&{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    }
+    text
   }
+
   fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> String {
-    let done = match get_tag(term) {
-      DP0 => {
-        format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")))
+    let mut stack = vec![StackItem::Term(term)];
+    let mut output = Vec::new();
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Str(txt) => {
+          output.push(txt);
+        },
+        StackItem::Term(term) =>
+          match get_tag(term) {
+            DP0 => {
+              output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
+            }
+            DP1 => {
+              output.push(format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b"))));
+            }
+            VAR => {
+              output.push(format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c"))));
+            }
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              output.push(format!("@{}", name));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+            }
+            APP => {
+              output.push("(".to_string());
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            SUP => {
+              output.push("{".to_string());
+              stack.push(StackItem::Str("}".to_string()));
+              //let kind = get_ext(term);
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            OP2 => {
+              let oper = get_ext(term);
+              let symb = match oper {
+                ADD => "+",
+                SUB => "-",
+                MUL => "*",
+                DIV => "/",
+                MOD => "%",
+                AND => "&",
+                OR  => "|",
+                XOR => "^",
+                SHL => "<<",
+                SHR => ">>",
+                LTN => "<",
+                LTE => "<=",
+                EQL => "=",
+                GTE => ">=",
+                GTN => ">",
+                NEQ => "!=",
+                _   => "?",
+              };
+              output.push(format!("({}", symb));
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            NUM => {
+              let numb = get_num(term);
+              output.push(format!("#{}", numb));
+            }
+            CTR => {
+              let func = get_ext(term);
+              output.push(format!("$({}", u128_to_name(func)));
+              stack.push(StackItem::Str(")".to_string()));
+              let arit = rt.get_arity(func);
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+            FUN => {
+              let func = get_ext(term);
+              output.push(format!("!{} ", u128_to_name(func)));
+              stack.push(StackItem::Str(")".to_string()));
+              let arit = rt.get_arity(func);
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+            ERA => {
+              output.push(String::from("*"));
+            }
+            _ => output.push(format!("?g({})", get_tag(term))),
+          }
+        }
       }
-      DP1 => {
-        format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b")))
-      }
-      VAR => {
-        format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c")))
-      }
-      LAM => {
-        let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-        format!("@{} {}", name, go(rt, ask_arg(rt, term, 1), names))
-      }
-      APP => {
-        let func = go(rt, ask_arg(rt, term, 0), names);
-        let argm = go(rt, ask_arg(rt, term, 1), names);
-        format!("({} {})", func, argm)
-      }
-      SUP => {
-        //let kind = get_ext(term);
-        let func = go(rt, ask_arg(rt, term, 0), names);
-        let argm = go(rt, ask_arg(rt, term, 1), names);
-        format!("{{{} {}}}", func, argm)
-      }
-      OP2 => {
-        let oper = get_ext(term);
-        let val0 = go(rt, ask_arg(rt, term, 0), names);
-        let val1 = go(rt, ask_arg(rt, term, 1), names);
-        let symb = match oper {
-          ADD => "+",
-          SUB => "-",
-          MUL => "*",
-          DIV => "/",
-          MOD => "%",
-          AND => "&",
-          OR  => "|",
-          XOR => "^",
-          SHL => "<<",
-          SHR => ">>",
-          LTN => "<",
-          LTE => "<=",
-          EQL => "=",
-          GTE => ">=",
-          GTN => ">",
-          NEQ => "!=",
-          _   => "?",
-        };
-        format!("({} {} {})", symb, val0, val1)
-      }
-      NUM => {
-        let numb = get_num(term);
-        // If it has 26-30 bits, pretty-print as a name
-        //if numb > 0x3FFFFFF && numb <= 0x3FFFFFFF {
-          //return format!("@{}", view_name(numb));
-        //} else {
-          return format!("#{}", numb);
-        //}
-      }
-      CTR => {
-        let func = get_ext(term);
-        let arit = rt.get_arity(func);
-        //println!("  - arity is: {} {}", u128_to_name(func), arit);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("$({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
-      }
-      FUN => {
-        let func = get_ext(term);
-        let arit = rt.get_arity(func);
-        //println!("  - arity is: {} {}", u128_to_name(func), arit);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("!({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
-      }
-      ERA => {
-        "*".to_string()
-      }
-      _ => format!("?g({})", get_tag(term)),
-    };
-    return done;
+
+    let res = output.join("");
+    return res;
+
   }
-  find_lets(rt, term, &mut lets, &mut kinds, &mut names, &mut count);
-  let mut text = go(rt, term, &names);
-  for (_key, pos) in lets {
-    // todo: reverse
-    let what = String::from("?h");
-    //let kind = kinds.get(&key).unwrap_or(&0);
-    let name = names.get(&pos).unwrap_or(&what);
-    let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
-    let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(" | &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
-  }
+
+  let mut text = find_lets(rt, term, &mut names);
+  text.push_str( &go(rt, term, &names));
   text
 }
 
@@ -2971,129 +3003,3 @@ pub fn test_statements_from_code(code: &str) {
 pub fn test(file: &str) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }
-
-
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use proptest::prelude::*;
-
-  
-  // Generate a checksum for a runtime state (for testing)
-  fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
-    let fn_ids = fn_names.iter().map(|x| name_to_u128(x)).collect::<Vec<u128>>();
-    let mut hasher = DefaultHasher::new();
-    for fn_id in fn_ids {
-      let term_lnk = rt.read_disk(fn_id);
-      if let Some(term_lnk) = term_lnk {  
-        let term_lnk = show_term(rt, term_lnk);
-
-        dbg!(term_lnk.clone());
-        term_lnk.hash(&mut hasher);
-      }
-    }
-    let res = hasher.finish();
-    // dbg!(res);
-    res
-  }
-
-  /// Tests the rollback of states in the kindelia runtime
-  /// 
-  /// # Arguments
-  /// 
-  /// * `pre_code` - Like a genesis block, use this to deploy functions and contracts
-  /// * `code` - The code that will be executed `total_tick` times, use this to test the states
-  /// * `fn_names` - The names of the functions which states will be tested
-  /// * `total_tick` - The number of times the code will be executed
-  /// * `rollback_tick` - The tick to rollback to
-  /// 
-  fn test_runtime_rollback(pre_code: &str, code: &str, fn_names: &[&str], total_tick: u128, rollback_tick: u128) -> bool {
-    let mut rt = init_runtime();
-    
-    // Calculate all total_tick states and saves old checksum
-    let mut old_checksum= 0;
-    rt.run_statements_from_code(pre_code);
-    for _ in 0..total_tick {
-      rt.run_statements_from_code(code);
-      rt.tick();
-      // dbg!(test_heap_checksum(&fn_names, &mut rt));
-      if rt.get_tick() == rollback_tick {
-        old_checksum = test_heap_checksum(&fn_names, &mut rt);
-      }
-    }
-    // Does rollback to nearest rollback_tick saved state
-    rt.rollback(rollback_tick);
-    if rt.get_tick() == 0 {
-      rt.run_statements_from_code(pre_code);
-    }
-    // Run until rollback_tick
-    let tick_diff = rollback_tick - rt.get_tick();
-    for _ in 0..tick_diff {
-      rt.run_statements_from_code(code);
-      rt.tick();
-    }
-    // Calculates new checksum, after rollback
-    let new_checksum = test_heap_checksum(&fn_names, &mut rt);
-    dbg!(old_checksum, new_checksum);
-    // Returns if checksums are equal
-    old_checksum == new_checksum
-  }
-
-  // proptest! {
-    #[test]
-    fn simple_rollback() {
-      let pre_code = "
-        $(Succ p)
-        $(Zero)
-        !(Add n) {
-          !(Add n) = $(Succ n)
-        } = #0
-        
-        !(Sub n) {
-          !(Sub $(Succ p)) = p
-          !(Sub $(Zero)) = $(Zero)
-        } = #0
-        
-        !(Store action) {
-          !(Store $(Add)) =
-            $(IO.take @l 
-            $(IO.save !(Add l) @~
-            $(IO.done #0)))
-          !(Store $(Sub)) =
-            $(IO.take @l 
-            $(IO.save !(Sub l) @~
-            $(IO.done #0)))
-          !(Store $(Get)) = !(IO.load @l $(IO.done l))
-        } = $(Zero)
-      ";
-      let code = "
-        {
-          $(IO.call 'Count' $(Tuple1 $(Inc #1)) @~
-          $(IO.call 'Count' $(Tuple1 $(Get)) @x
-          $(IO.done x)))
-        }
-        {
-          $(IO.call 'Store' $(Tuple1 $(Add)) @~
-          $(IO.call 'Store' $(Tuple1 $(Get)) @x
-          $(IO.done x)))
-        }
-      ";
-      let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-      // if a > b {
-        assert!(test_runtime_rollback(pre_code, code, &fn_names, 1000, 257));
-      // } else {
-      //   assert!(test_runtime_rollback(pre_code, code, &fn_names, b, a));
-      // }
-    // }
-  }
-}
-
-
-// TODO
-// fazer funcao de teste (ou modificar a atual) para testar ir e voltar mais de uma vez com o rollback
-// colocar testes em outro arquivo
-// criar funcao iterativa para substituir a show_term (usando XOR sum)
-// estudar proptest?
-// criar contratos que usam: dups de construtores, dups de lambdas, 
-//    salvar lambda em um estado e usá-la, criar árvores, tuplas, qlqr coisa mais complicada
