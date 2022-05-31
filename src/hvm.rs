@@ -13,6 +13,8 @@ use crate::bits;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
 
+use std::collections::hash_map::DefaultHasher;
+
 // Types
 // -----
 
@@ -614,7 +616,7 @@ impl Heap {
       use std::io::Write;
       let file_path = path.join(format!("{}.{}.bin", uuid, name));
       //format!("{}/{}.{}.bin", path, uuid, name);
-      println!("saving: {:?}", file_path);
+      //println!("saving: {:?}", file_path);
       let mut file = std::fs::OpenOptions::new().append(true).create(true).open(file_path)?;
       file.write_all(&util::u128s_to_u8s(buffer))?;
       return Ok(());
@@ -1026,14 +1028,14 @@ impl Runtime {
         // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
-            let done_code = self.show_term(done);
+            // let done_code = self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
               let size_end = self.get_size();
               let mana_dif = self.get_mana() - mana_ini;
               let size_dif = size_end - size_ini;
               // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
-                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
               } else {
                 println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
@@ -1075,6 +1077,7 @@ impl Runtime {
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     if included {
+      
       self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
@@ -1097,7 +1100,7 @@ impl Runtime {
   pub fn rollback(&mut self, tick: u128) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back from {} to {}", tick, self.get_tick());
+      println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
@@ -2968,3 +2971,129 @@ pub fn test_statements_from_code(code: &str) {
 pub fn test(file: &str) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }
+
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use proptest::prelude::*;
+
+  
+  // Generate a checksum for a runtime state (for testing)
+  fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
+    let fn_ids = fn_names.iter().map(|x| name_to_u128(x)).collect::<Vec<u128>>();
+    let mut hasher = DefaultHasher::new();
+    for fn_id in fn_ids {
+      let term_lnk = rt.read_disk(fn_id);
+      if let Some(term_lnk) = term_lnk {  
+        let term_lnk = show_term(rt, term_lnk);
+
+        dbg!(term_lnk.clone());
+        term_lnk.hash(&mut hasher);
+      }
+    }
+    let res = hasher.finish();
+    // dbg!(res);
+    res
+  }
+
+  /// Tests the rollback of states in the kindelia runtime
+  /// 
+  /// # Arguments
+  /// 
+  /// * `pre_code` - Like a genesis block, use this to deploy functions and contracts
+  /// * `code` - The code that will be executed `total_tick` times, use this to test the states
+  /// * `fn_names` - The names of the functions which states will be tested
+  /// * `total_tick` - The number of times the code will be executed
+  /// * `rollback_tick` - The tick to rollback to
+  /// 
+  fn test_runtime_rollback(pre_code: &str, code: &str, fn_names: &[&str], total_tick: u128, rollback_tick: u128) -> bool {
+    let mut rt = init_runtime();
+    
+    // Calculate all total_tick states and saves old checksum
+    let mut old_checksum= 0;
+    rt.run_statements_from_code(pre_code);
+    for _ in 0..total_tick {
+      rt.run_statements_from_code(code);
+      rt.tick();
+      // dbg!(test_heap_checksum(&fn_names, &mut rt));
+      if rt.get_tick() == rollback_tick {
+        old_checksum = test_heap_checksum(&fn_names, &mut rt);
+      }
+    }
+    // Does rollback to nearest rollback_tick saved state
+    rt.rollback(rollback_tick);
+    if rt.get_tick() == 0 {
+      rt.run_statements_from_code(pre_code);
+    }
+    // Run until rollback_tick
+    let tick_diff = rollback_tick - rt.get_tick();
+    for _ in 0..tick_diff {
+      rt.run_statements_from_code(code);
+      rt.tick();
+    }
+    // Calculates new checksum, after rollback
+    let new_checksum = test_heap_checksum(&fn_names, &mut rt);
+    dbg!(old_checksum, new_checksum);
+    // Returns if checksums are equal
+    old_checksum == new_checksum
+  }
+
+  // proptest! {
+    #[test]
+    fn simple_rollback() {
+      let pre_code = "
+        $(Succ p)
+        $(Zero)
+        !(Add n) {
+          !(Add n) = $(Succ n)
+        } = #0
+        
+        !(Sub n) {
+          !(Sub $(Succ p)) = p
+          !(Sub $(Zero)) = $(Zero)
+        } = #0
+        
+        !(Store action) {
+          !(Store $(Add)) =
+            $(IO.take @l 
+            $(IO.save !(Add l) @~
+            $(IO.done #0)))
+          !(Store $(Sub)) =
+            $(IO.take @l 
+            $(IO.save !(Sub l) @~
+            $(IO.done #0)))
+          !(Store $(Get)) = !(IO.load @l $(IO.done l))
+        } = $(Zero)
+      ";
+      let code = "
+        {
+          $(IO.call 'Count' $(Tuple1 $(Inc #1)) @~
+          $(IO.call 'Count' $(Tuple1 $(Get)) @x
+          $(IO.done x)))
+        }
+        {
+          $(IO.call 'Store' $(Tuple1 $(Add)) @~
+          $(IO.call 'Store' $(Tuple1 $(Get)) @x
+          $(IO.done x)))
+        }
+      ";
+      let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+      // if a > b {
+        assert!(test_runtime_rollback(pre_code, code, &fn_names, 1000, 257));
+      // } else {
+      //   assert!(test_runtime_rollback(pre_code, code, &fn_names, b, a));
+      // }
+    // }
+  }
+}
+
+
+// TODO
+// fazer funcao de teste (ou modificar a atual) para testar ir e voltar mais de uma vez com o rollback
+// colocar testes em outro arquivo
+// criar funcao iterativa para substituir a show_term (usando XOR sum)
+// estudar proptest?
+// criar contratos que usam: dups de construtores, dups de lambdas, 
+//    salvar lambda em um estado e usá-la, criar árvores, tuplas, qlqr coisa mais complicada
