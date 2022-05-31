@@ -38,11 +38,14 @@ pub enum Oper {
   Eql, Gte, Gtn, Neq,
 }
 
-// A
-//[(Term,Term)]
-
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
+
+// A rewrite rule (equation)
+pub type Rule = (Term, Term);
+
+// A function (vector of rules)
+pub type Func = Vec<(Term, Term)>;
 
 // A left-hand side variable in a rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
@@ -52,12 +55,6 @@ pub struct Var {
   pub field: Option<u128>, // in what field is this variable located? (if any)
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
-
-// A rewrite rule (equation)
-pub type Rule = (Term, Term);
-
-// A function (vector of rules)
-pub type Func = Vec<(Term, Term)>;
 
 // A compiled rewrite rule
 #[derive(Clone, Debug, PartialEq)]
@@ -148,7 +145,7 @@ pub enum Rollback {
     head: u64,
     tail: Arc<Rollback>,
   },
-  Nil
+  Nil,
 }
 
 // The current and past states
@@ -603,50 +600,49 @@ impl Heap {
       self.write_arit(fnid, arit);
     }
   }
-  fn heap_path(&self) -> PathBuf {
-    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heap")
+  fn heap_dir_path(&self) -> PathBuf {
+    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
+  }
+  fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
+    self.heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
+  }
+  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
+    use std::io::Write;
+    std::fs::create_dir_all(&self.heap_dir_path())?;
+    std::fs::OpenOptions::new()
+      .append(true)
+      .create(true)
+      .open(self.buffer_file_path(self.uuid, buffer_name))?
+      .write_all(&util::u128s_to_u8s(buffer))?;
+    return Ok(());
+  }
+  fn read_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<Vec<u128>> {
+    std::fs::read(self.buffer_file_path(uuid, buffer_name)).map(|x| util::u8s_to_u128s(&x))
   }
   fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
-    fn save_buffer(path: &PathBuf, uuid: u128, name: &str, buffer: &[u128]) -> std::io::Result<()> {
-      use std::io::Write;
-      let file_path = path.join(format!("{}.{}.bin", uuid, name));
-      //format!("{}/{}.{}.bin", path, uuid, name);
-      println!("saving: {:?}", file_path);
-      let mut file = std::fs::OpenOptions::new().append(true).create(true).open(file_path)?;
-      file.write_all(&util::u128s_to_u8s(buffer))?;
-      return Ok(());
-    }
-    let path = &self.heap_path();
     let serial = self.serialize();
-    std::fs::create_dir_all(path)?;
-    save_buffer(path, uuid, "blob", &serial.blob)?;
-    save_buffer(path, uuid, "disk", &serial.disk)?;
-    save_buffer(path, uuid, "file", &serial.file)?;
-    save_buffer(path, uuid, "arit", &serial.arit)?;
-    save_buffer(path, uuid, "nums", &serial.nums)?;
+    self.write_buffer(serial.uuid, "blob", &serial.blob)?;
+    self.write_buffer(serial.uuid, "disk", &serial.disk)?;
+    self.write_buffer(serial.uuid, "file", &serial.file)?;
+    self.write_buffer(serial.uuid, "arit", &serial.arit)?;
+    self.write_buffer(serial.uuid, "nums", &serial.nums)?;
     return Ok(());
   }
   fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    fn load_buffer(path: &PathBuf, uuid: u128, name: &str) -> std::io::Result<Vec<u128>> {
-      let file_path = path.join(format!("{}.{}.bin", uuid, name));
-      std::fs::read(file_path).map(|x| util::u8s_to_u128s(&x))
-    }
-    let path = &self.heap_path();
-    self.deserialize(&SerializedHeap {
-      uuid: uuid,
-      blob: load_buffer(path, uuid, "blob")?,
-      disk: load_buffer(path, uuid, "disk")?,
-      file: load_buffer(path, uuid, "file")?,
-      arit: load_buffer(path, uuid, "arit")?,
-      nums: load_buffer(path, uuid, "nums")?,
-    });
+    let blob = self.read_buffer(uuid, "blob")?;
+    let disk = self.read_buffer(uuid, "disk")?;
+    let file = self.read_buffer(uuid, "file")?;
+    let arit = self.read_buffer(uuid, "arit")?;
+    let nums = self.read_buffer(uuid, "nums")?;
+    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums });
     return Ok(());
   }
-  fn delete_buffers(&mut self) {
+  fn delete_buffers(&mut self) -> std::io::Result<()> {
     // TODO
+    return Ok(());
   }
 }
 
@@ -1003,19 +999,29 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        println!("- fun {} {}", u128_to_name(*name), args.len());
-        if let Some(func) = build_func(func, true) {
-          self.set_arity(*name, args.len() as u128);
-          self.define_function(*name, func);
-          let state = self.create_term(init, 0, &mut init_map());
-          self.write_disk(*name, state);
-          self.draw();
+        // TODO: if arity is set, fail
+        if !self.exists(*name) {
+          if let Some(func) = build_func(func, true) {
+            println!("- fun {}", u128_to_name(*name));
+            self.set_arity(*name, args.len() as u128);
+            self.define_function(*name, func);
+            let state = self.create_term(init, 0, &mut init_map());
+            self.write_disk(*name, state);
+            self.draw();
+            return;
+          }
         }
+        println!("- fun {} fail", u128_to_name(*name));
       }
       Statement::Ctr { name, args } => {
-        println!("- ctr {} {}", u128_to_name(*name), args.len());
-        self.set_arity(*name, args.len() as u128);
-        self.draw();
+        // TODO: if arity is set, fail
+        if !self.exists(*name) {
+          println!("- ctr {}", u128_to_name(*name));
+          self.set_arity(*name, args.len() as u128);
+          self.draw();
+          return;
+        }
+        println!("- ctr {} fail", u128_to_name(*name));
       }
       Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
@@ -1079,10 +1085,10 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          //deleted.append_buffers(absorber.uuid); // TODO: persistence-WIP
-          //deleted.delete_buffers(); // TODO: persistence-WIP
+          self.heap[deleted as usize].append_buffers(self.heap[absorber as usize].uuid).expect("Couldn't append buffers.");
         }
         self.clear_heap(deleted);
+        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
@@ -1092,9 +1098,10 @@ impl Runtime {
       }
     }
   }
-  
+
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
+
     // If target tick is older than current tick
     if tick < self.get_tick() {
       println!("- rolling back from {} to {}", tick, self.get_tick());
@@ -1150,6 +1157,34 @@ impl Runtime {
     }
   }
 
+  // Same as get_with, but gets a function
+  // FIXME: can get_with be generalized for this case too?
+  pub fn get_func(&self, fid: u128) -> Option<Arc<CompFunc>> {
+    let got = self.get_heap(self.draw).read_file(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
+    let got = self.get_heap(self.curr).read_file(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
+    let mut back = &self.back;
+    loop {
+      match &**back {
+        Rollback::Cons { keep, head, tail } => {
+          let got = self.get_heap(*head).file.read(fid);
+          if let Some(func) = got {
+            return Some(func);
+          }
+          back = &*tail;
+        }
+        Rollback::Nil => {
+          return None;
+        }
+      }
+    }
+  }
+
   pub fn write(&mut self, idx: usize, val: u128) {
     return self.get_heap_mut(self.draw).write(idx, val);
   }
@@ -1180,29 +1215,13 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(fid, arity);
   }
 
-  pub fn get_func(&self, fid: u128) -> Option<Arc<CompFunc>> {
-    let got = self.get_heap(self.draw).read_file(fid);
-    if let Some(func) = got {
-      return Some(func);
-    }
-    let got = self.get_heap(self.curr).read_file(fid);
-    if let Some(func) = got {
-      return Some(func);
-    }
-    let mut back = &self.back;
-    loop {
-      match &**back {
-        Rollback::Cons { keep, head, tail } => {
-          let got = self.get_heap(*head).file.read(fid);
-          if let Some(func) = got {
-            return Some(func);
-          }
-          back = &*tail;
-        }
-        Rollback::Nil => {
-          return None;
-        }
-      }
+  pub fn exists(&self, fid: u128) -> bool {
+    if let Some(arity) = GET_ARITY(fid) {
+      return true;
+    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+      return true;
+    } else {
+      return false;
     }
   }
 
@@ -2940,13 +2959,8 @@ pub fn view_statements(statements: &[Statement]) -> String {
 
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &[Statement]) {
-  //println!("[Serialization]");
   let str_0 = view_statements(statements);
   let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
-  //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
-  //println!("{}", str_0);
-  //println!("---------------");
-  //println!("{}", str_1);
 
   println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   let mut rt = init_runtime();
@@ -2958,13 +2972,12 @@ pub fn test_statements(statements: &[Statement]) {
   println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());
   println!("- size: {} words", rt.get_size());
   println!("- time: {} ms", init.elapsed().as_millis());
-
 }
 
 pub fn test_statements_from_code(code: &str) {
   test_statements(&read_statements(code).1);
 }
 
-pub fn test(file: &str) {
+pub fn test_statements_from_file(file: &str) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }
