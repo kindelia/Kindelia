@@ -1131,7 +1131,7 @@ impl Runtime {
 
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back from {} to {}", tick, self.get_tick());
+      println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
@@ -1151,6 +1151,7 @@ impl Runtime {
         self.curr = self.nuls.pop().expect("No heap available!");
       }
     }
+    println!("- rolled back to {}", self.get_tick());
   }
 
   // Heap writers and readers
