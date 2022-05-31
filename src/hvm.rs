@@ -2547,8 +2547,8 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
           UTUP_GTE => "~>=",
           UTUP_GTN => "~>",
           UTUP_NEQ => "~!=",
-          UTUP_RTL => "~>~",
-          UTUP_RTR => "~<~",
+          UTUP_RTL => "~<~",
+          UTUP_RTR => "~>~",
           _        => "?",
         };
         format!("({} {} {})", symb, val0, val1)
