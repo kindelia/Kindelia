@@ -13,8 +13,6 @@ use crate::bits;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
 
-use std::collections::hash_map::DefaultHasher;
-
 // Types
 // -----
 
@@ -40,11 +38,14 @@ pub enum Oper {
   Eql, Gte, Gtn, Neq,
 }
 
-// A
-//[(Term,Term)]
-
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
+
+// A rewrite rule (equation)
+pub type Rule = (Term, Term);
+
+// A function (vector of rules)
+pub type Func = Vec<(Term, Term)>;
 
 // A left-hand side variable in a rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
@@ -54,12 +55,6 @@ pub struct Var {
   pub field: Option<u128>, // in what field is this variable located? (if any)
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
-
-// A rewrite rule (equation)
-pub type Rule = (Term, Term);
-
-// A function (vector of rules)
-pub type Func = Vec<(Term, Term)>;
 
 // A compiled rewrite rule
 #[derive(Clone, Debug, PartialEq)]
@@ -150,7 +145,7 @@ pub enum Rollback {
     head: u64,
     tail: Arc<Rollback>,
   },
-  Nil
+  Nil,
 }
 
 // The current and past states
@@ -222,22 +217,49 @@ pub const FUN: u128 = 0x9;
 pub const OP2: u128 = 0xA;
 pub const NUM: u128 = 0xB;
 
-pub const ADD: u128 = 0x0;
-pub const SUB: u128 = 0x1;
-pub const MUL: u128 = 0x2;
-pub const DIV: u128 = 0x3;
-pub const MOD: u128 = 0x4;
-pub const AND: u128 = 0x5;
-pub const OR : u128 = 0x6;
-pub const XOR: u128 = 0x7;
-pub const SHL: u128 = 0x8;
-pub const SHR: u128 = 0x9;
-pub const LTN: u128 = 0xA;
-pub const LTE: u128 = 0xB;
-pub const EQL: u128 = 0xC;
-pub const GTE: u128 = 0xD;
-pub const GTN: u128 = 0xE;
-pub const NEQ: u128 = 0xF;
+// Numeric primitives. Up to:
+// - 32 u120 operations
+// - 32 i120 operations
+// - 32 uTUP operations
+// - 32 iTUP operations
+// where uTUP = (u8,u16,u32,u64)
+//       iTUP = (i8,i16,i32,i64)
+pub const U120_ADD: u128 = 0x00;
+pub const U120_SUB: u128 = 0x01;
+pub const U120_MUL: u128 = 0x02;
+pub const U120_DIV: u128 = 0x03;
+pub const U120_MOD: u128 = 0x04;
+pub const U120_AND: u128 = 0x05;
+pub const U120_OR : u128 = 0x06;
+pub const U120_XOR: u128 = 0x07;
+pub const U120_SHL: u128 = 0x08;
+pub const U120_SHR: u128 = 0x09;
+pub const U120_LTN: u128 = 0x0A;
+pub const U120_LTE: u128 = 0x0B;
+pub const U120_EQL: u128 = 0x0C;
+pub const U120_GTE: u128 = 0x0D;
+pub const U120_GTN: u128 = 0x0E;
+pub const U120_NEQ: u128 = 0x0F;
+pub const U120_RTL: u128 = 0x10;
+pub const U120_RTR: u128 = 0x11;
+pub const UTUP_ADD: u128 = 0x40;
+pub const UTUP_SUB: u128 = 0x41;
+pub const UTUP_MUL: u128 = 0x42;
+pub const UTUP_DIV: u128 = 0x43;
+pub const UTUP_MOD: u128 = 0x44;
+pub const UTUP_AND: u128 = 0x45;
+pub const UTUP_OR : u128 = 0x46;
+pub const UTUP_XOR: u128 = 0x47;
+pub const UTUP_SHL: u128 = 0x48;
+pub const UTUP_SHR: u128 = 0x49;
+pub const UTUP_LTN: u128 = 0x4A;
+pub const UTUP_LTE: u128 = 0x4B;
+pub const UTUP_EQL: u128 = 0x4C;
+pub const UTUP_GTE: u128 = 0x4D;
+pub const UTUP_GTN: u128 = 0x4E;
+pub const UTUP_NEQ: u128 = 0x4F;
+pub const UTUP_RTL: u128 = 0x50;
+pub const UTUP_RTR: u128 = 0x51;
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -605,50 +627,49 @@ impl Heap {
       self.write_arit(fnid, arit);
     }
   }
-  fn heap_path(&self) -> PathBuf {
-    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heap")
+  fn heap_dir_path(&self) -> PathBuf {
+    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
+  }
+  fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
+    self.heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
+  }
+  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
+    use std::io::Write;
+    std::fs::create_dir_all(&self.heap_dir_path())?;
+    std::fs::OpenOptions::new()
+      .append(true)
+      .create(true)
+      .open(self.buffer_file_path(self.uuid, buffer_name))?
+      .write_all(&util::u128s_to_u8s(buffer))?;
+    return Ok(());
+  }
+  fn read_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<Vec<u128>> {
+    std::fs::read(self.buffer_file_path(uuid, buffer_name)).map(|x| util::u8s_to_u128s(&x))
   }
   fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
-    fn save_buffer(path: &PathBuf, uuid: u128, name: &str, buffer: &[u128]) -> std::io::Result<()> {
-      use std::io::Write;
-      let file_path = path.join(format!("{}.{}.bin", uuid, name));
-      //format!("{}/{}.{}.bin", path, uuid, name);
-      //println!("saving: {:?}", file_path);
-      let mut file = std::fs::OpenOptions::new().append(true).create(true).open(file_path)?;
-      file.write_all(&util::u128s_to_u8s(buffer))?;
-      return Ok(());
-    }
-    let path = &self.heap_path();
     let serial = self.serialize();
-    std::fs::create_dir_all(path)?;
-    save_buffer(path, uuid, "blob", &serial.blob)?;
-    save_buffer(path, uuid, "disk", &serial.disk)?;
-    save_buffer(path, uuid, "file", &serial.file)?;
-    save_buffer(path, uuid, "arit", &serial.arit)?;
-    save_buffer(path, uuid, "nums", &serial.nums)?;
+    self.write_buffer(serial.uuid, "blob", &serial.blob)?;
+    self.write_buffer(serial.uuid, "disk", &serial.disk)?;
+    self.write_buffer(serial.uuid, "file", &serial.file)?;
+    self.write_buffer(serial.uuid, "arit", &serial.arit)?;
+    self.write_buffer(serial.uuid, "nums", &serial.nums)?;
     return Ok(());
   }
   fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    fn load_buffer(path: &PathBuf, uuid: u128, name: &str) -> std::io::Result<Vec<u128>> {
-      let file_path = path.join(format!("{}.{}.bin", uuid, name));
-      std::fs::read(file_path).map(|x| util::u8s_to_u128s(&x))
-    }
-    let path = &self.heap_path();
-    self.deserialize(&SerializedHeap {
-      uuid: uuid,
-      blob: load_buffer(path, uuid, "blob")?,
-      disk: load_buffer(path, uuid, "disk")?,
-      file: load_buffer(path, uuid, "file")?,
-      arit: load_buffer(path, uuid, "arit")?,
-      nums: load_buffer(path, uuid, "nums")?,
-    });
+    let blob = self.read_buffer(uuid, "blob")?;
+    let disk = self.read_buffer(uuid, "disk")?;
+    let file = self.read_buffer(uuid, "file")?;
+    let arit = self.read_buffer(uuid, "arit")?;
+    let nums = self.read_buffer(uuid, "nums")?;
+    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums });
     return Ok(());
   }
-  fn delete_buffers(&mut self) {
+  fn delete_buffers(&mut self) -> std::io::Result<()> {
     // TODO
+    return Ok(());
   }
 }
 
@@ -1005,19 +1026,29 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement) {
     match statement {
       Statement::Fun { name, args, func, init } => {
-        // println!("- fun {} {}", u128_to_name(*name), args.len());
-        if let Some(func) = build_func(func, true) {
-          self.set_arity(*name, args.len() as u128);
-          self.define_function(*name, func);
-          let state = self.create_term(init, 0, &mut init_map());
-          self.write_disk(*name, state);
-          self.draw();
+        // TODO: if arity is set, fail
+        if !self.exists(*name) {
+          if let Some(func) = build_func(func, true) {
+            println!("- fun {}", u128_to_name(*name));
+            self.set_arity(*name, args.len() as u128);
+            self.define_function(*name, func);
+            let state = self.create_term(init, 0, &mut init_map());
+            self.write_disk(*name, state);
+            self.draw();
+            return;
+          }
         }
+        println!("- fun {} fail", u128_to_name(*name));
       }
       Statement::Ctr { name, args } => {
-        // println!("- ctr {} {}", u128_to_name(*name), args.len());
-        self.set_arity(*name, args.len() as u128);
-        self.draw();
+        // TODO: if arity is set, fail
+        if !self.exists(*name) {
+          println!("- ctr {}", u128_to_name(*name));
+          self.set_arity(*name, args.len() as u128);
+          self.draw();
+          return;
+        }
+        println!("- ctr {} fail", u128_to_name(*name));
       }
       Statement::Run { expr } => {
         let mana_ini = self.get_mana(); 
@@ -1028,14 +1059,14 @@ impl Runtime {
         // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
         if let Some(done) = self.run_io(0, 0, host, mana_lim) {
           if let Some(done) = self.compute(done, mana_lim) {
-            let done_code =  self.show_term(done);
+            let done_code = self.show_term(done);
             if let Some(()) = self.collect(done, mana_lim) {
               let size_end = self.get_size();
               let mana_dif = self.get_mana() - mana_ini;
               let size_dif = size_end - size_ini;
               // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
-                // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
               } else {
                 println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
@@ -1077,15 +1108,14 @@ impl Runtime {
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     if included {
-      
       self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          //deleted.append_buffers(absorber.uuid); // TODO: persistence-WIP
-          //deleted.delete_buffers(); // TODO: persistence-WIP
+          self.heap[deleted as usize].append_buffers(self.heap[absorber as usize].uuid).expect("Couldn't append buffers.");
         }
         self.clear_heap(deleted);
+        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
@@ -1095,12 +1125,13 @@ impl Runtime {
       }
     }
   }
-  
+
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
+
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back from {} to {}", self.get_tick(), tick);
+      println!("- rolling back from {} to {}", tick, self.get_tick());
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
@@ -1153,6 +1184,34 @@ impl Runtime {
     }
   }
 
+  // Same as get_with, but gets a function
+  // FIXME: can get_with be generalized for this case too?
+  pub fn get_func(&self, fid: u128) -> Option<Arc<CompFunc>> {
+    let got = self.get_heap(self.draw).read_file(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
+    let got = self.get_heap(self.curr).read_file(fid);
+    if let Some(func) = got {
+      return Some(func);
+    }
+    let mut back = &self.back;
+    loop {
+      match &**back {
+        Rollback::Cons { keep, head, tail } => {
+          let got = self.get_heap(*head).file.read(fid);
+          if let Some(func) = got {
+            return Some(func);
+          }
+          back = &*tail;
+        }
+        Rollback::Nil => {
+          return None;
+        }
+      }
+    }
+  }
+
   pub fn write(&mut self, idx: usize, val: u128) {
     return self.get_heap_mut(self.draw).write(idx, val);
   }
@@ -1183,29 +1242,13 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(fid, arity);
   }
 
-  pub fn get_func(&self, fid: u128) -> Option<Arc<CompFunc>> {
-    let got = self.get_heap(self.draw).read_file(fid);
-    if let Some(func) = got {
-      return Some(func);
-    }
-    let got = self.get_heap(self.curr).read_file(fid);
-    if let Some(func) = got {
-      return Some(func);
-    }
-    let mut back = &self.back;
-    loop {
-      match &**back {
-        Rollback::Cons { keep, head, tail } => {
-          let got = self.get_heap(*head).file.read(fid);
-          if let Some(func) = got {
-            return Some(func);
-          }
-          back = &*tail;
-        }
-        Rollback::Nil => {
-          return None;
-        }
-      }
+  pub fn exists(&self, fid: u128) -> bool {
+    if let Some(arity) = GET_ARITY(fid) {
+      return true;
+    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+      return true;
+    } else {
+      return false;
     }
   }
 
@@ -2028,28 +2071,67 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             //println!("op2-num");
+            fn gu8(tup: u128) -> u8 {
+              return tup as u8;
+            }
+            fn gu16(tup: u128) -> u16 {
+              return (tup >> 8) as u16;
+            }
+            fn gu32(tup: u128) -> u32 {
+              return (tup >> 24) as u32;
+            }
+            fn gu64(tup: u128) -> u64 {
+              return (tup >> 56) as u64;
+            }
+            fn utup(x8: u8, x16: u16, x32: u32, x64: u64) -> u128 {
+              let x8  = (x8  as u128) <<  0;
+              let x16 = (x16 as u128) <<  8;
+              let x32 = (x32 as u128) << 24;
+              let x64 = (x64 as u128) << 56;
+              return x8 | x16 | x32 | x64;
+            }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             rt.set_rwts(rt.get_rwts() + 1);
             let a = get_num(arg0);
             let b = get_num(arg1);
             let c = match get_ext(term) {
-              ADD => (a + b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              SUB => (a - b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              MUL => (a * b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              DIV => (a / b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              MOD => (a % b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              AND => (a & b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              OR  => (a | b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              XOR => (a ^ b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              SHL => (a << b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              SHR => (a >> b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              LTN => u128::from(a <  b),
-              LTE => u128::from(a <= b),
-              EQL => u128::from(a == b),
-              GTE => u128::from(a >= b),
-              GTN => u128::from(a >  b),
-              NEQ => u128::from(a != b),
-              _   => 0,
+              U120_ADD => (a + b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_SUB => (a - b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_MUL => (a * b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_DIV => (a / b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_MOD => (a % b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_AND => (a & b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_OR  => (a | b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_XOR => (a ^ b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_SHL => (a << b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_SHR => (a >> b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+              U120_LTN => u128::from(a <  b),
+              U120_LTE => u128::from(a <= b),
+              U120_EQL => u128::from(a == b),
+              U120_GTE => u128::from(a >= b),
+              U120_GTN => u128::from(a >  b),
+              U120_NEQ => u128::from(a != b),
+              U120_RTL => panic!("TODO"),
+              U120_RTR => panic!("TODO"),
+              UTUP_ADD => utup(gu8(a) + gu8(b), gu16(a) + gu16(b), gu32(a) + gu32(b), gu64(a) + gu64(b)),
+              UTUP_SUB => utup(gu8(a) - gu8(b), gu16(a) - gu16(b), gu32(a) - gu32(b), gu64(a) - gu64(b)),
+              UTUP_MUL => utup(gu8(a) * gu8(b), gu16(a) * gu16(b), gu32(a) * gu32(b), gu64(a) * gu64(b)),
+              UTUP_DIV => utup(gu8(a) / gu8(b), gu16(a) / gu16(b), gu32(a) / gu32(b), gu64(a) / gu64(b)),
+              UTUP_MOD => utup(gu8(a) % gu8(b), gu16(a) % gu16(b), gu32(a) % gu32(b), gu64(a) % gu64(b)),
+              UTUP_AND => utup(gu8(a) & gu8(b), gu16(a) & gu16(b), gu32(a) & gu32(b), gu64(a) & gu64(b)),
+              UTUP_OR  => utup(gu8(a) | gu8(b), gu16(a) | gu16(b), gu32(a) | gu32(b), gu64(a) | gu64(b)),
+              UTUP_XOR => utup(gu8(a) ^ gu8(b), gu16(a) ^ gu16(b), gu32(a) ^ gu32(b), gu64(a) ^ gu64(b)),
+              UTUP_SHL => utup(gu8(a) << gu8(b), gu16(a) << gu16(b), gu32(a) << gu32(b), gu64(a) << gu64(b)),
+              UTUP_SHR => utup(gu8(a) >> gu8(b), gu16(a) >> gu16(b), gu32(a) >> gu32(b), gu64(a) >> gu64(b)),
+              UTUP_LTN => utup(u8::from(gu8(a) <  gu8(b)), u16::from(gu16(a) <  gu16(b)), u32::from(gu32(a) <  gu32(b)), u64::from(gu64(a) <  gu64(b))),
+              UTUP_LTE => utup(u8::from(gu8(a) <= gu8(b)), u16::from(gu16(a) <= gu16(b)), u32::from(gu32(a) <= gu32(b)), u64::from(gu64(a) <= gu64(b))),
+              UTUP_EQL => utup(u8::from(gu8(a) == gu8(b)), u16::from(gu16(a) == gu16(b)), u32::from(gu32(a) == gu32(b)), u64::from(gu64(a) == gu64(b))),
+              UTUP_GTE => utup(u8::from(gu8(a) >= gu8(b)), u16::from(gu16(a) >= gu16(b)), u32::from(gu32(a) >= gu32(b)), u64::from(gu64(a) >= gu64(b))),
+              UTUP_GTN => utup(u8::from(gu8(a) >  gu8(b)), u16::from(gu16(a) >  gu16(b)), u32::from(gu32(a) >  gu32(b)), u64::from(gu64(a) >  gu64(b))),
+              UTUP_NEQ => utup(u8::from(gu8(a) != gu8(b)), u16::from(gu16(a) != gu16(b)), u32::from(gu32(a) != gu32(b)), u64::from(gu64(a) != gu64(b))),
+              UTUP_RTL => utup(gu8(a).rotate_left(gu8(b) as u32), gu16(a).rotate_left(gu16(b) as u32), gu32(a).rotate_left(gu32(b) as u32), gu64(a).rotate_left(gu64(b) as u32)),
+              UTUP_RTR => utup(gu8(a).rotate_right(gu8(b) as u32), gu16(a).rotate_right(gu16(b) as u32), gu32(a).rotate_right(gu32(b) as u32), gu64(a).rotate_right(gu64(b) as u32)),
+              _        => 0,
             };
             let done = Num(c);
             clear(rt, get_loc(term, 0), 2);
@@ -2463,23 +2545,41 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
             OP2 => {
               let oper = get_ext(term);
               let symb = match oper {
-                ADD => "+",
-                SUB => "-",
-                MUL => "*",
-                DIV => "/",
-                MOD => "%",
-                AND => "&",
-                OR  => "|",
-                XOR => "^",
-                SHL => "<<",
-                SHR => ">>",
-                LTN => "<",
-                LTE => "<=",
-                EQL => "=",
-                GTE => ">=",
-                GTN => ">",
-                NEQ => "!=",
-                _   => "?",
+                U120_ADD => "+",
+                U120_SUB => "-",
+                U120_MUL => "*",
+                U120_DIV => "/",
+                U120_MOD => "%",
+                U120_AND => "&",
+                U120_OR  => "|",
+                U120_XOR => "^",
+                U120_SHL => "<<",
+                U120_SHR => ">>",
+                U120_LTN => "<",
+                U120_LTE => "<=",
+                U120_EQL => "=",
+                U120_GTE => ">=",
+                U120_GTN => ">",
+                U120_NEQ => "!=",
+                UTUP_ADD => "~+",
+                UTUP_SUB => "~-",
+                UTUP_MUL => "~*",
+                UTUP_DIV => "~/",
+                UTUP_MOD => "~%",
+                UTUP_AND => "~&",
+                UTUP_OR  => "~|",
+                UTUP_XOR => "~^",
+                UTUP_SHL => "~<<",
+                UTUP_SHR => "~>>",
+                UTUP_LTN => "~<",
+                UTUP_LTE => "~<=",
+                UTUP_EQL => "~=",
+                UTUP_GTE => "~>=",
+                UTUP_GTN => "~>",
+                UTUP_NEQ => "~!=",
+                UTUP_RTL => "~<~",
+                UTUP_RTR => "~>~",
+                _        => "?",
               };
               output.push(format!("({}", symb));
               stack.push(StackItem::Str(")".to_string()));
@@ -2587,14 +2687,35 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
 }
 
 fn read_numb(code: &str) -> (&str, u128) {
-  let code = skip(code);
-  let mut numb = 0;
-  let mut code = code;
-  while head(code) >= '0' && head(code) <= '9' {
-    numb = numb * 10 + head(code) as u128 - 0x30;
+  let mut code = skip(code);
+  if head(code) == 'x' {
+    println!("is hex");
     code = tail(code);
+    let mut numb = 0;
+    let mut code = code;
+    loop {
+      if head(code) >= '0' && head(code) <= '9' {
+        numb = numb * 16 + head(code) as u128 - 0x30;
+        code = tail(code);
+      } else if head(code) >= 'a' && head(code) <= 'f' {
+        numb = numb * 16 + head(code) as u128 - 0x61 + 10;
+        code = tail(code);
+      } else if head(code) >= 'A' && head(code) <= 'F' {
+        numb = numb * 16 + head(code) as u128 - 0x41 + 10;
+        code = tail(code);
+      } else {
+        break;
+      }
+    }
+    return (code, numb);
+  } else {
+    let mut numb = 0;
+    while head(code) >= '0' && head(code) <= '9' {
+      numb = numb * 10 + head(code) as u128 - 0x30;
+      code = tail(code);
+    }
+    return (code, numb);
   }
-  return (code, numb);
 }
 
 fn read_name(code: &str) -> (&str, u128) {
@@ -2749,47 +2870,62 @@ pub fn read_term(code: &str) -> (&str, Term) {
 fn read_oper(code: &str) -> (&str, Option<u128>) {
   let code = skip(code);
   match head(code) {
-    '+' => (tail(code), Some(ADD)),
-    '-' => (tail(code), Some(SUB)),
-    '*' => (tail(code), Some(MUL)),
-    '/' => (tail(code), Some(DIV)),
-    '%' => (tail(code), Some(MOD)),
-    '&' => (tail(code), Some(AND)),
-    '|' => (tail(code), Some(OR)),
-    '^' => (tail(code), Some(XOR)),
-    '<' => {
-      let code = tail(code);
-      if head(code) == '=' { 
-        (tail(code), Some(LTE))
-      } else if head(code) == '<' {
-        (tail(code), Some(SHL))
-      } else {
-        (code, Some(LTN))
-      }
+    '+' => (tail(code), Some(U120_ADD)),
+    '-' => (tail(code), Some(U120_SUB)),
+    '*' => (tail(code), Some(U120_MUL)),
+    '/' => (tail(code), Some(U120_DIV)),
+    '%' => (tail(code), Some(U120_MOD)),
+    '&' => (tail(code), Some(U120_AND)),
+    '|' => (tail(code), Some(U120_OR)),
+    '^' => (tail(code), Some(U120_XOR)),
+    '<' => match head(tail(code)) {
+      '=' => (tail(code), Some(U120_LTE)),
+      '<' => (tail(code), Some(U120_SHL)),
+      _   => (code, Some(U120_LTN)),
     },
-    '>' => {
-      let code = tail(code);
-      if head(code) == '=' { 
-        (tail(code), Some(GTE))
-      } else if head(code) == '>' {
-        (tail(code), Some(SHR))
-      } else {
-        (code, Some(GTN))
-      }
+    '>' => match head(tail(code)) {
+      '=' => (tail(code), Some(U120_GTE)),
+      '>' => (tail(code), Some(U120_SHR)),
+      _   => (code, Some(U120_GTN)),
     },
-    '=' => {
-      if head(tail(code)) == '=' {
-        (tail(tail(code)), Some(EQL))
-      } else {
-        (code, None)
-      }
+    '=' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(U120_EQL)),
+      _   => (code, None),
     },
-    '!' => {
-      if head(tail(code)) == '=' {
-        (tail(tail(code)), Some(NEQ))
-      } else {
-        (code, None)
-      }
+    '!' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(U120_NEQ)),
+      _   => (code, None),
+    },
+    '~' => match head(tail(code)) {
+      '+' => (tail(tail(code)), Some(UTUP_ADD)),
+      '-' => (tail(tail(code)), Some(UTUP_SUB)),
+      '*' => (tail(tail(code)), Some(UTUP_MUL)),
+      '/' => (tail(tail(code)), Some(UTUP_DIV)),
+      '%' => (tail(tail(code)), Some(UTUP_MOD)),
+      '&' => (tail(tail(code)), Some(UTUP_AND)),
+      '|' => (tail(tail(code)), Some(UTUP_OR)),
+      '^' => (tail(tail(code)), Some(UTUP_XOR)),
+      '<' => match head(tail(tail(code))) {
+        '=' => (tail(tail(code)), Some(UTUP_LTE)),
+        '<' => (tail(tail(code)), Some(UTUP_SHL)),
+        '~' => (tail(tail(code)), Some(UTUP_RTL)),
+        _   => (tail(code), Some(UTUP_LTN)),
+      },
+      '>' => match head(tail(tail(code))) {
+        '=' => (tail(tail(code)), Some(UTUP_GTE)),
+        '>' => (tail(tail(code)), Some(UTUP_SHR)),
+        '~' => (tail(tail(code)), Some(UTUP_RTR)),
+        _   => (tail(code), Some(UTUP_GTN)),
+      },
+      '=' => match head(tail(tail(code))) {
+        '=' => (tail(tail(tail(code))), Some(UTUP_EQL)),
+        _   => (tail(code), None),
+      },
+      '!' => match head(tail(tail(code))) {
+        '=' => (tail(tail(tail(code))), Some(UTUP_NEQ)),
+        _   => (tail(code), None),
+      },
+      _ => (code, None)
     },
     _ => (code, None)
   }
@@ -2975,13 +3111,8 @@ pub fn view_statements(statements: &[Statement]) -> String {
 
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &[Statement]) {
-  //println!("[Serialization]");
   let str_0 = view_statements(statements);
   let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
-  //println!("[Deserialization] {}", if str_0 == str_1 { "(ok)" } else { "(error: not equal)" });
-  //println!("{}", str_0);
-  //println!("---------------");
-  //println!("{}", str_1);
 
   println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   let mut rt = init_runtime();
@@ -2993,13 +3124,12 @@ pub fn test_statements(statements: &[Statement]) {
   println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());
   println!("- size: {} words", rt.get_size());
   println!("- time: {} ms", init.elapsed().as_millis());
-
 }
 
 pub fn test_statements_from_code(code: &str) {
   test_statements(&read_statements(code).1);
 }
 
-pub fn test(file: &str) {
+pub fn test_statements_from_file(file: &str) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
 }

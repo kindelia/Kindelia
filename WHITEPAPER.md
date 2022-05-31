@@ -19,12 +19,12 @@ Sections
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
-* [Example blocks](#example-blocks)
-  * [Block #1: defining pure functions](#defining-pure-functions)
-  * [Block #2: defining stateful functions](#defining-stateful-functions)
-  * [Block #3: creating some accounts](#creating-some-accounts)
-  * [Block #4: installing a game](#installing-a-game)
-  * [Block #5: playing the game](#playing-the-game)
+* [Example blocks](#examples)
+  * [Block #1: defining pure functions](#block-1-defining-pure-functions)
+  * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
+  * [Block #3: creating some accounts](#block-3-creating-some-accounts)
+  * [Block #4: installing a game](#block-4-installing-a-game)
+  * [Block #5: playing the game](#block-5-playing-the-game)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -34,8 +34,8 @@ Sections
   * [Computation and Space Limits](#computation-and-space-limits)
   * [Serialization](#serialization)
 * [Notes](#notes)
-  * [Why?](#why)
-  * [Why Nakamoto Consensus (Proof of Work)?](#why-nakamoto-consensus-proof-of-work?)
+  * [Why?](#1-why)
+  * [Why Nakamoto Consensus (Proof of Work)?](#2-why-nakamoto-consensus-proof-of-work)
 
 Introduction
 ============
@@ -558,29 +558,107 @@ A binary operation on 120-bit numbers.
 add(a, b)
 ```
 
-There are 16 numeric operations available:
+The numeric operations available are:
 
-ID | Name | Symbol | Operation
--- | ---- | ------ | ---------
- 0 | ADD  | `+`    | addition
- 1 | SUB  | `-`    | subtraction
- 2 | MUL  | `*`    | multiplication
- 3 | DIV  | `/`    | division
- 4 | MOD  | `%`    | modulus
- 5 | AND  | `&`    | bitwise and
- 6 | OR   | `\|`   | bitwise or
- 7 | XOR  | `^`    | bitwise xor
- 8 | SHL  | `<<`   | bitwise left shift
- 9 | SHR  | `>>`   | bitwise right shift
-10 | LE   | `<=`   | less than or equal
-11 | LT   | `<`    | less than
-12 | EQ   | `==`   | equal
-13 | GT   | `>`    | greater than or equal
-14 | GE   | `>=`   | greater than
-15 | NE   | `!=`   | not equal
+ID | Name      | Symbol | Operation
+-- | --------- | ------ | --------------------------------------
+ 0 | U120_ADD  | `+`    | unsigned integer addition
+ 1 | U120_SUB  | `-`    | unsigned integer subtraction
+ 2 | U120_MUL  | `*`    | unsigned integer multiplication
+ 3 | U120_DIV  | `/`    | unsigned integer division
+ 4 | U120_MOD  | `%`    | unsigned integer modulus
+ 5 | U120_AND  | `&`    | unsigned integer bitwise and
+ 6 | U120_OR   | `\|`   | unsigned integer bitwise or
+ 7 | U120_XOR  | `^`    | unsigned integer bitwise xor
+ 8 | U120_SHL  | `<<`   | unsigned integer bitwise left shift
+ 9 | U120_SHR  | `>>`   | unsigned integer bitwise right shift
+10 | U120_LE   | `<=`   | unsigned integer less than or equal
+11 | U120_LT   | `<`    | unsigned integer less than
+12 | U120_EQ   | `==`   | unsigned integer equal
+13 | U120_GT   | `>`    | unsigned integer greater than or equal
+14 | U120_GE   | `>=`   | unsigned integer greater than
+15 | U120_NE   | `!=`   | unsigned integer not equal
+32 | I120_ADD  | `+i`   | integer addition
+33 | I120_SUB  | `-i`   | integer subtraction
+34 | I120_MUL  | `*i`   | integer multiplication
+35 | I120_DIV  | `/i`   | integer division
+36 | I120_MOD  | `%i`   | integer modulus
+37 | I120_AND  | `&i`   | integer bitwise and
+38 | I120_OR   | `\|i`  | integer bitwise or
+39 | I120_XOR  | `^i`   | integer bitwise xor
+40 | I120_SHL  | `<<i`  | integer bitwise left shift
+41 | I120_SHR  | `>>i`  | integer bitwise right shift
+42 | I120_LE   | `<=i`  | integer less than or equal
+43 | I120_LT   | `<i`   | integer less than
+44 | I120_EQ   | `==i`  | integer equal
+45 | I120_GT   | `>i`   | integer greater than or equal
+46 | I120_GE   | `>=i`  | integer greater than
+47 | I120_NE   | `!=i`  | integer not equal
+48 | I120_RTL  | `<~i`  | integer rotate left
+49 | I120_RTL  | `>~i`  | integer rotate right
+64 | UTUP_ADD  | `~+`   | unsigned tuple addition
+65 | UTUP_SUB  | `~-`   | unsigned tuple subtraction
+66 | UTUP_MUL  | `~*`   | unsigned tuple multiplication
+67 | UTUP_DIV  | `~/`   | unsigned tuple division
+68 | UTUP_MOD  | `~%`   | unsigned tuple modulus
+69 | UTUP_AND  | `~&`   | unsigned tuple bitwise and
+70 | UTUP_OR   | `~\|`  | unsigned tuple bitwise or
+71 | UTUP_XOR  | `~^`   | unsigned tuple bitwise xor
+72 | UTUP_SHL  | `~<<`  | unsigned tuple bitwise left shift
+73 | UTUP_SHR  | `~>>`  | unsigned tuple bitwise right shift
+74 | UTUP_LE   | `~<=`  | unsigned tuple less than or equal
+75 | UTUP_LT   | `~<`   | unsigned tuple less than
+76 | UTUP_EQ   | `~==`  | unsigned tuple equal
+77 | UTUP_GT   | `~>`   | unsigned tuple greater than or equal
+78 | UTUP_GE   | `~>=`  | unsigned tuple greater than
+79 | UTUP_NE   | `~!=`  | unsigned tuple not equal
+80 | UTUP_RTL  | `~<~`  | unsigned tuple rotate left
+81 | UTUP_RTR  | `~>~`  | unsigned tuple rotate right
+96 | ITUP_ADD  | `~+i`  | tuple addition
+97 | ITUP_SUB  | `~-i`  | tuple subtraction
+98 | ITUP_MUL  | `~*i`  | tuple multiplication
+99 | ITUP_DIV  | `~/i`  | tuple division
+100| ITUP_MOD  | `~%i`  | tuple modulus
+101| ITUP_AND  | `~&i`  | tuple bitwise and
+102| ITUP_OR   | `~\|i` | tuple bitwise or
+103| ITUP_XOR  | `~^i`  | tuple bitwise xor
+104| ITUP_SHL  | `~<<i` | tuple bitwise left shift
+105| ITUP_SHR  | `~>>i` | tuple bitwise right shift
+106| ITUP_LE   | `~<=i` | tuple less than or equal
+107| ITUP_LT   | `~<i`  | tuple less than
+108| ITUP_EQ   | `~==i` | tuple equal
+109| ITUP_GT   | `~>i`  | tuple greater than or equal
+110| ITUP_GE   | `~>=i` | tuple greater than
+111| ITUP_NE   | `~!=i` | tuple not equal
+112| ITUP_RTL  | `~<~i` | tuple rotate left
+113| ITUP_RTR  | `~>~i` | tuple rotate right
 
-Operations have type `fn(u120,u120) -> u120`, and work like integer arithmetic
-in C. Comparisons return 0 for false and 1 for true.
+Numeric operations have type `fn(u120,u120) -> u120`, but the operands are
+interpreted differently, depending on the operation type:
+
+- **U120**: an unsigned 120-bit integer
+
+- **I120**: a signed 120-bit integer
+
+- **UTUP**: a tuple with unsigned 8-bit, 16-bit, 32-bit and 64-bit integers
+
+- **ITUP**: a tuple with signed 8-bit, 16-bit, 32-bit and 64-bit integers
+
+For integers, the sign bit is the most significant one. For tuple types, the
+smaller values are placed in the least significant bit. So, for example, an UTUP
+is constructed as:
+
+```
+fn utup(x8: u8, x16: u16, x32: u32, x64: u64) -> u128 {
+  let x8  = (x8  as u128) <<  0;
+  let x16 = (x16 as u128) <<  8;
+  let x32 = (x32 as u128) << 24;
+  let x64 = (x64 as u128) << 56;
+  return x8 | x16 | x32 | x64;
+}
+```
+
+Comparison operations like `equal` return 0 for false and 1 for true.
 
 ### Superposed Operation
 
