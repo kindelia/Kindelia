@@ -2853,7 +2853,7 @@ fn read_oper(code: &str) -> (&str, Option<u128>) {
     },
     '>' => match head(tail(code)) {
       '=' => (tail(code), Some(U120_GTE)),
-      '<' => (tail(code), Some(U120_SHR)),
+      '>' => (tail(code), Some(U120_SHR)),
       _   => (code, Some(U120_GTN)),
     },
     '=' => match head(tail(code)) {
@@ -2881,7 +2881,7 @@ fn read_oper(code: &str) -> (&str, Option<u128>) {
       },
       '>' => match head(tail(tail(code))) {
         '=' => (tail(tail(code)), Some(UTUP_GTE)),
-        '<' => (tail(tail(code)), Some(UTUP_SHR)),
+        '>' => (tail(tail(code)), Some(UTUP_SHR)),
         '~' => (tail(tail(code)), Some(UTUP_RTR)),
         _   => (tail(code), Some(UTUP_GTN)),
       },
