@@ -159,29 +159,33 @@ The **block** below defines and uses some global functions that operate on immut
 
 ```c
 // Declares a constructor, Leaf, with arity (size) 1
-$(Leaf value)
+ctr {Leaf value}
 
 // Declares a constructor, Node, with arity (size) 2
-$(Node left right)
+ctr {Node left right}
 
 // Declares a pure function, Gen, that receives a
 // num and returns a tree with 2^num copies of #1
-!(Gen depth) {
-  !(Gen #0) = $(Leaf #1)
-  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+fun (Gen depth) {
+  (Gen #0) =
+    {Leaf #1}
+  (Gen x) =
+    dup x0 x1 = x;
+    {Node (Gen (- x0 #1)) (Gen (- x1 #1))}
 } = #0
 
 // Declares a pure function that sums a tree
-!(Sum tree) {
-  !(Sum $(Leaf x))   = x
-  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
+fun (Sum tree) {
+  (Sum {Leaf x})   = x
+  (Sum {Node a b}) = (+ (Sum a) (Sum b))
 } = #0
 
 // Run statement that creates a tree with 2^21
 // numbers, sums them all and prints the result:
-{
-  $(IO.done !(Sum !(Gen #21)))
+run {
+  !done (Sum (Gen #21))
 }
+
 ```
 
 When a Kindelia node runs that block, the global functions `Gen` and `Sum` will
@@ -215,25 +219,30 @@ counter, i.e., 3.
 
 ```c
 // Creates a Counter function with 2 actions:
-$(Inc) // incs its counter
-$(Get) // reads its counter
-!(Counter action) {
-  !(Counter $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Counter $(Get)) = !(IO.load @x $(IO.done x))
+ctr {Inc} // incs its counter
+ctr {Get} // reads its counter
+fun (Counter action) {
+  (Counter {Inc}) =
+    !take x
+    !save (+ x #1)
+    !done #0
+  (Counter {Get}) =
+    !load x
+    !done x
 } = #0 // initial state = #0
 
 // Runs a script that increments the Counter's state 3 times
-{
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.done #0))))
+run {
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !done #0
 }
 
 // Runs a script that prints the Counter's state
-{
-  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
-  $(IO.done x))
+run {
+  !call x 'Counter' [{Get}]
+  !done x
 }
 ```
 
@@ -295,16 +304,16 @@ statements can be one of 3 variants:
 - **ctr**: declares a new constructor
 
     ```c
-    $(ConstructorName field_0_name field_1_name ...)
+    ctr {ConstructorName field_0_name field_1_name ...}
     ```
 
 
 - **fun**: declares a new function 
 
     ```c
-    !(FunctionName argument_0_name argument_1_name ...) {
-      !(ConstructorName arg_0 arg_1 ...) = returned_value_0
-      !(ConstructorName arg_0 arg_1 ...) = returned_value_1
+    fun (FunctionName argument_0_name argument_1_name ...) {
+      (ConstructorName arg_0 arg_1 ...) = returned_value_0
+      (ConstructorName arg_0 arg_1 ...) = returned_value_1
       ...
     } = initial_state
     ```
@@ -312,7 +321,7 @@ statements can be one of 3 variants:
 - **run**: runs an IO expression
 
     ```c
-    {
+    run {
       IO_expression
     }
     ```
@@ -352,17 +361,17 @@ Oper ::=
 // An expression
 Term ::=
 
-  // A lambda
+  // A lambda function
   @<var0: Name> <body: Term>
   
-  // An application
-  (<func: Term> <argm: Term>)
+  // A lambda application
+  (! <func: Term> <argm: Term>)
   
   // A constructor
-  $(<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
+  {<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>}
   
   // A function call
-  !(<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
+  (<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
 
   // A native number
   #<numb: Numb>
@@ -380,7 +389,7 @@ Term ::=
 For example,
 
 ```
-@x @y $(Pair (+ x #42) !(F y))
+@x @y {Pair (+ x #42) (F y)}
 ```
 
 Denotes a function that receives two values, `x`, and `y`, and returns a pair
@@ -421,12 +430,12 @@ Finally, Kindelia has side-effective operations that allow functions to save
 states, request information from the network, etc.:
 
 ```c
-$(IO.take           @r ...) // takes this function's internal state
-$(IO.save expr      @r ...) // saves this function's internal state
-$(IO.call func args @r ...) // calls another IO function
-$(IO.from           @r ...) // gets the caller name
+(IO.take           @r ...) // takes this function's internal state
+(IO.save expr      @r ...) // saves this function's internal state
+(IO.call func args @r ...) // calls another IO function
+(IO.from           @r ...) // gets the caller name
 ... TODO ...                // ...
-$(IO.done expr)             // returns from the IO action
+(IO.done expr)             // returns from the IO action
 ```
 
 Note that, since Kindelia's language is pure, these side-effects are only
@@ -826,22 +835,22 @@ different limits that a block must respect. For example:
 run {
 
   // Sends 500 Cat Coins, from Alice to Bob
-  !(ECDSA.check @alice
-  $(IO.call alice (Tuple4 'send_cat_coin' 'Bob' 500) @~
-  $(IO.done #0)))
+  (ECDSA.check @alice
+  (IO.call alice (Tuple3 'send_cat_coin' 'Bob' 500) @~
+  (IO.done #0)))
 
 } then {
 
   // Gets the used mana, bits and the block miner
-  $(IO.get_used_mana @used_mana
-  $(IO.get_used_bits @used_bits
-  $(IO.get_miner_name @miner_name
+  (IO.get_used_mana @used_mana
+  (IO.get_used_bits @used_bits
+  (IO.get_miner_name @miner_name
 
   // Pays '7 * used_mana + 3 * used_bits + 1 ultra sword' to the block miner
-  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 7 used_mana)) @~
-  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 3 used_bits)) @~
-  $(IO.call alice (Tuple4 'send_item' 'UltraSword' miner_name) @~
-  $(IO.done #0)))))))
+  (IO.call alice (Tuple3 'send_cat_coin' miner_name (* 7 used_mana)) @~
+  (IO.call alice (Tuple3 'send_cat_coin' miner_name (* 3 used_bits)) @~
+  (IO.call alice (Tuple3 'send_item' 'UltraSword' miner_name) @~
+  (IO.done #0)))))))
   
 } sign {
   alices_signature

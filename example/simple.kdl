@@ -1,5 +1,7 @@
-{
-  $(IO.call 'Count' !(Tuple1 $(Count.Inc)) @~
-  $(IO.call 'Count' !(Tuple1 $(Count.Get)) @x
-  $(IO.done x)))
+run {
+  !call ~ 'Count' [{Count.Inc}]
+  !call ~ 'Count' [{Count.Inc}]
+  !call ~ 'Count' [{Count.Inc}]
+  !call x 'Count' [{Count.Get}]
+  !done x
 }

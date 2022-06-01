@@ -366,27 +366,22 @@ pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
-//   (IO.done retr:r)                                       : (IO r)
-//   (IO.take               cont:(∀? (IO r))) : (IO r)
-//   (IO.save expr:?        cont:(∀? (IO r))) : (IO r)
-//   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
-//   (IO.from               cont:(∀? (IO r))) : (IO r)
-const IO_DONE : u128 = 0x13640a33ca9;
-const IO_TAKE : u128 = 0x13640e25be9;
-const IO_SAVE : u128 = 0x13640de5ea9;
-const IO_CALL : u128 = 0x136409e5c30;
-const IO_FROM : u128 = 0x13640ab6cf1;
-
-const fn GET_ARITY(fid: u128) -> Option<u128> {
-  match fid {
-    IO_DONE => Some(1),
-    IO_TAKE => Some(1),
-    IO_SAVE => Some(2),
-    IO_CALL => Some(3),
-    IO_FROM => Some(1),
-    _       => None,
-  }
-}
+//   (IO.done expr)           : (IO r)
+//   (IO.take           then) : (IO r)
+//   (IO.save expr      then) : (IO r)
+//   (IO.call expr args then) : (IO r)
+//   (IO.from           then) : (IO r)
+const IO_DONE : u128 = 0x1364039960f; // name_to_u128('IO.DONE')
+const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128('IO.TAKE')
+const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128('IO.SAVE')
+const IO_CALL : u128 = 0x1364034b596; // name_to_u128('IO.CALL')
+const IO_FROM : u128 = 0x1364041c657; // name_to_u128('IO.FROM')
+const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
+const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
+const MC_LOAD : u128 = 0xc33968; // name_to_u128('load')
+const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
+const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
+const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
@@ -513,25 +508,64 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
-$(Tuple0)
-$(Tuple1 x0)
-$(Tuple2 x0 x1)
-$(Tuple3 x0 x1 x2)
-$(Tuple4 x0 x1 x2 x3)
-$(Tuple5 x0 x1 x2 x3 x4)
-$(Tuple6 x0 x1 x2 x3 x4 x5)
-$(Tuple7 x0 x1 x2 x3 x4 x5 x6)
-$(Tuple8 x0 x1 x2 x3 x4 x5 x6 x7)
+ctr {Tuple0}
+ctr {Tuple1 x0}
+ctr {Tuple2 x0 x1}
+ctr {Tuple3 x0 x1 x2}
+ctr {Tuple4 x0 x1 x2 x3}
+ctr {Tuple5 x0 x1 x2 x3 x4}
+ctr {Tuple6 x0 x1 x2 x3 x4 x5}
+ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
+ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
 
-!(IO.load cont) {
-  !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
+ctr {IO.DONE expr}
+ctr {IO.TAKE then}
+ctr {IO.SAVE expr then}
+ctr {IO.CALL name args then}
+ctr {IO.FROM then} 
+
+fun (IO.done expr) {
+  (IO.done expr) = {IO.DONE expr}
 } = #0
 
-$(Count.Inc)
-$(Count.Get)
-!(Count action) {
-  !(Count $(Count.Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Count.Get)) = !(IO.load @x $(IO.done x))
+fun (IO.take then) {
+  (IO.take then) = {IO.TAKE then}
+} = #0
+
+fun (IO.save expr then) {
+  (IO.save expr then) = {IO.SAVE expr then}
+} = #0
+
+fun (IO.call name args then) {
+  (IO.call name args then) = {IO.CALL name args then}
+} = #0
+
+fun (IO.from then) {
+  (IO.from then) = {IO.FROM then}
+} = #0
+
+fun (IO.load cont) {
+  (IO.load cont) =
+    {IO.TAKE @x
+    dup x0 x1 = x;
+    {IO.SAVE x0 @~
+    (! cont x1)}}
+} = #0
+
+ctr {Count.Inc}
+ctr {Count.Get}
+fun (Count action) {
+  (Count {Count.Inc}) =
+    !take x
+    !save (+ x #1)
+    !done #0
+  (Count {Count.Get}) =
+    !load x
+    !done x
 } = #0
 ";
 
@@ -1397,9 +1431,7 @@ impl Runtime {
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
-    if let Some(arity) = GET_ARITY(fid) {
-      return arity;
-    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return arity;
     } else {
       return U128_NONE;
@@ -1411,9 +1443,7 @@ impl Runtime {
   }
 
   pub fn exists(&self, fid: u128) -> bool {
-    if let Some(arity) = GET_ARITY(fid) {
-      return true;
-    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return true;
     } else {
       return false;
@@ -2894,14 +2924,14 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         let arit = rt.get_arity(func);
         //println!("  - arity is: {} {}", u128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("$({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("{{{}{}}}", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       FUN => {
         let func = get_ext(term);
         let arit = rt.get_arity(func);
         //println!("  - arity is: {} {}", u128_to_name(func), arit);
         let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("!({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
+        format!("({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
       }
       ERA => {
         "*".to_string()
@@ -2919,7 +2949,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     let name = names.get(&pos).unwrap_or(&what);
     let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
     let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(" | &{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    text.push_str(&format!(" | &dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
   }
   text
 }
@@ -3101,18 +3131,6 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, body) = read_term(code);
       return (code, Term::Lam { name, body: Box::new(body) });
     },
-    '&' => {
-      let code         = tail(code);
-      let (code, skip) = read_char(code, '{');
-      let (code, nam0) = read_name(code);
-      let (code, nam1) = read_name(code);
-      let (code, skip) = read_char(code, '}');
-      let (code, skip) = read_char(code, '=');
-      let (code, expr) = read_term(code);
-      let (code, skip) = read_char(code, ';');
-      let (code, body) = read_term(code);
-      return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
-    },
     '(' => {
       let code = tail(code);
       let (code, oper) = read_oper(code);
@@ -3122,27 +3140,36 @@ pub fn read_term(code: &str) -> (&str, Term) {
         let (code, val1) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
-      } else {
+      } else if head(code) == '!' {
+        let code = tail(code);
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
+      } else {
+        let (code, name) = read_name(code);
+        let (code, args) = read_until(code, ')', read_term);
+        // TODO: check function name size _on direct calling_, and propagate error
+        return (code, Term::Fun { name, args });
       }
     },
-    '$' => {
+    '{' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_term);
+      let (code, args) = read_until(code, '}', read_term);
       return (code, Term::Ctr { name, args });
     },
-    '!' => {
+    '[' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, '(');
-      let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_term);
-      // TODO: check function name size _on direct calling_, and propagate error
-      return (code, Term::Fun { name, args });
+      let (code, vals) = read_until(code, ']', read_term);
+      if vals.len() <= 12 { 
+        return (code, Term::Ctr {
+          name: name_to_u128(&format!("Tuple{}", vals.len())),
+          args: vals
+        });
+      } else {
+        panic!("Tuple too long.");
+      }
     },
     '#' => {
       let code = tail(code);
@@ -3155,9 +3182,83 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, skip) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
+    '!' => {
+      let code = tail(code);
+      let (code, macro_name) = read_name(code);
+      //const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
+      //const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
+      //const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
+      //const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
+      //const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
+      match macro_name {
+        MC_DONE => {
+          let (code, expr) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.DONE"),
+            args: vec![expr],
+          });
+        }
+        MC_TAKE => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.TAKE"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_LOAD => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Fun {
+            name: name_to_u128("IO.load"), // attention: lowercase, because it is a function call
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_SAVE => {
+          let (code, expr) = read_term(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.SAVE"),
+            args: vec![expr, Term::Lam { name: VAR_NONE, body: Box::new(then) }],
+          });
+        }
+        MC_CALL => {
+          let (code, bind) = read_name(code);
+          let (code, func) = read_term(code);
+          let (code, args) = read_term(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.CALL"),
+            args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_FROM => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.FROM"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        _ => {
+          panic!("Unknown macro: {}.", u128_to_name(macro_name));
+        }
+      }
+    },
     _ => {
-      let (code, name) = read_name(code);
-      return (code, Term::Var { name });
+      if let ('d','u','p',' ') = (head(code), head(tail(code)), head(tail(tail(code))), head(tail(tail(tail(code))))) {
+        let code = tail(tail(tail(code)));
+        let (code, nam0) = read_name(code);
+        let (code, nam1) = read_name(code);
+        let (code, skip) = read_char(code, '=');
+        let (code, expr) = read_term(code);
+        let (code, skip) = read_char(code, ';');
+        let (code, body) = read_term(code);
+        return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
+      } else {
+        let (code, name) = read_name(code);
+        return (code, Term::Var { name });
+      }
     }
   }
 }
@@ -3250,9 +3351,9 @@ fn read_func(code: &str) -> (&str, CompFunc) {
 
 fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
-  match head(code) {
-    '!' => {
-      let code = tail(code);
+  match (head(code), head(tail(code)), head(tail(tail(code)))) {
+    ('f','u','n') => {
+      let code = tail(tail(tail(code)));
       let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_name);
@@ -3262,15 +3363,16 @@ fn read_statement(code: &str) -> (&str, Statement) {
       let (code, init) = read_term(code);
       return (code, Statement::Fun { name, args, func, init });
     }
-    '$' => {
-      let code = tail(code);
-      let (code, skip) = read_char(code, '(');
+    ('c','t','r') => {
+      let code = tail(tail(tail(code)));
+      let (code, skip) = read_char(code, '{');
       let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_name);
+      let (code, args) = read_until(code, '}', read_name);
       return (code, Statement::Ctr { name, args });
     }
-    '{' => {
-      let code = tail(code);
+    ('r','u','n') => {
+      let code = tail(tail(tail(code)));
+      let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
       return (code, Statement::Run { expr });
@@ -3310,7 +3412,7 @@ pub fn view_term(term: &Term) -> String {
       let nam1 = view_name(*nam1);
       let expr = view_term(expr);
       let body = view_term(body);
-      return format!("&{{{} {}}} = {}; {}", nam0, nam1, expr, body);
+      return format!("dup {} {} = {}; {}", nam0, nam1, expr, body);
     }
     Term::Lam { name, body } => {
       let name = view_name(*name);
@@ -3320,17 +3422,17 @@ pub fn view_term(term: &Term) -> String {
     Term::App { func, argm } => {
       let func = view_term(func);
       let argm = view_term(argm);
-      return format!("({} {})", func, argm);
+      return format!("(! {} {})", func, argm);
     }
     Term::Ctr { name, args } => {
       let name = view_name(*name);
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("$({}{})", name, args);
+      return format!("{{{}{}}}", name, args);
     }
     Term::Fun { name, args } => {
       let name = view_name(*name);
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("!({}{})", name, args);
+      return format!("({}{})", name, args);
     }
     Term::Num { numb } => {
       // If it has 26-30 bits, pretty-print as a name
@@ -3385,17 +3487,17 @@ pub fn view_statement(statement: &Statement) -> String {
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      return format!("!({} {}) {{\n{}\n}} = {}", name, args, func, init);
+      return format!("fun ({} {}) {{\n{}\n}} = {}", name, args, func, init);
     }
     Statement::Ctr { name, args } => {
       // correct:
       let name = u128_to_name(*name);
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
-      return format!("$({} {})", name, args);
+      return format!("ctr {{{} {}}}", name, args);
     }
     Statement::Run { expr } => {
       let expr = view_term(expr);
-      return format!("{{\n  {}\n}}", expr);
+      return format!("run {{\n  {}\n}}", expr);
     }
   }
 }
