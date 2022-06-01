@@ -1,6 +1,6 @@
 #![allow(clippy::identity_op)]
 
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1663,6 +1663,102 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // Term
 // ----
 
+// Counts how many times the free variable 'name' appers inside Term
+fn count_uses(term: &Term, name: u128) -> u128 {
+  match term {
+    Term::Var { name: var_name } => {
+      return if name == *var_name { 1 } else { 0 };
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let expr_uses = count_uses(expr, name);
+      let body_uses = if name == *nam0 || name == *nam1 { 0 } else { count_uses(body, name) };
+      return expr_uses + body_uses;
+    }
+    Term::Lam { name: lam_name, body } => {
+      return if name == *lam_name { 0 } else { count_uses(body, name) };
+    }
+    Term::App { func, argm } => {
+      let func_uses = count_uses(func, name);
+      let argm_uses = count_uses(argm, name);
+      return func_uses + argm_uses;
+    }
+    Term::Ctr { name: ctr_name, args } => {
+      let mut uses = 0;
+      for arg in args {
+        uses += count_uses(arg, name);
+      }
+      return uses;
+    }
+    Term::Fun { name: fun_name, args } => {
+      let mut uses = 0;
+      for arg in args {
+        uses += count_uses(arg, name);
+      }
+      return uses;
+    }
+    Term::Num { numb } => {
+      return 0;
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let val0_uses = count_uses(val0, name);
+      let val1_uses = count_uses(val1, name);
+      return val0_uses + val1_uses;
+    }
+  }
+}
+
+// Checks if:
+// - Every non-erased variable is used exactly once
+// - Every erased variable is never used
+pub fn is_linear(term: &Term) -> bool {
+  match term {
+    Term::Var { name: var_name } => {
+      return true;
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let expr_linear = is_linear(expr);
+      let body_linear
+        =  (*nam0 == VAR_NONE || count_uses(body, *nam0) == 1)
+        && (*nam1 == VAR_NONE || count_uses(body, *nam1) == 1)
+        && is_linear(body);
+      return expr_linear && body_linear;
+    }
+    Term::Lam { name, body } => {
+      let body_linear
+        =  (*name == VAR_NONE || count_uses(body, *name) == 1)
+        && is_linear(body);
+      return body_linear;
+    }
+    Term::App { func, argm } => {
+      let func_linear = is_linear(func);
+      let argm_linear = is_linear(argm);
+      return func_linear && argm_linear;
+    }
+    Term::Ctr { name: ctr_name, args } => {
+      let mut linear = true;
+      for arg in args {
+        linear = linear && is_linear(arg);
+      }
+      return linear;
+    }
+    Term::Fun { name: fun_name, args } => {
+      let mut linear = true;
+      for arg in args {
+        linear = linear && is_linear(arg);
+      }
+      return linear;
+    }
+    Term::Num { numb } => {
+      return true;
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let val0_linear = is_linear(val0);
+      let val1_linear = is_linear(val1);
+      return val0_linear && val1_linear;
+    }
+  }
+}
+
 // Writes a Term represented as a Rust enum on the Runtime's rt.
 pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
@@ -1784,20 +1880,33 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for rule in 0 .. func.len() {
-    let comp_rule = &func[rule];
+  for rule_index in 0 .. func.len() {
+    let rule = &func[rule_index];
+
+    // Validates that:
+    // - the same lhs variable names aren't defined twice or more
+    // - lhs variables are used linearly on the rhs
+    let mut seen : HashSet<u128> = HashSet::new();
+    fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
+      if seen.contains(&name) {
+        return false;
+      } else {
+        seen.insert(name);
+        return name == VAR_NONE || count_uses(body, name) == 1;
+      }
+    }
 
     let mut cond = Vec::new();
     let mut vars = Vec::new();
     let mut eras = Vec::new();
 
     // If the lhs is a Fun
-    if let Term::Fun { ref name, ref args } = comp_rule.0 {
+    if let Term::Fun { ref name, ref args } = rule.0 {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
         if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", rule);
+          println!("  - failed to build function: arity mismatch on rule {}", rule_index);
         }
         return None;
       }
@@ -1815,11 +1924,18 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
             for j in 0 .. arg_args.len() as u128 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
+                if !check_var(name, &rule.1, &mut seen) {
+                  if debug {
+                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+                  }
+                  return None;
+                } else {
+                  vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
+                }
               // Otherwise..
               } else {
                 if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}", rule, i);
+                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
                 }
                 return None; // return none, because we don't allow nested matches
               }
@@ -1832,12 +1948,19 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
-            cond.push(0); // it has no matching condition
+            if !check_var(*arg_name, &rule.1, &mut seen) {
+              if debug {
+                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(*arg_name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+              }
+              return None;
+            } else {
+              vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
+              cond.push(0); // it has no matching condition
+            }
           }
           _ => {
             if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}", rule, i);
+              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
             }
             return None;
           }
@@ -1847,13 +1970,13 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     // If lhs isn't a Ctr, return None
     } else {
       if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}", rule);
+        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.0), view_term(&rule.1));
       }
       return None;
     }
 
     // Creates the rhs body
-    let body = comp_rule.1.clone();
+    let body = rule.1.clone();
 
     // Adds the rule to the result vector
     comp_rules.push(CompRule { cond, vars, eras, body });
@@ -1867,7 +1990,12 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     }
   }
 
-  return Some(CompFunc { func: func.clone(), arity, redux, rules: comp_rules });
+  return Some(CompFunc {
+    func: func.clone(),
+    arity,
+    redux,
+    rules: comp_rules,
+  });
 }
 
 pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
