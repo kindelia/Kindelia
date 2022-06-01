@@ -204,6 +204,18 @@ pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
 pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
 pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
 
+// | --------- | -----------------------|
+// | TAG = NUM |        num (u120)      |
+// | --------- | ---------------------- |
+// | TAG = CTR |                        |
+// | TAG = APP | ext (u60) | val (u60)  |
+// | TAG = OP2 |                        |
+// ...
+// | --------- | ---------------------- |
+// | TAG = LAM |       pos (u120)       |
+// ...
+// | --------- | -----------------------|
+
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
 pub const VAR: u128 = 0x2;
@@ -224,42 +236,130 @@ pub const NUM: u128 = 0xB;
 // - 32 iTUP operations
 // where uTUP = (u8,u16,u32,u64)
 //       iTUP = (i8,i16,i32,i64)
-pub const U120_ADD: u128 = 0x00;
-pub const U120_SUB: u128 = 0x01;
-pub const U120_MUL: u128 = 0x02;
-pub const U120_DIV: u128 = 0x03;
-pub const U120_MOD: u128 = 0x04;
-pub const U120_AND: u128 = 0x05;
-pub const U120_OR : u128 = 0x06;
-pub const U120_XOR: u128 = 0x07;
-pub const U120_SHL: u128 = 0x08;
-pub const U120_SHR: u128 = 0x09;
-pub const U120_LTN: u128 = 0x0A;
-pub const U120_LTE: u128 = 0x0B;
-pub const U120_EQL: u128 = 0x0C;
-pub const U120_GTE: u128 = 0x0D;
-pub const U120_GTN: u128 = 0x0E;
-pub const U120_NEQ: u128 = 0x0F;
-pub const U120_RTL: u128 = 0x10;
-pub const U120_RTR: u128 = 0x11;
-pub const UTUP_ADD: u128 = 0x40;
-pub const UTUP_SUB: u128 = 0x41;
-pub const UTUP_MUL: u128 = 0x42;
-pub const UTUP_DIV: u128 = 0x43;
-pub const UTUP_MOD: u128 = 0x44;
-pub const UTUP_AND: u128 = 0x45;
-pub const UTUP_OR : u128 = 0x46;
-pub const UTUP_XOR: u128 = 0x47;
-pub const UTUP_SHL: u128 = 0x48;
-pub const UTUP_SHR: u128 = 0x49;
-pub const UTUP_LTN: u128 = 0x4A;
-pub const UTUP_LTE: u128 = 0x4B;
-pub const UTUP_EQL: u128 = 0x4C;
-pub const UTUP_GTE: u128 = 0x4D;
-pub const UTUP_GTN: u128 = 0x4E;
-pub const UTUP_NEQ: u128 = 0x4F;
-pub const UTUP_RTL: u128 = 0x50;
-pub const UTUP_RTR: u128 = 0x51;
+
+pub const OP_U120: u128 = 0b00 << 5;
+pub const OP_I120: u128 = 0b01 << 5;
+pub const OP_UTUP: u128 = 0b10 << 5;
+pub const OP_ITUP: u128 = 0b11 << 5;
+
+pub const ADD : u128 = 0x00;
+pub const SUB : u128 = 0x01;
+pub const MUL : u128 = 0x02;
+pub const DIV : u128 = 0x03;
+pub const MOD : u128 = 0x04;
+pub const AND : u128 = 0x05;
+pub const OR  : u128 = 0x06;
+pub const XOR : u128 = 0x07;
+pub const SHL : u128 = 0x08;
+pub const SHR : u128 = 0x09;
+pub const LTN : u128 = 0x0A;
+pub const LTE : u128 = 0x0B;
+pub const EQL : u128 = 0x0C;
+pub const GTE : u128 = 0x0D;
+pub const GTN : u128 = 0x0E;
+pub const NEQ : u128 = 0x0F;
+pub const RTL : u128 = 0x10;
+pub const RTR : u128 = 0x11;
+
+/// kind:  0 -> x120     ; 1 -> xTUP
+/// sig:   0 -> unsigned ; 1 -> signed
+/// op: see above (5-bits)
+fn make_oper(kind: u128, sig: u128, op_code: u128) -> u128 {
+  let res = kind;
+  let res = (res << 1) | sig;
+  let res = (res << 5) | op_code;
+  res
+}
+
+fn decompose_oper(op: u128) -> (u128, u128, u128) {
+  let op_code = op & ((1<<5) - 1);
+  let op = op >> 5;
+  let sig = op & 1;
+  let op = op >> 1;
+  let kind = op & 1;
+  let op = op >> 1;
+  debug_assert!(op == 0, "Invalid operation");
+  (kind, sig, op_code)
+}
+
+// ?? This entire block can be replaced by a single clever macro
+
+// U120
+pub const U120_ADD: u128 = OP_U120 | ADD;
+pub const U120_SUB: u128 = OP_U120 | SUB;
+pub const U120_MUL: u128 = OP_U120 | MUL;
+pub const U120_DIV: u128 = OP_U120 | DIV;
+pub const U120_MOD: u128 = OP_U120 | MOD;
+pub const U120_AND: u128 = OP_U120 | AND;
+pub const U120_OR : u128 = OP_U120 | OR;
+pub const U120_XOR: u128 = OP_U120 | XOR;
+pub const U120_SHL: u128 = OP_U120 | SHL;
+pub const U120_SHR: u128 = OP_U120 | SHR;
+pub const U120_LTN: u128 = OP_U120 | LTN;
+pub const U120_LTE: u128 = OP_U120 | LTE;
+pub const U120_EQL: u128 = OP_U120 | EQL;
+pub const U120_GTE: u128 = OP_U120 | GTE;
+pub const U120_GTN: u128 = OP_U120 | GTN;
+pub const U120_NEQ: u128 = OP_U120 | NEQ;
+pub const U120_RTL: u128 = OP_U120 | RTL;
+pub const U120_RTR: u128 = OP_U120 | RTR;
+// I120
+pub const I120_ADD: u128 = OP_I120 | ADD;
+pub const I120_SUB: u128 = OP_I120 | SUB;
+pub const I120_MUL: u128 = OP_I120 | MUL;
+pub const I120_DIV: u128 = OP_I120 | DIV;
+pub const I120_MOD: u128 = OP_I120 | MOD;
+pub const I120_AND: u128 = OP_I120 | AND;
+pub const I120_OR : u128 = OP_I120 | OR;
+pub const I120_XOR: u128 = OP_I120 | XOR;
+pub const I120_SHL: u128 = OP_I120 | SHL;
+pub const I120_SHR: u128 = OP_I120 | SHR;
+pub const I120_LTN: u128 = OP_I120 | LTN;
+pub const I120_LTE: u128 = OP_I120 | LTE;
+pub const I120_EQL: u128 = OP_I120 | EQL;
+pub const I120_GTE: u128 = OP_I120 | GTE;
+pub const I120_GTN: u128 = OP_I120 | GTN;
+pub const I120_NEQ: u128 = OP_I120 | NEQ;
+pub const I120_RTL: u128 = OP_I120 | RTL;
+pub const I120_RTR: u128 = OP_I120 | RTR;
+// UTUP
+pub const UTUP_ADD: u128 = OP_UTUP | ADD;
+pub const UTUP_SUB: u128 = OP_UTUP | SUB;
+pub const UTUP_MUL: u128 = OP_UTUP | MUL;
+pub const UTUP_DIV: u128 = OP_UTUP | DIV;
+pub const UTUP_MOD: u128 = OP_UTUP | MOD;
+pub const UTUP_AND: u128 = OP_UTUP | AND;
+pub const UTUP_OR : u128 = OP_UTUP | OR;
+pub const UTUP_XOR: u128 = OP_UTUP | XOR;
+pub const UTUP_SHL: u128 = OP_UTUP | SHL;
+pub const UTUP_SHR: u128 = OP_UTUP | SHR;
+pub const UTUP_LTN: u128 = OP_UTUP | LTN;
+pub const UTUP_LTE: u128 = OP_UTUP | LTE;
+pub const UTUP_EQL: u128 = OP_UTUP | EQL;
+pub const UTUP_GTE: u128 = OP_UTUP | GTE;
+pub const UTUP_GTN: u128 = OP_UTUP | GTN;
+pub const UTUP_NEQ: u128 = OP_UTUP | NEQ;
+pub const UTUP_RTL: u128 = OP_UTUP | RTL;
+pub const UTUP_RTR: u128 = OP_UTUP | RTR;
+// ITUP
+pub const ITUP_ADD: u128 = OP_ITUP | ADD;
+pub const ITUP_SUB: u128 = OP_ITUP | SUB;
+pub const ITUP_MUL: u128 = OP_ITUP | MUL;
+pub const ITUP_DIV: u128 = OP_ITUP | DIV;
+pub const ITUP_MOD: u128 = OP_ITUP | MOD;
+pub const ITUP_AND: u128 = OP_ITUP | AND;
+pub const ITUP_OR : u128 = OP_ITUP | OR;
+pub const ITUP_XOR: u128 = OP_ITUP | XOR;
+pub const ITUP_SHL: u128 = OP_ITUP | SHL;
+pub const ITUP_SHR: u128 = OP_ITUP | SHR;
+pub const ITUP_LTN: u128 = OP_ITUP | LTN;
+pub const ITUP_LTE: u128 = OP_ITUP | LTE;
+pub const ITUP_EQL: u128 = OP_ITUP | EQL;
+pub const ITUP_GTE: u128 = OP_ITUP | GTE;
+pub const ITUP_GTN: u128 = OP_ITUP | GTN;
+pub const ITUP_NEQ: u128 = OP_ITUP | NEQ;
+pub const ITUP_RTL: u128 = OP_ITUP | RTL;
+pub const ITUP_RTR: u128 = OP_ITUP | RTR;
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -1404,15 +1504,15 @@ pub fn get_tag(lnk: Lnk) -> u128 {
 }
 
 pub fn get_ext(lnk: Lnk) -> u128 {
-  (lnk / EXT) & 0xFFFFFFFFFFFFFFF
+  (lnk / EXT) & 0xFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Lnk) -> u128 {
-  lnk & 0xFFFFFFFFFFFFFFF
+  lnk & 0xFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_num(lnk: Lnk) -> u128 {
-  lnk & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+  lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
 }
 
 //pub fn get_ari(lnk: Lnk) -> u128 {
@@ -2070,70 +2170,137 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
           // --------- OP2-NUM
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
-            //println!("op2-num");
-            fn gu8(tup: u128) -> u8 {
-              return tup as u8;
+            // eprintln!("op2-num");
+            fn gu08(tup: u128) -> u8 {
+              tup as u8
             }
             fn gu16(tup: u128) -> u16 {
-              return (tup >> 8) as u16;
+              (tup >> 8) as u16
             }
             fn gu32(tup: u128) -> u32 {
-              return (tup >> 24) as u32;
+              (tup >> 24) as u32
             }
             fn gu64(tup: u128) -> u64 {
-              return (tup >> 56) as u64;
+              (tup >> 56) as u64
+            }
+            fn gi08(tup: u128) -> i8 {
+              tup as i8
+            }
+            fn gi16(tup: u128) -> i16 {
+              (tup >> 8) as i16
+            }
+            fn gi32(tup: u128) -> i32 {
+              (tup >> 24) as i32
+            }
+            fn gi64(tup: u128) -> i64 {
+              (tup >> 56) as i64
             }
             fn utup(x8: u8, x16: u16, x32: u32, x64: u64) -> u128 {
-              let x8  = (x8  as u128) <<  0;
-              let x16 = (x16 as u128) <<  8;
-              let x32 = (x32 as u128) << 24;
-              let x64 = (x64 as u128) << 56;
+              let x8  = (x8  as u128) << (0);
+              let x16 = (x16 as u128) << (8);
+              let x32 = (x32 as u128) << (8 + 16);
+              let x64 = (x64 as u128) << (8 + 16 + 32);
+              return x8 | x16 | x32 | x64;
+            }
+            fn itup(x8: i8, x16: i16, x32: i32, x64: i64) -> u128 {
+              let x8  = (x8  as  u8 as u128) << (0);
+              let x16 = (x16 as u16 as u128) << (8);
+              let x32 = (x32 as u32 as u128) << (8 + 16);
+              let x64 = (x64 as u64 as u128) << (8 + 16 + 32);
               return x8 | x16 | x32 | x64;
             }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let a = get_num(arg0);
-            let b = get_num(arg1);
-            let c = match get_ext(term) {
-              U120_ADD => (a + b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SUB => (a - b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MUL => (a * b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_DIV => (a / b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MOD => (a % b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_AND => (a & b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_OR  => (a | b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_XOR => (a ^ b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHL => (a << b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHR => (a >> b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_LTN => u128::from(a <  b),
-              U120_LTE => u128::from(a <= b),
-              U120_EQL => u128::from(a == b),
-              U120_GTE => u128::from(a >= b),
-              U120_GTN => u128::from(a >  b),
-              U120_NEQ => u128::from(a != b),
-              U120_RTL => panic!("TODO"),
-              U120_RTR => panic!("TODO"),
-              UTUP_ADD => utup(gu8(a) + gu8(b), gu16(a) + gu16(b), gu32(a) + gu32(b), gu64(a) + gu64(b)),
-              UTUP_SUB => utup(gu8(a) - gu8(b), gu16(a) - gu16(b), gu32(a) - gu32(b), gu64(a) - gu64(b)),
-              UTUP_MUL => utup(gu8(a) * gu8(b), gu16(a) * gu16(b), gu32(a) * gu32(b), gu64(a) * gu64(b)),
-              UTUP_DIV => utup(gu8(a) / gu8(b), gu16(a) / gu16(b), gu32(a) / gu32(b), gu64(a) / gu64(b)),
-              UTUP_MOD => utup(gu8(a) % gu8(b), gu16(a) % gu16(b), gu32(a) % gu32(b), gu64(a) % gu64(b)),
-              UTUP_AND => utup(gu8(a) & gu8(b), gu16(a) & gu16(b), gu32(a) & gu32(b), gu64(a) & gu64(b)),
-              UTUP_OR  => utup(gu8(a) | gu8(b), gu16(a) | gu16(b), gu32(a) | gu32(b), gu64(a) | gu64(b)),
-              UTUP_XOR => utup(gu8(a) ^ gu8(b), gu16(a) ^ gu16(b), gu32(a) ^ gu32(b), gu64(a) ^ gu64(b)),
-              UTUP_SHL => utup(gu8(a) << gu8(b), gu16(a) << gu16(b), gu32(a) << gu32(b), gu64(a) << gu64(b)),
-              UTUP_SHR => utup(gu8(a) >> gu8(b), gu16(a) >> gu16(b), gu32(a) >> gu32(b), gu64(a) >> gu64(b)),
-              UTUP_LTN => utup(u8::from(gu8(a) <  gu8(b)), u16::from(gu16(a) <  gu16(b)), u32::from(gu32(a) <  gu32(b)), u64::from(gu64(a) <  gu64(b))),
-              UTUP_LTE => utup(u8::from(gu8(a) <= gu8(b)), u16::from(gu16(a) <= gu16(b)), u32::from(gu32(a) <= gu32(b)), u64::from(gu64(a) <= gu64(b))),
-              UTUP_EQL => utup(u8::from(gu8(a) == gu8(b)), u16::from(gu16(a) == gu16(b)), u32::from(gu32(a) == gu32(b)), u64::from(gu64(a) == gu64(b))),
-              UTUP_GTE => utup(u8::from(gu8(a) >= gu8(b)), u16::from(gu16(a) >= gu16(b)), u32::from(gu32(a) >= gu32(b)), u64::from(gu64(a) >= gu64(b))),
-              UTUP_GTN => utup(u8::from(gu8(a) >  gu8(b)), u16::from(gu16(a) >  gu16(b)), u32::from(gu32(a) >  gu32(b)), u64::from(gu64(a) >  gu64(b))),
-              UTUP_NEQ => utup(u8::from(gu8(a) != gu8(b)), u16::from(gu16(a) != gu16(b)), u32::from(gu32(a) != gu32(b)), u64::from(gu64(a) != gu64(b))),
-              UTUP_RTL => utup(gu8(a).rotate_left(gu8(b) as u32), gu16(a).rotate_left(gu16(b) as u32), gu32(a).rotate_left(gu32(b) as u32), gu64(a).rotate_left(gu64(b) as u32)),
-              UTUP_RTR => utup(gu8(a).rotate_right(gu8(b) as u32), gu16(a).rotate_right(gu16(b) as u32), gu32(a).rotate_right(gu32(b) as u32), gu64(a).rotate_right(gu64(b) as u32)),
-              _        => 0,
+            let a_u = get_num(arg0);
+            let b_u = get_num(arg1);
+            let a_i = a_u as i128;
+            let b_i = b_u as i128;
+            let a_u08 = gu08(a_u); let a_u16 = gu16(a_u); let a_u32 = gu32(a_u); let a_u64 = gu64(a_u); // TODO: replace by single function
+            let a_i08 = gi08(a_u); let a_i16 = gi16(a_u); let a_i32 = gi32(a_u); let a_i64 = gi64(a_u);
+            let b_u08 = gu08(b_u); let b_u16 = gu16(b_u); let b_u32 = gu32(b_u); let b_u64 = gu64(b_u);
+            let b_i08 = gi08(b_u); let b_i16 = gi16(b_u); let b_i32 = gi32(b_u); let b_i64 = gi64(b_u);
+
+            let op = get_ext(term);
+            let res = match op {
+              // U120
+              U120_ADD => (a_u +  b_u) & NUM_MASK,
+              U120_SUB => (a_u -  b_u) & NUM_MASK,
+              U120_MUL => (a_u *  b_u) & NUM_MASK,
+              U120_DIV => (a_u /  b_u) & NUM_MASK,
+              U120_MOD => (a_u %  b_u) & NUM_MASK,
+              U120_AND => (a_u &  b_u) & NUM_MASK,
+              U120_OR  => (a_u |  b_u) & NUM_MASK,
+              U120_XOR => (a_u ^  b_u) & NUM_MASK,
+              U120_SHL => (a_u << b_u) & NUM_MASK,
+              U120_SHR => (a_u >> b_u) & NUM_MASK,
+              U120_LTN => u128::from(a_u <  b_u),
+              U120_LTE => u128::from(a_u <= b_u),
+              U120_EQL => u128::from(a_u == b_u),
+              U120_GTE => u128::from(a_u >= b_u),
+              U120_GTN => u128::from(a_u >  b_u),
+              U120_NEQ => u128::from(a_u != b_u),
+              U120_RTL => todo!("U120_RTL"), // TODO
+              U120_RTR => todo!("U120_RTR"), // TODO
+              // I120
+              I120_ADD => (a_i +  b_i) as u128 & NUM_MASK,
+              I120_SUB => (a_i -  b_i) as u128 & NUM_MASK,
+              I120_MUL => (a_i *  b_i) as u128 & NUM_MASK,
+              I120_DIV => (a_i /  b_i) as u128 & NUM_MASK,
+              I120_MOD => (a_i %  b_i) as u128 & NUM_MASK,
+              I120_AND => (a_i &  b_i) as u128 & NUM_MASK,
+              I120_OR  => (a_i |  b_i) as u128 & NUM_MASK,
+              I120_XOR => (a_i ^  b_i) as u128 & NUM_MASK,
+              I120_SHL => (a_i << b_i) as u128 & NUM_MASK,
+              I120_SHR => (a_i >> b_i) as u128 & NUM_MASK,
+              I120_LTN => u128::from(a_i <  b_i),
+              I120_LTE => u128::from(a_i <= b_i),
+              I120_EQL => u128::from(a_i == b_i),
+              I120_GTE => u128::from(a_i >= b_i),
+              I120_GTN => u128::from(a_i >  b_i),
+              I120_NEQ => u128::from(a_i != b_i),
+              I120_RTL => todo!("I120_RTL"), // TODO
+              I120_RTR => todo!("I120_RTR"), // TODO
+              // UTUP
+              UTUP_ADD => utup(a_u08 +  b_u08, a_u16 +  b_u16, a_u32 +  b_u32, a_u64 +  b_u64),
+              UTUP_SUB => utup(a_u08 -  b_u08, a_u16 -  b_u16, a_u32 -  b_u32, a_u64 -  b_u64),
+              UTUP_MUL => utup(a_u08 *  b_u08, a_u16 *  b_u16, a_u32 *  b_u32, a_u64 *  b_u64),
+              UTUP_DIV => utup(a_u08 /  b_u08, a_u16 /  b_u16, a_u32 /  b_u32, a_u64 /  b_u64),
+              UTUP_MOD => utup(a_u08 %  b_u08, a_u16 %  b_u16, a_u32 %  b_u32, a_u64 %  b_u64),
+              UTUP_AND => utup(a_u08 &  b_u08, a_u16 &  b_u16, a_u32 &  b_u32, a_u64 &  b_u64),
+              UTUP_OR  => utup(a_u08 |  b_u08, a_u16 |  b_u16, a_u32 |  b_u32, a_u64 |  b_u64),
+              UTUP_XOR => utup(a_u08 ^  b_u08, a_u16 ^  b_u16, a_u32 ^  b_u32, a_u64 ^  b_u64),
+              UTUP_SHL => utup(a_u08 << b_u08, a_u16 << b_u16, a_u32 << b_u32, a_u64 << b_u64),
+              UTUP_SHR => utup(a_u08 >> b_u08, a_u16 >> b_u16, a_u32 >> b_u32, a_u64 >> b_u64),
+              UTUP_LTN => utup(u8::from(a_u08 <  b_u08), u16::from(a_u16 <  b_u16), u32::from(a_u32 <  b_u32), u64::from(a_u64 <  b_u64)),
+              UTUP_LTE => utup(u8::from(a_u08 <= b_u08), u16::from(a_u16 <= b_u16), u32::from(a_u32 <= b_u32), u64::from(a_u64 <= b_u64)),
+              UTUP_EQL => utup(u8::from(a_u08 == b_u08), u16::from(a_u16 == b_u16), u32::from(a_u32 == b_u32), u64::from(a_u64 == b_u64)),
+              UTUP_GTE => utup(u8::from(a_u08 >= b_u08), u16::from(a_u16 >= b_u16), u32::from(a_u32 >= b_u32), u64::from(a_u64 >= b_u64)),
+              UTUP_GTN => utup(u8::from(a_u08 >  b_u08), u16::from(a_u16 >  b_u16), u32::from(a_u32 >  b_u32), u64::from(a_u64 >  b_u64)),
+              UTUP_NEQ => utup(u8::from(a_u08 != b_u08), u16::from(a_u16 != b_u16), u32::from(a_u32 != b_u32), u64::from(a_u64 != b_u64)),
+              UTUP_RTL => utup(a_u08.rotate_left(b_u08 as u32),  a_u16.rotate_left(b_u16 as u32),  a_u32.rotate_left(b_u32 as u32),  a_u64.rotate_left(b_u64 as u32) ), // ?? I think the u64 to u32 cast can panic
+              UTUP_RTR => utup(a_u08.rotate_right(b_u08 as u32), a_u16.rotate_right(b_u16 as u32), a_u32.rotate_right(b_u32 as u32), a_u64.rotate_right(b_u64 as u32)),
+              // ITUP
+              ITUP_ADD => itup(a_i08 +  b_i08, a_i16 +  b_i16, a_i32 +  b_i32, a_i64 +  b_i64),
+              ITUP_SUB => itup(a_i08 -  b_i08, a_i16 -  b_i16, a_i32 -  b_i32, a_i64 -  b_i64),
+              ITUP_MUL => itup(a_i08 *  b_i08, a_i16 *  b_i16, a_i32 *  b_i32, a_i64 *  b_i64),
+              ITUP_DIV => itup(a_i08 /  b_i08, a_i16 /  b_i16, a_i32 /  b_i32, a_i64 /  b_i64),
+              ITUP_MOD => itup(a_i08 %  b_i08, a_i16 %  b_i16, a_i32 %  b_i32, a_i64 %  b_i64),
+              ITUP_AND => itup(a_i08 &  b_i08, a_i16 &  b_i16, a_i32 &  b_i32, a_i64 &  b_i64),
+              ITUP_OR  => itup(a_i08 |  b_i08, a_i16 |  b_i16, a_i32 |  b_i32, a_i64 |  b_i64),
+              ITUP_XOR => itup(a_i08 ^  b_i08, a_i16 ^  b_i16, a_i32 ^  b_i32, a_i64 ^  b_i64),
+              ITUP_SHL => itup(a_i08 << b_i08, a_i16 << b_i16, a_i32 << b_i32, a_i64 << b_i64),
+              ITUP_SHR => itup(a_i08 >> b_i08, a_i16 >> b_i16, a_i32 >> b_i32, a_i64 >> b_i64),
+              ITUP_LTN => itup(i8::from(a_i08 <  b_i08), i16::from(a_i16 <  b_i16), i32::from(a_i32 <  b_i32), i64::from(a_i64 <  b_i64)),
+              ITUP_LTE => itup(i8::from(a_i08 <= b_i08), i16::from(a_i16 <= b_i16), i32::from(a_i32 <= b_i32), i64::from(a_i64 <= b_i64)),
+              ITUP_EQL => itup(i8::from(a_i08 == b_i08), i16::from(a_i16 == b_i16), i32::from(a_i32 == b_i32), i64::from(a_i64 == b_i64)),
+              ITUP_GTE => itup(i8::from(a_i08 >= b_i08), i16::from(a_i16 >= b_i16), i32::from(a_i32 >= b_i32), i64::from(a_i64 >= b_i64)),
+              ITUP_GTN => itup(i8::from(a_i08 >  b_i08), i16::from(a_i16 >  b_i16), i32::from(a_i32 >  b_i32), i64::from(a_i64 >  b_i64)),
+              ITUP_NEQ => itup(i8::from(a_i08 != b_i08), i16::from(a_i16 != b_i16), i32::from(a_i32 != b_i32), i64::from(a_i64 != b_i64)),
+              ITUP_RTL => itup(a_i08.rotate_left(b_i08 as u32),  a_i16.rotate_left(b_i16 as u32),  a_i32.rotate_left(b_i32 as u32),  a_i64.rotate_left(b_i64 as u32)),
+              ITUP_RTR => itup(a_i08.rotate_right(b_i08 as u32), a_i16.rotate_right(b_i16 as u32), a_i32.rotate_right(b_i32 as u32), a_i64.rotate_right(b_i64 as u32)),
+              _ => panic!("Invalid operation!"),
             };
-            let done = Num(c);
+            let done = Num(res);
             clear(rt, get_loc(term, 0), 2);
             link(rt, host, done);
           // (+ {a0 a1} b)
@@ -2514,43 +2681,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         let oper = get_ext(term);
         let val0 = go(rt, ask_arg(rt, term, 0), names);
         let val1 = go(rt, ask_arg(rt, term, 1), names);
-        let symb = match oper {
-          U120_ADD => "+",
-          U120_SUB => "-",
-          U120_MUL => "*",
-          U120_DIV => "/",
-          U120_MOD => "%",
-          U120_AND => "&",
-          U120_OR  => "|",
-          U120_XOR => "^",
-          U120_SHL => "<<",
-          U120_SHR => ">>",
-          U120_LTN => "<",
-          U120_LTE => "<=",
-          U120_EQL => "=",
-          U120_GTE => ">=",
-          U120_GTN => ">",
-          U120_NEQ => "!=",
-          UTUP_ADD => "~+",
-          UTUP_SUB => "~-",
-          UTUP_MUL => "~*",
-          UTUP_DIV => "~/",
-          UTUP_MOD => "~%",
-          UTUP_AND => "~&",
-          UTUP_OR  => "~|",
-          UTUP_XOR => "~^",
-          UTUP_SHL => "~<<",
-          UTUP_SHR => "~>>",
-          UTUP_LTN => "~<",
-          UTUP_LTE => "~<=",
-          UTUP_EQL => "~=",
-          UTUP_GTE => "~>=",
-          UTUP_GTN => "~>",
-          UTUP_NEQ => "~!=",
-          UTUP_RTL => "~>~",
-          UTUP_RTR => "~<~",
-          _        => "?",
-        };
+        let symb = view_oper(&oper);
         format!("({} {} {})", symb, val0, val1)
       }
       NUM => {
@@ -2835,68 +2966,69 @@ pub fn read_term(code: &str) -> (&str, Term) {
   }
 }
 
-fn read_oper(code: &str) -> (&str, Option<u128>) {
-  let code = skip(code);
-  match head(code) {
-    '+' => (tail(code), Some(U120_ADD)),
-    '-' => (tail(code), Some(U120_SUB)),
-    '*' => (tail(code), Some(U120_MUL)),
-    '/' => (tail(code), Some(U120_DIV)),
-    '%' => (tail(code), Some(U120_MOD)),
-    '&' => (tail(code), Some(U120_AND)),
-    '|' => (tail(code), Some(U120_OR)),
-    '^' => (tail(code), Some(U120_XOR)),
-    '<' => match head(tail(code)) {
-      '=' => (tail(code), Some(U120_LTE)),
-      '<' => (tail(code), Some(U120_SHL)),
-      _   => (code, Some(U120_LTN)),
-    },
-    '>' => match head(tail(code)) {
-      '=' => (tail(code), Some(U120_GTE)),
-      '<' => (tail(code), Some(U120_SHR)),
-      _   => (code, Some(U120_GTN)),
-    },
-    '=' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(U120_EQL)),
-      _   => (code, None),
-    },
-    '!' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(U120_NEQ)),
-      _   => (code, None),
-    },
-    '~' => match head(tail(code)) {
-      '+' => (tail(tail(code)), Some(UTUP_ADD)),
-      '-' => (tail(tail(code)), Some(UTUP_SUB)),
-      '*' => (tail(tail(code)), Some(UTUP_MUL)),
-      '/' => (tail(tail(code)), Some(UTUP_DIV)),
-      '%' => (tail(tail(code)), Some(UTUP_MOD)),
-      '&' => (tail(tail(code)), Some(UTUP_AND)),
-      '|' => (tail(tail(code)), Some(UTUP_OR)),
-      '^' => (tail(tail(code)), Some(UTUP_XOR)),
-      '<' => match head(tail(tail(code))) {
-        '=' => (tail(tail(code)), Some(UTUP_LTE)),
-        '<' => (tail(tail(code)), Some(UTUP_SHL)),
-        '~' => (tail(tail(code)), Some(UTUP_RTL)),
-        _   => (tail(code), Some(UTUP_LTN)),
-      },
-      '>' => match head(tail(tail(code))) {
-        '=' => (tail(tail(code)), Some(UTUP_GTE)),
-        '<' => (tail(tail(code)), Some(UTUP_SHR)),
-        '~' => (tail(tail(code)), Some(UTUP_RTR)),
-        _   => (tail(code), Some(UTUP_GTN)),
-      },
-      '=' => match head(tail(tail(code))) {
-        '=' => (tail(tail(tail(code))), Some(UTUP_EQL)),
-        _   => (tail(code), None),
-      },
-      '!' => match head(tail(tail(code))) {
-        '=' => (tail(tail(tail(code))), Some(UTUP_NEQ)),
-        _   => (tail(code), None),
-      },
-      _ => (code, None)
-    },
-    _ => (code, None)
+fn read_oper(in_code: &str) -> (&str, Option<u128>) {
+  fn head_is(ch: char, code: &str) -> (&str, u128) {
+    if head(code) == ch {
+      (tail(code), 1)
+    } else {
+      (code, 0)
+    }
   }
+
+  fn read_op(code: &str) -> (&str, Option<u128>) {
+    let tl = tail(code);
+    match head(code) {
+      // Should not match with `~`
+      '+' => (tl, Some(ADD)),
+      '-' => (tl, Some(SUB)),
+      '*' => (tl, Some(MUL)),
+      '/' => (tl, Some(DIV)),
+      '%' => (tl, Some(MOD)),
+      '&' => (tl, Some(AND)),
+      '|' => (tl, Some(OR)),
+      '^' => (tl, Some(XOR)),
+      '<' => match head(tl) {
+        '=' => (tail(tl), Some(LTE)),
+        '<' => (tail(tl), Some(SHL)),
+        '~' => (tail(tl), Some(RTL)),
+        _   => (code, Some(LTN)),
+      },
+      '>' => match head(tl) {
+        '=' => (tail(tl), Some(GTE)),
+        '>' => (tail(tl), Some(SHR)),
+        '~' => (tail(tl), Some(RTR)),
+        _   => (code, Some(GTN)),
+      },
+      '=' => match head(tl) {
+        '=' => (tail(tl), Some(EQL)),
+        _   => (code, None),
+      },
+      '!' => match head(tl) {
+        '=' => (tail(tl), Some(NEQ)),
+        _   => (code, None),
+      },
+      _ => (code, None),
+    }
+  }
+
+  let code = skip(in_code);
+
+  // U120 vs UTUP
+  let (code, op_kind) = head_is('~', code);
+
+  // The actual operation code
+  let (code, op_code) = read_op(code);
+  let op = if let Some(op) = op_code {
+    op
+  } else {
+    return (in_code, None);
+  };
+
+  // Unsigned vs signed
+  let (code, is_sig) = head_is('i', code);
+
+  let oper = make_oper(op_kind, is_sig, op);
+  (code, Some(oper))
 }
 
 fn read_rule(code: &str) -> (&str, (Term,Term)) {
@@ -3022,25 +3154,32 @@ pub fn view_term(term: &Term) -> String {
 }
 
 pub fn view_oper(oper: &u128) -> String {
-  match oper {
-     0 => "+".to_string(),
-     1 => "-".to_string(),
-     2 => "*".to_string(),
-     3 => "/".to_string(),
-     4 => "%".to_string(),
-     5 => "&".to_string(),
-     6 => "|".to_string(),
-     7 => "^".to_string(),
-     8 => "<<".to_string(),
-     9 => ">>".to_string(),
-    10 => "<=".to_string(),
-    11 => "<".to_string(),
-    12 => "==".to_string(),
-    13 => ">=".to_string(),
-    14 => ">".to_string(),
-    15 => "!=".to_string(),
-     _ => "?".to_string(),
-  }
+  let (kind, sig, op_code) = decompose_oper(*oper);
+  let kind = if kind > 0 { "~" } else { "" };
+  let sig = if sig > 0 { "i" } else { "" };
+  let op = 
+    match op_code {
+      ADD => "+",
+      SUB => "-",
+      MUL => "*",
+      DIV => "/",
+      MOD => "%",
+      AND => "&",
+      OR  => "|",
+      XOR => "^",
+      SHL => "<<",
+      SHR => ">>",
+      LTN => "<",
+      LTE => "<=",
+      EQL => "==",
+      GTE => ">=",
+      GTN => ">",
+      NEQ => "!=",
+      RTL => "<~",
+      RTR => ">~",
+      _ => "??",
+    };
+  format!("{}{}{}", kind, op, sig)
 }
 
 pub fn view_statement(statement: &Statement) -> String {
