@@ -150,7 +150,7 @@ $(Node left right)
 // When a transaction fails, it is fully reversed
 {
   $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(Foo))
+  $(Sum #0)) // runtime type error
 }
 
 // Here, the count wasn't incremented, even though

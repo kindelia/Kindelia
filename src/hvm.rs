@@ -367,7 +367,7 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
 //   (IO.done retr:r)                                       : (IO r)
-//   (IO.laod               cont:(∀? (IO r))) : (IO r)
+//   (IO.take               cont:(∀? (IO r))) : (IO r)
 //   (IO.save expr:?        cont:(∀? (IO r))) : (IO r)
 //   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
 //   (IO.from               cont:(∀? (IO r))) : (IO r)
@@ -527,11 +527,11 @@ $(Tuple8 x0 x1 x2 x3 x4 x5 x6 x7)
   !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
 } = #0
 
-$(Inc)
-$(Get)
+$(Count.Inc)
+$(Count.Get)
 !(Count action) {
-  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Get)) = !(IO.load @x $(IO.done x))
+  !(Count $(Count.Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
+  !(Count $(Count.Get)) = !(IO.load @x $(IO.done x))
 } = #0
 ";
 
@@ -1128,13 +1128,19 @@ impl Runtime {
       Statement::Fun { name, args, func, init } => {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
-          if let Some(func) = build_func(func, true) {
-            println!("- fun {}", u128_to_name(*name));
-            self.set_arity(*name, args.len() as u128);
-            self.define_function(*name, func);
-            let state = self.create_term(init, 0, &mut init_map());
-            self.write_disk(*name, state);
-            self.draw();
+          self.set_arity(*name, args.len() as u128);
+          if self.check_func_arities(&func) {
+            if let Some(func) = build_func(func, true) {
+              println!("- fun {}", u128_to_name(*name));
+              self.set_arity(*name, args.len() as u128);
+              self.define_function(*name, func);
+              let state = self.create_term(init, 0, &mut init_map());
+              self.write_disk(*name, state);
+              self.draw();
+              return;
+            }
+          } else {
+            self.undo();
             return;
           }
         }
@@ -1155,31 +1161,93 @@ impl Runtime {
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        let host = self.alloc_term(expr);
-        // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
-        if let Some(done) = self.run_io(0, 0, host, mana_lim) {
-          if let Some(done) = self.compute(done, mana_lim) {
-            let done_code = self.show_term(done);
-            if let Some(()) = self.collect(done, mana_lim) {
-              let size_end = self.get_size();
-              let mana_dif = self.get_mana() - mana_ini;
-              let size_dif = size_end - size_ini;
-              // dbg!(size_end, size_dif, size_lim);
-              if size_end <= size_lim {
-                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
-                self.draw();
-              } else {
-                println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
-                self.undo();
+        if self.check_term_arities(expr) {
+          let host = self.alloc_term(expr);
+          // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
+          if let Some(done) = self.run_io(0, 0, host, mana_lim) {
+            if let Some(done) = self.compute(done, mana_lim) {
+              let done_code = self.show_term(done);
+              if let Some(()) = self.collect(done, mana_lim) {
+                let size_end = self.get_size();
+                let mana_dif = self.get_mana() - mana_ini;
+                let size_dif = size_end - size_ini;
+                // dbg!(size_end, size_dif, size_lim);
+                if size_end <= size_lim {
+                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  self.draw();
+                } else {
+                  println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                  self.undo();
+                }
+                return;
               }
-              return;
             }
           }
+          println!("- run fail");
+          self.undo();
+        } else {
+          println!("- run fail: incorrect ctr or fun arity");
         }
-        println!("- run fail");
-        self.undo();
       }
     }
+  }
+
+  pub fn check_term_arities(&self, term: &Term) -> bool {
+    match term {
+      Term::Var { name } => {
+        return true;
+      },
+      Term::Dup { nam0, nam1, expr, body } => {
+        return self.check_term_arities(expr) && self.check_term_arities(body);
+      }
+      Term::Lam { name, body } => {
+        return self.check_term_arities(body);
+      }
+      Term::App { func, argm } => {
+        return self.check_term_arities(func) && self.check_term_arities(argm);
+      }
+      Term::Ctr { name, args } => {
+        if self.get_arity(*name) != args.len() as u128 {
+          return false;
+        }
+        for arg in args {
+          if !self.check_term_arities(arg) {
+            return false;
+          }
+        }
+        return true;
+      }
+      Term::Fun { name, args } => {
+        if self.get_arity(*name) != args.len() as u128 {
+          return false;
+        }
+        for arg in args {
+          if !self.check_term_arities(arg) {
+            return false;
+          }
+        }
+        return true;
+      }
+      Term::Num { numb } => {
+        return true;
+      }
+      Term::Op2 { oper, val0, val1 } => {
+        return self.check_term_arities(val0) && self.check_term_arities(val1);
+      }
+    }
+  }
+
+  pub fn check_rule_arities(&self, rule: &Rule) -> bool {
+    return self.check_term_arities(&rule.0) && self.check_term_arities(&rule.1);
+  }
+
+  pub fn check_func_arities(&self, func: &Func) -> bool {
+    for rule in func {
+      if !self.check_rule_arities(rule) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // Maximum mana = 42m * block_number
@@ -1334,7 +1402,7 @@ impl Runtime {
     } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return arity;
     } else {
-      return 0;
+      return U128_NONE;
     }
   }
 
@@ -1857,7 +1925,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   // If there are no rules, return none
   if func.len() == 0 {
     if debug {
-      println!("- failed to build function: no rules");
+      println!("  - failed to build function: no rules");
     }
     return None;
   }
@@ -1868,7 +1936,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     arity = args.len() as u128;
   } else {
     if debug {
-      println!("- failed to build function: no arity");
+      println!("  - failed to build function: left-hand side must be !(Fun ...)");
     }
     return None;
   }
