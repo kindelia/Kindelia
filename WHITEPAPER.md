@@ -442,8 +442,8 @@ The primitive operations in that machine are called rewrite rules, and they
 include beta-reduction (lambda application), pattern-matching, numeric
 operators, and primitives for cloning and erasing data. It is important to
 stress that all these operations are constant-time, which is essential to make
-computation measurable: see the mana table in the next section. For more info on
-how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
+costs measurable: see the mana table in the next section. For more info on how
+that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
 In addition to the 8 term variants, the HVM also has an internal superposition
 construct, which is just a pair that can show up as a byproduct of its
