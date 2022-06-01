@@ -158,45 +158,34 @@ Block #1: defining pure functions
 The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// Declares a constructor, Leaf, with arity (size) 1
+// Declares a constructor, Leaf, with 1 field
 ctr {Leaf value}
 
-// Declares a constructor, Node, with arity (size) 2
-ctr {Node left right}
-
-// Declares a pure function, Gen, that receives a
-// num and returns a tree with 2^num copies of #1
-fun (Gen depth) {
-  (Gen #0) =
-    {Leaf #1}
-  (Gen x) =
-    dup x0 x1 = x;
-    {Node (Gen (- x0 #1)) (Gen (- x1 #1))}
-} = #0
+// Declares a constructor, Branch, with 2 fields
+ctr {Branch left right}
 
 // Declares a pure function that sums a tree
 fun (Sum tree) {
-  (Sum {Leaf x})   = x
-  (Sum {Node a b}) = (+ (Sum a) (Sum b))
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
 } = #0
 
-// Run statement that creates a tree with 2^21
-// numbers, sums them all and prints the result:
+// Sums a tree with 4 numbers
 run {
-  !done (Sum (Gen #21))
+  !done (Sum {Branch
+    {Branch {Leaf #1} {Leaf #2}}
+    {Branch {Leaf #3} {Leaf #4}}})
 }
-
 ```
 
-When a Kindelia node runs that block, the global functions `Gen` and `Sum` will
-be defined forever inside the network. Note how they are written in a functional
-style, closely resembling Haskell's equational, pattern-matching notation. These
-functions are not compiled to stack machines, but, instead, run natively on the
-HVM. Note also that the language is linear: variables aren't used more than
-once. This is essential to keep Kindelia's computations efficient and
-measurable. In order to make that practical, there is a lazy duplication
-operation, written as `&{a b} = x`, which allows values to be cloned
-incrementally.
+When a Kindelia node runs that block, the global function `Sum` will be defined
+forever inside the network. Note how it follows a functional style, closely
+resembling Haskell's equational notation. Kindelia functions aren't compiled to
+stack machines: they run natively on the HVM. Note also that the language is
+linear: variables aren't used more than once. This is essential to keep
+computations efficient and measurable. In order to make that practical, there is
+a lazy duplication operation, written as `dup a b = x`, which allows values to
+be cloned incrementally. Check [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for more info.
 
 Other than defining constructors and functions, blocks can also evaluate
 side-effective actions inside `run {}` statements. These operate like Haskell's
@@ -209,7 +198,7 @@ Block #2: defining stateful functions
 
 Actual contracts must hold a state. In Kindelia, every function holds an
 internal state, which is just any native HVM structure. That state can be loaded
-and saved using `IO.load` and `IO.save`. With just that, we are able to create
+and saved using `load` and `save`. With just that, we are able to create
 smart-contracts by using stateful functions.
 
 Below, we define a `Count` contract that has two actions: one to increment a
@@ -219,19 +208,24 @@ counter, i.e., 3.
 
 ```c
 // Creates a Counter function with 2 actions:
-ctr {Inc} // incs its counter
-ctr {Get} // reads its counter
+ctr {Inc} // action that increments the counter
+ctr {Get} // action that returns the counter
 fun (Counter action) {
-  (Counter {Inc}) =
-    !take x
-    !save (+ x #1)
-    !done #0
-  (Counter {Get}) =
-    !load x
-    !done x
-} = #0 // initial state = #0
 
-// Runs a script that increments the Counter's state 3 times
+  // increments the counter
+  (Counter {Inc}) =
+    !take x        // loads the state and assigns it to 'x'
+    !save (+ x #1) // overwrites the state as 'x + 1'
+    !done #0       // returns 0
+
+  // returns the counter
+  (Counter {Get}) =
+    !load x // loads the state
+    !done x // returns it
+
+} = #0 // initial state is 0
+
+// Increments the Counter's state 3 times
 run {
   !call ~ 'Counter' [{Inc}]
   !call ~ 'Counter' [{Inc}]
@@ -239,25 +233,38 @@ run {
   !done #0
 }
 
-// Runs a script that prints the Counter's state
+// Prints the Counter's state
 run {
   !call x 'Counter' [{Get}]
   !done x
 }
 ```
 
-Note that `IO.load` and `IO.save` just save/load the state stored on the "active
-function", i.e., the one currently being called. A function's state can be any
-arbitrary HVM structure: a number, a list, a tree. There is no `U256`
-serialization. If a contract requires a map-like structure, it can, for example,
-store an immutable map as its state.
+Note that `load` and `save` aren't side-effective functions. Instead, they
+*describe* effects using a pure datatype, exactly like Haskell's IO. These
+effects can be passed as first-class expressions, and are evaluated when placed
+directly inside a `run{}` block. In Haskellish pseudo-code:
 
-`IO.load` and `IO.save` have no cost, but the user still needs to pay for
-computations. For example, updating a balance requires paying for the cost of
-the immutable `Map.insert` operation (whichs, usually, is pretty cheap). To
-avoid state bloat, though, there is a heavy tax on state growth. The good news
-is that updating states without allocating more space is extremelly cheap,
-compared to Ethereum.
+```
+data IO s a
+  = Done { retr :: a }                                             -- returns a value
+  | Take { cont :: s -> (IO s a) }                                 -- loads the state
+  | Save { expr :: s, cont :: () -> (IO s a) }                     -- saves the state
+  | Call { func :: Name, args :: (ArgsOf func), cont :: (IO s a) } -- calls a function
+  | From { cont :: Name -> (IO s a) }                              -- gets the caller name
+```
+
+A function's state can be any arbitrary HVM structure: a number, a list, a tree.
+There is no forced, costly and error-prone `U256` serialization, like on
+Ethereum. If a contract requires a balance map, for example, it can simply store
+an immutable tree as its state, simply and directly.
+
+Finally, `load` and `save` themselves have no cost! But blocks must still repeat
+the heap growth and accumulated computation limites. So, for example, updating a
+coin balance requires paying the cost of some `Map.updade` operation (which,
+usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
+is very expensive. This allows Kindelia to host highly dynamic applications such
+as games and exchanges on its layer 1.
 
 Block #3: creating some accounts
 --------------------------------
@@ -380,7 +387,7 @@ Term ::=
   (<oper: Oper> <val0: Term> <val1: Term>)
 
   // A cloning operation
-  &{<var0: Name> <var1: Name>} = <expr: Term>; <body: Term>
+  dup <var0: Name> <var1: Name> = <expr: Term>; <body: Term>
 
   // A variable
   <bind: Name>
@@ -396,7 +403,7 @@ Denotes a function that receives two values, `x`, and `y`, and returns a pair
 with `x` plus `42` and `F` applied to `y`. In Python, this could be written
 as: `lambda x: lambda y: (x + 42, F(y))`. Also, since Kindelia's language is
 affine, variables must occur, at most, once. To duplicate values, the clone
-operator, `&`, must be used.
+operator, `dup`, must be used.
 
 While this syntax may look high-level, don't confuse it with a user-facing
 language such as Solidity. It is just a direct textual representation of the
@@ -454,15 +461,11 @@ stress that all these operations are constant-time, which is essential to make
 costs measurable: see the mana table in the next section. For more info on how
 that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
-In addition to the 8 term variants, the HVM also has an internal superposition
-construct, which is just a pair that can show up as a byproduct of its
-lazy-cloning operation. This has nothing to do with quantum mechanics, we just
-borrow the name because it is a good intuition of their behaviors; again, see
-[HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for a study. That
-construct will be written as `{a b}`. It also has an erasure construct, which
-may appear as a byproduct of erasing data.
-
-Kindelia's rewrite rules are:
+As explained on the document above, in addition to the 8 term variants, the HVM
+also has an internal superposition construct, which is just a pair that can show
+up as a byproduct of its lazy-cloning operation. That construct will be written
+as `{a b}`. It also has an erasure construct, which may appear as a byproduct of
+erasing data. Kindelia's rewrite rules are:
 
 ### Lambda Application
 
@@ -482,7 +485,7 @@ Applies a superposition to an argument.
 ```
 ({a b} c)
 --------------- APP-SUP
-&{x0 x1} = c
+dup x0 x1 = c
 {(a x0) (b x1)}
 ```
 
@@ -491,9 +494,9 @@ Applies a superposition to an argument.
 Lazily, incrementally clones a lambda.
 
 ```
-&{r s} = @x f
-------------- DUP-LAM
-&{f0 f1} = f
+dup r s = @x f
+-------------- DUP-LAM
+dup f0 f1 = f
 r <- @x0 f0
 s <- @x1 f1
 x <- {x0 x1}
@@ -505,8 +508,8 @@ Superpositions and duplications hold a 60-bit integer label. If the label is
 equal, this rule collapses the superposition.
 
 ```
-&{x y} = {a b}
--------------- DUP-SUP (identical labels)
+dup x y = {a b}
+--------------- DUP-SUP (identical labels)
 x <- a
 y <- b
 ```
@@ -514,12 +517,12 @@ y <- b
 Otherwise, this rule duplicates the superposition.
 
 ```
-&{x y} = {a b}
--------------- DUP-SUP (different labels)
+dup x y = {a b}
+--------------- DUP-SUP (different labels)
 x <- {xA xB}
 y <- {yA yB}
-&{xA yA} = a
-&{xB yB} = b
+dup xA yA = a
+dup xB yB = b
 ```
 
 ### Number Duplication
@@ -527,8 +530,8 @@ y <- {yA yB}
 Clones a 120-bit number.
 
 ```
-&{x y} = N
----------- DUP-NUM
+dup x y = N
+----------- DUP-NUM
 x <- N
 y <- N
 ```
@@ -538,11 +541,11 @@ y <- N
 Lazily, incrementally clones a constructor.
 
 ```
-${x y} = (K a b c ...)
----------------------- DUP-CTR
-${a0 a1} = a
-${b0 b1} = b
-${c0 c1} = c
+dup x y = (K a b c ...)
+----------------------- DUP-CTR
+dup a0 a1 = a
+dup b0 b1 = b
+dup c0 c1 = c
 ...
 x <- (K a0 b0 c0 ...)
 y <- (K a1 b1 c1 ...)
@@ -551,10 +554,10 @@ y <- (K a1 b1 c1 ...)
 ### Erasure Duplication
 
 ```
-${x y} = *
----------- DUP-ERA
-x <- *
-y <- *
+dup x y = ~
+----------- DUP-ERA
+x <- ~
+y <- ~
 ```
 
 ### Numeric Operation
@@ -683,7 +686,7 @@ let b0 b1 = b
 ```
 (+ a {b0 b1})
 --------------------- OP2-SUP-1
-${a0 a1} = a
+dup a0 a1 = a
 {(+ a0 b0) (+ a1 b1)}
 ```
 
@@ -694,8 +697,8 @@ Pattern-matching on a superposition.
 ```
 (F {a0 a1} b c ...)
 ----------------------------------- FUN-SUP
-${b0 b1} = b
-${c0 c1} = c
+dup b0 b1 = b
+dup c0 c1 = c
 ...
 {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
 ```

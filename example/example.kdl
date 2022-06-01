@@ -75,16 +75,21 @@
 ctr {Inc} // incs its counter
 ctr {Get} // reads its counter
 fun (Counter action) {
+
+  // increments the counter
   (Counter {Inc}) =
-    !take x
-    !save (+ x #1)
-    !done #0
+    !take x        // loads the state and assigns it to 'x'
+    !save (+ x #1) // overwrites the state as 'x + 1'
+    !done #0       // returns 0
+
+  // returns the counter
   (Counter {Get}) =
-    !load x
-    !done x
+    !load x // loads the state
+    !done x // returns it
+
 } = #0 // initial state = #0
 
-// Runs a script that increments the Counter's state 3 times
+// Increments the Counter's state 3 times
 run {
   !call ~ 'Counter' [{Inc}]
   !call ~ 'Counter' [{Inc}]
@@ -92,7 +97,7 @@ run {
   !done #0
 }
 
-// Runs a script that prints the Counter's state
+// Prints the Counter's state
 run {
   !call x 'Counter' [{Get}]
   !done x
@@ -101,11 +106,17 @@ run {
 // Example datatype and algorithm
 // ==============================
 
-// Declares a constructor, Leaf, with arity (size) 1
+// Declares a constructor, Leaf, with 1 field
 ctr {Leaf value}
 
-// Declares a constructor, Node, with arity (size) 2
-ctr {Node left right}
+// Declares a constructor, Branch, with 2 fields
+ctr {Branch left right}
+
+// Declares a pure function that sums a tree
+fun (Sum tree) {
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
+} = #0
 
 // Declares a pure function, Gen, that receives a
 // num and returns a tree with 2^num copies of #1
@@ -114,17 +125,17 @@ fun (Gen depth) {
     {Leaf #1}
   (Gen x) =
     dup x0 x1 = x;
-    {Node (Gen (- x0 #1)) (Gen (- x1 #1))}
+    {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
 } = #0
 
-// Declares a pure function that sums a tree
-fun (Sum tree) {
-  (Sum {Leaf x})   = x
-  (Sum {Node a b}) = (+ (Sum a) (Sum b))
-} = #0
+// Sums a tree with 4 numbers
+run {
+  !done (Sum {Branch
+    {Branch {Leaf #1} {Leaf #2}}
+    {Branch {Leaf #3} {Leaf #4}}})
+}
 
-// Run statement that creates a tree with 2^21
-// numbers, sums them all and prints the result:
+// Creates a tree with 2^21 numbers and sums it
 run {
   !done (Sum (Gen #21))
 }
