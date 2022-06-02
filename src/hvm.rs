@@ -1988,9 +1988,11 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
       if seen.contains(&name) {
         return false;
+      } else if name == VAR_NONE {
+        return true;
       } else {
         seen.insert(name);
-        return name == VAR_NONE || count_uses(body, name) == 1;
+        return count_uses(body, name) == 1;
       }
     }
 
