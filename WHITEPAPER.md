@@ -22,9 +22,9 @@ Sections
 * [Example blocks](#examples)
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
-  * [Block #3: creating some accounts](#block-3-creating-some-accounts)
-  * [Block #4: installing a game](#block-4-installing-a-game)
-  * [Block #5: playing the game](#block-5-playing-the-game)
+  * [Block #3: installing a game](#block-3-installing-a-game)
+  * [Block #4: playing the game](#block-4-playing-the-game)
+  * [What about accounts?](#what-about-accounts)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -266,37 +266,24 @@ usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
 is very expensive. This allows Kindelia to host highly dynamic applications such
 as games and exchanges on its layer 1.
 
-Block #3: creating some accounts
---------------------------------
-
-A Kindelia account is just a function that receives an action and a signature,
-and, if the signature checks, calls another function to perform that action. For
-example:
-
-```c
-// TODO
-```
-
-As soon as the function above is deployed, Alice may use it as her own account
-to send coins in an hypothetical "Coin" contract, because only herself is able
-to call it with a signature that enters the `Coin.send` branch. Of course, this
-account is extremelly limited, but anything is possible. Alice could have a
-collection of signature schemes, she could impose limitations, and could extend
-her own account's functionality by storing lambdas on its internal state.
-
-Block #4: installing a game
+Block #3: installing a game
 ---------------------------
 
 ```c
 // TODO
 ```
 
-Block #5: playing the game
+Block #4: playing the game
 --------------------------
 
 ```c
 // TODO
 ```
+
+What about accounts?
+--------------------
+
+TODO
 
 Technical Overview
 ==================
