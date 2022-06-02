@@ -23,9 +23,11 @@
 //
 // - Names can have up to 10 letters (60 bits)
 //
-// - Constructors are written as `$(CtrName arg_0 arg_1 ...)`
+// - Constructors are written as `{CtrName arg_0 arg_1 ...}`
 //
-// - Function calls are written as `!(FunName arg_0 arg_1 ...)`
+// - Function calls are written as `(FunName arg_0 arg_1 ...)`
+//
+// - Lambdas are written as `@var body` and application as `(! fun arg)`
 //
 // - Integers are 120-bit, and are written like `#123`
 // 
@@ -37,22 +39,22 @@
 //
 // - Constructors must be declared on the top-level, including name and fields:
 //
-//     $(Name field_0 field_1 ...)
+//     ctr {Name field_0 field_1 ...}
 // 
 // - Functions must be declared on the top-level, including:
 //   - Its name and arguments
 //   - As a set of equations
 //   - An initial state
 //
-//     !(Function arg0 arg1 ...) {
-//       !(Ctor0 arg_0 arg_1 ...) = return_0
-//       !(Ctor1 arg_0 arg_1 ...) = return_1
+//     fun (Function arg0 arg1 ...) {
+//       (Ctor0 arg_0 arg_1 ...) = return_0
+//       (Ctor1 arg_0 arg_1 ...) = return_1
 //       ...
 //     } = initial_state
 // 
 // - IO actions can be performed with IO statements:
 //
-//     {
+//     run {
 //       IO_expression
 //     }
 //
@@ -70,92 +72,113 @@
 // ===================================
 
 // Creates a Counter function with 2 actions:
-$(Inc) // incs its counter
-$(Get) // reads its counter
-!(Counter action) {
-  !(Counter $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Counter $(Get)) = !(IO.load @x $(IO.done x))
+ctr {Inc} // incs its counter
+ctr {Get} // reads its counter
+fun (Counter action) {
+
+  // increments the counter
+  (Counter {Inc}) =
+    !take x        // loads the state and assigns it to 'x'
+    !save (+ x #1) // overwrites the state as 'x + 1'
+    !done #0       // returns 0
+
+  // returns the counter
+  (Counter {Get}) =
+    !load x // loads the state
+    !done x // returns it
+
 } = #0 // initial state = #0
 
-// Runs a script that increments the Counter's state 3 times
-{
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.done #0))))
+// Increments the Counter's state 3 times
+run {
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !done #0
 }
 
-// Runs a script that prints the Counter's state
-{
-  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
-  $(IO.done x))
+// Prints the Counter's state
+run {
+  !call x 'Counter' [{Get}]
+  !done x
 }
 
 // Example datatype and algorithm
 // ==============================
 
-// Declares a constructor, Leaf, with arity (size) 1
-$(Leaf value)
+// Declares a constructor, Leaf, with 1 field
+ctr {Leaf value}
 
-// Declares a constructor, Node, with arity (size) 2
-$(Node left right)
+// Declares a constructor, Branch, with 2 fields
+ctr {Branch left right}
+
+// Declares a pure function that sums a tree
+fun (Sum tree) {
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
+} = #0
 
 // Declares a pure function, Gen, that receives a
 // num and returns a tree with 2^num copies of #1
-!(Gen depth) {
-  !(Gen #0) = $(Leaf #1)
-  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
+fun (Gen depth) {
+  (Gen #0) =
+    {Leaf #1}
+  (Gen x) =
+    dup x0 x1 = x;
+    {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
 } = #0
 
-// Declares a pure function that sums a tree
-!(Sum tree) {
-  !(Sum $(Leaf x))   = x
-  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
-} = #0
+// Sums a tree with 4 numbers
+run {
+  !done (Sum {Branch
+    {Branch {Leaf #1} {Leaf #2}}
+    {Branch {Leaf #3} {Leaf #4}}})
+}
 
-// Run statement that creates a tree with 2^21
-// numbers, sums them all and prints the result:
-{
-  $(IO.done !(Sum !(Gen #21)))
+// Creates a tree with 2^21 numbers and sums it
+run {
+  !done (Sum (Gen #21))
 }
 
 // Example account
 // ===============
 
 // Utility that, when called, returns the caller name
-!(WhoIs) {
-  !(WhoIs) = $(IO.from @who $(IO.done who))
+fun (WhoIs) {
+  (WhoIs) =
+    !from who
+    !done who
 } = #0
 
-// Creates the LadyAlice account. It just receives a `$(CallN ...)`
+// Creates the LadyAlice account. It just receives a `{CallN ...}`
 // action and calls another function directly. When that is done,
 // that function's 'caller' will be set to LadyAlice, so it works as if
 // LadyAlice is an user of that other function. Note that this account
 // isn't checking signatures, so anyone can act on LadyAlice's behalf.
-!(LadyAlice name args) {
-  !(LadyAlice name args) = $(IO.call name args @res $(IO.done res))
+fun (LadyAlice name args) {
+  (LadyAlice name args) =
+    !call result name args
+    !done result
 } = #0
 
 // Prints LadyAlice's name
-{
-  $(IO.call 'LadyAlice' $(Tuple2 'WhoIs' $(Tuple0)) @nam
-  $(IO.done nam))
+run {
+  !call name 'LadyAlice' ['WhoIs' []]
+  !done name
 }
-
-// (LadyAlice (Call expr code sign)) 
 
 // Example failure
 // ===============
 
 // When a transaction fails, it is fully reversed
-{
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(Foo))
+run {
+  !call ~ 'Counter' [{Inc}]
+  (Sum #0) // runtime type error
 }
 
 // Here, the count wasn't incremented, even though
-// the last transaction called `!(Count $(Inc))`
-{
-  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
-  $(IO.done x))
+// the last transaction called `!(Count {Inc})`
+run {
+  !call x 'Counter' [{Get}]
+  !done x
 }

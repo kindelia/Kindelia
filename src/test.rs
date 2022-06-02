@@ -67,10 +67,12 @@ fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&
     }
     rt.tick();
   }
+  // println!("- final rollback tick {}", rt.get_tick());
 }
 
 fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
   debug_assert!(tick >= rt.get_tick());
+  // println!("- advancing from {} to {}", rt.get_tick(), tick);
   let actual_tick = rt.get_tick();
   for _ in actual_tick..tick {
     if let Some(code) = code {
@@ -192,6 +194,7 @@ fn advanced_rollback_run_fail() {
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
+// Still in progress
 #[test]
 fn rollback_buffers() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
@@ -234,40 +237,48 @@ fn stack_overflow() { // caused by compute_at function
 // ===========================================================
 // Codes
 const PRE_COUNTER: &'static str = "
-  $(Succ p)
-  $(Zero)
-  !(Add n) {
-    !(Add n) = $(Succ n)
+  ctr {Succ p}
+  ctr {Zero}
+
+  fun (Add n) {
+    (Add n) = {Succ n}
   } = #0
-  
-  !(Sub n) {
-    !(Sub $(Succ p)) = p
-    !(Sub $(Zero)) = $(Zero)
+
+  fun (Sub n) {
+    (Sub {Succ p}) = p
+    (Sub {Zero}) = {Zero}
   } = #0
-  
-  !(Store action) {
-    !(Store $(Add)) =
-      $(IO.take @l 
-      $(IO.save !(Add l) @~
-      $(IO.done #0)))
-    !(Store $(Sub)) =
-      $(IO.take @l 
-      $(IO.save !(Sub l) @~
-      $(IO.done #0)))
-    !(Store $(Get)) = !(IO.load @l $(IO.done l))
-  } = $(Zero)
+
+  ctr {StoreAdd}
+  ctr {StoreSub}
+  ctr {StoreGet}
+
+  fun (Store action) {
+    (Store {StoreAdd}) =
+      !take l
+      !save (Add l)
+      !done #0
+    (Store {StoreSub}) =
+      !take l
+      !save (Sub l)
+      !done #0
+    (Store {StoreGet}) = 
+      !load l
+      !done l
+  } = {Zero}
 ";
 
 const COUNTER: &'static str = "
-  {
-    $(IO.call 'Count' $(Tuple1 $(Inc #1)) @~
-    $(IO.call 'Count' $(Tuple1 $(Get)) @x
-    $(IO.done x)))
+  run {
+    !call ~ 'Store' [{StoreAdd}]
+    !call x 'Store' [{StoreGet}]
+    !done x
   }
-  {
-    $(IO.call 'Store' $(Tuple1 $(Add)) @~
-    $(IO.call 'Store' $(Tuple1 $(Get)) @x
-    $(IO.done x)))
+
+  run {
+    !call ~ 'Count' [{Count.Inc}]
+    !call x 'Count' [{Count.Get}]
+    !done x
   }
 ";
 

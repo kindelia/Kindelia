@@ -1,6 +1,6 @@
 #![allow(clippy::identity_op)]
 
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -204,6 +204,18 @@ pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
 pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
 pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
 
+// | --------- | -----------------------|
+// | TAG = NUM |        num (u120)      |
+// | --------- | ---------------------- |
+// | TAG = CTR |                        |
+// | TAG = APP | ext (u60) | val (u60)  |
+// | TAG = OP2 |                        |
+// ...
+// | --------- | ---------------------- |
+// | TAG = LAM |       pos (u120)       |
+// ...
+// | --------- | -----------------------|
+
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
 pub const VAR: u128 = 0x2;
@@ -224,69 +236,152 @@ pub const NUM: u128 = 0xB;
 // - 32 iTUP operations
 // where uTUP = (u8,u16,u32,u64)
 //       iTUP = (i8,i16,i32,i64)
-pub const U120_ADD: u128 = 0x00;
-pub const U120_SUB: u128 = 0x01;
-pub const U120_MUL: u128 = 0x02;
-pub const U120_DIV: u128 = 0x03;
-pub const U120_MOD: u128 = 0x04;
-pub const U120_AND: u128 = 0x05;
-pub const U120_OR : u128 = 0x06;
-pub const U120_XOR: u128 = 0x07;
-pub const U120_SHL: u128 = 0x08;
-pub const U120_SHR: u128 = 0x09;
-pub const U120_LTN: u128 = 0x0A;
-pub const U120_LTE: u128 = 0x0B;
-pub const U120_EQL: u128 = 0x0C;
-pub const U120_GTE: u128 = 0x0D;
-pub const U120_GTN: u128 = 0x0E;
-pub const U120_NEQ: u128 = 0x0F;
-pub const U120_RTL: u128 = 0x10;
-pub const U120_RTR: u128 = 0x11;
-pub const UTUP_ADD: u128 = 0x40;
-pub const UTUP_SUB: u128 = 0x41;
-pub const UTUP_MUL: u128 = 0x42;
-pub const UTUP_DIV: u128 = 0x43;
-pub const UTUP_MOD: u128 = 0x44;
-pub const UTUP_AND: u128 = 0x45;
-pub const UTUP_OR : u128 = 0x46;
-pub const UTUP_XOR: u128 = 0x47;
-pub const UTUP_SHL: u128 = 0x48;
-pub const UTUP_SHR: u128 = 0x49;
-pub const UTUP_LTN: u128 = 0x4A;
-pub const UTUP_LTE: u128 = 0x4B;
-pub const UTUP_EQL: u128 = 0x4C;
-pub const UTUP_GTE: u128 = 0x4D;
-pub const UTUP_GTN: u128 = 0x4E;
-pub const UTUP_NEQ: u128 = 0x4F;
-pub const UTUP_RTL: u128 = 0x50;
-pub const UTUP_RTR: u128 = 0x51;
+
+pub const OP_U120: u128 = 0b00 << 5;
+pub const OP_I120: u128 = 0b01 << 5;
+pub const OP_UTUP: u128 = 0b10 << 5;
+pub const OP_ITUP: u128 = 0b11 << 5;
+
+pub const ADD : u128 = 0x00;
+pub const SUB : u128 = 0x01;
+pub const MUL : u128 = 0x02;
+pub const DIV : u128 = 0x03;
+pub const MOD : u128 = 0x04;
+pub const AND : u128 = 0x05;
+pub const OR  : u128 = 0x06;
+pub const XOR : u128 = 0x07;
+pub const SHL : u128 = 0x08;
+pub const SHR : u128 = 0x09;
+pub const LTN : u128 = 0x0A;
+pub const LTE : u128 = 0x0B;
+pub const EQL : u128 = 0x0C;
+pub const GTE : u128 = 0x0D;
+pub const GTN : u128 = 0x0E;
+pub const NEQ : u128 = 0x0F;
+pub const RTL : u128 = 0x10;
+pub const RTR : u128 = 0x11;
+
+/// kind:  0 -> x120     ; 1 -> xTUP
+/// sig:   0 -> unsigned ; 1 -> signed
+/// op: see above (5-bits)
+fn make_oper(kind: u128, sig: u128, op_code: u128) -> u128 {
+  let res = kind;
+  let res = (res << 1) | sig;
+  let res = (res << 5) | op_code;
+  res
+}
+
+fn decompose_oper(op: u128) -> (u128, u128, u128) {
+  let op_code = op & ((1<<5) - 1);
+  let op = op >> 5;
+  let sig = op & 1;
+  let op = op >> 1;
+  let kind = op & 1;
+  let op = op >> 1;
+  debug_assert!(op == 0, "Invalid operation");
+  (kind, sig, op_code)
+}
+
+// ?? This entire block can be replaced by a single clever macro
+
+// U120
+pub const U120_ADD: u128 = OP_U120 | ADD;
+pub const U120_SUB: u128 = OP_U120 | SUB;
+pub const U120_MUL: u128 = OP_U120 | MUL;
+pub const U120_DIV: u128 = OP_U120 | DIV;
+pub const U120_MOD: u128 = OP_U120 | MOD;
+pub const U120_AND: u128 = OP_U120 | AND;
+pub const U120_OR : u128 = OP_U120 | OR;
+pub const U120_XOR: u128 = OP_U120 | XOR;
+pub const U120_SHL: u128 = OP_U120 | SHL;
+pub const U120_SHR: u128 = OP_U120 | SHR;
+pub const U120_LTN: u128 = OP_U120 | LTN;
+pub const U120_LTE: u128 = OP_U120 | LTE;
+pub const U120_EQL: u128 = OP_U120 | EQL;
+pub const U120_GTE: u128 = OP_U120 | GTE;
+pub const U120_GTN: u128 = OP_U120 | GTN;
+pub const U120_NEQ: u128 = OP_U120 | NEQ;
+pub const U120_RTL: u128 = OP_U120 | RTL;
+pub const U120_RTR: u128 = OP_U120 | RTR;
+// I120
+pub const I120_ADD: u128 = OP_I120 | ADD;
+pub const I120_SUB: u128 = OP_I120 | SUB;
+pub const I120_MUL: u128 = OP_I120 | MUL;
+pub const I120_DIV: u128 = OP_I120 | DIV;
+pub const I120_MOD: u128 = OP_I120 | MOD;
+pub const I120_AND: u128 = OP_I120 | AND;
+pub const I120_OR : u128 = OP_I120 | OR;
+pub const I120_XOR: u128 = OP_I120 | XOR;
+pub const I120_SHL: u128 = OP_I120 | SHL;
+pub const I120_SHR: u128 = OP_I120 | SHR;
+pub const I120_LTN: u128 = OP_I120 | LTN;
+pub const I120_LTE: u128 = OP_I120 | LTE;
+pub const I120_EQL: u128 = OP_I120 | EQL;
+pub const I120_GTE: u128 = OP_I120 | GTE;
+pub const I120_GTN: u128 = OP_I120 | GTN;
+pub const I120_NEQ: u128 = OP_I120 | NEQ;
+pub const I120_RTL: u128 = OP_I120 | RTL;
+pub const I120_RTR: u128 = OP_I120 | RTR;
+// UTUP
+pub const UTUP_ADD: u128 = OP_UTUP | ADD;
+pub const UTUP_SUB: u128 = OP_UTUP | SUB;
+pub const UTUP_MUL: u128 = OP_UTUP | MUL;
+pub const UTUP_DIV: u128 = OP_UTUP | DIV;
+pub const UTUP_MOD: u128 = OP_UTUP | MOD;
+pub const UTUP_AND: u128 = OP_UTUP | AND;
+pub const UTUP_OR : u128 = OP_UTUP | OR;
+pub const UTUP_XOR: u128 = OP_UTUP | XOR;
+pub const UTUP_SHL: u128 = OP_UTUP | SHL;
+pub const UTUP_SHR: u128 = OP_UTUP | SHR;
+pub const UTUP_LTN: u128 = OP_UTUP | LTN;
+pub const UTUP_LTE: u128 = OP_UTUP | LTE;
+pub const UTUP_EQL: u128 = OP_UTUP | EQL;
+pub const UTUP_GTE: u128 = OP_UTUP | GTE;
+pub const UTUP_GTN: u128 = OP_UTUP | GTN;
+pub const UTUP_NEQ: u128 = OP_UTUP | NEQ;
+pub const UTUP_RTL: u128 = OP_UTUP | RTL;
+pub const UTUP_RTR: u128 = OP_UTUP | RTR;
+// ITUP
+pub const ITUP_ADD: u128 = OP_ITUP | ADD;
+pub const ITUP_SUB: u128 = OP_ITUP | SUB;
+pub const ITUP_MUL: u128 = OP_ITUP | MUL;
+pub const ITUP_DIV: u128 = OP_ITUP | DIV;
+pub const ITUP_MOD: u128 = OP_ITUP | MOD;
+pub const ITUP_AND: u128 = OP_ITUP | AND;
+pub const ITUP_OR : u128 = OP_ITUP | OR;
+pub const ITUP_XOR: u128 = OP_ITUP | XOR;
+pub const ITUP_SHL: u128 = OP_ITUP | SHL;
+pub const ITUP_SHR: u128 = OP_ITUP | SHR;
+pub const ITUP_LTN: u128 = OP_ITUP | LTN;
+pub const ITUP_LTE: u128 = OP_ITUP | LTE;
+pub const ITUP_EQL: u128 = OP_ITUP | EQL;
+pub const ITUP_GTE: u128 = OP_ITUP | GTE;
+pub const ITUP_GTN: u128 = OP_ITUP | GTN;
+pub const ITUP_NEQ: u128 = OP_ITUP | NEQ;
+pub const ITUP_RTL: u128 = OP_ITUP | RTL;
+pub const ITUP_RTR: u128 = OP_ITUP | RTR;
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
-//   (IO.done retr:r)                                       : (IO r)
-//   (IO.laod               cont:(∀? (IO r))) : (IO r)
-//   (IO.save expr:?        cont:(∀? (IO r))) : (IO r)
-//   (IO.call expr:? args:? cont:(∀? (IO r))) : (IO r)
-//   (IO.from               cont:(∀? (IO r))) : (IO r)
-const IO_DONE : u128 = 0x13640a33ca9;
-const IO_TAKE : u128 = 0x13640e25be9;
-const IO_SAVE : u128 = 0x13640de5ea9;
-const IO_CALL : u128 = 0x136409e5c30;
-const IO_FROM : u128 = 0x13640ab6cf1;
-
-const fn GET_ARITY(fid: u128) -> Option<u128> {
-  match fid {
-    IO_DONE => Some(1),
-    IO_TAKE => Some(1),
-    IO_SAVE => Some(2),
-    IO_CALL => Some(3),
-    IO_FROM => Some(1),
-    _       => None,
-  }
-}
+//   (IO.done expr)           : (IO r)
+//   (IO.take           then) : (IO r)
+//   (IO.save expr      then) : (IO r)
+//   (IO.call expr args then) : (IO r)
+//   (IO.from           then) : (IO r)
+const IO_DONE : u128 = 0x1364039960f; // name_to_u128('IO.DONE')
+const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128('IO.TAKE')
+const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128('IO.SAVE')
+const IO_CALL : u128 = 0x1364034b596; // name_to_u128('IO.CALL')
+const IO_FROM : u128 = 0x1364041c657; // name_to_u128('IO.FROM')
+const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
+const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
+const MC_LOAD : u128 = 0xc33968; // name_to_u128('load')
+const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
+const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
+const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
@@ -413,25 +508,64 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
-$(Tuple0)
-$(Tuple1 x0)
-$(Tuple2 x0 x1)
-$(Tuple3 x0 x1 x2)
-$(Tuple4 x0 x1 x2 x3)
-$(Tuple5 x0 x1 x2 x3 x4)
-$(Tuple6 x0 x1 x2 x3 x4 x5)
-$(Tuple7 x0 x1 x2 x3 x4 x5 x6)
-$(Tuple8 x0 x1 x2 x3 x4 x5 x6 x7)
+ctr {Tuple0}
+ctr {Tuple1 x0}
+ctr {Tuple2 x0 x1}
+ctr {Tuple3 x0 x1 x2}
+ctr {Tuple4 x0 x1 x2 x3}
+ctr {Tuple5 x0 x1 x2 x3 x4}
+ctr {Tuple6 x0 x1 x2 x3 x4 x5}
+ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
+ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
 
-!(IO.load cont) {
-  !(IO.load cont) = $(IO.take @x &{x0 x1} = x; $(IO.save x0 @~ (cont x1)))
+ctr {IO.DONE expr}
+ctr {IO.TAKE then}
+ctr {IO.SAVE expr then}
+ctr {IO.CALL name args then}
+ctr {IO.FROM then} 
+
+fun (IO.done expr) {
+  (IO.done expr) = {IO.DONE expr}
 } = #0
 
-$(Inc)
-$(Get)
-!(Count action) {
-  !(Count $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Count $(Get)) = !(IO.load @x $(IO.done x))
+fun (IO.take then) {
+  (IO.take then) = {IO.TAKE then}
+} = #0
+
+fun (IO.save expr then) {
+  (IO.save expr then) = {IO.SAVE expr then}
+} = #0
+
+fun (IO.call name args then) {
+  (IO.call name args then) = {IO.CALL name args then}
+} = #0
+
+fun (IO.from then) {
+  (IO.from then) = {IO.FROM then}
+} = #0
+
+fun (IO.load cont) {
+  (IO.load cont) =
+    {IO.TAKE @x
+    dup x0 x1 = x;
+    {IO.SAVE x0 @~
+    (! cont x1)}}
+} = #0
+
+ctr {Count.Inc}
+ctr {Count.Get}
+fun (Count action) {
+  (Count {Count.Inc}) =
+    !take x
+    !save (+ x #1)
+    !done #0
+  (Count {Count.Get}) =
+    !load x
+    !done x
 } = #0
 ";
 
@@ -1052,13 +1186,19 @@ impl Runtime {
       Statement::Fun { name, args, func, init } => {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
-          if let Some(func) = build_func(func, true) {
-            // println!("- fun {}", u128_to_name(*name));
-            self.set_arity(*name, args.len() as u128);
-            self.define_function(*name, func);
-            let state = self.create_term(init, 0, &mut init_map());
-            self.write_disk(*name, state);
-            self.draw();
+          self.set_arity(*name, args.len() as u128);
+          if self.check_func_arities(&func) {
+            if let Some(func) = build_func(func, true) {
+              // println!("- fun {}", u128_to_name(*name));
+              self.set_arity(*name, args.len() as u128);
+              self.define_function(*name, func);
+              let state = self.create_term(init, 0, &mut init_map());
+              self.write_disk(*name, state);
+              self.draw();
+              return;
+            }
+          } else {
+            self.undo();
             return;
           }
         }
@@ -1079,31 +1219,93 @@ impl Runtime {
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        let host = self.alloc_term(expr);
-        // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
-        if let Some(done) = self.run_io(0, 0, host, mana_lim) {
-          if let Some(done) = self.compute(done, mana_lim) {
-            let done_code = self.show_term(done);
-            if let Some(()) = self.collect(done, mana_lim) {
-              let size_end = self.get_size();
-              let mana_dif = self.get_mana() - mana_ini;
-              let size_dif = size_end - size_ini;
-              // dbg!(size_end, size_dif, size_lim);
-              if size_end <= size_lim {
-                // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
-                self.draw();
-              } else {
-                println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
-                self.undo();
+        if self.check_term_arities(expr) {
+          let host = self.alloc_term(expr);
+          // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
+          if let Some(done) = self.run_io(0, 0, host, mana_lim) {
+            if let Some(done) = self.compute(done, mana_lim) {
+              let done_code = self.show_term(done);
+              if let Some(()) = self.collect(done, mana_lim) {
+                let size_end = self.get_size();
+                let mana_dif = self.get_mana() - mana_ini;
+                let size_dif = size_end - size_ini;
+                // dbg!(size_end, size_dif, size_lim);
+                if size_end <= size_lim {
+                  // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  self.draw();
+                } else {
+                  println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                  self.undo();
+                }
+                return;
               }
-              return;
             }
           }
+          println!("- run fail");
+          self.undo();
+        } else {
+          println!("- run fail: incorrect ctr or fun arity");
         }
-        println!("- run fail");
-        self.undo();
       }
     }
+  }
+
+  pub fn check_term_arities(&self, term: &Term) -> bool {
+    match term {
+      Term::Var { name } => {
+        return true;
+      },
+      Term::Dup { nam0, nam1, expr, body } => {
+        return self.check_term_arities(expr) && self.check_term_arities(body);
+      }
+      Term::Lam { name, body } => {
+        return self.check_term_arities(body);
+      }
+      Term::App { func, argm } => {
+        return self.check_term_arities(func) && self.check_term_arities(argm);
+      }
+      Term::Ctr { name, args } => {
+        if self.get_arity(*name) != args.len() as u128 {
+          return false;
+        }
+        for arg in args {
+          if !self.check_term_arities(arg) {
+            return false;
+          }
+        }
+        return true;
+      }
+      Term::Fun { name, args } => {
+        if self.get_arity(*name) != args.len() as u128 {
+          return false;
+        }
+        for arg in args {
+          if !self.check_term_arities(arg) {
+            return false;
+          }
+        }
+        return true;
+      }
+      Term::Num { numb } => {
+        return true;
+      }
+      Term::Op2 { oper, val0, val1 } => {
+        return self.check_term_arities(val0) && self.check_term_arities(val1);
+      }
+    }
+  }
+
+  pub fn check_rule_arities(&self, rule: &Rule) -> bool {
+    return self.check_term_arities(&rule.0) && self.check_term_arities(&rule.1);
+  }
+
+  pub fn check_func_arities(&self, func: &Func) -> bool {
+    for rule in func {
+      if !self.check_rule_arities(rule) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // Maximum mana = 42m * block_number
@@ -1255,12 +1457,10 @@ impl Runtime {
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
-    if let Some(arity) = GET_ARITY(fid) {
-      return arity;
-    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return arity;
     } else {
-      return 0;
+      return U128_NONE;
     }
   }
 
@@ -1269,9 +1469,7 @@ impl Runtime {
   }
 
   pub fn exists(&self, fid: u128) -> bool {
-    if let Some(arity) = GET_ARITY(fid) {
-      return true;
-    } else if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return true;
     } else {
       return false;
@@ -1430,15 +1628,15 @@ pub fn get_tag(lnk: Lnk) -> u128 {
 }
 
 pub fn get_ext(lnk: Lnk) -> u128 {
-  (lnk / EXT) & 0xFFFFFFFFFFFFFFF
+  (lnk / EXT) & 0xFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Lnk) -> u128 {
-  lnk & 0xFFFFFFFFFFFFFFF
+  lnk & 0xFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_num(lnk: Lnk) -> u128 {
-  lnk & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+  lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
 }
 
 //pub fn get_ari(lnk: Lnk) -> u128 {
@@ -1589,6 +1787,102 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // Term
 // ----
 
+// Counts how many times the free variable 'name' appers inside Term
+fn count_uses(term: &Term, name: u128) -> u128 {
+  match term {
+    Term::Var { name: var_name } => {
+      return if name == *var_name { 1 } else { 0 };
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let expr_uses = count_uses(expr, name);
+      let body_uses = if name == *nam0 || name == *nam1 { 0 } else { count_uses(body, name) };
+      return expr_uses + body_uses;
+    }
+    Term::Lam { name: lam_name, body } => {
+      return if name == *lam_name { 0 } else { count_uses(body, name) };
+    }
+    Term::App { func, argm } => {
+      let func_uses = count_uses(func, name);
+      let argm_uses = count_uses(argm, name);
+      return func_uses + argm_uses;
+    }
+    Term::Ctr { name: ctr_name, args } => {
+      let mut uses = 0;
+      for arg in args {
+        uses += count_uses(arg, name);
+      }
+      return uses;
+    }
+    Term::Fun { name: fun_name, args } => {
+      let mut uses = 0;
+      for arg in args {
+        uses += count_uses(arg, name);
+      }
+      return uses;
+    }
+    Term::Num { numb } => {
+      return 0;
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let val0_uses = count_uses(val0, name);
+      let val1_uses = count_uses(val1, name);
+      return val0_uses + val1_uses;
+    }
+  }
+}
+
+// Checks if:
+// - Every non-erased variable is used exactly once
+// - Every erased variable is never used
+pub fn is_linear(term: &Term) -> bool {
+  match term {
+    Term::Var { name: var_name } => {
+      return true;
+    }
+    Term::Dup { nam0, nam1, expr, body } => {
+      let expr_linear = is_linear(expr);
+      let body_linear
+        =  (*nam0 == VAR_NONE || count_uses(body, *nam0) == 1)
+        && (*nam1 == VAR_NONE || count_uses(body, *nam1) == 1)
+        && is_linear(body);
+      return expr_linear && body_linear;
+    }
+    Term::Lam { name, body } => {
+      let body_linear
+        =  (*name == VAR_NONE || count_uses(body, *name) == 1)
+        && is_linear(body);
+      return body_linear;
+    }
+    Term::App { func, argm } => {
+      let func_linear = is_linear(func);
+      let argm_linear = is_linear(argm);
+      return func_linear && argm_linear;
+    }
+    Term::Ctr { name: ctr_name, args } => {
+      let mut linear = true;
+      for arg in args {
+        linear = linear && is_linear(arg);
+      }
+      return linear;
+    }
+    Term::Fun { name: fun_name, args } => {
+      let mut linear = true;
+      for arg in args {
+        linear = linear && is_linear(arg);
+      }
+      return linear;
+    }
+    Term::Num { numb } => {
+      return true;
+    }
+    Term::Op2 { oper, val0, val1 } => {
+      let val0_linear = is_linear(val0);
+      let val1_linear = is_linear(val1);
+      return val0_linear && val1_linear;
+    }
+  }
+}
+
 // Writes a Term represented as a Rust enum on the Runtime's rt.
 pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
@@ -1687,7 +1981,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   // If there are no rules, return none
   if func.len() == 0 {
     if debug {
-      println!("- failed to build function: no rules");
+      println!("  - failed to build function: no rules");
     }
     return None;
   }
@@ -1698,7 +1992,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     arity = args.len() as u128;
   } else {
     if debug {
-      println!("- failed to build function: no arity");
+      println!("  - failed to build function: left-hand side must be !(Fun ...)");
     }
     return None;
   }
@@ -1710,20 +2004,35 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for rule in 0 .. func.len() {
-    let comp_rule = &func[rule];
+  for rule_index in 0 .. func.len() {
+    let rule = &func[rule_index];
+
+    // Validates that:
+    // - the same lhs variable names aren't defined twice or more
+    // - lhs variables are used linearly on the rhs
+    let mut seen : HashSet<u128> = HashSet::new();
+    fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
+      if seen.contains(&name) {
+        return false;
+      } else if name == VAR_NONE {
+        return true;
+      } else {
+        seen.insert(name);
+        return count_uses(body, name) == 1;
+      }
+    }
 
     let mut cond = Vec::new();
     let mut vars = Vec::new();
     let mut eras = Vec::new();
 
     // If the lhs is a Fun
-    if let Term::Fun { ref name, ref args } = comp_rule.0 {
+    if let Term::Fun { ref name, ref args } = rule.0 {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
         if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", rule);
+          println!("  - failed to build function: arity mismatch on rule {}", rule_index);
         }
         return None;
       }
@@ -1741,11 +2050,18 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
             for j in 0 .. arg_args.len() as u128 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
+                if !check_var(name, &rule.1, &mut seen) {
+                  if debug {
+                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+                  }
+                  return None;
+                } else {
+                  vars.push(Var { name, param: i, field: Some(j), erase: name == VAR_NONE }); // add its location
+                }
               // Otherwise..
               } else {
                 if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}", rule, i);
+                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
                 }
                 return None; // return none, because we don't allow nested matches
               }
@@ -1758,12 +2074,19 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
-            cond.push(0); // it has no matching condition
+            if !check_var(*arg_name, &rule.1, &mut seen) {
+              if debug {
+                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(*arg_name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+              }
+              return None;
+            } else {
+              vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
+              cond.push(0); // it has no matching condition
+            }
           }
           _ => {
             if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}", rule, i);
+              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
             }
             return None;
           }
@@ -1773,13 +2096,13 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     // If lhs isn't a Ctr, return None
     } else {
       if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}", rule);
+        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.0), view_term(&rule.1));
       }
       return None;
     }
 
     // Creates the rhs body
-    let body = comp_rule.1.clone();
+    let body = rule.1.clone();
 
     // Adds the rule to the result vector
     comp_rules.push(CompRule { cond, vars, eras, body });
@@ -1793,7 +2116,12 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     }
   }
 
-  return Some(CompFunc { func: func.clone(), arity, redux, rules: comp_rules });
+  return Some(CompFunc {
+    func: func.clone(),
+    arity,
+    redux,
+    rules: comp_rules,
+  });
 }
 
 pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
@@ -2096,70 +2424,137 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
           // --------- OP2-NUM
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
-            //println!("op2-num");
-            fn gu8(tup: u128) -> u8 {
-              return tup as u8;
+            // eprintln!("op2-num");
+            fn gu08(tup: u128) -> u8 {
+              tup as u8
             }
             fn gu16(tup: u128) -> u16 {
-              return (tup >> 8) as u16;
+              (tup >> 8) as u16
             }
             fn gu32(tup: u128) -> u32 {
-              return (tup >> 24) as u32;
+              (tup >> 24) as u32
             }
             fn gu64(tup: u128) -> u64 {
-              return (tup >> 56) as u64;
+              (tup >> 56) as u64
+            }
+            fn gi08(tup: u128) -> i8 {
+              tup as i8
+            }
+            fn gi16(tup: u128) -> i16 {
+              (tup >> 8) as i16
+            }
+            fn gi32(tup: u128) -> i32 {
+              (tup >> 24) as i32
+            }
+            fn gi64(tup: u128) -> i64 {
+              (tup >> 56) as i64
             }
             fn utup(x8: u8, x16: u16, x32: u32, x64: u64) -> u128 {
-              let x8  = (x8  as u128) <<  0;
-              let x16 = (x16 as u128) <<  8;
-              let x32 = (x32 as u128) << 24;
-              let x64 = (x64 as u128) << 56;
+              let x8  = (x8  as u128) << (0);
+              let x16 = (x16 as u128) << (8);
+              let x32 = (x32 as u128) << (8 + 16);
+              let x64 = (x64 as u128) << (8 + 16 + 32);
+              return x8 | x16 | x32 | x64;
+            }
+            fn itup(x8: i8, x16: i16, x32: i32, x64: i64) -> u128 {
+              let x8  = (x8  as  u8 as u128) << (0);
+              let x16 = (x16 as u16 as u128) << (8);
+              let x32 = (x32 as u32 as u128) << (8 + 16);
+              let x64 = (x64 as u64 as u128) << (8 + 16 + 32);
               return x8 | x16 | x32 | x64;
             }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let a = get_num(arg0);
-            let b = get_num(arg1);
-            let c = match get_ext(term) {
-              U120_ADD => (a + b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SUB => (a - b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MUL => (a * b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_DIV => (a / b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_MOD => (a % b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_AND => (a & b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_OR  => (a | b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_XOR => (a ^ b)  & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHL => (a << b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_SHR => (a >> b) & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-              U120_LTN => u128::from(a <  b),
-              U120_LTE => u128::from(a <= b),
-              U120_EQL => u128::from(a == b),
-              U120_GTE => u128::from(a >= b),
-              U120_GTN => u128::from(a >  b),
-              U120_NEQ => u128::from(a != b),
-              U120_RTL => panic!("TODO"),
-              U120_RTR => panic!("TODO"),
-              UTUP_ADD => utup(gu8(a) + gu8(b), gu16(a) + gu16(b), gu32(a) + gu32(b), gu64(a) + gu64(b)),
-              UTUP_SUB => utup(gu8(a) - gu8(b), gu16(a) - gu16(b), gu32(a) - gu32(b), gu64(a) - gu64(b)),
-              UTUP_MUL => utup(gu8(a) * gu8(b), gu16(a) * gu16(b), gu32(a) * gu32(b), gu64(a) * gu64(b)),
-              UTUP_DIV => utup(gu8(a) / gu8(b), gu16(a) / gu16(b), gu32(a) / gu32(b), gu64(a) / gu64(b)),
-              UTUP_MOD => utup(gu8(a) % gu8(b), gu16(a) % gu16(b), gu32(a) % gu32(b), gu64(a) % gu64(b)),
-              UTUP_AND => utup(gu8(a) & gu8(b), gu16(a) & gu16(b), gu32(a) & gu32(b), gu64(a) & gu64(b)),
-              UTUP_OR  => utup(gu8(a) | gu8(b), gu16(a) | gu16(b), gu32(a) | gu32(b), gu64(a) | gu64(b)),
-              UTUP_XOR => utup(gu8(a) ^ gu8(b), gu16(a) ^ gu16(b), gu32(a) ^ gu32(b), gu64(a) ^ gu64(b)),
-              UTUP_SHL => utup(gu8(a) << gu8(b), gu16(a) << gu16(b), gu32(a) << gu32(b), gu64(a) << gu64(b)),
-              UTUP_SHR => utup(gu8(a) >> gu8(b), gu16(a) >> gu16(b), gu32(a) >> gu32(b), gu64(a) >> gu64(b)),
-              UTUP_LTN => utup(u8::from(gu8(a) <  gu8(b)), u16::from(gu16(a) <  gu16(b)), u32::from(gu32(a) <  gu32(b)), u64::from(gu64(a) <  gu64(b))),
-              UTUP_LTE => utup(u8::from(gu8(a) <= gu8(b)), u16::from(gu16(a) <= gu16(b)), u32::from(gu32(a) <= gu32(b)), u64::from(gu64(a) <= gu64(b))),
-              UTUP_EQL => utup(u8::from(gu8(a) == gu8(b)), u16::from(gu16(a) == gu16(b)), u32::from(gu32(a) == gu32(b)), u64::from(gu64(a) == gu64(b))),
-              UTUP_GTE => utup(u8::from(gu8(a) >= gu8(b)), u16::from(gu16(a) >= gu16(b)), u32::from(gu32(a) >= gu32(b)), u64::from(gu64(a) >= gu64(b))),
-              UTUP_GTN => utup(u8::from(gu8(a) >  gu8(b)), u16::from(gu16(a) >  gu16(b)), u32::from(gu32(a) >  gu32(b)), u64::from(gu64(a) >  gu64(b))),
-              UTUP_NEQ => utup(u8::from(gu8(a) != gu8(b)), u16::from(gu16(a) != gu16(b)), u32::from(gu32(a) != gu32(b)), u64::from(gu64(a) != gu64(b))),
-              UTUP_RTL => utup(gu8(a).rotate_left(gu8(b) as u32), gu16(a).rotate_left(gu16(b) as u32), gu32(a).rotate_left(gu32(b) as u32), gu64(a).rotate_left(gu64(b) as u32)),
-              UTUP_RTR => utup(gu8(a).rotate_right(gu8(b) as u32), gu16(a).rotate_right(gu16(b) as u32), gu32(a).rotate_right(gu32(b) as u32), gu64(a).rotate_right(gu64(b) as u32)),
-              _        => 0,
+            let a_u = get_num(arg0);
+            let b_u = get_num(arg1);
+            let a_i = a_u as i128;
+            let b_i = b_u as i128;
+            let a_u08 = gu08(a_u); let a_u16 = gu16(a_u); let a_u32 = gu32(a_u); let a_u64 = gu64(a_u); // TODO: replace by single function
+            let a_i08 = gi08(a_u); let a_i16 = gi16(a_u); let a_i32 = gi32(a_u); let a_i64 = gi64(a_u);
+            let b_u08 = gu08(b_u); let b_u16 = gu16(b_u); let b_u32 = gu32(b_u); let b_u64 = gu64(b_u);
+            let b_i08 = gi08(b_u); let b_i16 = gi16(b_u); let b_i32 = gi32(b_u); let b_i64 = gi64(b_u);
+
+            let op = get_ext(term);
+            let res = match op {
+              // U120
+              U120_ADD => (a_u +  b_u) & NUM_MASK,
+              U120_SUB => (a_u -  b_u) & NUM_MASK,
+              U120_MUL => (a_u *  b_u) & NUM_MASK,
+              U120_DIV => (a_u /  b_u) & NUM_MASK,
+              U120_MOD => (a_u %  b_u) & NUM_MASK,
+              U120_AND => (a_u &  b_u) & NUM_MASK,
+              U120_OR  => (a_u |  b_u) & NUM_MASK,
+              U120_XOR => (a_u ^  b_u) & NUM_MASK,
+              U120_SHL => (a_u << b_u) & NUM_MASK,
+              U120_SHR => (a_u >> b_u) & NUM_MASK,
+              U120_LTN => u128::from(a_u <  b_u),
+              U120_LTE => u128::from(a_u <= b_u),
+              U120_EQL => u128::from(a_u == b_u),
+              U120_GTE => u128::from(a_u >= b_u),
+              U120_GTN => u128::from(a_u >  b_u),
+              U120_NEQ => u128::from(a_u != b_u),
+              U120_RTL => todo!("U120_RTL"), // TODO
+              U120_RTR => todo!("U120_RTR"), // TODO
+              // I120
+              I120_ADD => (a_i +  b_i) as u128 & NUM_MASK,
+              I120_SUB => (a_i -  b_i) as u128 & NUM_MASK,
+              I120_MUL => (a_i *  b_i) as u128 & NUM_MASK,
+              I120_DIV => (a_i /  b_i) as u128 & NUM_MASK,
+              I120_MOD => (a_i %  b_i) as u128 & NUM_MASK,
+              I120_AND => (a_i &  b_i) as u128 & NUM_MASK,
+              I120_OR  => (a_i |  b_i) as u128 & NUM_MASK,
+              I120_XOR => (a_i ^  b_i) as u128 & NUM_MASK,
+              I120_SHL => (a_i << b_i) as u128 & NUM_MASK,
+              I120_SHR => (a_i >> b_i) as u128 & NUM_MASK,
+              I120_LTN => u128::from(a_i <  b_i),
+              I120_LTE => u128::from(a_i <= b_i),
+              I120_EQL => u128::from(a_i == b_i),
+              I120_GTE => u128::from(a_i >= b_i),
+              I120_GTN => u128::from(a_i >  b_i),
+              I120_NEQ => u128::from(a_i != b_i),
+              I120_RTL => todo!("I120_RTL"), // TODO
+              I120_RTR => todo!("I120_RTR"), // TODO
+              // UTUP
+              UTUP_ADD => utup(a_u08 +  b_u08, a_u16 +  b_u16, a_u32 +  b_u32, a_u64 +  b_u64),
+              UTUP_SUB => utup(a_u08 -  b_u08, a_u16 -  b_u16, a_u32 -  b_u32, a_u64 -  b_u64),
+              UTUP_MUL => utup(a_u08 *  b_u08, a_u16 *  b_u16, a_u32 *  b_u32, a_u64 *  b_u64),
+              UTUP_DIV => utup(a_u08 /  b_u08, a_u16 /  b_u16, a_u32 /  b_u32, a_u64 /  b_u64),
+              UTUP_MOD => utup(a_u08 %  b_u08, a_u16 %  b_u16, a_u32 %  b_u32, a_u64 %  b_u64),
+              UTUP_AND => utup(a_u08 &  b_u08, a_u16 &  b_u16, a_u32 &  b_u32, a_u64 &  b_u64),
+              UTUP_OR  => utup(a_u08 |  b_u08, a_u16 |  b_u16, a_u32 |  b_u32, a_u64 |  b_u64),
+              UTUP_XOR => utup(a_u08 ^  b_u08, a_u16 ^  b_u16, a_u32 ^  b_u32, a_u64 ^  b_u64),
+              UTUP_SHL => utup(a_u08 << b_u08, a_u16 << b_u16, a_u32 << b_u32, a_u64 << b_u64),
+              UTUP_SHR => utup(a_u08 >> b_u08, a_u16 >> b_u16, a_u32 >> b_u32, a_u64 >> b_u64),
+              UTUP_LTN => utup(u8::from(a_u08 <  b_u08), u16::from(a_u16 <  b_u16), u32::from(a_u32 <  b_u32), u64::from(a_u64 <  b_u64)),
+              UTUP_LTE => utup(u8::from(a_u08 <= b_u08), u16::from(a_u16 <= b_u16), u32::from(a_u32 <= b_u32), u64::from(a_u64 <= b_u64)),
+              UTUP_EQL => utup(u8::from(a_u08 == b_u08), u16::from(a_u16 == b_u16), u32::from(a_u32 == b_u32), u64::from(a_u64 == b_u64)),
+              UTUP_GTE => utup(u8::from(a_u08 >= b_u08), u16::from(a_u16 >= b_u16), u32::from(a_u32 >= b_u32), u64::from(a_u64 >= b_u64)),
+              UTUP_GTN => utup(u8::from(a_u08 >  b_u08), u16::from(a_u16 >  b_u16), u32::from(a_u32 >  b_u32), u64::from(a_u64 >  b_u64)),
+              UTUP_NEQ => utup(u8::from(a_u08 != b_u08), u16::from(a_u16 != b_u16), u32::from(a_u32 != b_u32), u64::from(a_u64 != b_u64)),
+              UTUP_RTL => utup(a_u08.rotate_left(b_u08 as u32),  a_u16.rotate_left(b_u16 as u32),  a_u32.rotate_left(b_u32 as u32),  a_u64.rotate_left(b_u64 as u32) ), // ?? I think the u64 to u32 cast can panic
+              UTUP_RTR => utup(a_u08.rotate_right(b_u08 as u32), a_u16.rotate_right(b_u16 as u32), a_u32.rotate_right(b_u32 as u32), a_u64.rotate_right(b_u64 as u32)),
+              // ITUP
+              ITUP_ADD => itup(a_i08 +  b_i08, a_i16 +  b_i16, a_i32 +  b_i32, a_i64 +  b_i64),
+              ITUP_SUB => itup(a_i08 -  b_i08, a_i16 -  b_i16, a_i32 -  b_i32, a_i64 -  b_i64),
+              ITUP_MUL => itup(a_i08 *  b_i08, a_i16 *  b_i16, a_i32 *  b_i32, a_i64 *  b_i64),
+              ITUP_DIV => itup(a_i08 /  b_i08, a_i16 /  b_i16, a_i32 /  b_i32, a_i64 /  b_i64),
+              ITUP_MOD => itup(a_i08 %  b_i08, a_i16 %  b_i16, a_i32 %  b_i32, a_i64 %  b_i64),
+              ITUP_AND => itup(a_i08 &  b_i08, a_i16 &  b_i16, a_i32 &  b_i32, a_i64 &  b_i64),
+              ITUP_OR  => itup(a_i08 |  b_i08, a_i16 |  b_i16, a_i32 |  b_i32, a_i64 |  b_i64),
+              ITUP_XOR => itup(a_i08 ^  b_i08, a_i16 ^  b_i16, a_i32 ^  b_i32, a_i64 ^  b_i64),
+              ITUP_SHL => itup(a_i08 << b_i08, a_i16 << b_i16, a_i32 << b_i32, a_i64 << b_i64),
+              ITUP_SHR => itup(a_i08 >> b_i08, a_i16 >> b_i16, a_i32 >> b_i32, a_i64 >> b_i64),
+              ITUP_LTN => itup(i8::from(a_i08 <  b_i08), i16::from(a_i16 <  b_i16), i32::from(a_i32 <  b_i32), i64::from(a_i64 <  b_i64)),
+              ITUP_LTE => itup(i8::from(a_i08 <= b_i08), i16::from(a_i16 <= b_i16), i32::from(a_i32 <= b_i32), i64::from(a_i64 <= b_i64)),
+              ITUP_EQL => itup(i8::from(a_i08 == b_i08), i16::from(a_i16 == b_i16), i32::from(a_i32 == b_i32), i64::from(a_i64 == b_i64)),
+              ITUP_GTE => itup(i8::from(a_i08 >= b_i08), i16::from(a_i16 >= b_i16), i32::from(a_i32 >= b_i32), i64::from(a_i64 >= b_i64)),
+              ITUP_GTN => itup(i8::from(a_i08 >  b_i08), i16::from(a_i16 >  b_i16), i32::from(a_i32 >  b_i32), i64::from(a_i64 >  b_i64)),
+              ITUP_NEQ => itup(i8::from(a_i08 != b_i08), i16::from(a_i16 != b_i16), i32::from(a_i32 != b_i32), i64::from(a_i64 != b_i64)),
+              ITUP_RTL => itup(a_i08.rotate_left(b_i08 as u32),  a_i16.rotate_left(b_i16 as u32),  a_i32.rotate_left(b_i32 as u32),  a_i64.rotate_left(b_i64 as u32)),
+              ITUP_RTR => itup(a_i08.rotate_right(b_i08 as u32), a_i16.rotate_right(b_i16 as u32), a_i32.rotate_right(b_i32 as u32), a_i64.rotate_right(b_i64 as u32)),
+              _ => panic!("Invalid operation!"),
             };
-            let done = Num(c);
+            let done = Num(res);
             clear(rt, get_loc(term, 0), 2);
             link(rt, host, done);
           // (+ {a0 a1} b)
@@ -2523,7 +2918,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("&{{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+      text.push_str(&format!("&dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
     }
     text
   }
@@ -2619,8 +3014,8 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
             }
             CTR => {
               let func = get_ext(term);
-              output.push(format!("$({}", u128_to_name(func)));
-              stack.push(StackItem::Str(")".to_string()));
+              output.push(format!("{{{}", u128_to_name(func)));
+              stack.push(StackItem::Str("}".to_string()));
               let arit = rt.get_arity(func);
               for i in (0..arit).rev() {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
@@ -2629,7 +3024,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
             }
             FUN => {
               let func = get_ext(term);
-              output.push(format!("!{} ", u128_to_name(func)));
+              output.push(format!("({} ", u128_to_name(func)));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(func);
               for i in (0..arit).rev() {
@@ -2832,18 +3227,6 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, body) = read_term(code);
       return (code, Term::Lam { name, body: Box::new(body) });
     },
-    '&' => {
-      let code         = tail(code);
-      let (code, skip) = read_char(code, '{');
-      let (code, nam0) = read_name(code);
-      let (code, nam1) = read_name(code);
-      let (code, skip) = read_char(code, '}');
-      let (code, skip) = read_char(code, '=');
-      let (code, expr) = read_term(code);
-      let (code, skip) = read_char(code, ';');
-      let (code, body) = read_term(code);
-      return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
-    },
     '(' => {
       let code = tail(code);
       let (code, oper) = read_oper(code);
@@ -2853,27 +3236,36 @@ pub fn read_term(code: &str) -> (&str, Term) {
         let (code, val1) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
-      } else {
+      } else if head(code) == '!' {
+        let code = tail(code);
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
         let (code, skip) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
+      } else {
+        let (code, name) = read_name(code);
+        let (code, args) = read_until(code, ')', read_term);
+        // TODO: check function name size _on direct calling_, and propagate error
+        return (code, Term::Fun { name, args });
       }
     },
-    '$' => {
+    '{' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_term);
+      let (code, args) = read_until(code, '}', read_term);
       return (code, Term::Ctr { name, args });
     },
-    '!' => {
+    '[' => {
       let code = tail(code);
-      let (code, skip) = read_char(code, '(');
-      let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_term);
-      // TODO: check function name size _on direct calling_, and propagate error
-      return (code, Term::Fun { name, args });
+      let (code, vals) = read_until(code, ']', read_term);
+      if vals.len() <= 12 { 
+        return (code, Term::Ctr {
+          name: name_to_u128(&format!("Tuple{}", vals.len())),
+          args: vals
+        });
+      } else {
+        panic!("Tuple too long.");
+      }
     },
     '#' => {
       let code = tail(code);
@@ -2886,75 +3278,150 @@ pub fn read_term(code: &str) -> (&str, Term) {
       let (code, skip) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
+    '!' => {
+      let code = tail(code);
+      let (code, macro_name) = read_name(code);
+      //const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
+      //const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
+      //const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
+      //const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
+      //const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
+      match macro_name {
+        MC_DONE => {
+          let (code, expr) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.DONE"),
+            args: vec![expr],
+          });
+        }
+        MC_TAKE => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.TAKE"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_LOAD => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Fun {
+            name: name_to_u128("IO.load"), // attention: lowercase, because it is a function call
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_SAVE => {
+          let (code, expr) = read_term(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.SAVE"),
+            args: vec![expr, Term::Lam { name: VAR_NONE, body: Box::new(then) }],
+          });
+        }
+        MC_CALL => {
+          let (code, bind) = read_name(code);
+          let (code, func) = read_term(code);
+          let (code, args) = read_term(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.CALL"),
+            args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        MC_FROM => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.FROM"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
+        _ => {
+          panic!("Unknown macro: {}.", u128_to_name(macro_name));
+        }
+      }
+    },
     _ => {
-      let (code, name) = read_name(code);
-      return (code, Term::Var { name });
+      if let ('d','u','p',' ') = (head(code), head(tail(code)), head(tail(tail(code))), head(tail(tail(tail(code))))) {
+        let code = tail(tail(tail(code)));
+        let (code, nam0) = read_name(code);
+        let (code, nam1) = read_name(code);
+        let (code, skip) = read_char(code, '=');
+        let (code, expr) = read_term(code);
+        let (code, skip) = read_char(code, ';');
+        let (code, body) = read_term(code);
+        return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
+      } else {
+        let (code, name) = read_name(code);
+        return (code, Term::Var { name });
+      }
     }
   }
 }
 
-fn read_oper(code: &str) -> (&str, Option<u128>) {
-  let code = skip(code);
-  match head(code) {
-    '+' => (tail(code), Some(U120_ADD)),
-    '-' => (tail(code), Some(U120_SUB)),
-    '*' => (tail(code), Some(U120_MUL)),
-    '/' => (tail(code), Some(U120_DIV)),
-    '%' => (tail(code), Some(U120_MOD)),
-    '&' => (tail(code), Some(U120_AND)),
-    '|' => (tail(code), Some(U120_OR)),
-    '^' => (tail(code), Some(U120_XOR)),
-    '<' => match head(tail(code)) {
-      '=' => (tail(code), Some(U120_LTE)),
-      '<' => (tail(code), Some(U120_SHL)),
-      _   => (code, Some(U120_LTN)),
-    },
-    '>' => match head(tail(code)) {
-      '=' => (tail(code), Some(U120_GTE)),
-      '>' => (tail(code), Some(U120_SHR)),
-      _   => (code, Some(U120_GTN)),
-    },
-    '=' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(U120_EQL)),
-      _   => (code, None),
-    },
-    '!' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(U120_NEQ)),
-      _   => (code, None),
-    },
-    '~' => match head(tail(code)) {
-      '+' => (tail(tail(code)), Some(UTUP_ADD)),
-      '-' => (tail(tail(code)), Some(UTUP_SUB)),
-      '*' => (tail(tail(code)), Some(UTUP_MUL)),
-      '/' => (tail(tail(code)), Some(UTUP_DIV)),
-      '%' => (tail(tail(code)), Some(UTUP_MOD)),
-      '&' => (tail(tail(code)), Some(UTUP_AND)),
-      '|' => (tail(tail(code)), Some(UTUP_OR)),
-      '^' => (tail(tail(code)), Some(UTUP_XOR)),
-      '<' => match head(tail(tail(code))) {
-        '=' => (tail(tail(code)), Some(UTUP_LTE)),
-        '<' => (tail(tail(code)), Some(UTUP_SHL)),
-        '~' => (tail(tail(code)), Some(UTUP_RTL)),
-        _   => (tail(code), Some(UTUP_LTN)),
-      },
-      '>' => match head(tail(tail(code))) {
-        '=' => (tail(tail(code)), Some(UTUP_GTE)),
-        '>' => (tail(tail(code)), Some(UTUP_SHR)),
-        '~' => (tail(tail(code)), Some(UTUP_RTR)),
-        _   => (tail(code), Some(UTUP_GTN)),
-      },
-      '=' => match head(tail(tail(code))) {
-        '=' => (tail(tail(tail(code))), Some(UTUP_EQL)),
-        _   => (tail(code), None),
-      },
-      '!' => match head(tail(tail(code))) {
-        '=' => (tail(tail(tail(code))), Some(UTUP_NEQ)),
-        _   => (tail(code), None),
-      },
-      _ => (code, None)
-    },
-    _ => (code, None)
+fn read_oper(in_code: &str) -> (&str, Option<u128>) {
+  fn head_is(ch: char, code: &str) -> (&str, u128) {
+    if head(code) == ch {
+      (tail(code), 1)
+    } else {
+      (code, 0)
+    }
   }
+
+  fn read_op(code: &str) -> (&str, Option<u128>) {
+    let tl = tail(code);
+    match head(code) {
+      // Should not match with `~`
+      '+' => (tl, Some(ADD)),
+      '-' => (tl, Some(SUB)),
+      '*' => (tl, Some(MUL)),
+      '/' => (tl, Some(DIV)),
+      '%' => (tl, Some(MOD)),
+      '&' => (tl, Some(AND)),
+      '|' => (tl, Some(OR)),
+      '^' => (tl, Some(XOR)),
+      '<' => match head(tl) {
+        '=' => (tail(tl), Some(LTE)),
+        '<' => (tail(tl), Some(SHL)),
+        '~' => (tail(tl), Some(RTL)),
+        _   => (code, Some(LTN)),
+      },
+      '>' => match head(tl) {
+        '=' => (tail(tl), Some(GTE)),
+        '>' => (tail(tl), Some(SHR)),
+        '~' => (tail(tl), Some(RTR)),
+        _   => (code, Some(GTN)),
+      },
+      '=' => match head(tl) {
+        '=' => (tail(tl), Some(EQL)),
+        _   => (code, None),
+      },
+      '!' => match head(tl) {
+        '=' => (tail(tl), Some(NEQ)),
+        _   => (code, None),
+      },
+      _ => (code, None),
+    }
+  }
+
+  let code = skip(in_code);
+
+  // U120 vs UTUP
+  let (code, op_kind) = head_is('~', code);
+
+  // The actual operation code
+  let (code, op_code) = read_op(code);
+  let op = if let Some(op) = op_code {
+    op
+  } else {
+    return (in_code, None);
+  };
+
+  // Unsigned vs signed
+  let (code, is_sig) = head_is('i', code);
+
+  let oper = make_oper(op_kind, is_sig, op);
+  (code, Some(oper))
 }
 
 fn read_rule(code: &str) -> (&str, (Term,Term)) {
@@ -2980,9 +3447,9 @@ fn read_func(code: &str) -> (&str, CompFunc) {
 
 fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
-  match head(code) {
-    '!' => {
-      let code = tail(code);
+  match (head(code), head(tail(code)), head(tail(tail(code)))) {
+    ('f','u','n') => {
+      let code = tail(tail(tail(code)));
       let (code, skip) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_name);
@@ -2992,15 +3459,16 @@ fn read_statement(code: &str) -> (&str, Statement) {
       let (code, init) = read_term(code);
       return (code, Statement::Fun { name, args, func, init });
     }
-    '$' => {
-      let code = tail(code);
-      let (code, skip) = read_char(code, '(');
+    ('c','t','r') => {
+      let code = tail(tail(tail(code)));
+      let (code, skip) = read_char(code, '{');
       let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_name);
+      let (code, args) = read_until(code, '}', read_name);
       return (code, Statement::Ctr { name, args });
     }
-    '{' => {
-      let code = tail(code);
+    ('r','u','n') => {
+      let code = tail(tail(tail(code)));
+      let (code, skip) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, skip) = read_char(code, '}');
       return (code, Statement::Run { expr });
@@ -3040,7 +3508,7 @@ pub fn view_term(term: &Term) -> String {
       let nam1 = view_name(*nam1);
       let expr = view_term(expr);
       let body = view_term(body);
-      return format!("&{{{} {}}} = {}; {}", nam0, nam1, expr, body);
+      return format!("dup {} {} = {}; {}", nam0, nam1, expr, body);
     }
     Term::Lam { name, body } => {
       let name = view_name(*name);
@@ -3050,17 +3518,17 @@ pub fn view_term(term: &Term) -> String {
     Term::App { func, argm } => {
       let func = view_term(func);
       let argm = view_term(argm);
-      return format!("({} {})", func, argm);
+      return format!("(! {} {})", func, argm);
     }
     Term::Ctr { name, args } => {
       let name = view_name(*name);
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("$({}{})", name, args);
+      return format!("{{{}{}}}", name, args);
     }
     Term::Fun { name, args } => {
       let name = view_name(*name);
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("!({}{})", name, args);
+      return format!("({}{})", name, args);
     }
     Term::Num { numb } => {
       // If it has 26-30 bits, pretty-print as a name
@@ -3080,25 +3548,32 @@ pub fn view_term(term: &Term) -> String {
 }
 
 pub fn view_oper(oper: &u128) -> String {
-  match oper {
-     0 => "+".to_string(),
-     1 => "-".to_string(),
-     2 => "*".to_string(),
-     3 => "/".to_string(),
-     4 => "%".to_string(),
-     5 => "&".to_string(),
-     6 => "|".to_string(),
-     7 => "^".to_string(),
-     8 => "<<".to_string(),
-     9 => ">>".to_string(),
-    10 => "<=".to_string(),
-    11 => "<".to_string(),
-    12 => "==".to_string(),
-    13 => ">=".to_string(),
-    14 => ">".to_string(),
-    15 => "!=".to_string(),
-     _ => "?".to_string(),
-  }
+  let (kind, sig, op_code) = decompose_oper(*oper);
+  let kind = if kind > 0 { "~" } else { "" };
+  let sig = if sig > 0 { "i" } else { "" };
+  let op = 
+    match op_code {
+      ADD => "+",
+      SUB => "-",
+      MUL => "*",
+      DIV => "/",
+      MOD => "%",
+      AND => "&",
+      OR  => "|",
+      XOR => "^",
+      SHL => "<<",
+      SHR => ">>",
+      LTN => "<",
+      LTE => "<=",
+      EQL => "==",
+      GTE => ">=",
+      GTN => ">",
+      NEQ => "!=",
+      RTL => "<~",
+      RTR => ">~",
+      _ => "??",
+    };
+  format!("{}{}{}", kind, op, sig)
 }
 
 pub fn view_statement(statement: &Statement) -> String {
@@ -3108,17 +3583,17 @@ pub fn view_statement(statement: &Statement) -> String {
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      return format!("!({} {}) {{\n{}\n}} = {}", name, args, func, init);
+      return format!("fun ({} {}) {{\n{}\n}} = {}", name, args, func, init);
     }
     Statement::Ctr { name, args } => {
       // correct:
       let name = u128_to_name(*name);
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
-      return format!("$({} {})", name, args);
+      return format!("ctr {{{} {}}}", name, args);
     }
     Statement::Run { expr } => {
       let expr = view_term(expr);
-      return format!("{{\n  {}\n}}", expr);
+      return format!("run {{\n  {}\n}}", expr);
     }
   }
 }
