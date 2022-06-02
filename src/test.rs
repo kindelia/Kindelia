@@ -52,6 +52,34 @@ fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   res
 }
 
+fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&str>) {
+  debug_assert!(tick < rt.get_tick());
+  rt.rollback(tick);
+  if rt.get_tick() == 0 {
+    if let Some(pre_code) = pre_code {
+      rt.run_statements_from_code(pre_code);
+    }
+  }
+  let tick_diff = tick - rt.get_tick();
+  for _ in 0..tick_diff {
+    if let Some(code) = code {
+      rt.run_statements_from_code(code);
+    }
+    rt.tick();
+  }
+}
+
+fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
+  debug_assert!(tick >= rt.get_tick());
+  let actual_tick = rt.get_tick();
+  for _ in actual_tick..tick {
+    if let Some(code) = code {
+      rt.run_statements_from_code(code);
+    }
+    rt.tick();
+  }
+}
+
 /// Tests the rollback of states in the kindelia runtime
 ///
 /// # Arguments
@@ -104,74 +132,103 @@ fn rollback_simple(
 
 // Does basically the same of rollback_simple, but with a path
 // This path tells kindelia where to go
-// The points_to_test are the points where the state will be saved and compared
-fn rollback_path(
-  pre_code: &str,
-  code: &str,
-  fn_names: &[&str],
-  path: &[u128],
-  points_to_test: &[u128],
-) -> bool {
-  let mut rt = init_runtime();
-
-  // Calculate all total_tick states and saves old checksum
-  rt.run_statements_from_code(pre_code);
-
+fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -> bool {
   let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
-  let mut insert_state_interest = |rt: &mut Runtime| {
-    if points_to_test.contains(&rt.get_tick()) {
-      let state =
-        RuntimeStateTest::new(test_heap_checksum(&fn_names, rt), rt.get_mana(), rt.get_size());
-      let vec = states_store.get_mut(&rt.get_tick());
-      if let Some(vec) = vec {
-        vec.push(state);
-      } else {
-        states_store.insert(rt.get_tick(), vec![state]);
-      }
+  let mut insert_state = |rt: &mut Runtime| {
+    let state =
+      RuntimeStateTest::new(test_heap_checksum(&fn_names, rt), rt.get_mana(), rt.get_size());
+    let vec = states_store.get_mut(&rt.get_tick());
+    if let Some(vec) = vec {
+      vec.push(state);
+    } else {
+      states_store.insert(rt.get_tick(), vec![state]);
     }
   };
+
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(pre_code);
 
   for tick in path {
     let tick = *tick;
     if tick < rt.get_tick() {
-      rt.rollback(tick);
-      if rt.get_tick() == 0 {
-        rt.run_statements_from_code(pre_code);
-      }
-      insert_state_interest(&mut rt);
-    }
-    if tick >= rt.get_tick() {
-      let actual_tick = rt.get_tick();
-      for _ in actual_tick..tick {
-        rt.run_statements_from_code(code);
-        rt.tick();
-        // dbg!(test_heap_checksum(&fn_names, &mut rt));
-        insert_state_interest(&mut rt);
-      }
+      rollback(&mut rt, tick, Some(pre_code), Some(code));
     } else {
+      advance(&mut rt, tick, Some(code));
     }
+    insert_state(&mut rt);
   }
 
   dbg!(states_store.clone());
+  // Verify if all values from all vectors from all ticks of interest are equal
   states_store.values().all(|vec| are_all_elemenets_equal(vec))
 }
-
 
 // ===========================================================
 // Tests
 #[test]
 fn simple_rollback() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  assert!(rollback_simple(PRE_COUNTER, COUNTER, &fn_names, 10000, 1));
+  assert!(rollback_simple(PRE_COUNTER, COUNTER, &fn_names, 1000, 1));
 }
 
 #[test]
-fn advanced_rollback() {
+fn advanced_rollback_in_random_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  let path =
-    [1000, 500, 12, 500, 12, 500, 12, 500, 12, 500, 12, 500, 12, 500, 12, 500, 12, 500, 12, 500];
-  let points_to_test = [1, 12, 37, 500, 950];
-  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path, &points_to_test));
+  let path = [1000, 12, 1000, 24, 1000, 36];
+  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
+}
+
+#[test]
+fn advanced_rollback_in_saved_state() {
+  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let path = [1000, 768, 1000, 768, 1000, 768];
+  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
+}
+
+#[test]
+fn advanced_rollback_run_fail() {
+  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let path = [2, 1, 2, 1, 2, 1];
+  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
+}
+
+#[test]
+fn rollback_buffers() {
+  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+
+  advance(&mut rt, 48, Some(COUNTER));
+  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  advance(&mut rt, 48, Some(COUNTER));
+  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  advance(&mut rt, 48, Some(COUNTER));
+
+  rt.save_curr_heap().expect("Could not save heap");
+  let curr_uuid = rt.get_curr_heap().uuid;
+  let state1 =
+    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  rt.load_heap(curr_uuid).expect("Could not load heap");
+  let state2 =
+    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 50, Some(COUNTER));
+  rt.load_heap(curr_uuid).expect("Could not load heap");
+  let state3 =
+    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  // dbg!(state1.clone(), state2.clone());
+  assert_eq!(state1, state2);
+  assert_eq!(state2, state3);
+}
+
+#[test]
+fn stack_overflow() { // caused by compute_at function
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+  advance(&mut rt, 2000, Some(COUNTER));
 }
 
 // ===========================================================
@@ -222,3 +279,4 @@ const COUNTER: &'static str = "
 // estudar proptest?
 // criar contratos que usam: dups de construtores, dups de lambdas,
 // salvar lambda em um estado e usá-la, criar árvores, tuplas, qlqr coisa mais complicada
+

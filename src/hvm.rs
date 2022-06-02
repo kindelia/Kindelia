@@ -646,7 +646,7 @@ impl Heap {
   fn read_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<Vec<u128>> {
     std::fs::read(self.buffer_file_path(uuid, buffer_name)).map(|x| util::u8s_to_u128s(&x))
   }
-  fn save_buffers(&self) -> std::io::Result<()> {
+  pub fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
@@ -658,7 +658,7 @@ impl Heap {
     self.write_buffer(serial.uuid, "nums", &serial.nums)?;
     return Ok(());
   }
-  fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
+  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
     let blob = self.read_buffer(uuid, "blob")?;
     let disk = self.read_buffer(uuid, "disk")?;
     let file = self.read_buffer(uuid, "file")?;
@@ -835,6 +835,11 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
+  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(uuid)
+  }
+
   // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
@@ -910,6 +915,25 @@ impl Runtime {
 
   pub fn get_heap_mut(&mut self, index: u64) -> &mut Heap {
     return &mut self.heap[index as usize];
+  }
+
+  pub fn get_curr_heap(&mut self) -> &Heap {
+    return &self.heap[self.curr as usize];
+  }
+
+  pub fn save_curr_heap(&mut self) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.save_buffers()
+  }
+
+  pub fn load_heap(&mut self, uuid: u128) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(uuid)
+  }
+
+  pub fn load_curr_heap(&mut self) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(curr_heap.uuid)
   }
 
   // Copies the contents of the absorbed heap into the absorber heap
@@ -1029,7 +1053,7 @@ impl Runtime {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
           if let Some(func) = build_func(func, true) {
-            println!("- fun {}", u128_to_name(*name));
+            // println!("- fun {}", u128_to_name(*name));
             self.set_arity(*name, args.len() as u128);
             self.define_function(*name, func);
             let state = self.create_term(init, 0, &mut init_map());
@@ -1043,7 +1067,7 @@ impl Runtime {
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
-          println!("- ctr {}", u128_to_name(*name));
+          // println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
           return;
@@ -1066,7 +1090,7 @@ impl Runtime {
               let size_dif = size_end - size_ini;
               // dbg!(size_end, size_dif, size_lim);
               if size_end <= size_lim {
-                println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                 self.draw();
               } else {
                 println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
@@ -1107,6 +1131,7 @@ impl Runtime {
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
+    // println!(" - back {}", view_rollback(&self.back));
     if included {
       self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
