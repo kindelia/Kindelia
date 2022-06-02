@@ -22,9 +22,9 @@ Sections
 * [Example blocks](#examples)
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
-  * [Block #3: creating some accounts](#block-3-creating-some-accounts)
-  * [Block #4: installing a game](#block-4-installing-a-game)
-  * [Block #5: playing the game](#block-5-playing-the-game)
+  * [Block #3: installing a game](#block-3-installing-a-game)
+  * [Block #4: playing the game](#block-4-playing-the-game)
+  * [What about accounts?](#what-about-accounts)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -158,41 +158,34 @@ Block #1: defining pure functions
 The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// Declares a constructor, Leaf, with arity (size) 1
-$(Leaf value)
+// Declares a constructor, Leaf, with 1 field
+ctr {Leaf value}
 
-// Declares a constructor, Node, with arity (size) 2
-$(Node left right)
-
-// Declares a pure function, Gen, that receives a
-// num and returns a tree with 2^num copies of #1
-!(Gen depth) {
-  !(Gen #0) = $(Leaf #1)
-  !(Gen  x) = &{x0 x1} = x; $(Node !(Gen (- x0 #1)) !(Gen (- x1 #1)))
-} = #0
+// Declares a constructor, Branch, with 2 fields
+ctr {Branch left right}
 
 // Declares a pure function that sums a tree
-!(Sum tree) {
-  !(Sum $(Leaf x))   = x
-  !(Sum $(Node a b)) = (+ !(Sum a) !(Sum b))
+fun (Sum tree) {
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
 } = #0
 
-// Run statement that creates a tree with 2^21
-// numbers, sums them all and prints the result:
-{
-  $(IO.done !(Sum !(Gen #21)))
+// Sums a tree with 4 numbers
+run {
+  !done (Sum {Branch
+    {Branch {Leaf #1} {Leaf #2}}
+    {Branch {Leaf #3} {Leaf #4}}})
 }
 ```
 
-When a Kindelia node runs that block, the global functions `Gen` and `Sum` will
-be defined forever inside the network. Note how they are written in a functional
-style, closely resembling Haskell's equational, pattern-matching notation. These
-functions are not compiled to stack machines, but, instead, run natively on the
-HVM. Note also that the language is linear: variables aren't used more than
-once. This is essential to keep Kindelia's computations efficient and
-measurable. In order to make that practical, there is a lazy duplication
-operation, written as `&{a b} = x`, which allows values to be cloned
-incrementally.
+When a Kindelia node runs that block, the global function `Sum` will be defined
+forever inside the network. Note how it follows a functional style, closely
+resembling Haskell's equational notation. Kindelia functions aren't compiled to
+stack machines: they run natively on the HVM. Note also that the language is
+linear: variables aren't used more than once. This is essential to keep
+computations efficient and measurable. In order to make that practical, there is
+a lazy duplication operation, written as `dup a b = x`, which allows values to
+be cloned incrementally. Check [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for more info.
 
 Other than defining constructors and functions, blocks can also evaluate
 side-effective actions inside `run {}` statements. These operate like Haskell's
@@ -205,7 +198,7 @@ Block #2: defining stateful functions
 
 Actual contracts must hold a state. In Kindelia, every function holds an
 internal state, which is just any native HVM structure. That state can be loaded
-and saved using `IO.load` and `IO.save`. With just that, we are able to create
+and saved using `load` and `save`. With just that, we are able to create
 smart-contracts by using stateful functions.
 
 Below, we define a `Count` contract that has two actions: one to increment a
@@ -215,72 +208,82 @@ counter, i.e., 3.
 
 ```c
 // Creates a Counter function with 2 actions:
-$(Inc) // incs its counter
-$(Get) // reads its counter
-!(Counter action) {
-  !(Counter $(Inc)) = $(IO.take @x $(IO.save (+ x #1) @~ $(IO.done #0)))
-  !(Counter $(Get)) = !(IO.load @x $(IO.done x))
-} = #0 // initial state = #0
+ctr {Inc} // action that increments the counter
+ctr {Get} // action that returns the counter
+fun (Counter action) {
 
-// Runs a script that increments the Counter's state 3 times
-{
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.call 'Counter' $(Tuple1 $(Inc)) @~
-  $(IO.done #0))))
+  // increments the counter
+  (Counter {Inc}) =
+    !take x        // loads the state and assigns it to 'x'
+    !save (+ x #1) // overwrites the state as 'x + 1'
+    !done #0       // returns 0
+
+  // returns the counter
+  (Counter {Get}) =
+    !load x // loads the state
+    !done x // returns it
+
+} = #0 // initial state is 0
+
+// Increments the Counter's state 3 times
+run {
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !call ~ 'Counter' [{Inc}]
+  !done #0
 }
 
-// Runs a script that prints the Counter's state
-{
-  $(IO.call 'Counter' $(Tuple1 $(Get)) @x
-  $(IO.done x))
+// Prints the Counter's state
+run {
+  !call x 'Counter' [{Get}]
+  !done x
 }
 ```
 
-Note that `IO.load` and `IO.save` just save/load the state stored on the "active
-function", i.e., the one currently being called. A function's state can be any
-arbitrary HVM structure: a number, a list, a tree. There is no `U256`
-serialization. If a contract requires a map-like structure, it can, for example,
-store an immutable map as its state.
+Note that `load` and `save` aren't side-effective functions. Instead, they
+*describe* effects using a pure datatype, exactly like Haskell's IO. These
+effects can be passed as first-class expressions, and are evaluated when placed
+directly inside a `run{}` block. In Haskellish pseudo-code:
 
-`IO.load` and `IO.save` have no cost, but the user still needs to pay for
-computations. For example, updating a balance requires paying for the cost of
-the immutable `Map.insert` operation (whichs, usually, is pretty cheap). To
-avoid state bloat, though, there is a heavy tax on state growth. The good news
-is that updating states without allocating more space is extremelly cheap,
-compared to Ethereum.
-
-Block #3: creating some accounts
---------------------------------
-
-A Kindelia account is just a function that receives an action and a signature,
-and, if the signature checks, calls another function to perform that action. For
-example:
-
-```c
-// TODO
+```
+data IO s a
+  = Done { retr :: a }                                             -- returns a value
+  | Take { cont :: s -> (IO s a) }                                 -- loads the state
+  | Save { expr :: s, cont :: () -> (IO s a) }                     -- saves the state
+  | Call { func :: Name, args :: (ArgsOf func), cont :: (IO s a) } -- calls a function
+  | From { cont :: Name -> (IO s a) }                              -- gets the caller name
 ```
 
-As soon as the function above is deployed, Alice may use it as her own account
-to send coins in an hypothetical "Coin" contract, because only herself is able
-to call it with a signature that enters the `Coin.send` branch. Of course, this
-account is extremelly limited, but anything is possible. Alice could have a
-collection of signature schemes, she could impose limitations, and could extend
-her own account's functionality by storing lambdas on its internal state.
+A function's state can be any arbitrary HVM structure: a number, a list, a tree.
+There is no forced, costly and error-prone `U256` serialization, like on
+Ethereum. If a contract requires a balance map, for example, it can simply store
+an immutable tree as its state, simply and directly.
 
-Block #4: installing a game
+Finally, `load` and `save` themselves have no cost! But blocks must still repeat
+the heap growth and accumulated computation limites. So, for example, updating a
+coin balance requires paying the cost of some `Map.updade` operation (which,
+usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
+is very expensive. This allows Kindelia to host highly dynamic applications such
+as games and exchanges on its layer 1.
+
+Block #3: installing a game
 ---------------------------
 
 ```c
 // TODO
 ```
 
-Block #5: playing the game
+Block #4: playing the game
 --------------------------
 
 ```c
 // TODO
 ```
+
+What about accounts?
+--------------------
+
+TODO
 
 Technical Overview
 ==================
@@ -295,16 +298,16 @@ statements can be one of 3 variants:
 - **ctr**: declares a new constructor
 
     ```c
-    $(ConstructorName field_0_name field_1_name ...)
+    ctr {ConstructorName field_0_name field_1_name ...}
     ```
 
 
 - **fun**: declares a new function 
 
     ```c
-    !(FunctionName argument_0_name argument_1_name ...) {
-      !(ConstructorName arg_0 arg_1 ...) = returned_value_0
-      !(ConstructorName arg_0 arg_1 ...) = returned_value_1
+    fun (FunctionName argument_0_name argument_1_name ...) {
+      (ConstructorName arg_0 arg_1 ...) = returned_value_0
+      (ConstructorName arg_0 arg_1 ...) = returned_value_1
       ...
     } = initial_state
     ```
@@ -312,7 +315,7 @@ statements can be one of 3 variants:
 - **run**: runs an IO expression
 
     ```c
-    {
+    run {
       IO_expression
     }
     ```
@@ -352,17 +355,17 @@ Oper ::=
 // An expression
 Term ::=
 
-  // A lambda
+  // A lambda function
   @<var0: Name> <body: Term>
   
-  // An application
-  (<func: Term> <argm: Term>)
+  // A lambda application
+  (! <func: Term> <argm: Term>)
   
   // A constructor
-  $(<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
+  {<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>}
   
   // A function call
-  !(<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
+  (<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>)
 
   // A native number
   #<numb: Numb>
@@ -371,7 +374,7 @@ Term ::=
   (<oper: Oper> <val0: Term> <val1: Term>)
 
   // A cloning operation
-  &{<var0: Name> <var1: Name>} = <expr: Term>; <body: Term>
+  dup <var0: Name> <var1: Name> = <expr: Term>; <body: Term>
 
   // A variable
   <bind: Name>
@@ -380,14 +383,14 @@ Term ::=
 For example,
 
 ```
-@x @y $(Pair (+ x #42) !(F y))
+@x @y {Pair (+ x #42) (F y)}
 ```
 
 Denotes a function that receives two values, `x`, and `y`, and returns a pair
 with `x` plus `42` and `F` applied to `y`. In Python, this could be written
 as: `lambda x: lambda y: (x + 42, F(y))`. Also, since Kindelia's language is
 affine, variables must occur, at most, once. To duplicate values, the clone
-operator, `&`, must be used.
+operator, `dup`, must be used.
 
 While this syntax may look high-level, don't confuse it with a user-facing
 language such as Solidity. It is just a direct textual representation of the
@@ -421,12 +424,12 @@ Finally, Kindelia has side-effective operations that allow functions to save
 states, request information from the network, etc.:
 
 ```c
-$(IO.take           @r ...) // takes this function's internal state
-$(IO.save expr      @r ...) // saves this function's internal state
-$(IO.call func args @r ...) // calls another IO function
-$(IO.from           @r ...) // gets the caller name
+(IO.take           @r ...) // takes this function's internal state
+(IO.save expr      @r ...) // saves this function's internal state
+(IO.call func args @r ...) // calls another IO function
+(IO.from           @r ...) // gets the caller name
 ... TODO ...                // ...
-$(IO.done expr)             // returns from the IO action
+(IO.done expr)             // returns from the IO action
 ```
 
 Note that, since Kindelia's language is pure, these side-effects are only
@@ -442,18 +445,14 @@ The primitive operations in that machine are called rewrite rules, and they
 include beta-reduction (lambda application), pattern-matching, numeric
 operators, and primitives for cloning and erasing data. It is important to
 stress that all these operations are constant-time, which is essential to make
-computation measurable: see the mana table in the next section. For more info on
-how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
+costs measurable: see the mana table in the next section. For more info on how
+that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
-In addition to the 8 term variants, the HVM also has an internal superposition
-construct, which is just a pair that can show up as a byproduct of its
-lazy-cloning operation. This has nothing to do with quantum mechanics, we just
-borrow the name because it is a good intuition of their behaviors; again, see
-[HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for a study. That
-construct will be written as `{a b}`. It also has an erasure construct, which
-may appear as a byproduct of erasing data.
-
-Kindelia's rewrite rules are:
+As explained on the document above, in addition to the 8 term variants, the HVM
+also has an internal superposition construct, which is just a pair that can show
+up as a byproduct of its lazy-cloning operation. That construct will be written
+as `{a b}`. It also has an erasure construct, which may appear as a byproduct of
+erasing data. Kindelia's rewrite rules are:
 
 ### Lambda Application
 
@@ -473,7 +472,7 @@ Applies a superposition to an argument.
 ```
 ({a b} c)
 --------------- APP-SUP
-&{x0 x1} = c
+dup x0 x1 = c
 {(a x0) (b x1)}
 ```
 
@@ -482,9 +481,9 @@ Applies a superposition to an argument.
 Lazily, incrementally clones a lambda.
 
 ```
-&{r s} = @x f
-------------- DUP-LAM
-&{f0 f1} = f
+dup r s = @x f
+-------------- DUP-LAM
+dup f0 f1 = f
 r <- @x0 f0
 s <- @x1 f1
 x <- {x0 x1}
@@ -496,8 +495,8 @@ Superpositions and duplications hold a 60-bit integer label. If the label is
 equal, this rule collapses the superposition.
 
 ```
-&{x y} = {a b}
--------------- DUP-SUP (identical labels)
+dup x y = {a b}
+--------------- DUP-SUP (identical labels)
 x <- a
 y <- b
 ```
@@ -505,12 +504,12 @@ y <- b
 Otherwise, this rule duplicates the superposition.
 
 ```
-&{x y} = {a b}
--------------- DUP-SUP (different labels)
+dup x y = {a b}
+--------------- DUP-SUP (different labels)
 x <- {xA xB}
 y <- {yA yB}
-&{xA yA} = a
-&{xB yB} = b
+dup xA yA = a
+dup xB yB = b
 ```
 
 ### Number Duplication
@@ -518,8 +517,8 @@ y <- {yA yB}
 Clones a 120-bit number.
 
 ```
-&{x y} = N
----------- DUP-NUM
+dup x y = N
+----------- DUP-NUM
 x <- N
 y <- N
 ```
@@ -529,11 +528,11 @@ y <- N
 Lazily, incrementally clones a constructor.
 
 ```
-${x y} = (K a b c ...)
----------------------- DUP-CTR
-${a0 a1} = a
-${b0 b1} = b
-${c0 c1} = c
+dup x y = (K a b c ...)
+----------------------- DUP-CTR
+dup a0 a1 = a
+dup b0 b1 = b
+dup c0 c1 = c
 ...
 x <- (K a0 b0 c0 ...)
 y <- (K a1 b1 c1 ...)
@@ -542,10 +541,10 @@ y <- (K a1 b1 c1 ...)
 ### Erasure Duplication
 
 ```
-${x y} = *
----------- DUP-ERA
-x <- *
-y <- *
+dup x y = ~
+----------- DUP-ERA
+x <- ~
+y <- ~
 ```
 
 ### Numeric Operation
@@ -674,7 +673,7 @@ let b0 b1 = b
 ```
 (+ a {b0 b1})
 --------------------- OP2-SUP-1
-${a0 a1} = a
+dup a0 a1 = a
 {(+ a0 b0) (+ a1 b1)}
 ```
 
@@ -685,8 +684,8 @@ Pattern-matching on a superposition.
 ```
 (F {a0 a1} b c ...)
 ----------------------------------- FUN-SUP
-${b0 b1} = b
-${c0 c1} = c
+dup b0 b1 = b
+dup c0 c1 = c
 ...
 {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
 ```
@@ -826,22 +825,22 @@ different limits that a block must respect. For example:
 run {
 
   // Sends 500 Cat Coins, from Alice to Bob
-  !(ECDSA.check @alice
-  $(IO.call alice (Tuple4 'send_cat_coin' 'Bob' 500) @~
-  $(IO.done #0)))
+  (ECDSA.check @alice
+  (IO.call alice (Tuple3 'send_cat_coin' 'Bob' 500) @~
+  (IO.done #0)))
 
 } then {
 
   // Gets the used mana, bits and the block miner
-  $(IO.get_used_mana @used_mana
-  $(IO.get_used_bits @used_bits
-  $(IO.get_miner_name @miner_name
+  (IO.get_used_mana @used_mana
+  (IO.get_used_bits @used_bits
+  (IO.get_miner_name @miner_name
 
   // Pays '7 * used_mana + 3 * used_bits + 1 ultra sword' to the block miner
-  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 7 used_mana)) @~
-  $(IO.call alice (Tuple4 'send_cat_coin' miner_name (* 3 used_bits)) @~
-  $(IO.call alice (Tuple4 'send_item' 'UltraSword' miner_name) @~
-  $(IO.done #0)))))))
+  (IO.call alice (Tuple3 'send_cat_coin' miner_name (* 7 used_mana)) @~
+  (IO.call alice (Tuple3 'send_cat_coin' miner_name (* 3 used_bits)) @~
+  (IO.call alice (Tuple3 'send_item' 'UltraSword' miner_name) @~
+  (IO.done #0)))))))
   
 } sign {
   alices_signature
