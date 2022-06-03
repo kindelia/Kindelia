@@ -384,81 +384,81 @@ const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
 const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
+pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : i128 = 1024; // 1024 bits per sec = about 4 GB per year
+pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
 
-// |---------|---------------------------------|----------|
-// | Opcode  | Effect                          | Mana     |
-// |---------|---------------------------------|----------|
-// | APP-LAM | applies a lambda                | 10       |
-// | APP-SUP | applies a superposition         | 20       |
-// | OP2-NUM | operates on a number            | 10       |
-// | OP2-SUP | operates on a superposition     | 20       |
-// | FUN-CTR | pattern-matches a constructor   | 10 + M   |
-// | FUN-SUP | pattern-matches a superposition | 10 + A*5 |
-// | DUP-LAM | clones a lambda                 | 20       |
-// | DUP-NUM | clones a number                 | 10       |
-// | DUP-CTR | clones a constructor            | 10 + A*5 |
-// | DUP-SUP | clones a superposition          | 20       |
-// | DUP-SUP | undoes a superposition          | 10       |
-// | DUP-ERA | clones an erasure               | 10       |
-// |------------------------------------------------------|
-// | * A is the constructor or function arity             |
-// | * M is the alloc count of the right-hand side        |
-// |------------------------------------------------------|
+// |-----------|---------------------------------|-------|
+// | Opcode    | Effect                          | Mana  |
+// |-----------|---------------------------------|-------|
+// | APP-LAM   | applies a lambda                | 2     |
+// | APP-SUP   | applies a superposition         | 4     |
+// | OP2-NUM   | operates on a number            | 2     |
+// | OP2-SUP   | operates on a superposition     | 4     |
+// | FUN-CTR   | pattern-matches a constructor   | 2 + M |
+// | FUN-SUP   | pattern-matches a superposition | 2 + A |
+// | DUP-LAM   | clones a lambda                 | 4     |
+// | DUP-NUM   | clones a number                 | 2     |
+// | DUP-CTR   | clones a constructor            | 2 + A |
+// | DUP-SUP-D | clones a superposition          | 4     |
+// | DUP-SUP-E | undoes a superposition          | 2     |
+// | DUP-ERA   | clones an erasure               | 2     |
+// |-----------------------------------------------------|
+// | * A is the constructor or function arity            |
+// | * M is the alloc count of the right-hand side       |
+// |-----------------------------------------------------|
 
 
 fn AppLamMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn AppSupMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn Op2NumMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn Op2SupMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn FunCtrMana(body: &Term) -> u128 {
-  return 10 + count_allocs(body) * 5;
+  return 2 + count_allocs(body);
 }
 
 fn FunSupMana(arity: u128) -> u128 {
-  return 10 + arity * 5;
+  return 2 + arity;
 }
 
 fn DupLamMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn DupNumMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn DupCtrMana(arity: u128) -> u128 {
-  return 10 + arity * 5;
+  return 2 + arity;
 }
 
 fn DupDupMana() -> u128 {
-  return 20;
+  return 4;
 }
 
 fn DupSupMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn DupEraMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn count_allocs(body: &Term) -> u128 {
@@ -2280,12 +2280,12 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
             init = 1;
             continue;
           // dup x y = {a b}
-          // --------------- DUP-SUP (equal)
+          // --------------- DUP-SUP-E
           // x <- a
           // y <- b
           } else if get_tag(arg0) == SUP {
             if get_ext(term) == get_ext(arg0) {
-              //println!("dup-sup");
+              //println!("dup-sup-e");
               rt.set_mana(rt.get_mana() + DupSupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0), mana);
@@ -2296,13 +2296,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
               init = 1;
               continue;
             // dup x y = {a b}
-            // ----------------- DUP-SUP (different)
+            // ----------------- DUP-SUP-D
             // x <- {xA xB}
             // y <- {yA yB}
             // dup xA yA = a
             // dup xB yB = b
             } else {
-              //println!("dup-sup");
+              //println!("dup-sup-d");
               rt.set_mana(rt.get_mana() + DupDupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               let par0 = alloc(rt, 2);
