@@ -587,6 +587,10 @@ fn absorb_i128(a: i128, b: i128, overwrite: bool) -> i128 {
   if b == I128_NONE { a } else if overwrite || a == I128_NONE { b } else { a }
 }
 
+fn heap_dir_path() -> PathBuf {
+  dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
+}
+
 impl Heap {
   fn write(&mut self, idx: usize, val: u128) {
     return self.blob.write(idx, val);
@@ -761,15 +765,12 @@ impl Heap {
       self.write_arit(fnid, arit);
     }
   }
-  fn heap_dir_path(&self) -> PathBuf {
-    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
-  }
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
-    self.heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
+    heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
   fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
     use std::io::Write;
-    std::fs::create_dir_all(&self.heap_dir_path())?;
+    std::fs::create_dir_all(&heap_dir_path())?;
     std::fs::OpenOptions::new()
       .append(true)
       .create(true)
@@ -969,11 +970,6 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
-  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(uuid)
-  }
-
   // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
@@ -1049,25 +1045,6 @@ impl Runtime {
 
   pub fn get_heap_mut(&mut self, index: u64) -> &mut Heap {
     return &mut self.heap[index as usize];
-  }
-
-  pub fn get_curr_heap(&mut self) -> &Heap {
-    return &self.heap[self.curr as usize];
-  }
-
-  pub fn save_curr_heap(&mut self) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.save_buffers()
-  }
-
-  pub fn load_heap(&mut self, uuid: u128) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(uuid)
-  }
-
-  pub fn load_curr_heap(&mut self) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(curr_heap.uuid)
   }
 
   // Copies the contents of the absorbed heap into the absorber heap
@@ -1355,7 +1332,6 @@ impl Runtime {
 
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
-
     // If target tick is older than current tick
     if tick < self.get_tick() {
       println!("- rolling back from {} to {}", self.get_tick(), tick);
@@ -1369,16 +1345,64 @@ impl Runtime {
           self.back = tail.clone();
         }
       }
-      // Moves the most recent valid heap to `self.curr`
-      if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
-        self.back = tail.clone();
-        self.curr = *head;
-      } else {
-        self.back = Arc::new(Rollback::Nil);
-        self.curr = self.nuls.pop().expect("No heap available!");
+      self.curr = self.nuls.pop().expect("No heap available!");
+    }
+
+  }
+
+  // Persistence
+  // -----------
+
+  // Persists the current state. Since heaps are automatically saved to disk, function only saves
+  // their uuids. Note that this will NOT save the current heap, nor anything after the last heap
+  // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
+  // function is used to avoid re-processing the entire block history on node startup.
+  fn persist_state(&self) -> std::io::Result<()> {
+    fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
+      match rollback {
+        Rollback::Cons { keep, head, tail } => {
+          uuids.push(rt.heap[*head as usize].uuid);
+          get_uuids(rt, tail, uuids);
+        }
+        Rollback::Nil => {}
       }
     }
-    println!("- rolled back to {}", self.get_tick());
+    let mut uuids : Vec<u128> = vec![];
+    get_uuids(self, &self.back, &mut uuids);
+    std::fs::write(heap_dir_path().join("_uuids_"), &util::u128s_to_u8s(&uuids))?;
+    return Ok(());
+  }
+
+  // Restores the saved state. This loads the persisted Rollback list and its heaps.
+  fn restore_state(&mut self, uuids: &[u128]) -> std::io::Result<()> {
+    for i in 0 .. 10 {
+      self.heap[i].clear();
+    }
+    for i in 0 .. std::cmp::max(uuids.len(), 8) {
+      self.heap[i + 2].load_buffers(uuids[i])?;
+    }
+    let uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
+    fn load_heaps(rt: &mut Runtime, uuids: &[u128], index: usize) -> std::io::Result<Arc<Rollback>> {
+      if index == rt.heap.len() {
+        return Ok(Arc::new(Rollback::Nil));
+      } else {
+        rt.heap[index].load_buffers(uuids[index])?;
+        return Ok(Arc::new(Rollback::Cons {
+          keep: 0,
+          head: index as u64, 
+          tail: load_heaps(rt, &uuids, index + 1)?,
+        }));
+      }
+    }
+    self.draw = 0;
+    self.curr = 1;
+    self.back = load_heaps(self, &uuids, 2)?;
+    return Ok(());
+  }
+
+  // Reverts until the last 
+  fn clear_current_heap(&mut self) {
+    self.heap[self.curr as usize].clear();
   }
 
   // Heap writers and readers

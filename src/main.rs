@@ -8,9 +8,10 @@ mod util;
 mod hvm;
 mod node;
 mod bits;
-
-#[cfg(test)]
 mod test;
+
+//#[cfg(test)]
+//mod test;
 
 use primitive_types::U256;
 
@@ -25,15 +26,10 @@ use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
 use crate::util::*;
+use crate::test::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  //println!("{:x}", hvm::name_to_u128("done"));
-  //println!("{:x}", hvm::name_to_u128("take"));
-  //println!("{:x}", hvm::name_to_u128("load"));
-  //println!("{:x}", hvm::name_to_u128("save"));
-  //println!("{:x}", hvm::name_to_u128("call"));
-  //println!("{:x}", hvm::name_to_u128("from"));
   return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kindelia".to_string()));
   //return Ok(());
