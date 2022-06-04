@@ -130,7 +130,7 @@ attacks, which would irreversibly collapse both Ethereum and Bitcoin. There is
 no built-in currency either: Kindelia isn't a cryptocurrency! To prevent spam,
 it imposes 3 limits on its resource usage: the blockchain size grows about `40
 GB` per year, the state size grows about `2 GB` per year, and the computation
-budget grows about `1.3 * 10^18 mana` per year.  When the maximum capacity is
+budget grows about `3.1 * 10^14 mana` per year.  When the maximum capacity is
 reached, a fee market will emerge, and users can pay miners to include their
 transactions in any on-chain asset, not just the "official currency".
 
@@ -141,21 +141,19 @@ Ethereum, except without a native currency, and with a VM that is more suitable
 to both formally verified programs, and to highly dynamic apps. The table below
 compares some attributes of each network:
 
-```
-                         |            Kindelia |              Ethereum
------------------------- | ------------------- | ---------------------
-block time               |            1 second |            13 seconds
-limit: blockchain growth |          40 GB/year |          2174 GB/year
-limit: state growth      |        2 048 bits/s |              no limit
-limit: computation       |   10 000 000 mana/s |       2 300 000 gas/s
-cost: multiplication     |              2 mana |                 5 gas
-cost: beta reduction     |              2 mana |             ~ 200 gas
-cost: pattern matching   |              2 mana |             ~ 200 gas
-cost: SSTORE (reuse)     |              0 bits |             5 000 gas
-cost: SSTORE (alloc)     |            128 bits |            20 000 gas
-native currency          |                none |                 Ether
-pre-mine                 |                 N/A |      72 000 000 Ether
-```
+.                        |            Kindelia |            Ethereum
+------------------------ | ------------------- | -------------------
+block time               | `         1 second` | `       13 seconds`
+limit: blockchain growth | `       40 GB/year` | `     2174 GB/year`
+limit: state growth      | `     2 048 bits/s` | `         no limit`
+limit: computation       | `10 000 000 mana/s` | `  2 300 000 gas/s`
+cost: multiplication     | `           2 mana` | `            5 gas`
+cost: beta reduction     | `           2 mana` | `        ~ 200 gas`
+cost: pattern matching   | `           2 mana` | `        ~ 200 gas`
+cost: SSTORE (reuse)     | `           0 bits` | `        5 000 gas`
+cost: SSTORE (alloc)     | `         128 bits` | `       20 000 gas`
+native currency          | `             none` | `            Ether`
+pre-mine                 | `              N/A` | ` 72 000 000 Ether`
 
 Examples
 ========
