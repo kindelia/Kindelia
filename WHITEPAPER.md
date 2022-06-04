@@ -130,9 +130,30 @@ attacks, which would irreversibly collapse both Ethereum and Bitcoin. There is
 no built-in currency either: Kindelia isn't a cryptocurrency! To prevent spam,
 it imposes 3 limits on its resource usage: the blockchain size grows about `40
 GB` per year, the state size grows about `2 GB` per year, and the computation
-budget grows about `1.3 * 10^18 mana` per year.  When the maximum capacity is
+budget grows about `3.1 * 10^14 mana` per year.  When the maximum capacity is
 reached, a fee market will emerge, and users can pay miners to include their
 transactions in any on-chain asset, not just the "official currency".
+
+**In short...**
+
+Kindelia is a layer-1 decentralized computer that is very similar to
+Ethereum, except without a native currency, and with a VM that is more suitable
+to both formally verified programs, and to highly dynamic apps. The table below
+compares some attributes of each network:
+
+.                        |            Kindelia |            Ethereum
+------------------------ | ------------------- | -------------------
+block time               | `         1 second` | `       13 seconds`
+limit: blockchain growth | `       40 GB/year` | `     2174 GB/year`
+limit: state growth      | `     2 048 bits/s` | `         no limit`
+limit: computation       | `10 000 000 mana/s` | `  2 300 000 gas/s`
+cost: multiplication     | `           2 mana` | `            5 gas`
+cost: beta reduction     | `           2 mana` | `        ~ 200 gas`
+cost: pattern matching   | `           2 mana` | `        ~ 200 gas`
+cost: SSTORE (reuse)     | `           0 bits` | `        5 000 gas`
+cost: SSTORE (alloc)     | `         128 bits` | `       20 000 gas`
+native currency          | `             none` | `            Ether`
+pre-mine                 | `              N/A` | ` 72 000 000 Ether`
 
 Examples
 ========
@@ -735,25 +756,26 @@ Ethereum, it has a cost table linking primitive operations to a number, which is
 called mana instead of gas. Unlike Ethereum, that cost isn't associated with
 transactions, but with the block as a whole.
 
-    .------------------------------------------------------.
-    | Opcode  | Effect                          | Mana     |
-    |---------|---------------------------------|----------|
-    | APP-LAM | applies a lambda                | 10       |
-    | APP-SUP | applies a superposition         | 20       |
-    | OP2-NUM | operates on a number            | 10       |
-    | OP2-SUP | operates on a superposition     | 20       |
-    | FUN-CTR | pattern-matches a constructor   | 10 + M   |
-    | FUN-SUP | pattern-matches a superposition | 10 + A*5 |
-    | DUP-LAM | clones a lambda                 | 20       |
-    | DUP-NUM | clones a number                 | 10       |
-    | DUP-CTR | clones a constructor            | 10 + A*5 |
-    | DUP-SUP | clones a superposition          | 20       |
-    | DUP-SUP | undoes a superposition          | 10       |
-    | DUP-ERA | clones an erasure               | 10       |
-    |------------------------------------------------------|
-    | * A is the constructor or function arity             |
-    | * M is the alloc count of the right-hand side        |
-    '------------------------------------------------------'
+    .---------------------------------------------------.
+    | Opcode  | Effect                          | Mana  |
+    |---------|---------------------------------|-------|
+    | APP-LAM | applies a lambda                | 2     |
+    | APP-SUP | applies a superposition         | 4     |
+    | OP2-NUM | operates on a number            | 2     |
+    | OP2-SUP | operates on a superposition     | 4     |
+    | FUN-CTR | pattern-matches a constructor   | 2 + M |
+    | FUN-SUP | pattern-matches a superposition | 2 + A |
+    | DUP-LAM | clones a lambda                 | 4     |
+    | DUP-NUM | clones a number                 | 2     |
+    | DUP-CTR | clones a constructor            | 2 + A |
+    | DUP-SUP | clones a superposition          | 4     |
+    | DUP-SUP | undoes a superposition          | 2     |
+    | DUP-ERA | clones an erasure               | 2     |
+    |---------------------------------------------------|
+    | * A is the constructor or function arity          |
+    | * M is the alloc count of the right-hand side     |
+    '---------------------------------------------------'
+
 
 Kindelia's elegant runtime is reflected by the simplicity of this table. In
 order to limit computations, nodes impose a hard ceiling on the amount of

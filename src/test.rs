@@ -21,7 +21,7 @@ impl RuntimeStateTest {
 
 // ===========================================================
 // Aux functions
-fn are_all_elemenets_equal<E: PartialEq>(vec: &[E]) -> bool {
+pub fn are_all_elemenets_equal<E: PartialEq>(vec: &[E]) -> bool {
   if vec.len() == 0 {
     return true;
   }
@@ -35,7 +35,7 @@ fn are_all_elemenets_equal<E: PartialEq>(vec: &[E]) -> bool {
 }
 
 // Generate a checksum for a runtime state (for testing)
-fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
+pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   let fn_ids = fn_names.iter().map(|x| name_to_u128(x)).collect::<Vec<u128>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
@@ -52,7 +52,7 @@ fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   res
 }
 
-fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&str>) {
+pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&str>) {
   debug_assert!(tick < rt.get_tick());
   rt.rollback(tick);
   if rt.get_tick() == 0 {
@@ -70,7 +70,7 @@ fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&
   // println!("- final rollback tick {}", rt.get_tick());
 }
 
-fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
+pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
   debug_assert!(tick >= rt.get_tick());
   // println!("- advancing from {} to {}", rt.get_tick(), tick);
   let actual_tick = rt.get_tick();
@@ -92,7 +92,7 @@ fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
 /// * `total_tick` - The number of times the code will be executed
 /// * `rollback_tick` - The tick to rollback to
 ///
-fn rollback_simple(
+pub fn rollback_simple(
   pre_code: &str,
   code: &str,
   fn_names: &[&str],
@@ -134,7 +134,7 @@ fn rollback_simple(
 
 // Does basically the same of rollback_simple, but with a path
 // This path tells kindelia where to go
-fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -> bool {
+pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -> bool {
   let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
   let mut insert_state = |rt: &mut Runtime| {
     let state =
@@ -168,67 +168,65 @@ fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -
 // ===========================================================
 // Tests
 #[test]
-fn simple_rollback() {
+pub fn simple_rollback() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   assert!(rollback_simple(PRE_COUNTER, COUNTER, &fn_names, 1000, 1));
 }
 
 #[test]
-fn advanced_rollback_in_random_state() {
+pub fn advanced_rollback_in_random_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let path = [1000, 12, 1000, 24, 1000, 36];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
 #[test]
-fn advanced_rollback_in_saved_state() {
+pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let path = [1000, 768, 1000, 768, 1000, 768];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
 #[test]
-fn advanced_rollback_run_fail() {
+pub fn advanced_rollback_run_fail() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let path = [2, 1, 2, 1, 2, 1];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
 // Still in progress
-#[test]
-fn rollback_buffers() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+//#[test]
+//pub fn rollback_buffers() {
+  //let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  //let mut rt = init_runtime();
+  //rt.run_statements_from_code(PRE_COUNTER);
 
-  advance(&mut rt, 48, Some(COUNTER));
-  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  advance(&mut rt, 48, Some(COUNTER));
-  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  advance(&mut rt, 48, Some(COUNTER));
+  //advance(&mut rt, 48, Some(COUNTER));
+  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  ////advance(&mut rt, 48, Some(COUNTER));
+  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  ////advance(&mut rt, 48, Some(COUNTER));
 
-  rt.save_curr_heap().expect("Could not save heap");
-  let curr_uuid = rt.get_curr_heap().uuid;
-  let state1 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  //rt.save_curr_heap().expect("Could not save heap");
+  //let curr_uuid = rt.get_curr_heap().uuid;
+  //let state1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
 
-  rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  rt.load_heap(curr_uuid).expect("Could not load heap");
-  let state2 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
+  //rt.load_heap(curr_uuid).expect("Could not load heap");
+  //let state2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
 
-  advance(&mut rt, 50, Some(COUNTER));
-  rt.load_heap(curr_uuid).expect("Could not load heap");
-  let state3 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  ////advance(&mut rt, 50, Some(COUNTER));
+  ////rt.load_heap(curr_uuid).expect("Could not load heap");
+  ////let state3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
 
-  // dbg!(state1.clone(), state2.clone());
-  assert_eq!(state1, state2);
-  assert_eq!(state2, state3);
-}
+  //// dbg!(state1.clone(), state2.clone());
+  //println!("{:?} {:?}", state1, state2);
+  //assert_eq!(state1, state2);
+  ////assert_eq!(state2, state3);
+//}
 
 #[test]
-fn stack_overflow() { // caused by compute_at function
+pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER);
   advance(&mut rt, 2000, Some(COUNTER));
@@ -236,7 +234,7 @@ fn stack_overflow() { // caused by compute_at function
 
 // ===========================================================
 // Codes
-const PRE_COUNTER: &'static str = "
+pub const PRE_COUNTER: &'static str = "
   ctr {Succ p}
   ctr {Zero}
 
@@ -268,7 +266,7 @@ const PRE_COUNTER: &'static str = "
   } = {Zero}
 ";
 
-const COUNTER: &'static str = "
+pub const COUNTER: &'static str = "
   run {
     !call ~ 'Store' [{StoreAdd}]
     !call x 'Store' [{StoreGet}]

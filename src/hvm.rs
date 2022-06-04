@@ -384,81 +384,81 @@ const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
 const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u128 = 42_000_000_000;
+pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : i128 = 1024; // 1024 bits per sec = about 4 GB per year
+pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
 
-// |---------|---------------------------------|----------|
-// | Opcode  | Effect                          | Mana     |
-// |---------|---------------------------------|----------|
-// | APP-LAM | applies a lambda                | 10       |
-// | APP-SUP | applies a superposition         | 20       |
-// | OP2-NUM | operates on a number            | 10       |
-// | OP2-SUP | operates on a superposition     | 20       |
-// | FUN-CTR | pattern-matches a constructor   | 10 + M   |
-// | FUN-SUP | pattern-matches a superposition | 10 + A*5 |
-// | DUP-LAM | clones a lambda                 | 20       |
-// | DUP-NUM | clones a number                 | 10       |
-// | DUP-CTR | clones a constructor            | 10 + A*5 |
-// | DUP-SUP | clones a superposition          | 20       |
-// | DUP-SUP | undoes a superposition          | 10       |
-// | DUP-ERA | clones an erasure               | 10       |
-// |------------------------------------------------------|
-// | * A is the constructor or function arity             |
-// | * M is the alloc count of the right-hand side        |
-// |------------------------------------------------------|
+// |-----------|---------------------------------|-------|
+// | Opcode    | Effect                          | Mana  |
+// |-----------|---------------------------------|-------|
+// | APP-LAM   | applies a lambda                | 2     |
+// | APP-SUP   | applies a superposition         | 4     |
+// | OP2-NUM   | operates on a number            | 2     |
+// | OP2-SUP   | operates on a superposition     | 4     |
+// | FUN-CTR   | pattern-matches a constructor   | 2 + M |
+// | FUN-SUP   | pattern-matches a superposition | 2 + A |
+// | DUP-LAM   | clones a lambda                 | 4     |
+// | DUP-NUM   | clones a number                 | 2     |
+// | DUP-CTR   | clones a constructor            | 2 + A |
+// | DUP-SUP-D | clones a superposition          | 4     |
+// | DUP-SUP-E | undoes a superposition          | 2     |
+// | DUP-ERA   | clones an erasure               | 2     |
+// |-----------------------------------------------------|
+// | * A is the constructor or function arity            |
+// | * M is the alloc count of the right-hand side       |
+// |-----------------------------------------------------|
 
 
 fn AppLamMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn AppSupMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn Op2NumMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn Op2SupMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn FunCtrMana(body: &Term) -> u128 {
-  return 10 + count_allocs(body) * 5;
+  return 2 + count_allocs(body);
 }
 
 fn FunSupMana(arity: u128) -> u128 {
-  return 10 + arity * 5;
+  return 2 + arity;
 }
 
 fn DupLamMana() -> u128 {
-  return 20; // 19?
+  return 4;
 }
 
 fn DupNumMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn DupCtrMana(arity: u128) -> u128 {
-  return 10 + arity * 5;
+  return 2 + arity;
 }
 
 fn DupDupMana() -> u128 {
-  return 20;
+  return 4;
 }
 
 fn DupSupMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn DupEraMana() -> u128 {
-  return 10;
+  return 2;
 }
 
 fn count_allocs(body: &Term) -> u128 {
@@ -585,6 +585,10 @@ fn absorb_u128(a: u128, b: u128, overwrite: bool) -> u128 {
 
 fn absorb_i128(a: i128, b: i128, overwrite: bool) -> i128 {
   if b == I128_NONE { a } else if overwrite || a == I128_NONE { b } else { a }
+}
+
+fn heap_dir_path() -> PathBuf {
+  dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
 }
 
 impl Heap {
@@ -761,15 +765,12 @@ impl Heap {
       self.write_arit(fnid, arit);
     }
   }
-  fn heap_dir_path(&self) -> PathBuf {
-    dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps")
-  }
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
-    self.heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
+    heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
   fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
     use std::io::Write;
-    std::fs::create_dir_all(&self.heap_dir_path())?;
+    std::fs::create_dir_all(&heap_dir_path())?;
     std::fs::OpenOptions::new()
       .append(true)
       .create(true)
@@ -969,11 +970,6 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
-  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(uuid)
-  }
-
   // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
@@ -1049,25 +1045,6 @@ impl Runtime {
 
   pub fn get_heap_mut(&mut self, index: u64) -> &mut Heap {
     return &mut self.heap[index as usize];
-  }
-
-  pub fn get_curr_heap(&mut self) -> &Heap {
-    return &self.heap[self.curr as usize];
-  }
-
-  pub fn save_curr_heap(&mut self) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.save_buffers()
-  }
-
-  pub fn load_heap(&mut self, uuid: u128) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(uuid)
-  }
-
-  pub fn load_curr_heap(&mut self) -> std::io::Result<()> {
-    let curr_heap = self.get_heap_mut(self.curr);
-    curr_heap.load_buffers(curr_heap.uuid)
   }
 
   // Copies the contents of the absorbed heap into the absorber heap
@@ -1355,7 +1332,6 @@ impl Runtime {
 
   // Rolls back to the earliest state before or equal `tick`
   pub fn rollback(&mut self, tick: u128) {
-
     // If target tick is older than current tick
     if tick < self.get_tick() {
       println!("- rolling back from {} to {}", self.get_tick(), tick);
@@ -1369,16 +1345,64 @@ impl Runtime {
           self.back = tail.clone();
         }
       }
-      // Moves the most recent valid heap to `self.curr`
-      if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
-        self.back = tail.clone();
-        self.curr = *head;
-      } else {
-        self.back = Arc::new(Rollback::Nil);
-        self.curr = self.nuls.pop().expect("No heap available!");
+      self.curr = self.nuls.pop().expect("No heap available!");
+    }
+
+  }
+
+  // Persistence
+  // -----------
+
+  // Persists the current state. Since heaps are automatically saved to disk, function only saves
+  // their uuids. Note that this will NOT save the current heap, nor anything after the last heap
+  // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
+  // function is used to avoid re-processing the entire block history on node startup.
+  fn persist_state(&self) -> std::io::Result<()> {
+    fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
+      match rollback {
+        Rollback::Cons { keep, head, tail } => {
+          uuids.push(rt.heap[*head as usize].uuid);
+          get_uuids(rt, tail, uuids);
+        }
+        Rollback::Nil => {}
       }
     }
-    println!("- rolled back to {}", self.get_tick());
+    let mut uuids : Vec<u128> = vec![];
+    get_uuids(self, &self.back, &mut uuids);
+    std::fs::write(heap_dir_path().join("_uuids_"), &util::u128s_to_u8s(&uuids))?;
+    return Ok(());
+  }
+
+  // Restores the saved state. This loads the persisted Rollback list and its heaps.
+  fn restore_state(&mut self, uuids: &[u128]) -> std::io::Result<()> {
+    for i in 0 .. 10 {
+      self.heap[i].clear();
+    }
+    for i in 0 .. std::cmp::max(uuids.len(), 8) {
+      self.heap[i + 2].load_buffers(uuids[i])?;
+    }
+    let uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
+    fn load_heaps(rt: &mut Runtime, uuids: &[u128], index: usize) -> std::io::Result<Arc<Rollback>> {
+      if index == rt.heap.len() {
+        return Ok(Arc::new(Rollback::Nil));
+      } else {
+        rt.heap[index].load_buffers(uuids[index])?;
+        return Ok(Arc::new(Rollback::Cons {
+          keep: 0,
+          head: index as u64, 
+          tail: load_heaps(rt, &uuids, index + 1)?,
+        }));
+      }
+    }
+    self.draw = 0;
+    self.curr = 1;
+    self.back = load_heaps(self, &uuids, 2)?;
+    return Ok(());
+  }
+
+  // Reverts until the last 
+  fn clear_current_heap(&mut self) {
+    self.heap[self.curr as usize].clear();
   }
 
   // Heap writers and readers
@@ -2306,12 +2330,12 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
             init = 1;
             continue;
           // dup x y = {a b}
-          // --------------- DUP-SUP (equal)
+          // --------------- DUP-SUP-E
           // x <- a
           // y <- b
           } else if get_tag(arg0) == SUP {
             if get_ext(term) == get_ext(arg0) {
-              //println!("dup-sup");
+              //println!("dup-sup-e");
               rt.set_mana(rt.get_mana() + DupSupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0), mana);
@@ -2322,13 +2346,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
               init = 1;
               continue;
             // dup x y = {a b}
-            // ----------------- DUP-SUP (different)
+            // ----------------- DUP-SUP-D
             // x <- {xA xB}
             // y <- {yA yB}
             // dup xA yA = a
             // dup xB yB = b
             } else {
-              //println!("dup-sup");
+              //println!("dup-sup-d");
               rt.set_mana(rt.get_mana() + DupDupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               let par0 = alloc(rt, 2);
