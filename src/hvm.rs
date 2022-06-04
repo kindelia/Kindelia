@@ -780,7 +780,7 @@ impl Heap {
   fn read_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<Vec<u128>> {
     std::fs::read(self.buffer_file_path(uuid, buffer_name)).map(|x| util::u8s_to_u128s(&x))
   }
-  fn save_buffers(&self) -> std::io::Result<()> {
+  pub fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
@@ -792,7 +792,7 @@ impl Heap {
     self.write_buffer(serial.uuid, "nums", &serial.nums)?;
     return Ok(());
   }
-  fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
+  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
     let blob = self.read_buffer(uuid, "blob")?;
     let disk = self.read_buffer(uuid, "disk")?;
     let file = self.read_buffer(uuid, "file")?;
@@ -969,6 +969,11 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(cid, arity);
   }
 
+  pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(uuid)
+  }
+
   // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
@@ -1044,6 +1049,25 @@ impl Runtime {
 
   pub fn get_heap_mut(&mut self, index: u64) -> &mut Heap {
     return &mut self.heap[index as usize];
+  }
+
+  pub fn get_curr_heap(&mut self) -> &Heap {
+    return &self.heap[self.curr as usize];
+  }
+
+  pub fn save_curr_heap(&mut self) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.save_buffers()
+  }
+
+  pub fn load_heap(&mut self, uuid: u128) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(uuid)
+  }
+
+  pub fn load_curr_heap(&mut self) -> std::io::Result<()> {
+    let curr_heap = self.get_heap_mut(self.curr);
+    curr_heap.load_buffers(curr_heap.uuid)
   }
 
   // Copies the contents of the absorbed heap into the absorber heap
@@ -1165,7 +1189,7 @@ impl Runtime {
           self.set_arity(*name, args.len() as u128);
           if self.check_func_arities(&func) {
             if let Some(func) = build_func(func, true) {
-              println!("- fun {}", u128_to_name(*name));
+              // println!("- fun {}", u128_to_name(*name));
               self.set_arity(*name, args.len() as u128);
               self.define_function(*name, func);
               let state = self.create_term(init, 0, &mut init_map());
@@ -1183,7 +1207,7 @@ impl Runtime {
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
-          println!("- ctr {}", u128_to_name(*name));
+          // println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
           return;
@@ -1207,7 +1231,7 @@ impl Runtime {
                 let size_dif = size_end - size_ini;
                 // dbg!(size_end, size_dif, size_lim);
                 if size_end <= size_lim {
-                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
                 } else {
                   println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
@@ -1309,6 +1333,7 @@ impl Runtime {
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
+    // println!(" - back {}", view_rollback(&self.back));
     if included {
       self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
@@ -1333,7 +1358,7 @@ impl Runtime {
 
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back from {} to {}", tick, self.get_tick());
+      println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
@@ -1353,6 +1378,7 @@ impl Runtime {
         self.curr = self.nuls.pop().expect("No heap available!");
       }
     }
+    println!("- rolled back to {}", self.get_tick());
   }
 
   // Heap writers and readers
@@ -2822,137 +2848,205 @@ pub fn show_rt(rt: &Runtime) -> String {
 }
 
 pub fn show_term(rt: &Runtime, term: Lnk) -> String {
-  let mut lets: HashMap<u128, u128> = HashMap::new();
-  let mut kinds: HashMap<u128, u128> = HashMap::new();
+  enum StackItem {
+    Term(Lnk),
+    Str(String),
+  }
   let mut names: HashMap<u128, String> = HashMap::new();
-  let mut count: u128 = 0;
   fn find_lets(
     rt: &Runtime,
     term: Lnk,
-    lets: &mut HashMap<u128, u128>,
-    kinds: &mut HashMap<u128, u128>,
     names: &mut HashMap<u128, String>,
-    count: &mut u128,
-  ) {
-    match get_tag(term) {
-      LAM => {
-        names.insert(get_loc(term, 0), format!("{}", count));
-        *count += 1;
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      APP => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      SUP => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      DP0 => {
-        if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+  ) -> String {
+    let mut lets: HashMap<u128, u128> = HashMap::new();
+    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut count: u128 = 0;
+    let mut stack = vec![term];
+    while !stack.is_empty() {
+      let term = stack.pop().unwrap();
+      match get_tag(term) {
+        LAM => {
           names.insert(get_loc(term, 0), format!("{}", count));
-          *count += 1;
-          kinds.insert(get_loc(term, 0), get_ext(term));
-          e.insert(get_loc(term, 0));
-          find_lets(rt, ask_arg(rt, term, 2), lets, kinds, names, count);
+          count += 1;
+          stack.push(ask_arg(rt, term, 1));
         }
-      }
-      DP1 => {
-        if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-          names.insert(get_loc(term, 0), format!("{}", count));
-          *count += 1;
-          kinds.insert(get_loc(term, 0), get_ext(term));
-          e.insert(get_loc(term, 0));
-          find_lets(rt, ask_arg(rt, term, 2), lets, kinds, names, count);
+        APP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
         }
-      }
-      OP2 => {
-        find_lets(rt, ask_arg(rt, term, 0), lets, kinds, names, count);
-        find_lets(rt, ask_arg(rt, term, 1), lets, kinds, names, count);
-      }
-      CTR | FUN => {
-        let arity = rt.get_arity(get_ext(term));
-        for i in 0 .. arity {
-          find_lets(rt, ask_arg(rt, term, i), lets, kinds, names, count);
+        SUP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
         }
+        DP0 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        DP1 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        OP2 => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        CTR | FUN => {
+          let arity = rt.get_arity(get_ext(term));
+          for i in (0..arity).rev() {
+            stack.push(ask_arg(rt, term, i));
+          }
+        }
+        _ => {}
       }
-      _ => {}
     }
+
+    let mut text = String::new();
+    for (_key, pos) in lets {
+      // todo: reverse
+      let what = String::from("?h");
+      //let kind = kinds.get(&key).unwrap_or(&0);
+      let name = names.get(&pos).unwrap_or(&what);
+      let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
+      let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+      text.push_str(&format!("&dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    }
+    text
   }
+
   fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> String {
-    let done = match get_tag(term) {
-      DP0 => {
-        format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")))
+    let mut stack = vec![StackItem::Term(term)];
+    let mut output = Vec::new();
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Str(txt) => {
+          output.push(txt);
+        },
+        StackItem::Term(term) =>
+          match get_tag(term) {
+            DP0 => {
+              output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
+            }
+            DP1 => {
+              output.push(format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b"))));
+            }
+            VAR => {
+              output.push(format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c"))));
+            }
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              output.push(format!("@{}", name));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+            }
+            APP => {
+              output.push("(".to_string());
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            SUP => {
+              output.push("{".to_string());
+              stack.push(StackItem::Str("}".to_string()));
+              //let kind = get_ext(term);
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            OP2 => {
+              let oper = get_ext(term);
+              let symb = match oper {
+                U120_ADD => "+",
+                U120_SUB => "-",
+                U120_MUL => "*",
+                U120_DIV => "/",
+                U120_MOD => "%",
+                U120_AND => "&",
+                U120_OR  => "|",
+                U120_XOR => "^",
+                U120_SHL => "<<",
+                U120_SHR => ">>",
+                U120_LTN => "<",
+                U120_LTE => "<=",
+                U120_EQL => "=",
+                U120_GTE => ">=",
+                U120_GTN => ">",
+                U120_NEQ => "!=",
+                UTUP_ADD => "~+",
+                UTUP_SUB => "~-",
+                UTUP_MUL => "~*",
+                UTUP_DIV => "~/",
+                UTUP_MOD => "~%",
+                UTUP_AND => "~&",
+                UTUP_OR  => "~|",
+                UTUP_XOR => "~^",
+                UTUP_SHL => "~<<",
+                UTUP_SHR => "~>>",
+                UTUP_LTN => "~<",
+                UTUP_LTE => "~<=",
+                UTUP_EQL => "~=",
+                UTUP_GTE => "~>=",
+                UTUP_GTN => "~>",
+                UTUP_NEQ => "~!=",
+                UTUP_RTL => "~<~",
+                UTUP_RTR => "~>~",
+                _        => "?",
+              };
+              output.push(format!("({}", symb));
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            NUM => {
+              let numb = get_num(term);
+              output.push(format!("#{}", numb));
+            }
+            CTR => {
+              let func = get_ext(term);
+              output.push(format!("{{{}", u128_to_name(func)));
+              stack.push(StackItem::Str("}".to_string()));
+              let arit = rt.get_arity(func);
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+            FUN => {
+              let func = get_ext(term);
+              output.push(format!("({} ", u128_to_name(func)));
+              stack.push(StackItem::Str(")".to_string()));
+              let arit = rt.get_arity(func);
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+            ERA => {
+              output.push(String::from("*"));
+            }
+            _ => output.push(format!("?g({})", get_tag(term))),
+          }
+        }
       }
-      DP1 => {
-        format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b")))
-      }
-      VAR => {
-        format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c")))
-      }
-      LAM => {
-        let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-        format!("@{} {}", name, go(rt, ask_arg(rt, term, 1), names))
-      }
-      APP => {
-        let func = go(rt, ask_arg(rt, term, 0), names);
-        let argm = go(rt, ask_arg(rt, term, 1), names);
-        format!("({} {})", func, argm)
-      }
-      SUP => {
-        //let kind = get_ext(term);
-        let func = go(rt, ask_arg(rt, term, 0), names);
-        let argm = go(rt, ask_arg(rt, term, 1), names);
-        format!("{{{} {}}}", func, argm)
-      }
-      OP2 => {
-        let oper = get_ext(term);
-        let val0 = go(rt, ask_arg(rt, term, 0), names);
-        let val1 = go(rt, ask_arg(rt, term, 1), names);
-        let symb = view_oper(&oper);
-        format!("({} {} {})", symb, val0, val1)
-      }
-      NUM => {
-        let numb = get_num(term);
-        // If it has 26-30 bits, pretty-print as a name
-        //if numb > 0x3FFFFFF && numb <= 0x3FFFFFFF {
-          //return format!("@{}", view_name(numb));
-        //} else {
-          return format!("#{}", numb);
-        //}
-      }
-      CTR => {
-        let func = get_ext(term);
-        let arit = rt.get_arity(func);
-        //println!("  - arity is: {} {}", u128_to_name(func), arit);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("{{{}{}}}", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
-      }
-      FUN => {
-        let func = get_ext(term);
-        let arit = rt.get_arity(func);
-        //println!("  - arity is: {} {}", u128_to_name(func), arit);
-        let args: Vec<String> = (0..arit).map(|i| go(rt, ask_arg(rt, term, i), names)).collect();
-        format!("({}{})", u128_to_name(func), args.iter().map(|x| format!(" {}", x)).collect::<String>())
-      }
-      ERA => {
-        "*".to_string()
-      }
-      _ => format!("?g({})", get_tag(term)),
-    };
-    return done;
+
+    let res = output.join("");
+    return res;
+
   }
-  find_lets(rt, term, &mut lets, &mut kinds, &mut names, &mut count);
-  let mut text = go(rt, term, &names);
-  for (_key, pos) in lets {
-    // todo: reverse
-    let what = String::from("?h");
-    //let kind = kinds.get(&key).unwrap_or(&0);
-    let name = names.get(&pos).unwrap_or(&what);
-    let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
-    let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-    text.push_str(&format!(" | &dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
-  }
+
+  let mut text = find_lets(rt, term, &mut names);
+  text.push_str( &go(rt, term, &names));
   text
 }
 
