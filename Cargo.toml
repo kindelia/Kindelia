@@ -27,3 +27,6 @@ fastrand = "1.7.0"
 nohash-hasher = "0.2.0"
 json = "0.12.4"
 proptest = "1.0.0"
+warp = "0.3"
+tokio = { version = "1.19.1", features = ["full"] }
+futures = "0.1.31"

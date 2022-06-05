@@ -12,6 +12,9 @@ use std::net::*;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::sync::mpsc;
+use std::sync::mpsc::{SyncSender, Receiver};
+use futures::sync::oneshot;
 
 use std::io::{stdin, stdout, Write};
 use termion::event::Key;
@@ -59,6 +62,18 @@ pub struct Node {
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
   pub runtime    : Runtime,                         // Kindelia's runtime
+  pub receiver   : Receiver<Request>,               // Receives an API request
+}
+
+// API request
+pub enum Request {
+  Double {
+    value: u128,
+    answer: oneshot::Sender<u128>,
+  },
+  GetTick {
+    answer: oneshot::Sender<u128>,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -346,9 +361,10 @@ pub fn GENESIS_BLOCK() -> Block {
   }
 }
 
-pub fn new_node(kindelia_path: PathBuf) -> Node {
+pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
   let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
   let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
+  let (query_sender, query_receiver) = mpsc::sync_channel(1);
   let mut node = Node {
     path       : kindelia_path,
     socket     : socket,
@@ -366,6 +382,7 @@ pub fn new_node(kindelia_path: PathBuf) -> Node {
     peer_id    : HashMap::new(),
     peers      : HashMap::new(),
     runtime    : init_runtime(),
+    receiver   : query_receiver,
   };
 
   // UDP_PORT is the local port, it doesn't change existing node ports
@@ -394,7 +411,7 @@ pub fn new_node(kindelia_path: PathBuf) -> Node {
     seen_at: get_time(),
   });
 
-  return node;
+  return (query_sender, node);
 }
 
 pub fn new_miner_comm() -> SharedMinerComm {
@@ -609,6 +626,17 @@ pub fn node_message_receive(node: &mut Node) {
   }
 }
 
+pub fn node_handle_request(node: &mut Node, request: Request) {
+  match request {
+    Request::Double { value, answer } => {
+      answer.send(value * 2).unwrap();
+    }
+    Request::GetTick { answer } => {
+      answer.send(node.runtime.get_tick()).unwrap();
+    }
+  }
+}
+
 // Sends a block to a target address; also share some random peers
 // FIXME: instead of sharing random peers, share recently active peers
 pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
@@ -804,7 +832,14 @@ pub fn node_loop(
         node_gossip_tip_block(&mut node, 8);
       }
 
-      // Receives and handles incoming messages
+      // Receives and handles incoming API requests
+      if tick % 10 == 0 {
+        if let Ok(request) = node.receiver.try_recv() {
+          node_handle_request(&mut node, request);
+        }
+      }
+
+      // Receives and handles incoming network messages
       if tick % 10 == 0 {
         node_message_receive(&mut node);
       }

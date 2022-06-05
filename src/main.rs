@@ -3,12 +3,14 @@
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
+#![feature(async_closure)]
 
-mod util;
+mod api;
+mod bits;
 mod hvm;
 mod node;
-mod bits;
 mod test;
+mod util;
 
 //#[cfg(test)]
 //mod test;
@@ -22,17 +24,18 @@ use std::thread;
 
 pub use clap::{Parser, Subcommand};
 
+use crate::api::*;
 use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
-use crate::util::*;
 use crate::test::*;
+use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  return run_cli();
-  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kindelia".to_string()));
-  //return Ok(());
+  //return run_cli();
+  start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
+  return Ok(());
   //hvm::test("./example/example.kindelia");
   //return Ok(());
 }
@@ -88,11 +91,13 @@ fn run_cli() -> Result<(), String> {
   let kindelia_path = get_kindelia_path(arguments.path)?;
 
   match arguments.command {
+
     // Starts the node process
     CliCmd::Start { file } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
       start_node(kindelia_path, file);
     }
+
     // Runs a single block, for testing
     CliCmd::Run { file } => {
       let file = std::fs::read_to_string(file);
@@ -112,14 +117,17 @@ fn run_cli() -> Result<(), String> {
 
 fn start_node(kindelia_path: PathBuf, file: Option<String>) {
   // Reads the file contents
-  let file = file.map(|file| std::fs::read_to_string(file).expect("File not found."));
+  let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let node = new_node(kindelia_path.clone());
+  let (node_query_sender, node) = new_node(kindelia_path.clone());
 
   // Node to Miner communication object
   let miner_comm_0 = new_miner_comm();
   let miner_comm_1 = miner_comm_0.clone();
+
+  // API thread channel
+  //let (api_send, api_recv) = mpsc::channel();
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
@@ -131,7 +139,14 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
     miner_loop(miner_comm_1);
   });
 
+  // Spawns the API thread
+  let api_thread = thread::spawn(move || {
+    api_loop(node_query_sender);
+  });
+
   // Joins all threads
   node_thread.join().unwrap();
   miner_thread.join().unwrap();
+  api_thread.join().unwrap();
 }
+

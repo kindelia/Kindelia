@@ -1166,7 +1166,7 @@ impl Runtime {
           self.set_arity(*name, args.len() as u128);
           if self.check_func(&func) {
             if let Some(func) = build_func(func, true) {
-              // println!("- fun {}", u128_to_name(*name));
+              println!("- fun {}", u128_to_name(*name));
               self.set_arity(*name, args.len() as u128);
               self.define_function(*name, func);
               let state = self.create_term(init, 0, &mut init_map());
@@ -1184,7 +1184,7 @@ impl Runtime {
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
-          // println!("- ctr {}", u128_to_name(*name));
+          println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
           return;
@@ -1208,7 +1208,7 @@ impl Runtime {
                 let size_dif = size_end - size_ini;
                 // dbg!(size_end, size_dif, size_lim);
                 if size_end <= size_lim {
-                  // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
                 } else {
                   println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
