@@ -192,7 +192,7 @@ const HEAP_SIZE: u128 = 32 * U128_PER_MB;
 
 pub const MAX_ARITY: u128 = 16;
 pub const MAX_FUNCS: u128 = 1 << 24; // TODO: increase to 2^30 once arity is moved out
-
+pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 pub const VARS_SIZE: usize = 1 << 18; // maximum variables per rule
 
 pub const VAL: u128 = 1 << 0;
@@ -377,7 +377,7 @@ const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128('IO.SAVE')
 const IO_CALL : u128 = 0x1364034b596; // name_to_u128('IO.CALL')
 const IO_FROM : u128 = 0x1364041c657; // name_to_u128('IO.FROM')
 const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
-const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
+const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take')
 const MC_LOAD : u128 = 0xc33968; // name_to_u128('load')
 const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
 const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
@@ -1164,7 +1164,7 @@ impl Runtime {
         // TODO: if arity is set, fail
         if !self.exists(*name) {
           self.set_arity(*name, args.len() as u128);
-          if self.check_func_arities(&func) {
+          if self.check_func(&func) {
             if let Some(func) = build_func(func, true) {
               // println!("- fun {}", u128_to_name(*name));
               self.set_arity(*name, args.len() as u128);
@@ -1272,17 +1272,66 @@ impl Runtime {
     }
   }
 
-  pub fn check_rule_arities(&self, rule: &Rule) -> bool {
-    return self.check_term_arities(&rule.0) && self.check_term_arities(&rule.1);
-  }
-
-  pub fn check_func_arities(&self, func: &Func) -> bool {
+  pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
-      if !self.check_rule_arities(rule) {
+      if !self.check_term_arities(&rule.0)
+      || !self.check_term_arities(&rule.1)
+      || !self.check_term_depth(&rule.0, 0)
+      || !self.check_term_depth(&rule.1, 0) {
         return false;
       }
     }
     return true;
+  }
+
+  pub fn check_term_depth(&self, term: &Term, depth: u128) -> bool {
+    if depth > MAX_TERM_DEPTH {
+      return false;
+    } else {
+      match term {
+        Term::Var { name } => {
+          return true;
+        },
+        Term::Dup { nam0, nam1, expr, body } => {
+          let expr_check = self.check_term_depth(expr, depth + 1);
+          let body_check = self.check_term_depth(body, depth + 1);
+          return expr_check && body_check;
+        }
+        Term::Lam { name, body } => {
+          let body_check = self.check_term_depth(body, depth + 1);
+          return body_check;
+        }
+        Term::App { func, argm } => {
+          let func_check = self.check_term_depth(func, depth + 1);
+          let argm_check = self.check_term_depth(argm, depth + 1);
+          return func_check && argm_check;
+        }
+        Term::Ctr { name, args } => {
+          for arg in args {
+            if !self.check_term_depth(arg, depth + 1) {
+              return false;
+            }
+          }
+          return true;
+        }
+        Term::Fun { name, args } => {
+          for arg in args {
+            if !self.check_term_depth(arg, depth + 1) {
+              return false;
+            }
+          }
+          return true;
+        }
+        Term::Num { numb } => {
+          return true;
+        }
+        Term::Op2 { oper, val0, val1 } => {
+          let val0_check = self.check_term_depth(val0, depth + 1);
+          let val1_check = self.check_term_depth(val1, depth + 1);
+          return val0_check && val1_check;
+        }
+      }
+    }
   }
 
   // Maximum mana = 42m * block_number
@@ -1290,7 +1339,7 @@ impl Runtime {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
   }
 
-  // Maximum size =  * block_number
+  // Maximum size = 2048 * block_number
   pub fn get_size_limit(&self) -> i128 {
     (self.get_tick() as i128 + 1) * (BLOCK_BITS_LIMIT / 128)
   }
@@ -1635,12 +1684,12 @@ pub fn Num(val: u128) -> Lnk {
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Lnk {
+  debug_assert!(fun < 1 << 60, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
   (CTR * TAG) | (fun * EXT) | pos
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Lnk {
-  debug_assert!(fun < 1<<60,
-    "Directly calling function with too long name: `{}`.", u128_to_name(fun));
+  debug_assert!(fun < 1 << 60, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
 
