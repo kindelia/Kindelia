@@ -2946,6 +2946,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   s
 }
 
+// TODO: this should be renamed to "readback", and should return a term instead of a string. 
 pub fn show_term(rt: &Runtime, term: Lnk) -> String {
   enum StackItem {
     Term(Lnk),
