@@ -174,7 +174,7 @@ is just different, with different goals. Kindelia is minimalist, Ethereum is
 complex. Ethereum has features that some may miss on Kindelia. For example,
 Ethereum's Merkle Patricia Trees are terrible for SSTORE performance, but they
 do allow light clients which, on Kindelia, aren't possible; at least, not
-without making zero-knowledge proofs about the HVM execution. Kindelia's doesn't
+without making zero-knowledge proofs about the HVM execution. Kindelia doesn't
 store logs, bloom filters, there are no complex opcodes like SHA3, no
 precompiled contracts, there is no GHOST protocol (we rely on ultra-compact
 blocks for fast propagation), and consensus is just old and simple proof of
@@ -205,7 +205,7 @@ in mind, so, using it would raise complications, such as high compilation times,
 and how to measure execution costs. Because of that, contracts are compiled to
 an intermediate language, Plutus, and interpreted on-chain. This is much less
 efficient than compiling, and ultimately means that Cardano fees can't be much
-cheaper than Ethereum, under the same load. Kindelia's HVM is as efficient as
+cheaper than Ethereum's, under the same load. Kindelia's HVM is as efficient as
 GHC, while having negligible compilation times, and measurable execution costs,
 letting users run Haskell-like languages with GHC-like efficiency.
 
@@ -229,8 +229,8 @@ a highly complex system, Kindelia is just a minimal open-source standard - our
 entire implementation is under 10k lines of code! - promoting node diversity and
 making it inherently independent from its original creators.
 
-Finally, note that we do not claim that Kindelia is *better* than Cardano,
-we just rely on the reader's inference.
+Finally, note that we do not claim that Kindelia is *better* than Cardano, we
+just rely on the reader's reasoning.
 
 Examples
 ========
@@ -801,16 +801,17 @@ Garbage Collection
 
 Kindelia represents its state as reversible runtime heaps. In other words, it
 would be as if we stored the memory of a JavaScript engine, or of Haskell's STG
-runtime, as the network state. A `IO.save` operation merely links the active
+runtime, as the network state. An `IO.save` operation merely links the active
 function name to a pointer to a runtime expression. That is why it is has
 basically no cost, and is only restricted by the total state size limit.
 
 This idea has an obvious problem, though: if there is any kind of space leak on
 the runtime, the blockchain size will grow permanently. This could be fixed with
 a global garbage collector, but that raises the question: who pays for it?
-Fortunatelly, we don't have to deal with this question, since HVM is garbage
-collection free. In other words, running an IO statement will always free all
-the memory it used, so, the only way the heap can grow is by using `IO.save`.
+Fortunatelly, we don't have to deal with this question, since HVM doesn't
+require a global search pass to collect garbage. Running an IO statement will
+always free all the memory it used, so, the only way the heap can grow is by
+using `IO.save`.
 
 In order for that to be possible, the HVM has an auxiliary garbage collection
 procedure that is triggered whenever a value goes out of scope. This happens
