@@ -2825,59 +2825,85 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
   (((bits[bit as usize >> 6] >> (bit & 0x3f)) as u8) & 1) == 1
 }
 
-// Evaluates redexes recursively. This is used to save space before storing a term, since,
+// Evaluates redexes iterativaly. This is used to save space before storing a term, since,
 // otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 // normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
 // since it would require passing over the entire state.
 pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
-  let term = ask_lnk(rt, host);
-  let norm = reduce(rt, host, mana)?;
-  if term != norm {
-    match get_tag(norm) {
-      LAM => {
-        let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1, mana)?;
-        link(rt, loc_1, lnk_1);
-      }
-      APP => {
-        let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0, mana)?;
-        link(rt, loc_0, lnk_0);
-        let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1, mana)?;
-        link(rt, loc_1, lnk_1);
-      }
-      SUP => {
-        let loc_0 = get_loc(norm, 0);
-        let lnk_0 = compute_at(rt, loc_0, mana)?;
-        link(rt, loc_0, lnk_0);
-        let loc_1 = get_loc(norm, 1);
-        let lnk_1 = compute_at(rt, loc_1, mana)?;
-        link(rt, loc_1, lnk_1);
-      }
-      DP0 => {
-        let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2, mana)?;
-        link(rt, loc_2, lnk_2);
-      }
-      DP1 => {
-        let loc_2 = get_loc(norm, 2);
-        let lnk_2 = compute_at(rt, loc_2, mana)?;
-        link(rt, loc_2, lnk_2);
-      }
-      CTR | FUN => {
-        for i in 0 .. rt.get_arity(get_ext(norm)) {
-          let loc_i = get_loc(norm, i);
-          let lnk_i = compute_at(rt, loc_i, mana)?;
-          link(rt, loc_i, lnk_i);
+  enum StackItem {
+    LinkResolver(u128),
+    Host(u128, u128)
+  }
+  let mut stack = vec![StackItem::Host(host, mana)];
+  let mut output = vec![];
+  while !stack.is_empty() {
+    let item = stack.pop().unwrap();
+    match item {
+      StackItem::Host(host, mana) => {
+        let term = ask_lnk(rt, host);
+        let norm = reduce(rt, host, mana)?;
+
+        if term == norm {
+          output.push(Some(term));
+        } else {
+          match get_tag(norm) {
+            LAM => {
+              let loc_1 = get_loc(norm, 1);
+              stack.push(StackItem::LinkResolver(loc_1));
+              stack.push(StackItem::Host(loc_1, mana));
+            }
+            APP => {
+              let loc_0 = get_loc(norm, 0);
+              let loc_1 = get_loc(norm, 1);
+              stack.push(StackItem::LinkResolver(loc_1));
+              stack.push(StackItem::Host(loc_1, mana));
+              stack.push(StackItem::LinkResolver(loc_0));
+              stack.push(StackItem::Host(loc_0, mana));
+            }
+            SUP => {
+              let loc_0 = get_loc(norm, 0);
+              let loc_1 = get_loc(norm, 1);
+              stack.push(StackItem::LinkResolver(loc_1));
+              stack.push(StackItem::Host(loc_1, mana));
+              stack.push(StackItem::LinkResolver(loc_0));
+              stack.push(StackItem::Host(loc_0, mana));
+            }
+            DP0 => {
+              let loc_2 = get_loc(norm, 2);
+              stack.push(StackItem::LinkResolver(loc_2));
+              stack.push(StackItem::Host(loc_2, mana));
+            }
+            DP1 => {
+              let loc_2 = get_loc(norm, 2);
+              stack.push(StackItem::LinkResolver(loc_2));
+              stack.push(StackItem::Host(loc_2, mana));
+            }
+            CTR | FUN => {
+              for i in (0..rt.get_arity(get_ext(norm))).rev() {
+                let loc_i = get_loc(norm, i);
+                stack.push(StackItem::LinkResolver(loc_i));
+                stack.push(StackItem::Host(loc_i, mana));
+              }
+            }
+            _ => {}
+          };
+          output.push(Some(norm));
+        }
+      },
+      StackItem::LinkResolver(loc) => {
+        match output.pop() {
+          Some(lnk) => {
+            if let Some(lnk) = lnk {
+              link(rt, loc, lnk);
+            }
+          }
+          None => panic!("No term to resolve link"),
         }
       }
-      _ => {}
-    };
-    return Some(norm);
-  } else {
-    return Some(term);
+    }
   }
+
+  output.pop().unwrap()
 }
 
 // Debug
