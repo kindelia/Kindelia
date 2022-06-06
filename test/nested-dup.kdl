@@ -1,0 +1,21 @@
+ctr {Pair v0 v1}
+
+fun (PaPair x) {
+  (PaPair x) =
+    dup x0 x1 = x;
+    {Pair
+      x0
+      dup x2 x3 = x1; {Pair (+ #1 x2) (+ #3 x3)}
+    }
+}
+  = #0
+
+fun (Destruct x) {
+  (Destruct {Pair ~ x}) = (Destruct x)
+  (Destruct x) = x
+}
+  = #0
+
+run {
+  !done (+ (Destruct (PaPair #42)) #0)
+}
