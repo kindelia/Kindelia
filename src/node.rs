@@ -1,7 +1,6 @@
 use bit_vec::BitVec;
 use im::HashSet;
 use json::object;
-use pad::{PadStr, Alignment};
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
@@ -15,12 +14,6 @@ use std::thread;
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender, Receiver};
 use futures::sync::oneshot;
-
-use std::io::{stdin, stdout, Write};
-use termion::event::Key;
-use termion::input::TermRead;
-use termion::raw::IntoRawMode;
-use termion::{color, style};
 
 use crate::util::*;
 use crate::bits::*;

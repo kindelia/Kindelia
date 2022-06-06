@@ -1,10 +1,9 @@
-use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use im::HashMap;
 use proptest::proptest;
-use std::{
-  collections::hash_map::DefaultHasher,
-  hash::{Hash, Hasher},
-};
+
+use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime};
 
 // Struct used to store interesting parts of runtime state
 #[derive(Eq, PartialEq, Debug, Clone)]

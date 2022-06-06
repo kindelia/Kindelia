@@ -3,7 +3,7 @@
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
-#![feature(async_closure)]
+// #![feature(async_closure)]
 
 mod api;
 mod bits;
@@ -15,9 +15,6 @@ mod util;
 //#[cfg(test)]
 //mod test;
 
-use primitive_types::U256;
-
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
