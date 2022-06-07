@@ -751,17 +751,17 @@ impl Heap {
     // Deserializes File
     let mut i = 0;
     while i < serial.file.len() {
-      let fnid = serial.file[i * 2 + 0];
-      let size = serial.file[i * 2 + 1];
-      let buff = &serial.file[i * 2 + 2 .. i * 2 + 2 + size as usize];
+      let fnid = serial.file[i + 0];
+      let size = serial.file[i + 1];
+      let buff = &serial.file[i + 2 .. i + 2 + size as usize];
       let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))),false).unwrap();
       self.write_file(fnid, Arc::new(func));
-      i += 1;
+      i = i + 2 + size as usize;
     }
     // Deserializes Arit
     for i in 0 .. serial.arit.len() / 2 {
-      let fnid = serial.file[i * 2 + 0];
-      let arit = serial.file[i * 2 + 1];
+      let fnid = serial.arit[i * 2 + 0];
+      let arit = serial.arit[i * 2 + 1];
       self.write_arit(fnid, arit);
     }
   }
@@ -1354,7 +1354,7 @@ impl Runtime {
     self.snapshot();
   }
 
-  fn snapshot(&mut self) {
+  pub fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
     //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
@@ -1365,7 +1365,7 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[deleted as usize].append_buffers(self.heap[absorber as usize].uuid).expect("Couldn't append buffers.");
+          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers.");
         }
         self.clear_heap(deleted);
         self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
@@ -1406,7 +1406,7 @@ impl Runtime {
   // their uuids. Note that this will NOT save the current heap, nor anything after the last heap
   // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
   // function is used to avoid re-processing the entire block history on node startup.
-  fn persist_state(&self) -> std::io::Result<()> {
+  pub fn persist_state(&self) -> std::io::Result<()> {
     fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
       match rollback {
         Rollback::Cons { keep, head, tail } => {
@@ -1423,34 +1423,39 @@ impl Runtime {
   }
 
   // Restores the saved state. This loads the persisted Rollback list and its heaps.
-  fn restore_state(&mut self, uuids: &[u128]) -> std::io::Result<()> {
+  pub fn restore_state(&mut self) -> std::io::Result<()> {
     for i in 0 .. 10 {
       self.heap[i].clear();
     }
-    for i in 0 .. std::cmp::max(uuids.len(), 8) {
-      self.heap[i + 2].load_buffers(uuids[i])?;
-    }
-    let uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
-    fn load_heaps(rt: &mut Runtime, uuids: &[u128], index: usize) -> std::io::Result<Arc<Rollback>> {
-      if index == rt.heap.len() {
-        return Ok(Arc::new(Rollback::Nil));
+    self.nuls = vec![2,3,4,5,6,7,8,9];
+    // for i in 0 .. std::cmp::max(uuids.len(), 8) {
+    //   self.heap[i + 2].load_buffers(uuids[i])?;
+    // }
+    let mut uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
+    fn load_heaps(rt: &mut Runtime, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
+      if uuids.is_empty() || rt.nuls.is_empty() {
+        return Ok(back);
       } else {
-        rt.heap[index].load_buffers(uuids[index])?;
-        return Ok(Arc::new(Rollback::Cons {
-          keep: 0,
-          head: index as u64, 
-          tail: load_heaps(rt, &uuids, index + 1)?,
-        }));
+        let uuid = uuids.pop().unwrap();
+        let next = rt.nuls.pop().unwrap();
+        rt.heap[index as usize].load_buffers(uuid)?;
+        rt.curr = index;
+        return load_heaps(
+          rt, 
+          uuids, 
+          next, 
+           Arc::new(Rollback::Cons { keep: 0, head: index, tail: back.clone() }
+        ));
       }
     }
     self.draw = 0;
     self.curr = 1;
-    self.back = load_heaps(self, &uuids, 2)?;
+    self.back = load_heaps(self, &mut uuids, self.curr, Arc::new(Rollback::Nil))?;
     return Ok(());
   }
 
   // Reverts until the last 
-  fn clear_current_heap(&mut self) {
+  pub fn clear_current_heap(&mut self) {
     self.heap[self.curr as usize].clear();
   }
 
