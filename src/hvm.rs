@@ -134,6 +134,7 @@ pub struct SerializedHeap {
   pub file: Vec<u128>,
   pub arit: Vec<u128>,
   pub nums: Vec<u128>,
+  pub stat: Vec<u128>,
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -686,6 +687,10 @@ impl Heap {
     self.next = U128_NONE;
   }
   fn serialize(&self) -> SerializedHeap {
+    // Serializes stat and size
+    let size = self.size as u128;
+    let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.next];
+
     // Serializes Blob
     let mut blob_buff : Vec<u128> = vec![];
     for used_index in &self.blob.used {
@@ -729,9 +734,19 @@ impl Heap {
       file: file_buff,
       arit: arit_buff,
       nums: nums_buff,
+      stat,
     };
   }
   fn deserialize(&mut self, serial: &SerializedHeap) {
+    // Deseializes stat and size
+    self.tick = serial.nums[0];
+    self.funs = serial.nums[1];
+    self.dups = serial.nums[2];
+    self.rwts = serial.nums[3];
+    self.mana = serial.nums[4];
+    self.size = serial.nums[5] as i128;
+    self.next = serial.nums[6];
+
     // Deserializes Blob
     let mut i = 0;
     while i < serial.blob.len() {
@@ -768,11 +783,12 @@ impl Heap {
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
     heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
-  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
+  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128], append: bool) -> std::io::Result<()> {
     use std::io::Write;
     std::fs::create_dir_all(&heap_dir_path())?;
     std::fs::OpenOptions::new()
-      .append(true)
+      .write(true)
+      .append(append)
       .create(true)
       .open(self.buffer_file_path(self.uuid, buffer_name))?
       .write_all(&util::u128s_to_u8s(buffer))?;
@@ -786,11 +802,12 @@ impl Heap {
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
     let serial = self.serialize();
-    self.write_buffer(serial.uuid, "blob", &serial.blob)?;
-    self.write_buffer(serial.uuid, "disk", &serial.disk)?;
-    self.write_buffer(serial.uuid, "file", &serial.file)?;
-    self.write_buffer(serial.uuid, "arit", &serial.arit)?;
-    self.write_buffer(serial.uuid, "nums", &serial.nums)?;
+    self.write_buffer(serial.uuid, "blob", &serial.blob, true)?;
+    self.write_buffer(serial.uuid, "disk", &serial.disk, true)?;
+    self.write_buffer(serial.uuid, "file", &serial.file, true)?;
+    self.write_buffer(serial.uuid, "arit", &serial.arit, true)?;
+    self.write_buffer(serial.uuid, "nums", &serial.nums, true)?;
+    self.write_buffer(serial.uuid, "stat", &serial.stat, false)?;
     return Ok(());
   }
   pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
@@ -799,7 +816,8 @@ impl Heap {
     let file = self.read_buffer(uuid, "file")?;
     let arit = self.read_buffer(uuid, "arit")?;
     let nums = self.read_buffer(uuid, "nums")?;
-    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums });
+    let stat = self.read_buffer(uuid, "stat")?;
+    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums, stat });
     return Ok(());
   }
   fn delete_buffers(&mut self) -> std::io::Result<()> {
@@ -1451,6 +1469,7 @@ impl Runtime {
     self.draw = 0;
     self.curr = 1;
     self.back = load_heaps(self, &mut uuids, self.curr, Arc::new(Rollback::Nil))?;
+    self.curr = self.nuls.pop().expect("No heap available!");
     return Ok(());
   }
 
