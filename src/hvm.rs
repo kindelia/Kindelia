@@ -1175,11 +1175,12 @@ impl Runtime {
               return;
             }
           } else {
+            println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
             self.undo();
             return;
           }
         }
-        println!("- fun {} fail", u128_to_name(*name));
+        println!("- fun {} fail: already exists", u128_to_name(*name));
       }
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
@@ -1196,7 +1197,7 @@ impl Runtime {
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        if self.check_term_arities(expr) {
+        if self.check_term_arities(expr) && is_linear(expr) {
           let host = self.alloc_term(expr);
           // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
           if let Some(done) = self.run_io(0, 0, host, mana_lim) {
@@ -1221,10 +1222,14 @@ impl Runtime {
           println!("- run fail");
           self.undo();
         } else {
-          println!("- run fail: incorrect ctr or fun arity");
+          println!("- run fail: doesn't pass the checks");
         }
       }
     }
+  }
+
+  pub fn check_term(&self, term: &Term) -> bool {
+    return self.check_term_arities(term) && self.check_term_depth(term, 0) && is_linear(term);
   }
 
   pub fn check_term_arities(&self, term: &Term) -> bool {
@@ -1274,10 +1279,7 @@ impl Runtime {
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
-      if !self.check_term_arities(&rule.0)
-      || !self.check_term_arities(&rule.1)
-      || !self.check_term_depth(&rule.0, 0)
-      || !self.check_term_depth(&rule.1, 0) {
+      if !self.check_term(&rule.0) || !self.check_term(&rule.1) {
         return false;
       }
     }
