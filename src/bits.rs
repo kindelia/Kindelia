@@ -1,4 +1,4 @@
-use bit_vec::BitVec;
+pub use bit_vec::BitVec;
 
 use crate::util::*;
 use crate::hvm::*;
