@@ -1,9 +1,14 @@
-use std::sync::mpsc::{Receiver, SyncSender};
-use std::thread;
+#![warn(dead_code)]
+#![warn(unused_imports)]
+#![warn(non_snake_case)]
+#![warn(unused_variables)]
+#![warn(clippy::style)]
+#![allow(clippy::let_and_return)]
+use std::sync::mpsc::SyncSender;
 
 use futures::sync::oneshot;
 use futures::Future;
-use warp::reply::Json;
+use serde_json::json;
 
 use crate::node::*;
 
@@ -19,7 +24,7 @@ pub fn api_loop(node_query_tx: SyncSender<Request>) {
     let node_query_tx_1 = node_query_tx.clone();
     let node_query_tx_2 = node_query_tx.clone();
 
-    let get_tick = path!("get_tick").map(move || {
+    let get_tick = path!("tick").map(move || {
       let (rx, tx) = oneshot::channel();
       node_query_tx_1.send(Request::GetTick { answer: rx }).unwrap();
 
@@ -32,29 +37,52 @@ pub fn api_loop(node_query_tx: SyncSender<Request>) {
       format!("Tick: {}", tick)
     });
 
-    let get_block = path!("get_block" / u128).map(move |block_height| {
-      let (tx, rx) = oneshot::channel();
-      node_query_tx_2.send(Request::GetBlock { block_height, answer: tx }).unwrap();
-      let block = rx.wait().unwrap();
+    let get_block = || {
+      let node_query_tx = node_query_tx_2.clone();
+      path!("blocks" / u128 / ..).map(move |block_height| {
+        let (tx, rx) = oneshot::channel();
+        node_query_tx.send(Request::GetBlock { block_height, answer: tx }).unwrap();
+        let block = rx.wait().unwrap();
+        block
+      })
+    };
+
+    let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
       let bits = crate::bits::BitVec::from_bytes(&block.body.value);
       let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-      let json = ser::block_to_json(&block);
-      format!("{}", json)
+      // let json = json::JsonValue::from(stmts);
+      // format!("{}", json)
+      stmts
     });
 
-    let app = root.or(get_tick).or(get_block);
+    let get_block = get_block().and(path!()).map(ok_json);
+    let get_block_content = get_block_content.map(ok_json);
+
+    // println!("{:?}", get_block_content);
+
+    let app = root.or(get_tick).or(get_block).or(get_block_content);
 
     warp::serve(app).run(([127, 0, 0, 1], 8000)).await;
   });
 }
 
+fn ok_json<T>(data: T) -> warp::reply::Json
+where
+  T: serde::Serialize,
+{
+  let json_body = json!({ "status": "ok", "data": data });
+  warp::reply::json(&json_body)
+}
+
 mod ser {
   pub const TAG: &str = "$";
-  use crate::hvm::{self, u128_to_name};
+  use crate::hvm::u128_to_name;
   use crate::hvm::{Statement, Term};
-  use crate::node;
+  use crate::node::{self, Block};
   use json::object;
   use json::JsonValue;
+
+  use serde::ser::SerializeStruct;
 
   impl Into<JsonValue> for Statement {
     fn into(self) -> JsonValue {
@@ -84,9 +112,9 @@ mod ser {
   }
 
   fn rules_to_json(rules: Vec<(Term, Term)>) -> JsonValue {
-    let mut rules = rules.into_iter();
+    let rules = rules.into_iter();
     let mut rules_json = JsonValue::new_array();
-    while let Some((lhs, rhs)) = rules.next() {
+    for (lhs, rhs) in rules {
       rules_json
         .push(object! {
           "lhs" => lhs,
@@ -97,11 +125,43 @@ mod ser {
     rules_json
   }
 
-  impl Into<JsonValue> for Term {
-    fn into(self) -> JsonValue {
-      match self {
+  pub fn _block_to_json(block: &node::Block) -> JsonValue {
+    let body = block.body.value;
+    let bits = crate::bits::BitVec::from_bytes(&block.body.value);
+    let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
+    let body_bytes = body.into_iter().collect::<Vec<_>>();
+    object! {
+      TAG => "Block",
+      "time" => block.time.to_string(),
+      "rand" => block.rand.to_string(),
+      "prev" => block.prev.to_string(),
+      "body" => body_bytes,
+      "content" => stmts,
+    }
+  }
+
+  impl serde::Serialize for Block {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let body = self.body.value;
+      let body_bytes = body.into_iter().collect::<Vec<_>>();
+      let mut s = serializer.serialize_struct("Block", 4)?;
+      s.serialize_field("time", &self.time.to_string())?;
+      s.serialize_field("rand", &self.rand.to_string())?;
+      s.serialize_field("prev", &self.prev.to_string())?;
+      s.serialize_field("body", &body_bytes)?;
+      s.end()
+    }
+  }
+
+  impl From<Term> for JsonValue {
+    fn from(val: Term) -> Self {
+      match val {
         Term::Var { name } => object! {
           TAG => "Var",
+          "name" => u128_to_name(name),
         },
         Term::Dup { nam0, nam1, expr, body } => object! {
           TAG => "Dup",
@@ -144,6 +204,20 @@ mod ser {
     }
   }
 
+  // impl serde::Serialize for Term {
+  //   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  //   where
+  //     S: serde::Serializer,
+  //   {
+  //     // let mut s = serializer.serialize_struct("Person", 3)?;
+  //     let mut s = serializer.serialize_enum("Term");
+  //     // s.serialize_field("name", &self.name)?;
+  //     // s.serialize_field("age", &self.age)?;
+  //     // s.serialize_field("phones", &self.phones)?;
+  //     s.end()
+  //   }
+  // }
+
   // pub fn code_to_json(code: Vec<Statement>) -> JsonValue {
   //   let mut code_json = JsonValue::new_array();
   //   for stmt in code {
@@ -152,19 +226,4 @@ mod ser {
   //   }
   //   code_json
   // }
-
-  pub fn block_to_json(block: &node::Block) -> JsonValue {
-    let body = block.body.value;
-    let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-    let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-    let body_bytes = body.into_iter().collect::<Vec<_>>();
-    object! {
-      TAG => "Block",
-      "time" => block.time.to_string(),
-      "rand" => block.rand.to_string(),
-      "prev" => block.prev.to_string(),
-      // "body" => body_bytes,
-      "content" => stmts,
-    }
-  }
 }

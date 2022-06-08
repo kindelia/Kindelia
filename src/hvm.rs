@@ -16,8 +16,8 @@ use crate::util::U128_SIZE;
 // Types
 // -----
 
-// A native HVM term
-#[derive(Clone, Debug, PartialEq)]
+/// A native HVM term
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum Term {
   Var { name: u128 },
   Dup { nam0: u128, nam1: u128, expr: Box<Term>, body: Box<Term> },
@@ -92,10 +92,11 @@ pub struct Disk {
   pub links: Map<Lnk>,
 }
 
-// Can point to a node, a variable, or hold an unboxed value
+/// Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u128;
 
-// A global statement that alters the state of the blockchain
+/// A global statement that alters the state of the blockchain
+#[derive(serde::Serialize)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<(Term, Term)>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },

@@ -22,6 +22,7 @@ use crate::hvm::*;
 // Types
 // -----
 
+// TODO: store number of used bits
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
   pub value: [u8; BODY_SIZE],
@@ -32,12 +33,13 @@ pub struct Block {
   pub time: u128, // block timestamp
   pub rand: u128, // block nonce
   pub prev: U256, // previous block (32 bytes)
-  pub body: Body, // block contents (1280 bytes)
+  pub body: Body, // block contents (1280 bytes) 
 }
 
 pub type Transaction = Vec<u8>;
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
+// TODO: dashmap?
 pub struct Node {
   pub path       : PathBuf,                         // path where files are saved
   pub socket     : UdpSocket,                       // UDP socket
