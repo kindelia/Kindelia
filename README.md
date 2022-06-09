@@ -3,7 +3,7 @@ Kindelia
 
 Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of Ethereum, greatly simplifying the protocol, and increasing layer-1 performance and security. It is on development, with the genesis block scheduled for Jan 2023. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). In short, notable differences include:
 
-### Zero-cost reused SSTOREs
+### Zero-cost SSTOREs
 
 Kindelia uses a different state store, which replaces expensive Merkle trees by efficient reversible heaps, allowing for **zero-cost reused SSTOREs**. This makes Kindelia the only layer-1 computation network capable of hosting highly dynamic apps like games with realistic costs, without appealing to complex crypto like zero-knowledge proofs. In exchange, we lose certain kinds of light clients.
 
