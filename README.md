@@ -1,7 +1,7 @@
 Kindelia
 ========
 
-Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of the idea behind Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security, but with way less native features. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). In short:
+Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of the idea behind Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security, but with way less native features. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). The most notable differences are:
 
 ### Zero-Cost Reused SSTOREs
 
