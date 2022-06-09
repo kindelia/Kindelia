@@ -3,7 +3,7 @@
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
-#![feature(async_closure)]
+// #![feature(async_closure)]
 
 mod api;
 mod bits;
@@ -15,9 +15,6 @@ mod util;
 //#[cfg(test)]
 //mod test;
 
-use primitive_types::U256;
-
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -35,7 +32,6 @@ use crate::util::*;
 fn main() -> Result<(), String> {
   return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
-  //return Ok(());
   //hvm::test_statements_from_file("./example/simple.kdl");
   //return Ok(());
 }

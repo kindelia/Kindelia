@@ -1,10 +1,11 @@
-use bit_vec::BitVec;
-use im::HashSet;
-use primitive_types::U256;
-use priority_queue::PriorityQueue;
-use sha3::Digest;
 use std::collections::HashMap;
 use std::net::*;
+
+pub use primitive_types::U256;
+use bit_vec::BitVec;
+use im::HashSet;
+use priority_queue::PriorityQueue;
+use sha3::Digest;
 
 use crate::bits::*;
 
