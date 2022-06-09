@@ -1203,7 +1203,8 @@ impl Runtime {
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
         if self.check_term_arities(expr) && is_linear(expr) {
           let host = self.alloc_term(expr);
-          // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
+          // eprintln!("  => run term: {}", show_term(self,ask_lnk(self, host))); // ?? why this is showing dups?
+          // eprintln!("  => run term: {}", view_term(&readback(self, ask_lnk(self, host))));
           if let Some(done) = self.run_io(0, 0, host, mana_lim) {
             if let Some(done) = self.compute(done, mana_lim) {
               let done_code = self.show_term(done);
@@ -3153,6 +3154,239 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
   let mut text = find_lets(rt, term, &mut names);
   text.push_str( &go(rt, term, &names));
   text
+}
+
+pub fn readback(rt: &Runtime, term: Lnk) -> Term {
+  enum StackItem {
+    Term(Lnk),
+    Resolver(Lnk),
+  }
+  let mut names: HashMap<u128, String> = HashMap::new();
+  fn dups(
+    rt: &Runtime,
+    term: Lnk,
+    names: &mut HashMap<u128, String>,
+  ) -> Term {
+    let mut lets: HashMap<u128, u128> = HashMap::new();
+    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut count: u128 = 0;
+    let mut stack = vec![term];
+    while !stack.is_empty() {
+      let term = stack.pop().unwrap();
+      match get_tag(term) {
+        LAM => {
+          names.insert(get_loc(term, 0), format!("{}", count));
+          count += 1;
+          stack.push(ask_arg(rt, term, 1));
+        }
+        APP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        SUP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        DP0 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        DP1 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        OP2 => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        CTR | FUN => {
+          let arity = rt.get_arity(get_ext(term));
+          for i in (0..arity).rev() {
+            stack.push(ask_arg(rt, term, i));
+          }
+        }
+        _ => {}
+      }
+    }
+
+    let cont = expr(rt, term, &names);
+    if lets.is_empty() {
+      cont
+    } else {
+      let mut output = Term::Var { name: 0 };
+      for (i, (_key, pos)) in lets.iter().enumerate() {
+        // todo: reverse
+        let what = String::from("?h");
+        //let kind = kinds.get(&key).unwrap_or(&0);
+        let name = names.get(&pos).unwrap_or(&what);
+        let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
+        let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+        let expr = expr(rt, ask_lnk(rt, pos + 2), &names);
+
+        if i == 0 {
+          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(cont.clone()) };
+        } else {
+          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(output) };
+        }
+      }
+      output
+    }
+  }
+
+  fn expr(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> Term {
+    let mut stack = vec![StackItem::Term(term)];
+    let mut output = Vec::new();
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Resolver(term) => {
+          match get_tag(term) {
+            CTR => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              let mut args = Vec::new();
+              for i in 0..arit {
+                args.push(output.pop().unwrap());
+              }
+              output.push(Term::Ctr { name: func, args });
+            },
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              let body = Box::new(output.pop().unwrap());
+              output.push(Term::Lam { name: name_to_u128(&name), body });
+            }
+            APP => {
+              let argm = Box::new(output.pop().unwrap());
+              let func = Box::new(output.pop().unwrap());
+              output.push(Term::App { func , argm });
+            }
+            OP2 => {
+              let oper = get_ext(term);
+              let symb = match oper {
+                U120_ADD => "+",
+                U120_SUB => "-",
+                U120_MUL => "*",
+                U120_DIV => "/",
+                U120_MOD => "%",
+                U120_AND => "&",
+                U120_OR  => "|",
+                U120_XOR => "^",
+                U120_SHL => "<<",
+                U120_SHR => ">>",
+                U120_LTN => "<",
+                U120_LTE => "<=",
+                U120_EQL => "=",
+                U120_GTE => ">=",
+                U120_GTN => ">",
+                U120_NEQ => "!=",
+                UTUP_ADD => "~+",
+                UTUP_SUB => "~-",
+                UTUP_MUL => "~*",
+                UTUP_DIV => "~/",
+                UTUP_MOD => "~%",
+                UTUP_AND => "~&",
+                UTUP_OR  => "~|",
+                UTUP_XOR => "~^",
+                UTUP_SHL => "~<<",
+                UTUP_SHR => "~>>",
+                UTUP_LTN => "~<",
+                UTUP_LTE => "~<=",
+                UTUP_EQL => "~=",
+                UTUP_GTE => "~>=",
+                UTUP_GTN => "~>",
+                UTUP_NEQ => "~!=",
+                UTUP_RTL => "~<~",
+                UTUP_RTR => "~>~",
+                _        => "?",
+              };
+              let val1 = Box::new(output.pop().unwrap());
+              let val0 = Box::new(output.pop().unwrap());
+              output.push(Term::Op2 { oper, val0, val1 })
+            }
+            FUN => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              let mut args = Vec::new();
+              for i in 0..arit {
+                args.push(output.pop().unwrap());
+              }
+              output.push(Term::Fun { name: func, args });
+            }
+            _ => panic!("Term not valid in readback"),
+          }
+        },
+        StackItem::Term(term) =>
+          match get_tag(term) {
+            DP0 => {
+              let name = format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            DP1 => {
+              let name = format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            VAR => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?x")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+            }
+            APP => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            SUP => {}
+            OP2 => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            NUM => {
+              let numb = get_num(term);
+              output.push(Term::Num { numb });
+            }
+            CTR => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              stack.push(StackItem::Resolver(term));
+              for i in 0..arit {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+              }
+            }
+            FUN => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              stack.push(StackItem::Resolver(term));
+              for i in 0..arit {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+              }
+            }
+            ERA => {}
+            _ => {}
+          }
+        }
+      }
+
+    let res = output.pop().unwrap();
+    return res;
+
+  }
+
+  dups(rt, term, &mut names)
 }
 
 // Parsing
