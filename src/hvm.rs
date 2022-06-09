@@ -1624,11 +1624,10 @@ impl Runtime {
   }
 
   pub fn fresh_dups(&mut self) -> u128 {
-    let dups = self.get_heap(self.draw).get_dups();
+    let dups = self.get_dups();
     self.get_heap_mut(self.draw).set_dups(dups + 1);
     return dups & 0x3FFFFFFF;
   }
-
 }
 
 // Attempts to include a heap state on the list of past heap states. It only keeps at most
