@@ -403,15 +403,14 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
 // A Rule
 
 pub fn serialize_rule(rule: &Rule, bits: &mut BitVec) {
-  serialize_term(&rule.0, bits);
-  serialize_term(&rule.1, bits);
+  serialize_term(&rule.lhs, bits);
+  serialize_term(&rule.rhs, bits);
 }
 
 pub fn deserialize_rule(bits: &BitVec, index: &mut u128) -> Rule {
   let lhs  = deserialize_term(bits, index);
   let rhs  = deserialize_term(bits, index);
-  let rule = (lhs, rhs);
-  return rule;
+  Rule{lhs, rhs}
 }
 
 // A Func
