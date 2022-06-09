@@ -5,7 +5,7 @@ Kindelia is a peer-to-peer functional computer. It allows developers to host dec
 
 ### Zero-cost reused SSTOREs
 
-Kindelia uses a different state store, which replaces expensive Merkle trees by efficient reversible heaps, allowing for **zero-cost reused SSTOREs**. This makes Kindelia the only layer-1 computation network capable of hosting highly dynamic applications like games with realistic costs, without appealing to complex crypto like zero-knowledge proofs. In exchange, we lose the ability of making certain kinds of light clients.
+Kindelia uses a different state store, which replaces expensive Merkle trees by efficient reversible heaps, allowing for **zero-cost reused SSTOREs**. This makes Kindelia the only layer-1 computation network capable of hosting highly dynamic apps like games with realistic costs, without appealing to complex crypto like zero-knowledge proofs. In exchange, we lose certain kinds of light clients.
 
 ### A functional runtime
 
