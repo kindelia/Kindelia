@@ -1,10 +1,8 @@
 use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use im::HashMap;
 use proptest::proptest;
-use std::{
-  collections::hash_map::DefaultHasher,
-  hash::{Hash, Hasher},
-};
 
 // Struct used to store interesting parts of runtime state
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -198,7 +196,7 @@ pub fn advanced_rollback_run_fail() {
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER);
-  advance(&mut rt, 2000, Some(COUNTER));
+  advance(&mut rt, 1, Some(COUNTER));
 }
 
 #[test]
@@ -250,6 +248,11 @@ pub fn persistence2() {
   
   assert_eq!(s1, s4);
   assert_eq!(s2, s3);
+}
+
+#[test]
+pub fn asd() {
+  println!("{}", u128_to_name(1332521514319));
 }
 
 // ===========================================================

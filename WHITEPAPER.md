@@ -523,7 +523,7 @@ states, request information from the network, etc.:
 (IO.save expr      @r ...) // saves this function's internal state
 (IO.call func args @r ...) // calls another IO function
 (IO.from           @r ...) // gets the caller name
-... TODO ...                // ...
+... TODO ...               // ...
 (IO.done expr)             // returns from the IO action
 ```
 

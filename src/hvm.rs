@@ -16,7 +16,7 @@ use crate::util::U128_SIZE;
 // Types
 // -----
 
-// A native HVM term
+/// A native HVM term
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
   Var { name: u128 },
@@ -41,11 +41,15 @@ pub enum Oper {
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 
-// A rewrite rule (equation)
-pub type Rule = (Term, Term);
+/// A rewrite rule (equation)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rule {
+  pub lhs: Term,
+  pub rhs: Term,
+}
 
 // A function (vector of rules)
-pub type Func = Vec<(Term, Term)>;
+pub type Func = Vec<Rule>;
 
 // A left-hand side variable in a rewrite rule (equation)
 #[derive(Clone, Debug, PartialEq)]
@@ -92,12 +96,12 @@ pub struct Disk {
   pub links: Map<Lnk>,
 }
 
-// Can point to a node, a variable, or hold an unboxed value
+/// Can point to a node, a variable, or hold an unboxed value
 pub type Lnk = u128;
 
-// A global statement that alters the state of the blockchain
+/// A global statement that alters the state of the blockchain
 pub enum Statement {
-  Fun { name: u128, args: Vec<u128>, func: Vec<(Term, Term)>, init: Term },
+  Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },
   Run { expr: Term },
 }
@@ -1193,11 +1197,12 @@ impl Runtime {
               return;
             }
           } else {
+            println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
             self.undo();
             return;
           }
         }
-        println!("- fun {} fail", u128_to_name(*name));
+        println!("- fun {} fail: already exists", u128_to_name(*name));
       }
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
@@ -1214,7 +1219,7 @@ impl Runtime {
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        if self.check_term_arities(expr) {
+        if self.check_term_arities(expr) && is_linear(expr) {
           let host = self.alloc_term(expr);
           // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
           if let Some(done) = self.run_io(0, 0, host, mana_lim) {
@@ -1239,10 +1244,14 @@ impl Runtime {
           println!("- run fail");
           self.undo();
         } else {
-          println!("- run fail: incorrect ctr or fun arity");
+          println!("- run fail: doesn't pass the checks");
         }
       }
     }
+  }
+
+  pub fn check_term(&self, term: &Term) -> bool {
+    return self.check_term_arities(term) && self.check_term_depth(term, 0) && is_linear(term);
   }
 
   pub fn check_term_arities(&self, term: &Term) -> bool {
@@ -1292,10 +1301,7 @@ impl Runtime {
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
-      if !self.check_term_arities(&rule.0)
-      || !self.check_term_arities(&rule.1)
-      || !self.check_term_depth(&rule.0, 0)
-      || !self.check_term_depth(&rule.1, 0) {
+      if !self.check_term(&rule.lhs) || !self.check_term(&rule.rhs) {
         return false;
       }
     }
@@ -1884,7 +1890,7 @@ pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
 // Term
 // ----
 
-// Counts how many times the free variable 'name' appers inside Term
+// Counts how many times the free variable 'name' appears inside Term
 fn count_uses(term: &Term, name: u128) -> u128 {
   match term {
     Term::Var { name: var_name } => {
@@ -2017,7 +2023,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
-      let dupk = rt.get_dups();
+      let dupk = rt.fresh_dups();
       bind(rt, node + 0, *nam0, Dp0(dupk, node), vars_data);
       bind(rt, node + 1, *nam1, Dp1(dupk, node), vars_data);
       let expr = create_term(rt, expr, node + 2, vars_data);
@@ -2085,7 +2091,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
 
   // Find the function arity
   let arity;
-  if let Term::Fun { args, .. } = &func[0].0 {
+  if let Term::Fun { args, .. } = &func[0].lhs {
     arity = args.len() as u128;
   } else {
     if debug {
@@ -2124,7 +2130,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     let mut eras = Vec::new();
 
     // If the lhs is a Fun
-    if let Term::Fun { ref name, ref args } = rule.0 {
+    if let Term::Fun { ref name, ref args } = rule.lhs {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
@@ -2147,9 +2153,9 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
             for j in 0 .. arg_args.len() as u128 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                if !check_var(name, &rule.1, &mut seen) {
+                if !check_var(name, &rule.rhs, &mut seen) {
                   if debug {
-                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(name), rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
                   }
                   return None;
                 } else {
@@ -2158,7 +2164,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
               // Otherwise..
               } else {
                 if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
+                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
                 }
                 return None; // return none, because we don't allow nested matches
               }
@@ -2171,9 +2177,9 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            if !check_var(*arg_name, &rule.1, &mut seen) {
+            if !check_var(*arg_name, &rule.rhs, &mut seen) {
               if debug {
-                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(*arg_name), rule_index, i, view_term(&rule.0), view_term(&rule.1));
+                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", u128_to_name(*arg_name), rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
               }
               return None;
             } else {
@@ -2183,7 +2189,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
           }
           _ => {
             if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.0), view_term(&rule.1));
+              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
             }
             return None;
           }
@@ -2193,13 +2199,13 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
     // If lhs isn't a Ctr, return None
     } else {
       if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.0), view_term(&rule.1));
+        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.lhs), view_term(&rule.rhs));
       }
       return None;
     }
 
     // Creates the rhs body
-    let body = rule.1.clone();
+    let body = rule.rhs.clone();
 
     // Adds the rule to the result vector
     comp_rules.push(CompRule { cond, vars, eras, body });
@@ -2849,10 +2855,10 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
   (((bits[bit as usize >> 6] >> (bit & 0x3f)) as u8) & 1) == 1
 }
 
-// Evaluates redexes iterativaly. This is used to save space before storing a term, since,
-// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
-// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
-// since it would require passing over the entire state.
+/// Evaluates redexes iteratively. This is used to save space before storing a term, since,
+/// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
+/// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
+/// since it would require passing over the entire state.
 pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
   enum StackItem {
     LinkResolver(u128),
@@ -3548,14 +3554,14 @@ fn read_oper(in_code: &str) -> (&str, Option<u128>) {
   (code, Some(oper))
 }
 
-fn read_rule(code: &str) -> (&str, (Term,Term)) {
+fn read_rule(code: &str) -> (&str, Rule) {
   let (code, lhs) = read_term(code);
   let (code, ())  = read_char(code, '=');
   let (code, rhs) = read_term(code);
-  return (code, (lhs, rhs));
+  return (code, Rule{lhs, rhs});
 }
 
-fn read_rules(code: &str) -> (&str, Vec<(Term,Term)>) {
+fn read_rules(code: &str) -> (&str, Vec<Rule>) {
   let (code, rules) = read_until(code, '\0', read_rule);
   return (code, rules);
 }
@@ -3704,7 +3710,7 @@ pub fn view_statement(statement: &Statement) -> String {
   match statement {
     Statement::Fun { name, args, func, init } => {
       let name = u128_to_name(*name);
-      let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.0), view_term(&x.1))).collect::<Vec<String>>().join("\n");
+      let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.lhs), view_term(&x.rhs))).collect::<Vec<String>>().join("\n");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
       return format!("fun ({} {}) {{\n{}\n}} = {}", name, args, func, init);
