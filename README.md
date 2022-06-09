@@ -1,7 +1,7 @@
 Kindelia
 ========
 
-Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security, but removing native features. It is on development, with the genesis block scheduled for Jan 2023. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). Notable differences:
+Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security. It is on development, with the genesis block scheduled for Jan 2023. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). Notable differences:
 
 ### Zero-cost reused SSTOREs
 
