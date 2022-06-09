@@ -1995,7 +1995,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
-      let dupk = rt.get_dups();
+      let dupk = rt.fresh_dups();
       bind(rt, node + 0, *nam0, Dp0(dupk, node), vars_data);
       bind(rt, node + 1, *nam1, Dp1(dupk, node), vars_data);
       let expr = create_term(rt, expr, node + 2, vars_data);
