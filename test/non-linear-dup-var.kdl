@@ -1,0 +1,27 @@
+fun (LeFun x) {
+  (LeFun x) = dup x0 x1 = x; (+ (+ (+ x0 x1) x1) x0)
+}
+  = #0
+
+fun (LeFun2 x) {
+  (LeFun2 x) = 
+    dup x0 x1 = x;
+    dup x00 x01 = x0;
+    dup x10 x11 = x1;
+    dup x000 x001 = x00;
+    dup x010 x011 = x01;
+    dup x100 x101 = x10;
+    dup x110 x111 = x11;
+    #1234
+}
+  = #0
+
+// Should not work
+run {
+  !done (LeFun #3)
+}
+
+// Should not work, now it's leaking 21 cells
+run {
+  !done (LeFun2 #777)
+}

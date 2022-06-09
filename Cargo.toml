@@ -10,23 +10,35 @@ opt-level = 3
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bit-vec = "0.6.3"
-# CLI arguments parser
-clap = { version = "3.1.3", features = ["derive"] }
-dirs = "4.0.0"
-hex = "0.4"
-im = "15.0.0"
-num = "0.1.36"
-pad = "0.1.6"
-primitive-types = { version = "0.11.1" }
-priority-queue = "1.2.1"
+
+fastrand = "1.7.0"
 rand = "0.8.5"
 sha3 = "0.9.1"
-termion = "1.5.6"
-fastrand = "1.7.0"
+
+# == Util == #
+dirs = "4.0.0"
+hex = "0.4"
+# pad = "0.1.6"
+
+# == CLI arguments parser == #
+clap = { version = "3.1.3", features = ["derive"] }
+
+# == Datastructures == #
+bit-vec = "0.6.3"
+im = "15.0.0"
 nohash-hasher = "0.2.0"
+primitive-types = { version = "0.11.1" }
+priority-queue = "1.2.1"
+# num = "0.1.36"
+
+# # == TUI == #
+# termion = "1.5.6"
+
+# == API == #
 json = "0.12.4"
-proptest = "1.0.0"
-warp = "0.3"
-tokio = { version = "1.19.1", features = ["full"] }
 futures = "0.1.31"
+tokio = { version = "1.19.1", features = ["full"] }
+warp = "0.3"
+
+# [dev-dependencies]
+proptest = "1.0.0"

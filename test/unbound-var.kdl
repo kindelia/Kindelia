@@ -1,0 +1,19 @@
+// ?? I'm not sure how unbound/free vars should behave.
+// They seem to be resolving to #0 ?
+
+ctr {Pair a b}
+
+fun (SumPair p) {
+  // Here `a` is free/unbound
+  (SumPair {Pair ~ x}) = (- (+ #5 a) x)
+}
+  = #0
+
+fun (Store x) {
+  (Store {Set x}) = !save x !done x
+  (Store {Get}) = !take x !done x
+} = #0
+
+run {
+  !done (SumPair {Pair #777 #3})
+}
