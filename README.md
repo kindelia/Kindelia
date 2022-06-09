@@ -9,7 +9,7 @@ Kindelia uses a different state store, which replaces expensive Merkle trees by 
 
 ### A functional runtime
 
-Kindelia replaces the [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a functional runtime that decreases the cost of beta-reduction and pattern-matching 100-fold. This, among other things, makes it highly compatible with Haskell, Idris, Kind and the like, viabilizing **formal verification**, the act of mathematically proving that an app has zero bugs before deployment. This is not just a nice feature, but an essential part of applications that can't be patched or reversed. After all, what is the point of hosting an app in an eternal computer, if it will only last until a bug is found?
+Kindelia replaces the [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a functional runtime that decreases the cost of beta-reduction and pattern-matching 100-fold. This makes programs written in Haskell, Idris, Kind and similar much cheaper, enabling **formal verification**, the act of mathematically proving that an app has zero bugs before deployment. This is not just a nice feature, but an essential part of applications that can't be patched or reversed. After all, what is the point of hosting an app in an eternal computer, if it will only last until a bug is found?
 
 ### No currency, abstracted accounts, several polishments
 
