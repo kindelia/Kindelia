@@ -31,8 +31,7 @@ use crate::util::*;
 // Starts the node process
 fn main() -> Result<(), String> {
   return run_cli();
-  // start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
-  // return Ok(());
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
   //hvm::test_statements_from_file("./example/simple.kdl");
   //return Ok(());
 }

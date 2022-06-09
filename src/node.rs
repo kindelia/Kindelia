@@ -22,6 +22,7 @@ use crate::hvm::*;
 // Types
 // -----
 
+// TODO: store number of used bits
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
   pub value: [u8; BODY_SIZE],
@@ -32,12 +33,13 @@ pub struct Block {
   pub time: u128, // block timestamp
   pub rand: u128, // block nonce
   pub prev: U256, // previous block (32 bytes)
-  pub body: Body, // block contents (1280 bytes)
+  pub body: Body, // block contents (1280 bytes) 
 }
 
 pub type Transaction = Vec<u8>;
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
+// TODO: dashmap?
 pub struct Node {
   pub path       : PathBuf,                         // path where files are saved
   pub socket     : UdpSocket,                       // UDP socket
@@ -58,14 +60,31 @@ pub struct Node {
   pub receiver   : Receiver<Request>,               // Receives an API request
 }
 
-// API request
+// API
+// ===
+
+type RequestAnswer<T> = oneshot::Sender<T>;
+
+// TODO: store and serve tick where stuff where last changed
 pub enum Request {
   Double {
     value: u128,
-    answer: oneshot::Sender<u128>,
+    answer: RequestAnswer<u128>,
   },
   GetTick {
-    answer: oneshot::Sender<u128>,
+    answer: RequestAnswer<u128>,
+  },
+  GetBlock {
+    block_height: u128,
+    answer: RequestAnswer<Block>,
+  },
+  GetFunc {
+    name: u128,
+    answer: RequestAnswer<u128>,
+  },
+  GetState {
+    name: u128,
+    answer: RequestAnswer<u128>,
   },
 }
 
@@ -620,6 +639,7 @@ pub fn node_message_receive(node: &mut Node) {
 }
 
 pub fn node_handle_request(node: &mut Node, request: Request) {
+  // TODO: handle unwraps
   match request {
     Request::Double { value, answer } => {
       answer.send(value * 2).unwrap();
@@ -627,6 +647,13 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
     Request::GetTick { answer } => {
       answer.send(node.runtime.get_tick()).unwrap();
     }
+    Request::GetBlock { block_height, answer } => {
+      // TODO
+      let block = node.block.get(&node.tip).expect("No tip block");
+      answer.send(block.clone()).unwrap();
+    },
+    Request::GetFunc { name, answer } => todo!(),
+    Request::GetState { name, answer } => todo!(),
   }
 }
 
