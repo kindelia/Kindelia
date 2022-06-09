@@ -1,7 +1,7 @@
 Kindelia
 ========
 
-Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of the idea behind Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security, but with way less native features. Most notably:
+Kindelia is a peer-to-peer functional computer. It allows developers to host decentralized applications that stay up forever. It can be seen as a complete remake of the idea behind Ethereum, greatly simplifying the protocol, increasing layer-1 performance and security, but with way less native features. For more information, check our [WHITEPAPER.md](WHITEPAPER.md). In short:
 
 ### Zero-Cost Reused SSTOREs
 
@@ -9,17 +9,11 @@ It uses a different state store, which replaces expensive Merkle trees by effici
 
 ### Formal Verification
 
-It replaces the [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a functional runtime that decreases the cost of beta-reduction and pattern-matching 100-fold. This, among other things, viabilizes **formal verification**, the act of mathematically proving that an app has zero bugs before deployment. This is not just a nice feature, but an essential part of applications that can't be patched or reversed. After all, what is the point of hosting an app in an eternal computer, if it will only last until a bug is found?
+It replaces the [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a functional runtime that decreases the cost of beta-reduction and pattern-matching 100-fold. This, among other things, makes it highly compatible with Haskell, Idris, Kind and the like, viabilizing **formal verification**, the act of mathematically proving that an app has zero bugs before deployment. This is not just a nice feature, but an essential part of applications that can't be patched or reversed. After all, what is the point of hosting an app in an eternal computer, if it will only last until a bug is found?
 
 ### No Currency, Abstracted Accounts, many polishments
 
 Everything is simplified and polished. It has no native token, thus, **is not a cryptocurrency**. It is just a pure p2p computer. Blocks are just files of code, transactions are just function definitions or statements. Users can either mine their own blocks, or pay miners in any on-chain asset, rather than a single favored asset. Also, accounts are fully abstracted, which allows users to pick whatever signature scheme they like, making the network **inherently secure against quantum computers**, which would irreversibly destroy Bitcoin and Ethereum.
-
----
-
-Kindelia is NOT compatible with Solidity. Contracts should be compiled from functional languages like [Haskell](https://www.haskell.org/), [Idris](https://www.idris-lang.org/) or [Kind](https://github.com/kindelia/kind). 
-
-For more information, see the whitepaper here: [WHITEPAPER.md](WHITEPAPER.md).
 
 Installation
 ------------
