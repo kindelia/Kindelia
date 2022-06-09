@@ -50,15 +50,11 @@ pub fn api_loop(node_query_tx: SyncSender<Request>) {
     let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
       let bits = crate::bits::BitVec::from_bytes(&block.body.value);
       let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-      // let json = json::JsonValue::from(stmts);
-      // format!("{}", json)
       stmts
     });
 
     let get_block = get_block().and(path!()).map(ok_json);
     let get_block_content = get_block_content.map(ok_json);
-
-    // println!("{:?}", get_block_content);
 
     let app = root.or(get_tick).or(get_block).or(get_block_content);
 
@@ -75,69 +71,15 @@ where
 }
 
 mod ser {
-  pub const TAG: &str = "$";
+  // pub const TAG: &str = "$";
   use crate::hvm::u128_to_name;
-  use crate::hvm::{Statement, Term};
-  use crate::node::{self, Block};
-  use json::object;
-  use json::JsonValue;
+  use crate::hvm::{Rule, Statement, Term};
+  use crate::node::Block;
 
-  use serde::ser::SerializeStruct;
+  use serde::ser::{SerializeStruct, SerializeStructVariant};
 
-  impl Into<JsonValue> for Statement {
-    fn into(self) -> JsonValue {
-      match self {
-        Statement::Fun { name, args, func, init } => object! {
-          TAG => "Fun",
-          "name" => u128_to_name(name),
-          "args" => names_to_json(args),
-          "func" => rules_to_json(func),
-          "init" => init,
-        },
-        Statement::Ctr { name, args } => object! {
-          TAG => "Ctr",
-          "name" => u128_to_name(name),
-          "args" => names_to_json(args),
-        },
-        Statement::Run { expr } => object! {
-          TAG => "Run",
-          "body" => expr,
-        },
-      }
-    }
-  }
-
-  fn names_to_json(names: Vec<u128>) -> JsonValue {
-    names.iter().copied().map(u128_to_name).collect::<Vec<_>>().into()
-  }
-
-  fn rules_to_json(rules: Vec<(Term, Term)>) -> JsonValue {
-    let rules = rules.into_iter();
-    let mut rules_json = JsonValue::new_array();
-    for (lhs, rhs) in rules {
-      rules_json
-        .push(object! {
-          "lhs" => lhs,
-          "rhs" => rhs,
-        })
-        .expect("Not an array");
-    }
-    rules_json
-  }
-
-  pub fn _block_to_json(block: &node::Block) -> JsonValue {
-    let body = block.body.value;
-    let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-    let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-    let body_bytes = body.into_iter().collect::<Vec<_>>();
-    object! {
-      TAG => "Block",
-      "time" => block.time.to_string(),
-      "rand" => block.rand.to_string(),
-      "prev" => block.prev.to_string(),
-      "body" => body_bytes,
-      "content" => stmts,
-    }
+  fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
+    names.iter().copied().map(u128_to_name).collect::<Vec<_>>()
   }
 
   impl serde::Serialize for Block {
@@ -156,74 +98,103 @@ mod ser {
     }
   }
 
-  impl From<Term> for JsonValue {
-    fn from(val: Term) -> Self {
-      match val {
-        Term::Var { name } => object! {
-          TAG => "Var",
-          "name" => u128_to_name(name),
-        },
-        Term::Dup { nam0, nam1, expr, body } => object! {
-          TAG => "Dup",
-          "nam0" => u128_to_name(nam0),
-          "nam1" => u128_to_name(nam1),
-          "expr" => *expr,
-          "body" => *body,
-        },
-        Term::Lam { name, body } => object! {
-          TAG => "Lam",
-          "name" => u128_to_name(name),
-          "body" => *body,
-        },
-        Term::App { func, argm } => object! {
-          TAG => "App",
-          "func" => *func,
-          "argm" => *argm,
-        },
-        Term::Ctr { name, args } => object! {
-          TAG => "Ctr",
-          "name" => u128_to_name(name),
-          "args" => args,
-        },
-        Term::Fun { name, args } => object! {
-          TAG => "Fun",
-          "name" => u128_to_name(name),
-          "args" => args,
-        },
-        Term::Num { numb } => object! {
-          TAG => "Num",
-          "numb" => numb.to_string(),
-        },
-        Term::Op2 { oper, val0, val1 } => object! {
-          TAG => "Op2",
-          "oper" => u128_to_name(oper),
-          "val0" => *val0,
-          "val1" => *val1,
-        },
+  impl serde::Serialize for Statement {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      match self {
+        Statement::Fun { name, args, func, init } => {
+          let mut s = serializer.serialize_struct_variant("Statement", 0, "Fun", 4)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.serialize_field("args", func)?;
+          s.serialize_field("init", init)?;
+          s.end()
+        }
+        Statement::Ctr { name, args } => {
+          let mut s = serializer.serialize_struct_variant("Statement", 1, "Ctr", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.end()
+        }
+        Statement::Run { expr } => {
+          let mut s = serializer.serialize_struct_variant("Statement", 2, "Run", 1)?;
+          s.serialize_field("body", expr)?;
+          s.end()
+        }
       }
     }
   }
 
-  // impl serde::Serialize for Term {
-  //   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-  //   where
-  //     S: serde::Serializer,
-  //   {
-  //     // let mut s = serializer.serialize_struct("Person", 3)?;
-  //     let mut s = serializer.serialize_enum("Term");
-  //     // s.serialize_field("name", &self.name)?;
-  //     // s.serialize_field("age", &self.age)?;
-  //     // s.serialize_field("phones", &self.phones)?;
-  //     s.end()
-  //   }
-  // }
+  impl serde::Serialize for Rule {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("Rule", 2)?;
+      s.serialize_field("lhs", &self.lhs)?;
+      s.serialize_field("rhs", &self.rhs)?;
+      s.end()
+    }
+  }
 
-  // pub fn code_to_json(code: Vec<Statement>) -> JsonValue {
-  //   let mut code_json = JsonValue::new_array();
-  //   for stmt in code {
-  //     let stmt: JsonValue = stmt.into();
-  //     code_json.push(stmt).expect("Not an array");
-  //   }
-  //   code_json
-  // }
+  impl serde::Serialize for Term {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      match self {
+        Term::Var { name } => {
+          let mut s = serializer.serialize_struct_variant("Term", 0, "Var", 1)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.end()
+        }
+        Term::Dup { nam0, nam1, expr, body } => {
+          let mut s = serializer.serialize_struct_variant("Term", 1, "Dup", 4)?;
+          s.serialize_field("nam0", &u128_to_name(*nam0))?;
+          s.serialize_field("nam1", &u128_to_name(*nam1))?;
+          s.serialize_field("expr", &expr)?;
+          s.serialize_field("body", &body)?;
+          s.end()
+        }
+        Term::Lam { name, body } => {
+          let mut s = serializer.serialize_struct_variant("Term", 2, "Lam", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("body", &body)?;
+          s.end()
+        }
+        Term::App { func, argm } => {
+          let mut s = serializer.serialize_struct_variant("Term", 3, "App", 2)?;
+          s.serialize_field("func", &func)?;
+          s.serialize_field("argm", &argm)?;
+          s.end()
+        }
+        Term::Ctr { name, args } => {
+          let mut s = serializer.serialize_struct_variant("Term", 4, "Ctr", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", args)?;
+          s.end()
+        }
+        Term::Fun { name, args } => {
+          let mut s = serializer.serialize_struct_variant("Term", 5, "Fun", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", args)?;
+          s.end()
+        }
+        Term::Num { numb } => {
+          let mut s = serializer.serialize_struct_variant("Term", 6, "Num", 1)?;
+          s.serialize_field("numb", &numb.to_string())?;
+          s.end()
+        }
+        Term::Op2 { oper, val0, val1 } => {
+          let mut s = serializer.serialize_struct_variant("Term", 7, "Op2", 3)?;
+          s.serialize_field("oper", &oper.to_string())?;
+          s.serialize_field("val0", &val0)?;
+          s.serialize_field("val1", &val1)?;
+          s.end()
+        }
+      }
+    }
+  }
 }
