@@ -6,44 +6,57 @@
 #![allow(clippy::let_and_return)]
 use std::sync::mpsc::SyncSender;
 
-use futures::sync::oneshot;
-use futures::Future;
 use serde_json::json;
+use tokio::sync::oneshot;
 
-use crate::node::*;
+use crate::node::Request as NodeRequest;
 
-pub fn api_loop(node_query_tx: SyncSender<Request>) {
+pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    use warp::path;
-    use warp::Filter;
+    use warp::{path, Filter};
+    use crate::node::Block;
 
     let root = warp::path::end().map(|| "UP");
 
-    let node_query_tx_1 = node_query_tx.clone();
-    let node_query_tx_2 = node_query_tx.clone();
+    // TODO: macro to wrap those clones
 
-    let get_tick = path!("tick").map(move || {
-      let (rx, tx) = oneshot::channel();
-      node_query_tx_1.send(Request::GetTick { answer: rx }).unwrap();
+    let node_query_tx = node_query_sender.clone();
+    let get_tick = path!("tick").then(move || {
+      let node_query_tx = node_query_tx.clone();
+      async move {
+        let (tx, rx) = oneshot::channel();
+        node_query_tx.clone().send(NodeRequest::GetTick { answer: tx }).unwrap();
+        let tick = rx.await.unwrap();
+        ok_json(format!("Tick: {}", tick))
+      }
+    });
 
-      // FIXME: this .wait() call blocks. Since the node may take some time to respond, I believe
-      // this will greatly impact warp's performance, decreasing how many requests per second the
-      // node can handle. If this is correct, we should use an async oneshot channel instead.
+    // == Blocks ==
 
-      let tick = tx.wait().unwrap();
-
-      format!("Tick: {}", tick)
+    let node_query_tx = node_query_sender.clone();
+    let get_blocks = path!("blocks").then(move || {
+      let node_query_tx = node_query_tx.clone();
+      async move {
+        let (tx, rx) = oneshot::channel();
+        node_query_tx.send(NodeRequest::GetBlocks { range: (-10, -1), answer: tx }).unwrap();
+        let blocks = rx.await.unwrap();
+        blocks
+      }
     });
 
     let get_block = || {
-      let node_query_tx = node_query_tx_2.clone();
-      path!("blocks" / u128 / ..).map(move |block_height| {
-        let (tx, rx) = oneshot::channel();
-        node_query_tx.send(Request::GetBlock { block_height, answer: tx }).unwrap();
-        let block = rx.wait().unwrap();
-        block
+      let node_query_tx = node_query_sender.clone();
+      path!("blocks" / u128 / ..).then(move |block_height| {
+        let node_query_tx = node_query_tx.clone();
+        async move {
+          let (tx, rx) = oneshot::channel();
+          let node_query_tx = node_query_tx.clone();
+          node_query_tx.send(NodeRequest::GetBlock { block_height, answer: tx }).unwrap();
+          let block = rx.await.unwrap();
+          block
+        }
       })
     };
 
@@ -53,10 +66,16 @@ pub fn api_loop(node_query_tx: SyncSender<Request>) {
       stmts
     });
 
+    // == Functions ==
+
+    // ==
+
+    let get_tick = get_tick;
+    let get_blocks = get_blocks.map(ok_json);
     let get_block = get_block().and(path!()).map(ok_json);
     let get_block_content = get_block_content.map(ok_json);
 
-    let app = root.or(get_tick).or(get_block).or(get_block_content);
+    let app = root.or(get_tick).or(get_blocks).or(get_block).or(get_block_content);
 
     warp::serve(app).run(([127, 0, 0, 1], 8000)).await;
   });
