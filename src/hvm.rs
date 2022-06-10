@@ -535,32 +535,32 @@ ctr {Name name}
 ctr {IO.DONE expr}
 fun (IO.done expr) {
   (IO.done expr) = {IO.DONE expr}
-} = #0
+}
 
 ctr {IO.TAKE then}
 fun (IO.take then) {
   (IO.take then) = {IO.TAKE then}
-} = #0
+}
 
 ctr {IO.SAVE expr then}
 fun (IO.save expr then) {
   (IO.save expr then) = {IO.SAVE expr then}
-} = #0
+}
 
 ctr {IO.CALL name args then}
 fun (IO.call name args then) {
   (IO.call name args then) = {IO.CALL name args then}
-} = #0
+}
 
 ctr {IO.NAME then}
 fun (IO.name then) {
   (IO.name then) = {IO.NAME then}
-} = #0
+}
 
 ctr {IO.FROM then} 
 fun (IO.from then) {
   (IO.from then) = {IO.FROM then}
-} = #0
+}
 
 fun (IO.load cont) {
   (IO.load cont) =
@@ -568,7 +568,7 @@ fun (IO.load cont) {
     dup x0 x1 = x;
     {IO.SAVE x0 @~
     (! cont x1)}}
-} = #0
+}
 
 ctr {Count.Inc}
 ctr {Count.Get}
@@ -580,7 +580,7 @@ fun (Count action) {
   (Count {Count.Get}) =
     !load x
     !done x
-} = #0
+}
 ";
 
 // Utils
@@ -1265,54 +1265,56 @@ impl Runtime {
     }
   }
 
+  // FIXME: check_term_arities disabled due to #55; a better solution might be
+  //        to just handle incorrect arities when the term is constructed
   pub fn check_term(&self, term: &Term) -> bool {
-    return self.check_term_arities(term) && self.check_term_depth(term, 0) && is_linear(term);
+    return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
   }
 
-  pub fn check_term_arities(&self, term: &Term) -> bool {
-    match term {
-      Term::Var { name } => {
-        return true;
-      },
-      Term::Dup { nam0, nam1, expr, body } => {
-        return self.check_term_arities(expr) && self.check_term_arities(body);
-      }
-      Term::Lam { name, body } => {
-        return self.check_term_arities(body);
-      }
-      Term::App { func, argm } => {
-        return self.check_term_arities(func) && self.check_term_arities(argm);
-      }
-      Term::Ctr { name, args } => {
-        if self.get_arity(*name) != args.len() as u128 {
-          return false;
-        }
-        for arg in args {
-          if !self.check_term_arities(arg) {
-            return false;
-          }
-        }
-        return true;
-      }
-      Term::Fun { name, args } => {
-        if self.get_arity(*name) != args.len() as u128 {
-          return false;
-        }
-        for arg in args {
-          if !self.check_term_arities(arg) {
-            return false;
-          }
-        }
-        return true;
-      }
-      Term::Num { numb } => {
-        return true;
-      }
-      Term::Op2 { oper, val0, val1 } => {
-        return self.check_term_arities(val0) && self.check_term_arities(val1);
-      }
-    }
-  }
+  //pub fn check_term_arities(&self, term: &Term) -> bool {
+    //match term {
+      //Term::Var { name } => {
+        //return true;
+      //},
+      //Term::Dup { nam0, nam1, expr, body } => {
+        //return self.check_term_arities(expr) && self.check_term_arities(body);
+      //}
+      //Term::Lam { name, body } => {
+        //return self.check_term_arities(body);
+      //}
+      //Term::App { func, argm } => {
+        //return self.check_term_arities(func) && self.check_term_arities(argm);
+      //}
+      //Term::Ctr { name, args } => {
+        //if self.get_arity(*name) != args.len() as u128 {
+          //return false;
+        //}
+        //for arg in args {
+          //if !self.check_term_arities(arg) {
+            //return false;
+          //}
+        //}
+        //return true;
+      //}
+      //Term::Fun { name, args } => {
+        //if self.get_arity(*name) != args.len() as u128 {
+          //return false;
+        //}
+        //for arg in args {
+          //if !self.check_term_arities(arg) {
+            //return false;
+          //}
+        //}
+        //return true;
+      //}
+      //Term::Num { numb } => {
+        //return true;
+      //}
+      //Term::Op2 { oper, val0, val1 } => {
+        //return self.check_term_arities(val0) && self.check_term_arities(val1);
+      //}
+    //}
+  //}
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
@@ -2296,7 +2298,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
       return None;
     }
 
-    //if debug || true {
+    //if true {
       //println!("------------------------");
       //println!("{}", show_term(rt, ask_lnk(rt, 0)));
     //}
@@ -3850,9 +3852,16 @@ pub fn read_statement(code: &str) -> (&str, Statement) {
       let (code, args) = read_until(code, ')', read_name);
       let (code, unit) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
-      let (code, unit) = read_char(code, '=');
-      let (code, init) = read_term(code);
-      return (code, Statement::Fun { name, args, func, init });
+      let code = skip(code);
+      if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,4);
+        let (code, unit) = read_char(code, '{');
+        let (code, init) = read_term(code);
+        let (code, unit) = read_char(code, '}');
+        return (code, Statement::Fun { name, args, func, init });
+      } else {
+        return (code, Statement::Fun { name, args, func, init: Term::Num { numb: 0 } });
+      }
     }
     ('c','t','r') => {
       let code = drop(code,3);

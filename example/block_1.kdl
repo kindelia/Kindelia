@@ -8,7 +8,7 @@ ctr {Branch left right}
 fun (Sum tree) {
   (Sum {Leaf x})     = x
   (Sum {Branch a b}) = (+ (Sum a) (Sum b))
-} = #0
+}
 
 // Sums a tree with 4 numbers
 run {
@@ -25,7 +25,7 @@ fun (Gen depth) {
   (Gen x) =
     dup x0 x1 = x;
     {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
-} = #0
+}
 
 // Creates a tree with 2^21 numbers and sums it
 run {

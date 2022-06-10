@@ -23,9 +23,9 @@ Sections
 * [Example blocks](#examples)
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
-  * [Block #3: installing a game](#block-3-installing-a-game)
-  * [Block #4: playing the game](#block-4-playing-the-game)
-  * [What about accounts?](#what-about-accounts)
+  * [Block #3: signing statements](#block-3-signing-statements)
+  * [Block #4: installing a game](#block-3-installing-a-game)
+  * [Block #5: playing the game](#block-4-playing-the-game)
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
@@ -110,34 +110,20 @@ programming much more convenient, since contracts can store arbitrary HVM
 structures like trees and JSONs instead of just U256s; but, more importantly, it
 makes highly dynamic layer-1 DApps significantly cheaper.
 
-**The block structure is astonishingly simpler.**
+**Optimizations and simplifications everywhere.**
 
-There are no merkle roots, bloom filters, logs, receipts. Kindelia's blocks are
-refreshingly simple: just a timestamp, the previous hash, a nonce, the miner id,
-and a body of statements (transactions). The body is only *1280 bytes* long, and
-is fully included in the header. The entire block fits in a single UDP packet,
-enabling fast propagation and short block times, with minimal uncle rate. Also,
-instead of monetary "from/to" transactions, Kindelia blocks are just lists of
-statements that perform an action on Kindelia's global state. In other words,
-blocks can be seen as pages of code that are executed on Kindelia's REPL
-(read-eval-print loop). That flexibility enables important optimizations, such
-as unsigned transactions, making certain interactions, such as contract
-deployment, considerably cheaper.
-
-**Modular functions, abstracted accounts, no native currency...**
-
-Kindelia's design is robust, minimalist and doesn't implement anything that
-isn't necessary. There is no built-in account system: Kindelia accounts are just
-user-deployed functions that can run arbitrary signature schemes. This is not
-just flexible, but it makes Kindelia inherently immune to quantum attacks, which
-would irreversibly collapse both Ethereum and Bitcoin! There is no built-in
-"fee-paying" currency either. To prevent spam, there are 3 global limits on
-resource usage; see the table below. When the maximum capacity is reached, a fee
-market will emerge, and users will pay miners in any on-chain asset, not just an
-"official coin". Finally, instead of compiling contracts to monolithic blobs of
-assembly code, programs are broken into pure functions that are deployed
-modularly. That enables an enourmous amount of code reuse, and further increases
-the blockchain efficiency.
+Kindelia's block structure is refreshingly simple. There are no merkle roots,
+bloom filters, logs, receipts. Just a timestamp, the previous hash, the miner
+id, and a list of "statements". that alter the network's state, in a way that
+resembles a p2p REPL. The entire block is less than *1500 bytes* long, and fits
+in a single UDP packet, allowing fast fast propagation and short block times.
+There are no monetary transactions, just statements Compressed and unsigned
+statements greatly reduce the size and cost of several types of transactions,
+including app deployment. Moreover, instead of becoming monolithic assembly
+contracts, apps are broken into pure functions that are deployed separately and
+modularly. That enables an enourmous amount of code reuse, further increasing
+the network's efficiency. Finally, there is no native currency. Users can pay
+miners in any on-chain asset, rather than some network's "official token".
 
 **In short...**
 
@@ -258,7 +244,7 @@ ctr {Branch left right}
 fun (Sum tree) {
   (Sum {Leaf x})     = x
   (Sum {Branch a b}) = (+ (Sum a) (Sum b))
-} = #0
+}
 
 // Sums a tree with 4 numbers
 run {
@@ -318,7 +304,10 @@ fun (Counter action) {
     !load x // loads the state
     !done x // returns it
 
-} = #0 // initial state is 0
+// initial state is 0
+} with {
+  #0
+}
 
 // Increments the Counter's state 3 times
 run {
@@ -361,24 +350,43 @@ usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
 is very expensive. This allows Kindelia to host highly dynamic applications such
 as games and exchanges on its layer 1.
 
-Block #3: installing a game
+Block #3: signing statements
+----------------------------
+
+A `run{}` statement can also optionally include a signature:
+
+```c
+run {
+  !name x // get the signer's name
+  !done x // outputs it
+} sign {
+  0135ffd97b83f74843d93c4afb2d35d426c669f67bf3df8663de1d00768de179cd6215ccde6fe332845a5a4e72553bf9777b634b4f8ed91a1934620712e354887f
+}
+```
+
+That hexadecimal string represents the secp256k1 signature of the serialization
+of the `run{}` statement above. This will set the *subject* of the execution as
+the signer, changing the behavior of the `IO.name` and `IO.from` primitives,
+which return the subject's name, and the caller's name, respectively. To sign a
+statement, just place it in the end of a `.kdl` file, and, enter the command:
+
+```
+kindelia sign block_file.kdl key_file
+```
+
+Block #4: installing a game
 ---------------------------
 
 ```c
 // TODO
 ```
 
-Block #4: playing the game
+Block #5: playing the game
 --------------------------
 
 ```c
 // TODO
 ```
-
-What about accounts?
---------------------
-
-TODO
 
 Technical Overview
 ==================
@@ -404,7 +412,7 @@ statements can be one of 3 variants:
       (ConstructorName arg_0 arg_1 ...) = returned_value_0
       (ConstructorName arg_0 arg_1 ...) = returned_value_1
       ...
-    } = initial_state
+    } with { initial_state }
     ```
 
 - **run**: runs an IO expression

@@ -14,7 +14,10 @@ fun (Counter action) {
     !load x // loads the state
     !done x // returns it
 
-} = #0 // initial state is 0
+// initial state is 0
+} with {
+  #0
+}
 
 // Increments the Counter's state 3 times
 run {

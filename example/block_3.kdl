@@ -1,1 +1,24 @@
-// TODO
+// Blocks that end with a run{} statement can be signed with:
+// 
+//   kindelia sign block_file.kdl private_key_file
+// 
+// This will sign the last run{} statement, and output the hex signature. You
+// can then append a "sign { signature_here }" to the run block. Then, when that
+// block is mined, the IO.name action will return your account's name, which is
+// defined as the last 120 bits of your public key's keccak256.
+
+// This block is unsigned, so it outputs #0
+run {
+  !name x // get the signer's name
+  !done x // outputs it
+} 
+// Uncommenting below causes it to output the user name instead
+//sign {
+  //0135ffd97b83f74843d93c4afb2d35d426c669f67bf3df8663de1d00768de179cd6215ccde6fe332845a5a4e72553bf9777b634b4f8ed91a1934620712e354887f
+//}
+
+// Below are this user's infos:
+// Name, in letters : 'sqhu9O0algXs_4qS3bZP'
+// Name, in decimal : #1159732427595913447931281967622023450
+// Ethereum address : 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+// Secret key used  : 0x0000000000000000000000000000000000000000000000000000000000000001
