@@ -31,7 +31,6 @@ use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  println!("{}", u128_to_name(1159732427595913447931281967622023450));
   return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
   //hvm::test_statements_from_file("./example/simple.kdl");
