@@ -68,23 +68,26 @@ type RequestAnswer<T> = oneshot::Sender<T>;
 // TODO: store and serve tick where stuff where last changed
 pub enum Request {
   GetTick {
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<u128>,
   },
   GetBlocks {
     range: (i64, i64),
-    answer: RequestAnswer<Vec<Block>>,
+    tx: RequestAnswer<Vec<Block>>,
   },
   GetBlock {
     block_height: u128,
-    answer: RequestAnswer<Block>,
+    tx: RequestAnswer<Block>,
   },
-  GetFunc {
+  GetFunctions {
+    tx: RequestAnswer<Vec<u128>>,
+  },
+  GetFunction {
     name: u128,
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<u128>,
   },
   GetState {
     name: u128,
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<Option<Term>>,
   },
 }
 
@@ -648,10 +651,10 @@ pub fn node_message_receive(node: &mut Node) {
 pub fn node_handle_request(node: &mut Node, request: Request) {
   // TODO: handle unwraps
   match request {
-    Request::GetTick { answer } => {
+    Request::GetTick { tx: answer } => {
       answer.send(node.runtime.get_tick()).unwrap();
     }
-    Request::GetBlocks { range, answer } => {
+    Request::GetBlocks { range, tx: answer } => {
       let (start, end) = range;
       debug_assert!(start <= end);
       debug_assert!(end == -1);
@@ -659,13 +662,20 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
       let blocks = get_longest_chain(node, Some(num));
       answer.send(blocks).unwrap();
     },
-    Request::GetBlock { block_height, answer } => {
+    Request::GetBlock { block_height, tx: answer } => {
       // TODO
       let block = node.block.get(&node.tip).expect("No tip block");
       answer.send(block.clone()).unwrap();
     },
-    Request::GetFunc { name, answer } => todo!(),
-    Request::GetState { name, answer } => todo!(),
+    Request::GetFunctions { tx } => {
+      let funcs = vec![name_to_u128("Count")];
+      tx.send(funcs).unwrap();
+    },
+    Request::GetFunction { name, tx: answer } => todo!(),
+    Request::GetState { name, tx: answer } => {
+      let state = node.runtime.read_disk_as_term(name);
+      answer.send(state).unwrap();
+    },
   }
 }
 

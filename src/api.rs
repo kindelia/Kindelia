@@ -8,15 +8,35 @@ use std::sync::mpsc::SyncSender;
 
 use serde_json::json;
 use tokio::sync::oneshot;
+use warp::{path, Filter};
+use warp::reject;
+
+use crate::hvm::{name_to_u128, u128_to_name};
+use crate::node::Block;
 
 use crate::node::Request as NodeRequest;
+
+fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
+  names.iter().copied().map(u128_to_name).collect::<Vec<_>>()
+}
 
 pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    use warp::{path, Filter};
-    use crate::node::Block;
+    // // Custom rejection handler that maps rejections into responses.
+    // // https://docs.rs/warp/latest/warp/reject/index.html
+    // use warp::hyper::StatusCode;
+    // use warp::reject::{self, Rejection};
+    // use warp::reply::{self, Reply};
+    // async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+    //   if err.is_not_found() {
+    //     Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
+    //   } else {
+    //     eprintln!("unhandled rejection: {:?}", err);
+    //     Ok(reply::with_status("INTERNAL_SERVER_ERROR", StatusCode::INTERNAL_SERVER_ERROR))
+    //   }
+    // }
 
     let root = warp::path::end().map(|| "UP");
 
@@ -27,7 +47,7 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
       let node_query_tx = node_query_tx.clone();
       async move {
         let (tx, rx) = oneshot::channel();
-        node_query_tx.clone().send(NodeRequest::GetTick { answer: tx }).unwrap();
+        node_query_tx.send(NodeRequest::GetTick { tx }).unwrap();
         let tick = rx.await.unwrap();
         ok_json(format!("Tick: {}", tick))
       }
@@ -40,9 +60,9 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
       let node_query_tx = node_query_tx.clone();
       async move {
         let (tx, rx) = oneshot::channel();
-        node_query_tx.send(NodeRequest::GetBlocks { range: (-10, -1), answer: tx }).unwrap();
+        node_query_tx.send(NodeRequest::GetBlocks { range: (-10, -1), tx }).unwrap();
         let blocks = rx.await.unwrap();
-        blocks
+        ok_json(blocks)
       }
     });
 
@@ -52,32 +72,80 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
         let node_query_tx = node_query_tx.clone();
         async move {
           let (tx, rx) = oneshot::channel();
-          let node_query_tx = node_query_tx.clone();
-          node_query_tx.send(NodeRequest::GetBlock { block_height, answer: tx }).unwrap();
+          node_query_tx.send(NodeRequest::GetBlock { block_height, tx }).unwrap();
           let block = rx.await.unwrap();
           block
         }
       })
     };
 
+    let get_block_go = get_block().and(path!()).map(ok_json);
+
     let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
       let bits = crate::bits::BitVec::from_bytes(&block.body.value);
       let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-      stmts
+      ok_json(stmts)
     });
+
+    let blocks_router = get_blocks //
+      .or(get_block_go) //
+      .or(get_block_content);
 
     // == Functions ==
 
+    let node_query_tx = node_query_sender.clone();
+    let get_functions = path!("functions").then(move || {
+      let node_query_tx = node_query_tx.clone();
+      async move {
+        let (tx, rx) = oneshot::channel();
+        node_query_tx.send(NodeRequest::GetFunctions { tx }).unwrap();
+        let functions = rx.await.unwrap();
+        ok_json(u128_names_to_strings(&functions))
+      }
+    });
+
+    let node_query_tx = node_query_sender.clone();
+    let _get_function = path!("functions" / u128).then(move |id| {
+      let node_query_tx = node_query_tx.clone();
+      async move {
+        let (tx, rx) = oneshot::channel();
+        node_query_tx.send(NodeRequest::GetFunction { name: id, tx }).unwrap();
+        let function = rx.await.unwrap();
+        ok_json(function)
+      }
+    });
+
+    // TODO merge code redundancy with above route
+    let node_query_tx = node_query_sender.clone();
+    let get_function_state = path!("functions" / String / "state")
+      .and_then(move |id: String| {
+        let node_query_tx = node_query_tx.clone();
+        async move {
+          let (tx, rx) = oneshot::channel();
+          let node_query_tx = node_query_tx.clone();
+          let id = name_to_u128(&id);
+          node_query_tx.send(NodeRequest::GetState { name: id, tx }).unwrap();
+          let state = rx.await.unwrap();
+          if let Some(state) = state {
+            Ok(ok_json(state))
+          } else {
+            Err(reject::not_found())
+          }
+        }
+      });
+
+    let functions_router = get_functions //
+      // .or(get_function) //
+      .or(get_function_state)
+      ;
+
     // ==
 
-    let get_tick = get_tick;
-    let get_blocks = get_blocks.map(ok_json);
-    let get_block = get_block().and(path!()).map(ok_json);
-    let get_block_content = get_block_content.map(ok_json);
+    let app = root.or(get_tick).or(blocks_router).or(functions_router);
 
-    let app = root.or(get_tick).or(get_blocks).or(get_block).or(get_block_content);
 
     warp::serve(app).run(([127, 0, 0, 1], 8000)).await;
+    // .recover(handle_rejection)
   });
 }
 
@@ -90,16 +158,11 @@ where
 }
 
 mod ser {
-  // pub const TAG: &str = "$";
+  use serde::ser::{SerializeStruct, SerializeStructVariant};
   use crate::hvm::u128_to_name;
   use crate::hvm::{Rule, Statement, Term};
   use crate::node::Block;
-
-  use serde::ser::{SerializeStruct, SerializeStructVariant};
-
-  fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
-    names.iter().copied().map(u128_to_name).collect::<Vec<_>>()
-  }
+  use super::u128_names_to_strings;
 
   impl serde::Serialize for Block {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
