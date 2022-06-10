@@ -19,9 +19,9 @@ Sections
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
-  * [Cheap functional opcodes](#hvm-makes-functional-and-formally-verified-dapps-much-cheaper)
-  * [Zero-cost SSTORE](#reversible-heaps-make-dynamic-dapps-much-cheaper)
-  * [Massive L1 optimizations](#optimizations-and-simplifications-everywhere)
+  * [Functional opcodes, formally verified apps](#hvm-makes-functional-and-formally-verified-dapps-much-cheaper)
+  * [Zero-cost SSTOREs, highly dynamic apps](#reversible-heaps-make-dynamic-dapps-much-cheaper)
+  * [Massive layer-1 optimizations](#optimizations-and-simplifications-everywhere)
   * [Comparison table](#comparison-table)
   * [Summary](#in-short)
 * [Comparisons to Cardano](#comparisons-to-cardano)
@@ -29,7 +29,7 @@ Sections
   * [On efficiency](#on-efficiency)
   * [On simplicity](#on-simplicity)
   * [Summary](#in-short)
-* [HVM and its implications](#hvm-and-its-implications)
+* [The High-order Virtual Machine (HVM)](#the-high-order-virtual-machine-hvm)
   * [Sequential tasks: as fast as Haskell's GHC](#1-for-normal-sequential-tasks-such-as-folds-it-holds-similar-performance)
   * [Parallel tasks: several times faster](#2-for-very-parallel-tasks-such-as-tree-based-quicksort-it-is-several-times-faster)
   * [High-order tasks: exponentially faster](#3-for-very-high-order-tasks-it-is-exponentially-faster)
@@ -146,29 +146,47 @@ in any on-chain asset, rather than the network's "built-in token".
 
 The table below compares some attributes of each network:
 
-.                        |            Kindelia |            Ethereum
------------------------- | ------------------- | -------------------
-block time               | `         1 second` | `       13 seconds`
-limit: blockchain growth | `       40 GB/year` | `    2 174 GB/year`
-limit: state growth      | `        8 GB/year` | `      114 GB/year`
-limit: state growth      | `     2 048 bits/s` | `    29 440 bits/s`
-limit: computation       | `10 000 000 mana/s` | `  2 300 000 gas/s`
-cost: multiplication     | `           2 mana` | `            5 gas`
-cost: beta reduction     | `           2 mana` | `        ~ 200 gas`
-cost: pattern matching   | `           2 mana` | `        ~ 200 gas`
-cost: SSTORE (reuse)     | `           0 bits` | `        5 000 gas`
-cost: SSTORE (alloc)     | `         128 bits` | `       20 000 gas`
+.                               |                              Kindelia |                              Ethereum
+------------------------------- | ------------------------------------: | ------------------------------------:
+**block time**                  | ```                         1 second  ``` | ```                       13 seconds  ```
+**block size**                  | ```                       1280 bytes  ``` | ```                             1 MB  ```
+**max throughput: signed tx**   | ```                         ~20 tx/s  ``` | ```                         ~30 tx/s  ```
+**max throughput: unsigned tx** | ```                        ~160 tx/s  ``` | ```                              N/A  ```
+**max growth: blockchain**      | ```                       40 GB/year  ``` | ```                    2,174 GB/year  ```
+**max growth: state heap**      | ```  56 byte/s ~           8 GB/year  ``` | ```   3,680 byte/s ~     114 GB/year  ```
+**max growth: computation**     | ```                10,000,000 mana/s  ``` | ```                  2,300,000 gas/s  ```
+**cost: multiplication**        | ```     2 mana ~      5,000,000 op/s  ``` | ```          5 gas ~    460,000 op/s  ```
+**cost: beta reduction**        | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
+**cost: pattern matching**      | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
+**cost: SSTORE (reuse)**        | ```     0 bits ~      5,000,000 op/s  ``` | ```      5,000 gas ~        460 op/s  ```
+**cost: SSTORE (alloc)**        | ```   128 bits ~             16 op/s  ``` | ```     20,000 gas ~     11,500 op/s  ```
 
-The costs in this table were defined based on HVM benchmarks, using common
-market processors. Kindelia's block time is shorter, because its compressed
-blocks fit in a single UDP packet. Computation costs are lower, specially for
-functional programs, due to the HVM. Kindelia's reused SSTORE operation has 0
-cost, enabling a wide range of dynamic layer-1 applications that are simply not
-viable on Ethereum. When it comes to overall state and blockchain growth, we
-have more strict and realistic limits. This is intentional, in order to keep the
-network decentralized. Ethereum's blockchain could, in theory, grow 2 terabytes
-per year, and its state could grow 114 gigabytes per year, which would increase
-centralization, and make it difficult to store the state in-memory. 
+The costs in this table were defined based on HVM benchmarks, using modern
+mid-end processors.
+
+Network-wise, Kindelia's block time is shorter, because its compressed blocks
+fit in a single UDP packet. Due to block size limits, Ethereum can handle
+slightly more signed transactions per second, including monetary transfers, but
+Kindelia handles considerably more unsigned transactions per second, including
+contract deployment and other interactions that don't require authentication.
+Note that, since Kindelia's signed transactions can group multiple calls in a
+single statement, the actual throughput can be much higher, and it achieves that
+with a fraction of Ethereum's maximum blockchain growth.
+
+Computation-wise, Kindelia's layer-1 throughput is up to 434x higher, due to the
+HVM and stateful heaps respectivelly. Kindelia's functional opcodes allows it to
+host programs compiled from secure languages like Haskell, Idris, Agda and Kind,
+which is simply not economically viable on Ethereum. Kindelia's zero-cost reused
+SSTORE enables highly dynamic applications like layer-1 MMORPGs, which is also
+not viable on Ethereum.
+
+Space-wise, Kindelia has more strict limits on the blockchain and state heap
+growth, intentionally capping the maximum growth, to keep it in check.
+Ethereum's blockchain could, in theory, grow 2 terabytes per year, and its state
+could grow 114 gigabytes per year, which would increase centralization, and make
+it difficult to store the state in-memory. Note that, on Ethereum, this
+theoretical limit isn't meant to be reached, while Kindelia is designed to
+always grow at its max rate, so these numbers aren't directly comparable.
 
 ### In short
 
@@ -246,8 +264,8 @@ Finally, note that we do not claim that Kindelia is *better* than Cardano. It is
 impossible to innovate without trying new things, and it is okay if some ideas
 don't work so well.
 
-HVM and its implications
-========================
+The High-order Virtual Machine (HVM)
+====================================
 
 As stated, one of the most profound differences between Kindelia and other
 computation networks is the High-order Virtual Machine (HVM). It is a massively
@@ -330,7 +348,7 @@ reason the HVM works so well.
 ### Is Kindelia a consequence of the HVM?
 
 Yes. The main motivation behind the creation of Kindelia is to spread awareness
-of HVM, and all the amazing possibilities that Interaction Nets bring - and
+of the HVM, and all the amazing possibilities that Interaction Nets bring - and
 we're very open about that. Once the world realizes the potential of the HVM
 through Kindelia, it won't be hard to foresee a future where massively parallel
 interaction-net processors will replace the old Von Neumann architecture, taking
@@ -338,8 +356,8 @@ humanity to a whole new level of technological maturity. As the authors of
 Kindelia, we intend to lead this revolution.
 
 This, by itself, is a fair reason to believe on Kindelia's future; after all, we
-are, ironically, literally doing this for the technology, and have no interest
-on profiting from the network. That is why we made an extra effort to make it as
+are, ironically, doing this for the technology, and have no interest on
+profiting from the network. That is why we made an extra effort to make it as
 simple and stable as possible, decreasing the need for a highly active core
 team, and, thus, removing our own roles as figureheads. We further reinforce
 that philosophy by not adding a native currency that is massively pre-mined by
@@ -349,7 +367,7 @@ Note we do intend to launch a token for our foundation as a contract *inside*
 Kindelia, but it will not be *part* of the network, nor coupled to Kindelia's
 protocol in any way, as things should be. Since Kindelia shouldn't require
 high maintainance costs, that asset that will be used mostly to fund the
-development of HVM and its next-gen parallel compilers and processors.
+development of the HVM, and its next-gen parallel compilers and processors.
 
 Examples
 ========
