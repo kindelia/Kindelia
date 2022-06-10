@@ -7,6 +7,7 @@
 
 mod api;
 mod bits;
+mod crypto;
 mod hvm;
 mod node;
 mod test;
@@ -30,10 +31,10 @@ use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  return run_cli();
+  //return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
-  //hvm::test_statements_from_file("./example/simple.kdl");
-  //return Ok(());
+  hvm::test_statements_from_file("./example/block_4.kdl");
+  return Ok(());
 }
 
 // Environment variable where Kindelia path is stored
@@ -63,6 +64,13 @@ pub enum CliCmd {
     // #[clap(short, long)]
     // debug: bool,
   },
+  /// Signs an HVM term
+  Sign {
+    /// File containing the term to be signed
+    term_file: String,
+    /// File containing the 256-bit secret key, as a hex string
+    skey_file: String,
+  }
 }
 
 // Returns the path where Kindelia files are saved
@@ -105,6 +113,28 @@ fn run_cli() -> Result<(), String> {
           // TODO: flag to disable size limit / debug
           hvm::test_statements_from_code(&code);
         }
+      }
+    }
+
+    // Signs a run statement
+    CliCmd::Sign { term_file, skey_file } => {
+      if let (Ok(code), Ok(skey)) = (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file)) {
+        let statements = hvm::read_statements(&code).1;
+        if let Some(hvm::Statement::Run { expr, sign: None }) = &statements.last() {
+          let skey = hex::decode(&skey[0..64]).expect("hex string");
+          let user = crypto::Account::from_private_key(&skey);
+          let hash = hvm::hash_term(&expr);
+          let sign = user.sign(&hash);
+          //println!("expr: {}", hvm::view_term(&expr));
+          //println!("hash: {}", hex::encode(&hvm::hash_term(&expr).0));
+          //println!("user: {}", hex::encode(sign.signer_address(&hash).unwrap().0));
+          //println!("user: {}", hex::encode(crypto::Signature::from_hex(&format!("{}",sign.to_hex())).unwrap().signer_address(&hash).unwrap().0));
+          println!("{}", sign.to_hex());
+          return Ok(());
+        }
+        panic!("File must end with a run statement.");
+      } else {
+        println!("Couldn't load term and secret key files.");
       }
     }
   };

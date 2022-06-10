@@ -118,7 +118,8 @@ mod ser {
           s.serialize_field("args", &u128_names_to_strings(args))?;
           s.end()
         }
-        Statement::Run { expr } => {
+        // TODO: serialize 'with'
+        Statement::Run { expr, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 2, "Run", 1)?;
           s.serialize_field("body", expr)?;
           s.end()

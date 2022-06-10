@@ -1,8 +1,9 @@
 pub use bit_vec::BitVec;
 
-use crate::util::*;
+use crate::crypto;
 use crate::hvm::*;
 use crate::node::*;
+use crate::util::*;
 
 use primitive_types::U256;
 
@@ -112,7 +113,7 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128) -> u128 {
 }
 
 
-// Many elements
+// Many elements, unknown length
 
 pub fn serialize_list<T>(serialize_one: impl Fn(&T, &mut BitVec) -> (), values: &[T], bits: &mut BitVec) {
   for x in values {
@@ -129,6 +130,25 @@ pub fn deserialize_list<T>(deserialize_one: impl Fn(&BitVec, &mut u128) -> T, bi
     result.push(deserialize_one(bits, index));
   }
   *index = *index + 1;
+  result
+}
+
+// Many elements, known length
+
+pub fn serialize_vector<T>(serialize_one: impl Fn(&T, &mut BitVec) -> (), size: u128, data: &[T], bits: &mut BitVec) {
+  if data.len() as u128 != size {
+    panic!("Incorrect serialization vector size.");
+  }
+  for x in data {
+    serialize_one(x, bits);
+  }
+}
+
+pub fn deserialize_vector<T>(deserialize_one: impl Fn(&BitVec, &mut u128) -> T, size: u128, bits: &BitVec, index: &mut u128) -> Vec<T> {
+  let mut result = Vec::new();
+  for _ in 0 .. size {
+    result.push(deserialize_one(bits, index));
+  }
   result
 }
 
@@ -237,6 +257,9 @@ pub fn deserialize_hash(bits: &BitVec, index: &mut u128) -> Hash {
 // Bytes
 
 pub fn serialize_bytes(size: u128, bytes: &[u8], bits: &mut BitVec) {
+  if size as usize != bytes.len() {
+    panic!("Incorrect serialize_bytes size.");
+  }
   for byte in bytes {
     serialize_fixlen(8, &u256(*byte as u128), bits);
   }
@@ -400,6 +423,16 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
   }
 }
 
+pub fn serialized_term(term: &Term) -> BitVec {
+  let mut bits = BitVec::new();
+  serialize_term(term, &mut bits);
+  return bits;
+}
+
+pub fn deserialized_term(bits: &BitVec) -> Term {
+  deserialize_term(bits, &mut 0)
+}
+
 // A Rule
 
 pub fn serialize_rule(rule: &Rule, bits: &mut BitVec) {
@@ -449,17 +482,23 @@ pub fn serialize_statement(statement: &Statement, bits: &mut BitVec) {
       serialize_name(name, bits);
       serialize_list(serialize_name, args, bits);
     }
-    Statement::Run { expr } => {
+    Statement::Run { expr, sign } => {
       //serialize_fixlen(32, &u256(*mana as u128), bits);
       serialize_fixlen(4, &u256(2), bits);
       serialize_term(expr, bits);
+      if let Some(sign) = sign {
+        serialize_fixlen(1, &u256(1), bits);
+        serialize_bytes(65, &sign.0, bits);
+      } else {
+        serialize_fixlen(1, &u256(0), bits);
+      }
     }
   }
 }
 
 pub fn deserialize_statement(bits: &BitVec, index: &mut u128) -> Statement {
-  let tag = deserialize_fixlen(4, bits, index);
-  match tag.low_u128() {
+  let tag = deserialize_fixlen(4, bits, index).low_u128();
+  match tag {
     0 => {
       let name = deserialize_name(bits, index);
       let args = deserialize_list(deserialize_name, bits, index);
@@ -475,7 +514,24 @@ pub fn deserialize_statement(bits: &BitVec, index: &mut u128) -> Statement {
     2 => {
       //let mana = deserialize_fixlen(32, bits, index).low_u128();
       let expr = deserialize_term(bits, index);
-      Statement::Run { expr }
+      let mayb = deserialize_fixlen(1, bits, index).low_u128();
+      let sign = match mayb {
+        0 => {
+          None
+        }
+        1 => {
+          let data : Option<[u8; 65]> = deserialize_bytes(65, bits, index).try_into().ok();
+          if let Some(data) = data {
+            Some(crypto::Signature(data))
+          } else {
+            None
+          }
+        }
+        _ => {
+          panic!("unexpected error");
+        }
+      };
+      Statement::Run { expr, sign }
     }
     _ => panic!("unknown statement tag"),
   }
