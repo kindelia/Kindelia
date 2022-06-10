@@ -364,7 +364,7 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec) {
     }
     Term::Op2 { oper, val0, val1 } => {
       serialize_fixlen(3, &u256(7), bits);
-      serialize_fixlen(8, &u256(*oper as u128), bits);
+      serialize_fixlen(4, &u256(*oper as u128), bits);
       serialize_term(val0, bits);
       serialize_term(val1, bits);
     }
@@ -414,7 +414,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128) -> Term {
       Term::Num { numb }
     }
     7 => {
-      let oper = deserialize_fixlen(8, bits, index).low_u128();
+      let oper = deserialize_fixlen(4, bits, index).low_u128();
       let val0 = Box::new(deserialize_term(bits, index));
       let val1 = Box::new(deserialize_term(bits, index));
       Term::Op2 { oper, val0, val1 }
