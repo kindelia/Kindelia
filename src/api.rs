@@ -7,9 +7,11 @@
 use std::sync::mpsc::SyncSender;
 
 use serde_json::json;
+use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use warp::{path, Filter};
+use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
 use warp::reject;
+use warp::{path, Filter};
 
 use crate::hvm::{name_to_u128, u128_to_name};
 use crate::node::Block;
@@ -117,34 +119,36 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
 
     // TODO merge code redundancy with above route
     let node_query_tx = node_query_sender.clone();
-    let get_function_state = path!("functions" / String / "state")
-      .and_then(move |id: String| {
+    let get_function_state = path!("functions" / String / "state").and_then(move |id: String| {
+      let node_query_tx = node_query_tx.clone();
+      async move {
+        let (tx, rx) = oneshot::channel();
         let node_query_tx = node_query_tx.clone();
-        async move {
-          let (tx, rx) = oneshot::channel();
-          let node_query_tx = node_query_tx.clone();
-          let id = name_to_u128(&id);
-          node_query_tx.send(NodeRequest::GetState { name: id, tx }).unwrap();
-          let state = rx.await.unwrap();
-          if let Some(state) = state {
-            Ok(ok_json(state))
-          } else {
-            Err(reject::not_found())
-          }
+        let id = name_to_u128(&id);
+        node_query_tx.send(NodeRequest::GetState { name: id, tx }).unwrap();
+        let state = rx.await.unwrap();
+        if let Some(state) = state {
+          Ok(ok_json(state))
+        } else {
+          Err(reject::not_found())
         }
-      });
+      }
+    });
 
     let functions_router = get_functions //
       // .or(get_function) //
-      .or(get_function_state)
-      ;
+      .or(get_function_state);
 
     // ==
 
     let app = root.or(get_tick).or(blocks_router).or(functions_router);
 
+    let listener_v4 = TcpListener::bind("127.0.0.1:8000").await.unwrap();
+    let listener_v6 = TcpListener::bind("[::1]:8000").await.unwrap();
+    let incoming_connections =
+      TcpListenerStream::new(listener_v4).merge(TcpListenerStream::new(listener_v6));
 
-    warp::serve(app).run(([127, 0, 0, 1], 8000)).await;
+    warp::serve(app).run_incoming(incoming_connections).await;
     // .recover(handle_rejection)
   });
 }
@@ -158,11 +162,11 @@ where
 }
 
 mod ser {
-  use serde::ser::{SerializeStruct, SerializeStructVariant};
+  use super::u128_names_to_strings;
   use crate::hvm::u128_to_name;
   use crate::hvm::{Rule, Statement, Term};
   use crate::node::Block;
-  use super::u128_names_to_strings;
+  use serde::ser::{SerializeStruct, SerializeStructVariant};
 
   impl serde::Serialize for Block {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
