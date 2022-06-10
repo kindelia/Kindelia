@@ -1265,8 +1265,9 @@ impl Runtime {
     }
   }
 
-  // FIXME: check_term_arities disabled due to #55; a better solution might be
-  //        to just handle incorrect arities when the term is constructed
+  // FIXME: check_term_arities disabled due to #55; a better solution might be to just handle
+  //   incorrect arities when the term is constructed. update:: done by changing create_term, but
+  //   must review the codebase to ensure there aren't places allocating terms with wrong arities
   pub fn check_term(&self, term: &Term) -> bool {
     return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
   }
@@ -2057,22 +2058,30 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       App(node)
     }
     Term::Fun { name, args } => {
-      let size = args.len() as u128;
-      let node = alloc(rt, size);
-      for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
-        link(rt, node + i as u128, arg_lnk);
+      if args.len() != rt.get_arity(*name) as usize {
+        Num(0)
+      } else {
+        let size = args.len() as u128;
+        let node = alloc(rt, size);
+        for (i, arg) in args.iter().enumerate() {
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          link(rt, node + i as u128, arg_lnk);
+        }
+        Fun(*name, node)
       }
-      Fun(*name, node)
     }
     Term::Ctr { name, args } => {
-      let size = args.len() as u128;
-      let node = alloc(rt, size);
-      for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
-        link(rt, node + i as u128, arg_lnk);
+      if args.len() != rt.get_arity(*name) as usize {
+        Num(0)
+      } else {
+        let size = args.len() as u128;
+        let node = alloc(rt, size);
+        for (i, arg) in args.iter().enumerate() {
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          link(rt, node + i as u128, arg_lnk);
+        }
+        Ctr(*name, node)
       }
-      Ctr(*name, node)
     }
     Term::Num { numb } => {
       // TODO: assert numb size
