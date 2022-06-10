@@ -40,7 +40,7 @@ pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id);
     if let Some(term_lnk) = term_lnk {
-      let term_lnk = show_term(rt, term_lnk);
+      let term_lnk = show_term(rt, term_lnk, None);
 
       // dbg!(term_lnk.clone());
       term_lnk.hash(&mut hasher);

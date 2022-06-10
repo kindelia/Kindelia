@@ -1043,11 +1043,11 @@ impl Runtime {
   }
 
   pub fn show_term(&self, lnk: Lnk) -> String {
-    return show_term(self, lnk);
+    return show_term(self, lnk, None);
   }
 
   pub fn show_term_at(&self, loc: u128) -> String {
-    return show_term(self, self.read(loc as usize));
+    return show_term(self, self.read(loc as usize), None);
   }
 
   // Heaps
@@ -2299,8 +2299,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
     }
 
     //if true {
-      //println!("------------------------");
-      //println!("{}", show_term(rt, ask_lnk(rt, 0)));
+      // println!("------------------------");
+      // println!("{}", show_term(rt, ask_lnk(rt, root), Some(term)));
     //}
 
     if init == 1 {
@@ -2987,7 +2987,7 @@ pub fn show_rt(rt: &Runtime) -> String {
 }
 
 // TODO: this should be renamed to "readback", and should return a term instead of a string. 
-pub fn show_term(rt: &Runtime, term: Lnk) -> String {
+pub fn show_term(rt: &Runtime, term: Lnk, focus: Option<u128>) -> String {
   enum StackItem {
     Term(Lnk),
     Str(String),
@@ -2997,12 +2997,19 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
     rt: &Runtime,
     term: Lnk,
     names: &mut HashMap<u128, String>,
+    focus: Option<u128>
   ) -> String {
     let mut lets: HashMap<u128, u128> = HashMap::new();
     let mut kinds: HashMap<u128, u128> = HashMap::new();
     let mut count: u128 = 0;
     let mut stack = vec![term];
+    let mut text = String::new();
     while !stack.is_empty() {
+      // if let Some(focus) = focus {
+      //   if focus == term {
+      //     text.push_str("$");
+      //   }
+      // }
       let term = stack.pop().unwrap();
       match get_tag(term) {
         LAM => {
@@ -3050,7 +3057,6 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       }
     }
 
-    let mut text = String::new();
     for (_key, pos) in lets {
       // todo: reverse
       let what = String::from("?h");
@@ -3058,12 +3064,12 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("&dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+      text.push_str(&format!("dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)));
     }
     text
   }
 
-  fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> String {
+  fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {
@@ -3072,7 +3078,12 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
         StackItem::Str(txt) => {
           output.push(txt);
         },
-        StackItem::Term(term) =>
+        StackItem::Term(term) => {
+          if let Some(focus) = focus {
+            if focus == term {
+              output.push("$".to_string());
+            }
+          }
           match get_tag(term) {
             DP0 => {
               output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
@@ -3164,7 +3175,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
             }
             FUN => {
               let func = get_ext(term);
-              output.push(format!("({} ", u128_to_name(func)));
+              output.push(format!("({}", u128_to_name(func)));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(func);
               for i in (0..arit).rev() {
@@ -3178,6 +3189,7 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
             _ => output.push(format!("?g({})", get_tag(term))),
           }
         }
+        }
       }
 
     let res = output.join("");
@@ -3185,8 +3197,8 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
 
   }
 
-  let mut text = find_lets(rt, term, &mut names);
-  text.push_str( &go(rt, term, &names));
+  let mut text = find_lets(rt, term, &mut names, focus);
+  text.push_str( &go(rt, term, &names, focus));
   text
 }
 
