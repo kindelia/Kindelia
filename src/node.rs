@@ -44,7 +44,7 @@ pub struct Node {
   pub path       : PathBuf,                         // path where files are saved
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
-  pub tip        : U256,                            // current ti
+  pub tip        : U256,                            // current tip
   pub block      : U256Map<Block>,                  // block hash -> block information
   pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
   pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info

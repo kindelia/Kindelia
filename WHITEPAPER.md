@@ -19,8 +19,25 @@ Sections
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
+  * [Cheap functional opcodes](#hvm-makes-functional-and-formally-verified-dapps-much-cheaper)
+  * [Zero-cost SSTORE](#reversible-heaps-make-dynamic-dapps-much-cheaper)
+  * [Massive L1 optimizations](#optimizations-and-simplifications-everywhere)
+  * [Comparison table](#comparison-table)
+  * [Summary](#in-short)
 * [Comparisons to Cardano](#comparisons-to-cardano)
-* [Example blocks](#examples)
+  * [On security](#on-security)
+  * [On efficiency](#on-efficiency)
+  * [On simplicity](#on-simplicity)
+  * [Summary](#in-short)
+* [HVM and its implications](#hvm-and-its-implications)
+  * [Sequential tasks: as fast as Haskell's GHC](#1-for-normal-sequential-tasks-such-as-folds-it-holds-similar-performance)
+  * [Parallel tasks: several times faster](#2-for-very-parallel-tasks-such-as-tree-based-quicksort-it-is-several-times-faster)
+  * [High-order tasks: exponentially faster](#3-for-very-high-order-tasks-it-is-exponentially-faster)
+  * [Negligible compilation times](#1-it-has-negligible-compliation-times)
+  * [Measurable computation costs](#2-computation-costs-are-measurable-including-space-and-time)
+  * [How is that possible?](how-is-that-possible)
+  * [Is Kindelia a consequence of the HVM?](is-kindelia-a-consequence-of-the-hvm)
+* [Examples](#examples)
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
   * [Block #3: signing statements](#block-3-signing-statements)
@@ -86,7 +103,7 @@ multiplayer [GHCi](https://downloads.haskell.org/~ghc/latest/docs/html/users_gui
 Comparisons to Ethereum
 =======================
 
-**HVM makes functional and formally verified DApps much cheaper.**
+### HVM makes functional and formally verified DApps much cheaper
 
 Formal verification can be used to mathematically ensure that a program can't be
 exploited, which is invaluable for a network where programs can't be patched or
@@ -98,7 +115,7 @@ HVM, Kindelia is able to perform beta-reduction and pattern-matching natively,
 making functional programs much cheaper, which, in turn, makes functional and
 formally verified contracts economically viable.
 
-**Reversible heaps make stateful DApps much cheaper.**
+### Reversible heaps make dynamic DApps much cheaper
 
 One of the most expensive operations on Ethereum is SSTORE, which saves a U256
 number permanently. It costs 20000 gas for a new store, and 5000 gas for a
@@ -110,27 +127,24 @@ programming much more convenient, since contracts can store arbitrary HVM
 structures like trees and JSONs instead of just U256s; but, more importantly, it
 makes highly dynamic layer-1 DApps significantly cheaper.
 
-**Optimizations and simplifications everywhere.**
+### Optimizations and simplifications everywhere
 
 Kindelia's block structure is refreshingly simple. There are no merkle roots,
 bloom filters, logs, receipts. Just a timestamp, the previous hash, the miner
-id, and a list of "statements". that alter the network's state, in a way that
+id, and a list of "statements" that alter the network's state, in a way that
 resembles a p2p REPL. The entire block is less than *1500 bytes* long, and fits
 in a single UDP packet, allowing fast fast propagation and short block times.
-There are no monetary transactions, just statements Compressed and unsigned
-statements greatly reduce the size and cost of several types of transactions,
-including app deployment. Moreover, instead of becoming monolithic assembly
-contracts, apps are broken into pure functions that are deployed separately and
-modularly. That enables an enourmous amount of code reuse, further increasing
-the network's efficiency. Finally, there is no native currency. Users can pay
-miners in any on-chain asset, rather than some network's "official token".
+There are no monetary transactions, just statements, which can be compressed and
+unsigned, greatly reducing the size and cost of several types of transactions,
+including app deployment. Contracts aren't compiled to monolithic assembly
+codes, but are, instead, broken into pure functions that are deployed separately
+and modularly, enabling massive code reuse. Finally, there is no native
+currency, making Kindelia not a cryptocurrency, and allowing users to pay miners
+in any on-chain asset, rather than the network's "built-in token".
 
-**In short...**
+### Comparison table
 
-Kindelia is just a layer-1 decentralized computer that resembles Ethereum,
-except without a native currency, with a VM that makes functional programs much
-cheaper, and with a state manager that makes dynamic apps much cheaper. The
-table below compares some attributes of each network:
+The table below compares some attributes of each network:
 
 .                        |            Kindelia |            Ethereum
 ------------------------ | ------------------- | -------------------
@@ -145,26 +159,30 @@ cost: pattern matching   | `           2 mana` | `        ~ 200 gas`
 cost: SSTORE (reuse)     | `           0 bits` | `        5 000 gas`
 cost: SSTORE (alloc)     | `         128 bits` | `       20 000 gas`
 
-Kindelia's block time is shorter, because its compressed blocks fit in a single
-UDP packet. Computation costs are lower, specially for functional programs, due
-to the HVM. Kindelia's reused SSTORE operation has 0 cost, enabling a wide range
-of dynamic layer-1 applications that are simply not viable on Ethereum. When it
-comes to overall state and blockchain growth, we have more strict and realistic
-limits. This is an intentional choice, in order to keep the network fast and
-decentralized.  Ethereum's blockchain could, in theory, grow 2 terabytes per
-year, and its state could grow 114 gigabytes per year, which would increase
+The costs in this table were defined based on HVM benchmarks, using common
+market processors. Kindelia's block time is shorter, because its compressed
+blocks fit in a single UDP packet. Computation costs are lower, specially for
+functional programs, due to the HVM. Kindelia's reused SSTORE operation has 0
+cost, enabling a wide range of dynamic layer-1 applications that are simply not
+viable on Ethereum. When it comes to overall state and blockchain growth, we
+have more strict and realistic limits. This is intentional, in order to keep the
+network decentralized. Ethereum's blockchain could, in theory, grow 2 terabytes
+per year, and its state could grow 114 gigabytes per year, which would increase
 centralization, and make it difficult to store the state in-memory. 
+
+### In short
+
+Kindelia is just a layer-1 decentralized computer that resembles Ethereum,
+except without a native currency, with a VM that makes functional programs much
+cheaper, and with a state manager that makes dynamic apps much cheaper. 
 
 Finally, note that we do not claim that Kindelia is *better* than Ethereum. It
 is just different, with different goals. Kindelia is minimalist, Ethereum is
 complex. Ethereum has features that some may miss on Kindelia. For example,
 Ethereum's Merkle Patricia Trees are terrible for SSTORE performance, but they
-do allow light clients which, on Kindelia, aren't possible; at least, not
-without making zero-knowledge proofs about the HVM execution. Kindelia doesn't
-store logs, bloom filters, there are no complex opcodes like SHA3, no
-precompiled contracts, there is no GHOST protocol (we rely on ultra-compact
-blocks for fast propagation), and consensus is just old and simple proof of
-work, rather than complex proof of stake schemes. Whether that's better or
+allow light clients, which Kindelia lacks. Kindelia doesn't store logs, bloom
+filters, there is no GHOST protocol, and consensus is just old and simple proof
+of work, rather than complex proof of stake schemes. Whether that's better or
 worse, it depends on the use case.
 
 Comparisons to Cardano
@@ -175,6 +193,8 @@ and efficiency, seems like a great choice, because Haskell is functional, and
 its compiler, the GHC, is extremelly efficient. In a closer inspection, though,
 that approach doesn't make so much sense.
 
+### On security
+
 When it comes to **security**, while Haskell is functional, it does not actually
 feature formal proofs natively. That means users can not write a contract and
 prove theorems in the same language: they need to compile them to *something
@@ -184,39 +204,152 @@ better than Ethereum's situation. In Kindelia, users write and verify contracts
 in Kind, Idris or other proof assistant, and run them directly on the HVM. It is
 simple, cheap, secure and works.
 
+### On efficiency
+
 When it comes to **efficiency**, while Haskell's compiler, the GHC, produces
-efficient programs, it is not actually used to run contracts on Cardano's
-network! That's because GHC's runtime wasn't designed with a peer-to-peer setup
-in mind, so, using it would raise complications, such as high compilation times,
-and how to measure execution costs. Because of that, contracts are compiled to
-an intermediate language, Plutus, and interpreted on-chain. This is much less
+efficient programs, it is not actually used to run contracts on Cardano!  That's
+because GHC's runtime wasn't designed with a peer-to-peer setup in mind, so,
+using it would raise complications, such as high compilation times, and how to
+measure execution costs. Because of that, contracts are compiled to an
+intermediate language, Plutus, and interpreted on-chain. This is much less
 efficient than compiling, and ultimately means that Cardano fees can't be much
 cheaper than Ethereum's, under the same load. Kindelia's HVM is as efficient as
 GHC, while having negligible compilation times, and measurable execution costs,
 letting users run Haskell-like languages with GHC-like efficiency.
 
+### On simplicity
+
 Finally, Cardano's extended UTXO model, derived from Bitcoin, makes it
-currency-first, virtual-machine-second. It greatly increases complexity and
-decreases expressivity, under the assumption that it improves efficiency, which
-is dubious at least, since, untimately, efficiency is still dictated by total
-memory, disk and computation usage. The way programs are triggered is irrelevant
-to that. These is no clarity on how much of these resources Cardano would use
-under high load. Kindelia has no UTXO; it is just a functional runtime, with
-transactions that deploy/run global functions, and well-defined execution costs
-and resource limits.
+currency-first, computer-second. It greatly increases network complexity and
+decreases contract expressivity, under the assumption that it improves
+efficiency, which is dubious at least, since, untimately, efficiency is still
+dictated by total memory, disk and computation usage. The way programs are
+triggered is irrelevant for that analysis. These is no clarity on how much of
+these resources Cardano would use under high load, and what its opcode costs and
+limits are. Kindelia has no UTXO; it is just a functional runtime, with a global
+state, run/deploy transactions that alter it, and clear costs and limits for
+every defined operation.
+
+### In short
 
 In short, Cardano's goals are aligned to ours, but the execution differs
 drastically. Instead of fancy ideas that sound more like academic show-off than
 practical utilities, Kindelia is just the result of wrapping a functional
 runtime, the HVM, in a currency-less blockchain, which is just the right recipe
 to make the ultra-secure, worldwide functional computer that Cardano envisioned,
-but couldn't deliver.  Finally, instead of a massive, VC-funded company building
+but couldn't deliver. Finally, instead of a massive, VC-funded company building
 a highly complex system, Kindelia is just a minimal open-source standard - our
 entire implementation is under 10k lines of code! - promoting node diversity and
 making it inherently independent from its original creators.
 
-Finally, note that we do not claim that Kindelia is *better* than Cardano, we
-just rely on the reader's reasoning.
+Finally, note that we do not claim that Kindelia is *better* than Cardano. It is
+impossible to innovate without trying new things, and it is okay if some ideas
+don't work so well.
+
+HVM and its implications
+========================
+
+As stated, one of the most profound differences between Kindelia and other
+computation networks is the High-order Virtual Machine (HVM). It is a massively
+parallel runtime capable of evaluating functional programs optimally, a
+remarkable property that no other compiler in the market enjoys. Even though it
+is still in its infancy, it already compares to Haskell's GHC, the most mature
+pure functional compiler in the world, in most practical benchmarks.
+
+### 1. For normal, sequential tasks, it shows similar performance:
+
+![sequential](https://github.com/Kindelia/HVM/raw/master/bench/_results_/ListFold.png)
+
+### 2. For very parallel tasks, it is several times faster:
+
+![parallel](https://github.com/Kindelia/HVM/raw/master/bench/_results_/QuickSort.png)
+
+### 3. For very high-order tasks, it is exponentially faster:
+
+![high-order](https://github.com/Kindelia/HVM/raw/master/bench/_results_/LambdaArithmetic.png)
+
+The charts speak for themselves: HVM, on its first prototype, competes with
+Haskell's 30-years-old compiler. On the long term, it can bring unforeseen
+improvements on the performance of functional programs, specially taking in
+account the rise of parallel processors, and the discovery of new data
+structures and algorithms that take advantage of beta-optimality.
+
+When it comes to Kindelia, though, its main role is to make functional programs
+and algorithms run natively, which directly reduces costs by 100x to 1000x,
+compared to emulating them on stack machines such as the EVM. Other than raw
+performance, there are two additional characteristics that make it the ideal
+virtual machine for a functional peer-to-peer computer:
+
+### 1. It has negligible compilation times.
+
+Peer-to-peer computers must evaluate programs as fast as possible to increase
+throughput, yet, they can not use traditional optimizing compilers such as GCC
+or GHC. That's because an attacker could forge programs that take a long time to
+compile, resulting in a denial-of-service (DoS) attack that would stop the
+entire network. That is why Ethereum can't compile contracts, and why Cardano
+can't use the GHC, even though its contracts are written in Haskell.
+
+The HVM achieves its performance with a single-pass compilation of serialized
+programs to runtime objects. That pass is so cheap that it doesn't even need to
+be accounted for, making the HVM, unlike GHC, capable of dealing with arbitrary
+user-submitted code without exposing DoS vectors.
+
+### 2. Computation costs are measurable, including space and time.
+
+Even if GHC had a fast, single-pass compiler, using its runtime as the backbone
+of a peer-to-peer decentralized computer wouldn't be viable, because some
+operations such as lambda application (also called beta-reduction) can have
+unpredictable costs, depending on the context. It would be very hard to come up
+with a cost table that reflected real-world timings. To complicate matters
+further, Haskell's memory model would cause the heap to grow every time a
+contract is called, until its global garbage collector was triggered,
+potentially freezing the network, and raising a hard question: who pays for it,
+the user that triggered the GC, or the app that leaked the memory?
+
+HVM has the best of all worlds. Due to linearity, its beta-reduction opcode is
+an O(1), lightweight operation that can be assigned a fixed cost, exactly like
+any arithmetic opcode on Ethereum. Moreover, it is garbage-collection free: a
+transaction always clears all the (non-store-persisted) memory it uses as soon
+as it completes. There are no leaks and no stop-the-world garbage collectors.
+All that while maintaining the lazy functional semantics that allow pure
+ultra-secure, pure functional languages to run natively.
+
+### How is that possible?
+
+For a more in-depth overview, check the [HVM](https://github.com/kindelia/hvm)
+repository and, in particular,
+[HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md). The solution is
+simpler than it looks, and boils down to a combination of linearity, with a lazy
+duplication primitive that incrementally copies any term, including lambdas.
+Behind this simple concept, lies an elegant model of computation, the
+Interaction Net, which shares the best aspects of the Turing Machines and the
+Lambda Calculus, in a manner that looks truly foundamental, and is the main
+reason the HVM works so well.
+
+
+### Is Kindelia a consequence of the HVM?
+
+Yes. The main motivation behind the creation of Kindelia is to spread awareness
+of HVM, and all the amazing possibilities that Interaction Nets bring - and
+we're very open about that. Once the world realizes the potential of the HVM
+through Kindelia, it won't be hard to foresee a future where massively parallel
+interaction-net processors will replace the old Von Neumann architecture, taking
+humanity to a whole new level of technological maturity. As the authors of
+Kindelia, we intend to lead this revolution.
+
+This, by itself, is a fair reason to believe on Kindelia's future; after all, we
+are, ironically, literally doing this for the technology, and have no interest
+on profiting from the network. That is why we made an extra effort to make it as
+simple and stable as possible, decreasing the need for a highly active core
+team, and, thus, removing our own roles as figureheads. We further reinforce
+that philosophy by not adding a native currency that is massively pre-mined by
+the creators, as most projects do.
+
+Note we do intend to launch a token for our foundation as a contract *inside*
+Kindelia, but it will not be *part* of the network, nor coupled to Kindelia's
+protocol in any way, as things should be. Since Kindelia shouldn't require
+high maintainance costs, that asset that will be used mostly to fund the
+development of HVM and its next-gen parallel compilers and processors.
 
 Examples
 ========
