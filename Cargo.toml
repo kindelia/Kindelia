@@ -13,6 +13,11 @@ opt-level = 3
 
 fastrand = "1.7.0"
 rand = "0.8.5"
+
+# == Crypto == #
+
+secp256k1 = { version = "0.22.1", features = ["rand-std", "recovery", "global-context"] }
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 sha3 = "0.9.1"
 
 # == Util == #

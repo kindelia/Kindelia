@@ -1,0 +1,33 @@
+// Declares a constructor, Leaf, with 1 field
+ctr {Leaf value}
+
+// Declares a constructor, Branch, with 2 fields
+ctr {Branch left right}
+
+// Declares a pure function that sums a tree
+fun (Sum tree) {
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
+} = #0
+
+// Sums a tree with 4 numbers
+run {
+  !done (Sum {Branch
+    {Branch {Leaf #1} {Leaf #2}}
+    {Branch {Leaf #3} {Leaf #4}}})
+}
+
+// Declares a pure function, Gen, that receives a
+// num and returns a tree with 2^num copies of #1
+fun (Gen depth) {
+  (Gen #0) =
+    {Leaf #1}
+  (Gen x) =
+    dup x0 x1 = x;
+    {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
+} = #0
+
+// Creates a tree with 2^21 numbers and sums it
+run {
+  !done (Sum (Gen #21))
+}

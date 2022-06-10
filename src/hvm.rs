@@ -8,10 +8,11 @@ use std::time::Instant;
 
 use nohash_hasher::NoHashHasher;
 
-use crate::util;
 use crate::bits;
+use crate::crypto;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
+use crate::util;
 
 // Types
 // -----
@@ -103,7 +104,7 @@ pub type Lnk = u128;
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },
-  Run { expr: Term },
+  Run { expr: Term, sign: Option<crypto::Signature> },
 }
 
 // A mergeable vector of u128 values
@@ -374,18 +375,21 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (IO.take           then) : (IO r)
 //   (IO.save expr      then) : (IO r)
 //   (IO.call expr args then) : (IO r)
+//   (IO.name           then) : (IO r)
 //   (IO.from           then) : (IO r)
-const IO_DONE : u128 = 0x1364039960f; // name_to_u128('IO.DONE')
-const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128('IO.TAKE')
-const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128('IO.SAVE')
-const IO_CALL : u128 = 0x1364034b596; // name_to_u128('IO.CALL')
-const IO_FROM : u128 = 0x1364041c657; // name_to_u128('IO.FROM')
-const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
-const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take')
-const MC_LOAD : u128 = 0xc33968; // name_to_u128('load')
-const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
-const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
-const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
+const IO_DONE : u128 = 0x1364039960f; // name_to_u128("IO.DONE")
+const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128("IO.TAKE")
+const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128("IO.SAVE")
+const IO_CALL : u128 = 0x1364034b596; // name_to_u128("IO.CALL")
+const IO_NAME : u128 = 0x1364060b5cf; // name_to_u128("IO.NAME");
+const IO_FROM : u128 = 0x1364041c657; // name_to_u128("IO.FROM")
+const MC_DONE : u128 = 0xa33ca9; // name_to_u128("done")
+const MC_TAKE : u128 = 0xe25be9; // name_to_u128("take")
+const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
+const MC_SAVE : u128 = 0xde5ea9; // name_to_u128("save")
+const MC_CALL : u128 = 0x9e5c30; // name_to_u128("call")
+const MC_NAME : u128 = 0xca5c69; // name_to_u128("name");
+const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
@@ -526,28 +530,34 @@ ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
 ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
 ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
 
-ctr {IO.DONE expr}
-ctr {IO.TAKE then}
-ctr {IO.SAVE expr then}
-ctr {IO.CALL name args then}
-ctr {IO.FROM then} 
+ctr {Name name}
 
+ctr {IO.DONE expr}
 fun (IO.done expr) {
   (IO.done expr) = {IO.DONE expr}
 } = #0
 
+ctr {IO.TAKE then}
 fun (IO.take then) {
   (IO.take then) = {IO.TAKE then}
 } = #0
 
+ctr {IO.SAVE expr then}
 fun (IO.save expr then) {
   (IO.save expr then) = {IO.SAVE expr then}
 } = #0
 
+ctr {IO.CALL name args then}
 fun (IO.call name args then) {
   (IO.call name args then) = {IO.CALL name args then}
 } = #0
 
+ctr {IO.NAME then}
+fun (IO.name then) {
+  (IO.name then) = {IO.NAME then}
+} = #0
+
+ctr {IO.FROM then} 
 fun (IO.from then) {
   (IO.from then) = {IO.FROM then}
 } = #0
@@ -1142,9 +1152,17 @@ impl Runtime {
             clear(self, get_loc(term, 0), 3);
             return done;
           }
+          IO_NAME => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(caller));
+            let cont = alloc_app(self, cont, Num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
@@ -1196,15 +1214,29 @@ impl Runtime {
         }
         println!("- ctr {} fail", u128_to_name(*name));
       }
-      Statement::Run { expr } => {
+      Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        if self.check_term_arities(expr) && is_linear(expr) {
+        if self.check_term(expr) {
+          let hash = hash_term(&expr);
+          let subj = match sign {
+            None       => 0,
+            Some(sign) => sign.signer_name(&hash).map(|x| x.0).unwrap_or(1),
+          };
+          //let addr = match sign {
+            //None       => "?".to_string(),
+            //Some(sign) => sign.signer_address(&hash).map(|x| hex::encode(x.0)).unwrap_or("?".to_string()),
+          //};
+          //println!("checking signature...");
+          //println!("- hash: {}", hex::encode(hash.0));
+          //println!("- sign: {}", if let Some(s) = sign { hex::encode(s.0) } else { "".to_string() });
+          //println!("- subj: {}", subj);
+          //println!("- addr: {}", addr);
           let host = self.alloc_term(expr);
           // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
-          if let Some(done) = self.run_io(0, 0, host, mana_lim) {
+          if let Some(done) = self.run_io(subj, 0, host, mana_lim) {
             if let Some(done) = self.compute(done, mana_lim) {
               let done_code = self.show_term(done);
               if let Some(()) = self.collect(done, mana_lim) {
@@ -3171,6 +3203,18 @@ fn tail(code: &str) -> &str {
   }
 }
 
+fn drop(code: &str, amount: u128) -> &str {
+  let mut code = code;
+  for _ in 0 .. amount {
+    code = tail(code);
+  }
+  return code;
+}
+
+fn nth(code: &str, index: u128) -> char {
+  return head(drop(code, index));
+}
+
 fn skip(code: &str) -> &str {
   let mut code = code;
   loop {
@@ -3180,7 +3224,7 @@ fn skip(code: &str) -> &str {
       }
       continue;
     }
-    if head(code) == '/' && head(tail(code)) == '/' {
+    if head(code) == '/' && nth(code,1) == '/' {
       while head(code) != '\n' && head(code) != '\0' {
         code = tail(code);
       }
@@ -3204,7 +3248,7 @@ fn is_name_char(chr: char) -> bool {
       || chr >= '0' && chr <= '9';
 }
 
-fn read_char(code: &str, chr: char) -> (&str, ()) {
+pub fn read_char(code: &str, chr: char) -> (&str, ()) {
   let code = skip(code);
   if head(code) == chr {
     return (tail(code), ());
@@ -3213,10 +3257,9 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
   }
 }
 
-fn read_numb(code: &str) -> (&str, u128) {
+pub fn read_numb(code: &str) -> (&str, u128) {
   let mut code = skip(code);
   if head(code) == 'x' {
-    println!("is hex");
     code = tail(code);
     let mut numb = 0;
     let mut code = code;
@@ -3245,7 +3288,7 @@ fn read_numb(code: &str) -> (&str, u128) {
   }
 }
 
-fn read_name(code: &str) -> (&str, u128) {
+pub fn read_name(code: &str) -> (&str, u128) {
   let code = skip(code);
   let mut name = String::new();
   if head(code) == '~' {
@@ -3262,6 +3305,16 @@ fn read_name(code: &str) -> (&str, u128) {
     // TODO: check identifier size and propagate error
     return (code, name_to_u128(&name));
   }
+}
+
+pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
+  let mut data : Vec<u8> = Vec::new();
+  let mut code = skip(code);
+  while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
+    data.append(&mut hex::decode(&String::from_iter([nth(code,0),nth(code,1)])).unwrap());
+    code = drop(code, 2);
+  }
+  return (code, data);
 }
 
 /// Converts a name to a number, using the following table:
@@ -3312,7 +3365,7 @@ pub fn u128_to_name(num: u128) -> String {
   name.chars().rev().collect()
 }
 
-fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
+pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
   let mut elems = Vec::new();
   let mut code = code;
   while code.len() > 0 && head(skip(code)) != stop {
@@ -3340,13 +3393,13 @@ pub fn read_term(code: &str) -> (&str, Term) {
         let code = tail(code);
         let (code, val0) = read_term(code);
         let (code, val1) = read_term(code);
-        let (code, skip) = read_char(code, ')');
+        let (code, unit) = read_char(code, ')');
         return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
       } else if head(code) == '!' {
         let code = tail(code);
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
-        let (code, skip) = read_char(code, ')');
+        let (code, unit) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
       } else {
         let (code, name) = read_name(code);
@@ -3381,17 +3434,12 @@ pub fn read_term(code: &str) -> (&str, Term) {
     '\'' => {
       let code = tail(code);
       let (code, numb) = read_name(code);
-      let (code, skip) = read_char(code, '\'');
+      let (code, unit) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
     '!' => {
       let code = tail(code);
       let (code, macro_name) = read_name(code);
-      //const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
-      //const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
-      //const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
-      //const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
-      //const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
       match macro_name {
         MC_DONE => {
           let (code, expr) = read_term(code);
@@ -3434,6 +3482,14 @@ pub fn read_term(code: &str) -> (&str, Term) {
             args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
+        MC_NAME => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.NAME"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
         MC_FROM => {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
@@ -3448,13 +3504,13 @@ pub fn read_term(code: &str) -> (&str, Term) {
       }
     },
     _ => {
-      if let ('d','u','p',' ') = (head(code), head(tail(code)), head(tail(tail(code))), head(tail(tail(tail(code))))) {
-        let code = tail(tail(tail(code)));
+      if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,3);
         let (code, nam0) = read_name(code);
         let (code, nam1) = read_name(code);
-        let (code, skip) = read_char(code, '=');
+        let (code, unit) = read_char(code, '=');
         let (code, expr) = read_term(code);
-        let (code, skip) = read_char(code, ';');
+        let (code, unit) = read_char(code, ';');
         let (code, body) = read_term(code);
         return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
       } else {
@@ -3465,7 +3521,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
   }
 }
 
-fn read_oper(in_code: &str) -> (&str, Option<u128>) {
+pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
   fn head_is(ch: char, code: &str) -> (&str, u128) {
     if head(code) == ch {
       (tail(code), 1)
@@ -3530,19 +3586,19 @@ fn read_oper(in_code: &str) -> (&str, Option<u128>) {
   (code, Some(oper))
 }
 
-fn read_rule(code: &str) -> (&str, Rule) {
+pub fn read_rule(code: &str) -> (&str, Rule) {
   let (code, lhs) = read_term(code);
   let (code, ())  = read_char(code, '=');
   let (code, rhs) = read_term(code);
   return (code, Rule{lhs, rhs});
 }
 
-fn read_rules(code: &str) -> (&str, Vec<Rule>) {
+pub fn read_rules(code: &str) -> (&str, Vec<Rule>) {
   let (code, rules) = read_until(code, '\0', read_rule);
   return (code, rules);
 }
 
-fn read_func(code: &str) -> (&str, CompFunc) {
+pub fn read_func(code: &str) -> (&str, CompFunc) {
   let (code, rules) = read_until(code, '\0', read_rule);
   if let Some(func) = build_func(&rules, false) {
     return (code, func);
@@ -3551,33 +3607,46 @@ fn read_func(code: &str) -> (&str, CompFunc) {
   }
 }
 
-fn read_statement(code: &str) -> (&str, Statement) {
+pub fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
-  match (head(code), head(tail(code)), head(tail(tail(code)))) {
+  match (nth(code,0), nth(code,1), nth(code,2)) {
     ('f','u','n') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '(');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_name);
-      let (code, skip) = read_char(code, '{');
+      let (code, unit) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
-      let (code, skip) = read_char(code, '=');
+      let (code, unit) = read_char(code, '=');
       let (code, init) = read_term(code);
       return (code, Statement::Fun { name, args, func, init });
     }
     ('c','t','r') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '{');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '{');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, '}', read_name);
       return (code, Statement::Ctr { name, args });
     }
     ('r','u','n') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '{');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '{');
       let (code, expr) = read_term(code);
-      let (code, skip) = read_char(code, '}');
-      return (code, Statement::Run { expr });
+      let (code, unit) = read_char(code, '}');
+      let code = skip(code);
+      if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,4);
+        let (code, unit) = read_char(code, '{');
+        let (code, sign) = read_hex(code);
+        let (code, unit) = read_char(code, '}');
+        if sign.len() == 65 {
+          return (code, Statement::Run { expr, sign: Some(crypto::Signature(sign.as_slice().try_into().unwrap()))  });
+        } else {
+          panic!("Wrong signature size.");
+        }
+      } else {
+        return (code, Statement::Run { expr, sign: None });
+      }
     }
     _ => {
       panic!("Couldn't parse statement.");
@@ -3628,6 +3697,12 @@ pub fn view_term(term: &Term) -> String {
     }
     Term::Ctr { name, args } => {
       let name = view_name(*name);
+      // Pretty print names
+      if name == "Name" && args.len() == 1 {
+        if let Term::Num { numb } = args[0] {
+          return format!("{{Name {}}}", numb);
+        }
+      }
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
       return format!("{{{}{}}}", name, args);
     }
@@ -3697,9 +3772,12 @@ pub fn view_statement(statement: &Statement) -> String {
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       return format!("ctr {{{} {}}}", name, args);
     }
-    Statement::Run { expr } => {
+    Statement::Run { expr, sign } => {
       let expr = view_term(expr);
-      return format!("run {{\n  {}\n}}", expr);
+      match sign {
+        None => format!("run {{\n  {}\n}}", expr),
+        Some(sign) => format!("run {{\n  {}\n}} sign {{\n  {}\n}}", expr, hex::encode(sign.0)),
+      }
     }
   }
 }
@@ -3711,6 +3789,13 @@ pub fn view_statements(statements: &[Statement]) -> String {
     result.push_str("\n");
   }
   return result;
+}
+
+// Hashing
+// -------
+
+pub fn hash_term(term: &Term) -> crypto::Hash {
+  crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_term(&term)))
 }
 
 // Tests

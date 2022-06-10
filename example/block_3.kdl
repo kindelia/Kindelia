@@ -1,0 +1,8 @@
+ctr {Alice.call func args}
+
+fun (Alice action) {
+  (Alice {Alice.call func args}) =
+    
+    !call x func args
+    !done args
+}
