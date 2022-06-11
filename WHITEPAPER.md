@@ -1498,11 +1498,10 @@ banks won't debase them, but their history is full of breaches of that trust".
 This is true: countries go through periods of crisis, money is printed by
 humans. No form of human-controlled money has lasted more than a few centuries.
 A global currency that isn't controlled or affected by human actions and
-emotions surely can't be less stable on the very long term, right? And there is
-some value in that longevity factor. Bitcoin solves the problem of having a
-digital currency with fixed rules that are forever independent of human politics
-and emotions, and, even if you don't care about it, that is still a valid
-problem to solve.
+emotions is very stable on the long term. And there is some value in that
+longevity factor. Bitcoin solves the problem of having a digital currency with
+fixed rules that are forever independent of human politics and emotions, and,
+even if you don't care about it, that is still a valid problem to solve.
 
 As for applications, having a place where anyone can host forums, files, games,
 in such a manner that can't be censored by anything is also a comfortable
@@ -1510,31 +1509,31 @@ safeguard in the case things go terribly wrong in the world; even if they
 probably won't. Ethereum is such a place, but what is the point of an eternal
 application if it only lasts until a bug is found? Formal verification is the
 act of mathematically proving that given software has zero bugs, and that goes
-really well with the idea of eternal apps. That is why Kindelia is valuable.
-It solves the problem of having general-purpose software that run with the same
-well-defined rules forever, independent of any human action. Perhaps that problem
-isn't interesting to most people, but it is still valid problem to solve.
+really well with the idea of eternal apps. That is why Kindelia is valuable. It
+solves the problem of deploying general-purpose software in a computer that will
+run these programs with the same well-defined rules and a never-ending, 100%
+uptime, independent of any human action. Perhaps that problem isn't interesting
+to most people, but it is still valid problem to solve.
 
-Finally, the notion of virtual worlds that can't ever be turned off is also
-pretty cool to a gaming nerd like me. I can't leave a legendary sword on World
-of Warcraft to my grandchildren. After all, who knows if Blizzard will even
-exist by then? But I surely can do so on a virtual world hosted on Kindelia.
-The fact an item will never cease to exist makes it more valuable today, which
-results in markets where digital assets are valued just like physical assets,
-which is really cool. Kindelia's cheap states lets these virtual worlds exist
-without complicated layer 2 indirections.
+For example, the notion of virtual worlds that can't ever be turned off is
+pretty attractive to a gaming nerd like me. I can't leave a legendary sword on
+World of Warcraft to my grandchildren. After all, who knows if Blizzard will
+even exist by then? But I surely can do so on a virtual world hosted on
+Kindelia.  The fact an item will never cease to exist makes it more valuable
+today, which results in markets where digital assets are valued just like
+physical assets, which is really cool. Kindelia's cheap states lets these
+virtual worlds exist without complicated layer 2 indirections.
 
-Kindelia is a functional, worldwide computer, capable of hosting eternal
-applications that can't ever be altered or turned off; not by their owners, not
-by governments. And, with formal verification, these applications can remain
-bug-free during their endless lifespans. A common misconception is that
-peer-to-peer computers are designed to be fast. Yes, Kindelia and Ethereum are
-distributed, but that is meant to maximize uptime and security, not performance.
-They aren't meant to beat cloud servers, and anyone who thinks that simply
-doesn't get the point. But only these can grant, to their hosted applications,
-the power of living forever, and that's the whole point that makes them
-valuable. Perhaps not as valuable as the hype and price tickers let us believe.
-But who is to blame, the tech, or the greed of speculative markets?
+In short, Kindelia is a functional, worldwide computer, capable of hosting
+eternal applications that can't ever be altered or turned off; not by their
+owners, not by governments. And, with formal verification, these applications
+can remain bug-free during their endless lifespans. Kindelia and Ethereum
+are distributed, but that is meant to maximize uptime and security, not
+performance. They aren't meant to beat cloud servers, and anyone who thinks
+that simply doesn't get the point. But only these can grant, to their hosted
+applications, the power of living forever, and that's the whole point that makes
+them valuable. Perhaps not as valuable as the hype and price tickers let us
+believe. But who is to blame, the tech, or the greed of speculative markets?
 
 ## 2. Why Nakamoto Consensus (Proof of Work)?
 
