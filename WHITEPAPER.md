@@ -52,7 +52,7 @@ Table of Contents
   * [On efficiency](#on-efficiency)
   * [On simplicity](#on-simplicity)
   * [Summary](#in-short)
-* [Notes](#notes)
+* [Whys](#whys)
   * [Why create a cryptocurrency?](#why-create-a-cryptocurrency)
   * [Why not include a currency?](#why-not-include-a-currency)
   * [Why Nakamoto Consensus (Proof of Work)?](#why-nakamoto-consensus-proof-of-work)
@@ -99,7 +99,7 @@ This is an extensive paper with a lot of information.
 - If you'd rather read a long list of tech specs, head on to the [Technical Overview](#technical-overview).
 - To learn about the optimal functional runtime we use, see [The High-order Virtual Machine](#the-high-order-virtual-machine-hvm).
 - To learn how Kindelia compares to other p2p computers, move on to [Comparisons](#comparisons-to-ethereum).
-- To learn the why's behind Kindelia's existence and design choices, go to [Notes](#notes).
+- To learn the why's behind Kindelia's existence and design choices, go to [Whys](#whys).
 
 Examples
 ========
@@ -955,22 +955,9 @@ it says nothing about individual transactions. Kindelia relies on the principle
 that, during the early ages of the network, users will be mining their own
 blocks directly. After all, with 1 second per block, there are 86400 blocks per
 day. Until there are thousands of active users, mining a block won't be an issue
-for an average user.
-
-Once there are that many users, people will start mining Kindelia blocks
-professionally, looking to collect block rewards, which will be offered by apps
-and currencies as a way to incentive the network security. For example, a coin
-hosted on Kindelia may have a `.mint()` transaction that can be called once per
-block, and grants brand new tokens to the block miner.
-
-Once that happens, these miners will have plenty of unused space and
-computations in their blocks, so, they'll start selling that space to the
-community. Contracts will be created to facilitate that market, allowing users
-to pay miners to include their transactions in blocks. In other words, the
-hardcoded miner-fee mechanism that Ethereum currently has will be naturally
-replaced by mere contracts, and a fee market will naturally emerge. That is only
-possible due to Kindelia's flexibility, and, as a healthy side effect, users
-will pay miner fees in any asset, not just "the official coin".
+for an average user. When that starts becoming practical, a fee market will
+emerge naturally, and users will pay miners in whatever currencies they like.
+For more on that, check the ["Why not include a currency?"](#why-not-include-a-currency) section.
 
 Serialization
 -------------
@@ -1473,10 +1460,8 @@ don't work so well. Cardano has great minds, and has everything it takes to
 build a great decentralized computer.
 
 
-Notes
-=====
-
-TODO: Additional notes, disclaimers go here.
+Whys
+====
 
 ## Why create a cryptocurrency?
 
@@ -1663,11 +1648,10 @@ comment](https://ethresear.ch/t/explaining-the-liveness-guarantee/4228/3) about
 and that protecting the network against them is overkill. I agree with his
 sentiment, and I believe, and hope, that humanity will never find itself in a
 situation where two sides of the world go completely out of communication for
-weeks due to some catastrophic event. But if that does happen, I like the
-concept of having a resilient digital economy capable of recovering. Kindelia
-is designed to be that back-up plan, an ultra-secure, meteor-proof blockchain
-that will still be there in case everything goes wrong, and, as such, relying on
-Proof of Work is on par with that goal.
+weeks due to some catastrophic event. But if that does happen, I believe we
+should have at least one ultra-resilient digital economy capable of recovering.
+Kindelia fills that role, being the back-up plan, meteor-proof computer that,
+along Bitcoin, will still be there in case everything goes wrong.
 
 Finally, there is a common misconception that proof of stake increases a
 network's layer 1 scalability, efficiency and throughput. That is simply not
