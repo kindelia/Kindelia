@@ -949,7 +949,7 @@ high usage, making Kindelia somewhat resistant to performance losses due to
 high-traffic applications or periods, while still keeping the maximum
 synchronization computation in check.
 
-The current Rust implementation is capable of computing about 300 million mana
+The current Rust implementation is capable of computing about 55 million mana
 per second in an Apple M1 processor. This is about 7 times larger than the mana
 limit per block. That means that, for every 7 seconds a node spends offline, it
 must spend 1 second catching up, if single threaded. While that isn't a huge
