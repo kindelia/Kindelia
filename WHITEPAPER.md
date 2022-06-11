@@ -14,8 +14,8 @@ Finally, there is no built-in token, and, thus, **it isn't a cryptocurrency**.
 Instead, Kindelia is merely a peer-to-peer functional computer capable of
 efficiently hosting hack-proof programs that can't ever be turned off.
 
-Sections
-========
+Table of Contents
+=================
 
 * [Introduction](#introduction)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
@@ -328,11 +328,12 @@ the user that triggered the GC, or the app that leaked the memory?
 
 HVM has the best of all worlds. Due to linearity, its beta reduction opcode is
 an O(1), lightweight operation that can be assigned a fixed cost, exactly like
-any arithmetic opcode on Ethereum. Moreover, it is garbage-collection free: a
-transaction always clears all the (non-store-persisted) memory it uses as soon
-as it completes. There are no leaks and no stop-the-world garbage collectors.
-All that while maintaining the lazy functional semantics that allow pure
-ultra-secure, pure functional languages to run natively.
+any arithmetic opcode on Ethereum; see the [Table of Costs](#table-of-costs)
+below. Moreover, it is garbage-collection free: a transaction always clears all
+the (non-store-persisted) memory it uses as soon as it completes. There are no
+leaks and no stop-the-world garbage collectors.  All that while maintaining the
+lazy functional semantics that allow pure ultra-secure, pure functional
+languages to run natively.
 
 ### How is that possible?
 
