@@ -1570,8 +1570,8 @@ run {
 ```
 
 That way, miners get not just ETH, or just BTC, or any single token, but rather
-a constellation of gifts from built-in apps, as an kind incentive for them to
-keep contributing to the network's security. Everyone wins with this exchange.
+a constellation of gifts from built-in apps, as a kind incentive for them to
+keep contributing to the network's security. Everyone wins on this exchange.
 
 In a similar fashion, users can attach miner fees by including an extra payment
 at the end of their transactions. For example:
@@ -1605,7 +1605,7 @@ incentived by Ether fees, except replacing the native, hardcoded token, by any
 user-submitted assets.
 
 If Kindelia doesn't need a native token to exist, then it won't have a native
-token, because that's our ethics work - simple as that. But, then, how do we
+token, because that's how our ethics work - simple as that. But, then, how do we
 raise funds? That is a separate question, which, we believe, must have a
 separate answer. Ethereum, for example, minted and sold, out of thin air, more
 than 50% of its total supply, before the network was released, and an additional
