@@ -1388,6 +1388,9 @@ they all make some kind of compromise or impact the user experience in some way.
 Moving apps or computations in and out is an unavoidable overhead. If an app
 could operate efficiently on the layer 1, it would never resort to layer 2. A
 faster layer 1 increases the set of apps that don't need to be moved out.
+Dynamic MMORPGs and formally verified Idris2 apps that would require a layer 2
+can have the option of living natively on Kindelia's layer 1, and having an
+option is never a bad thing.
 
 ### On optimistic rollups
 
