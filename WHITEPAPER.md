@@ -54,6 +54,7 @@ Sections
 * [Notes](#notes)
   * [Why?](#1-why)
   * [Why Nakamoto Consensus (Proof of Work)?](#2-why-nakamoto-consensus-proof-of-work)
+  * [Why not become a layer 2 Ethereum rollup?](#3-why-not-become-a-layer-2-ethereum-rollup)
 
 Introduction
 ============
@@ -1317,4 +1318,105 @@ blame, the tech, or the greed of speculative markets?
 
 ## 2. Why Nakamoto Consensus (Proof of Work)?
 
-TODO: writeup
+--
+
+## 3. Why not become a layer 2 Ethereum rollup?
+
+When it comes to scalability, everyone, their parents and parrots has an
+opinion. Let's begin with a hard fact: no decentralized layer 1 computer will
+ever achieve VISA-level scalability. That is not a pessimistic projection, but a
+direct consequence of the overhead of consensus, the size of Earth and the speed
+of light. Because of that, layer 2 solutions are proposed to improve throughput,
+allowing computations to take place off-chain, in such way that that only the
+final result, plus some proof, must be submitted to the principal network. This
+increases the network scalability considerably.
+
+With that in mind, one might ask: if layer 2 solutions increase scalability, and
+if the HVM is meant to increase scalability, then why not just make HVM an
+Ethereum layer 2? That question makes as much sense as asking why don't running
+shoes make pasta cook faster. These are categorically different things. Layer 2
+solutions are algorithms that allow the network to find the result of certain
+computations without having to run them to begin with. HVM is a way to actually
+run these computations faster.
+
+A question that does make sense, though, is: if layer 2 is the only long-term
+solution for scalability anyway, then why even bother with a faster layer 1? The
+thing is, even if that is the case, layer 2 solutions still rely on the layer 1
+for disputes, so, all things equal, a faster, safer layer 1 will result in
+better layer 2 solutions. Moreover, while there are some great layer 2
+solutions, truth is, no matter how well designed some of them are, there is a
+common issue in all of them: they all make some kind of compromise or impact the
+user experience in some way. Moving apps or computations in and out is an
+overhead. If an app could operate efficiently on the layer 1, it should never
+resort to moving to layer 2. A faster layer 1 increases the set of apps that
+don't need to be moved out.
+
+For example, optimistic rollups are just a fancy way of saying that someone will
+compute the app's state outside and send it to the network, which will blidntly
+trust that it is correct. If the submitter lies and someone notices, a dispute
+mechanism is triggered, halting the app until it is resolved, and punishing the
+lier. The clever bit is that the fact the dispute mechanism exists means it is
+almost never used, allowing most computations to be performed offchain.
+
+This is a great idea that works very well in practice, but it brings a lot of
+complications. The fact someone has complete write control over an app's state
+is worrisome. If a fraud goes unnoticed, that party can to do anything with the
+app's memory. A network dominated by optimistic rollups is inherently less
+robust than a traditional layer 1, where computations are independently
+validated by every node. The question is: is it worth? Let's see the numbers.
+
+From [@corwintines's
+article](https://ethereum.org/en/developers/docs/scaling/optimistic-rollups/#:~:text=Optimistic%20rollups%20sit%20in%20parallel,or%20%22notarise%22%20the%20transaction.)
+on [ethereum.org](ethereum.org), optimistic rollups are claimed to provide
+10-100x improvements in scalability. In our [comparison
+table](#comparison-table), though, we claim HVM apps offer 10-434x improvements
+over EVM onchain, without optimistic rollups! In other words, due to the sheer
+performance of the HVM, Kindelia apps are as scalable as layer 2 Ethereum apps,
+without the uncomfortable compromise of having someone with full write access
+over app states. And a layer 2 on top of Kindelia would possibly increase that
+10-100x further. It seems like the Ethereum community spent an lot of effort
+thinking of ways to avoid the EVM because it is terribly slow, but they didn't
+bother asking if they could replace it with something faster to begin with.
+
+A different, more cutting-edge solution, is that of zero-knowledge proofs, which
+allow replacing the dispute mechanism by a cryptographic proof that the computed
+result is correct. A layer 2 based on zk-starks would greatly increase the
+network throughput. In fact, zk-snarks could even be attached to the layer 1, so
+that a layer 2 wasn't even be needed. Users could submit the result of their
+transactions directly, and nodes would just update the network state, without
+even running the EVM. This idea is amazing and, if delivered properly, would,
+honestly, be inherently superior to running apps in a virtual machine, like the
+HVM. This idea isn't without complications, though.
+
+First, zero knowledge proofs are new, unstandardized, complex cryptographic
+primitives. If any vulnerability is found in them, the network will be doomed.
+Moreover, their sheer complexity make the protocol much harder to implement.
+Kindelia's reference node has less than 10k lines of code, which promotes client
+diversity, allowing independent parties to implement their own nodes, decreasing
+our roles as lead developers and figureheads. Decentralized projects should aim
+not just for technical decentralization, but political decentralization matters
+too. In that sense, project based on zero knowledge proofs will never be as
+decentralized as a simple network which anyone can audit, implement and
+understand.
+
+Second, one of the most important features of decentralized projects is the fact
+users can manually audit all the computations that resulted in a specific
+balance or state, and zk-proofs prevent that. Compare, for example, Bitcoin to
+zCash. On Bitcoin, anyone can easily navigate the entire history of a Bitcoin
+all the way to the block where it was minted, and the circulating supply is
+crystal clear. On zCash, this isn't possible at all. There could be billions of
+ZEC coins generated from an exploit lying in someone's wallet, and nobody would
+notice. Zero knowledge proofs would do that, to the entire network state.
+Finally, computation isn't the main 
+
+Third, computation isn't the only factor impacting scalability. In fact, it
+isn't even the most relevant. SSTORE is, by far, the most problematic operation,
+and it is expensive because it increases the state size. Nor zero knowledge
+proofs, nor HVM, can do anything about that. Now, reused SSTOREs, i.e.,
+rewriting state without growing the total size, can be massively improved. HVM
+improves it by replacing merkle trees by reversible heaps, which are just cheap
+layered buffers. An hypothetical zero knowledge network could do the same. As
+for Ethereum, its layer 1 already relies on patricia trees, so, unless it
+replaces the entire store machinery, dynamic apps like virual game worlds will
+never be viable on layer 1.
+
