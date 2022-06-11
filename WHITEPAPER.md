@@ -136,11 +136,28 @@ run {
 }
 ```
 
+You can run it offline by installing Kindelia and entering the command below:
+
+```bash
+# runs a kindelia block, displaying:
+# - a list of each deployed ctr/fun
+# - the result of each run{} block
+# - total used mana and size
+kindelia run block_1.kdl
+```
+
 When a Kindelia node runs that block, the global function `Sum` will be defined
 forever inside the network. Note how it follows a functional style, closely
 resembling Haskell's equational notation. Kindelia functions aren't compiled to
 fit stack machines: they run natively as is, because beta reduction and pattern
 matching are primitive, O(1) opcodes on the HVM.
+
+Other than defining constructors and functions, blocks can also evaluate
+side-effective actions inside `run {}` statements. These operate like Haskell's
+`IO` monad. Inside them, users can query information from the blockchain, call
+other functions, save and load a persistent state. Note that the `run{}`
+statement shown on this example is not very useful, since it just performs a
+pure computation and returns, without saving any state.
 
 Kindelia's term language is lazy and linear, which means it works very similarly
 to Haskell's runtime, except variables can't be used more than once, which is
@@ -150,12 +167,6 @@ which allows values to be cloned incrementally. Check
 [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md) for more info on
 how the HVM works.
 
-Other than defining constructors and functions, blocks can also evaluate
-side-effective actions inside `run {}` statements. These operate like Haskell's
-`IO` monad. Inside them, users can query information from the blockchain, call
-other functions, save and load a persistent state. Note that the `run{}`
-statement shown here is "useless": it just performs a computation and returns
-without saving any state.
 
 Block #2: defining stateful functions
 -------------------------------------
