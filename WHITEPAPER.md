@@ -53,9 +53,10 @@ Table of Contents
   * [On simplicity](#on-simplicity)
   * [Summary](#in-short)
 * [Notes](#notes)
-  * [Why create a cryptocurrency?](#1-why-create-a-cryptocurrency)
-  * [Why Nakamoto Consensus (Proof of Work)?](#2-why-nakamoto-consensus-proof-of-work)
-  * [Why not become a layer 2 Ethereum rollup?](#3-why-not-become-a-layer-2-ethereum-rollup)
+  * [Why create a cryptocurrency?](#why-create-a-cryptocurrency)
+  * [Why not include a currency?](#why-not-include-a-currency)
+  * [Why Nakamoto Consensus (Proof of Work)?](#why-nakamoto-consensus-proof-of-work)
+  * [Why not become a layer 2 Ethereum rollup?](#why-not-become-a-layer-2-ethereum-rollup)
 
 Introduction
 ============
@@ -1477,7 +1478,7 @@ Notes
 
 TODO: Additional notes, disclaimers go here.
 
-## 1. Why create a cryptocurrency?
+## Why create a cryptocurrency?
 
 *“Your scientists were so preoccupied with whether they could, they didn't stop to think if they should.”*
 
@@ -1535,7 +1536,111 @@ applications, the power of living forever, and that's the whole point that makes
 them valuable. Perhaps not as valuable as the hype and price tickers let us
 believe. But who is to blame, the tech, or the greed of speculative markets?
 
-## 2. Why Nakamoto Consensus (Proof of Work)?
+## Why not include a currency?
+
+Many criticize crypto projects that end up creating an associated token, even in
+cases where such a token isn't necessary, because their network already provides
+one that would serve the purpose. But few people ask raise the same criticisms
+for crypto computers, like Ethereum? Do they actually need a token? We don't
+think so, and, if that is the case, then including one would be as dishonest as
+most utility tokens.
+
+One may wonder how an Ethereum-like network could operate without block rewards
+and miner fees, which are the core reasons it needs a native token, but both
+problems have a simple solution. For block rewards, user-deployed currencies and
+apps can implement a "Reward" functionality that grants tokens and assets to the
+current block miner:
+
+
+```c
+// CatCoin kindly grants 100 cat tokens to each block miner!
+
+!(CatCoin action) {
+  ...
+
+  // If this block > last_mined_block:
+  //   grants the block miner #100 tokens
+  (CatCoin {Reward miner}) =
+    !gblk block_num
+    !bind last_mint = (CatCoin.get_last_mint)
+    if (> block_num last_mint) then
+      !eval (CatCoin.send_tokens #100 miner)
+      !eval (CatCoin.set_last_mint block_num)
+      !done #0
+    else
+      !done #0
+  
+  ...
+}
+
+// To collect his reward, the block miner just adds an unsigned
+// run{} block with all the rewards he wants to collect:
+
+run {
+  !call ~ (CatCoin {Reward 'Alice'})
+  !call ~ (FurArena {Reward 'Alice'})
+  !call ~ (FrogSwap {Reward 'Alice'})
+  !done #0
+}
+```
+
+That way, miners get not just ETH, or just BTC, or any single token, but rather
+a constellation of gifts from built-in apps, as an kind incentive for them to
+keep contributing to the network's security. Everyone wins with this exchange.
+
+In a similar fashion, users can pay miner fees by including an extra payment at
+the end of their transactions. For example:
+
+```c
+// A run statement signed by Bob, who can't mine a block
+run {
+
+  // Do whatever Bob wants to do
+  !call ~ (WorldOfCat {Cast 'TailWhip'})
+  !call ~ (AlpacaSwap {Buy 'AlpaCoin' #50 #666})
+  !call ~ (LionChurch {Marry 'Alice'})
+
+  // Pays 42 Kold coins to the miner
+  !call miner (BlockMiner {Get})
+  !call ~     (Kold {Send #42 miner}) // pls include me, thx bye
+
+  !done #0
+
+} sign {
+  000123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+}
+```
+
+Bob wants to interact with 3 apps, but don't have the time or resources to mine
+his own block. As such, he writes a `run{}` statement, performs the desired
+transactions and, before ending, gives 42 Kold coins to the block miner. He then
+signs the statement and broadcasts it to the network. Miners will be incentived
+to include it in order to collect the Kold coins, in the exact same way they're
+incentived by Ether fees, except without a native, hardcoded token, using any
+user-submitted token instead.
+
+If Kindelia doesn't need a native token to exist, then it won't have a native
+token, because that's our ethics work - simple as that. But, then, how do we
+raise funds? That is a separate question, which, we believe, must have a
+separate answer. Ethereum, for example, minted and sold, out of thin air, more
+than 50% of its total supply, before the network was released, and an additional
+5% was granted to the Ethereum Foundation. We don't think that is wrong: whoever
+designed the network has the right to dictate it is rules, and there is nothing
+wrong with that. Furthermore, from that presale came all the funding that
+allowed Ethereum to exist, and that is a great thing. But, on the long term,
+that agressively centralized distribution isn't aligned with the decentralized
+vision it sells, and, as such, I intend to make it differently.
+
+Kindelia Foundation, the non-profit entity, will launch a token on Kindelia,
+which it will use to fund its future developments, including the maintenance of
+the network, ecosystem apps, as well as next-gen HVM compilers and processors.
+But that token will be launched as a normal app, under the same conditions as
+every other, with no privileged position on the network's code. If the token
+fails, the network can still exist, independent of its creator; as long, of
+course, as other developers, miners and users decide to keep it alive. That
+said, we believe we're doing a superb job, and hope Kindelia doesn't fire us! :)
+
+## Why Nakamoto Consensus (Proof of Work)?
 
 One of the main design goals of Kindelia is to have a simple, small reference
 implementation, promoting client diversity and decreasing our roles as
@@ -1574,7 +1679,7 @@ which, with sadness in our hearts, we do not know how to address right now. But
 Kindelia should absolutely migrate to proof of stake one day, if an algorithm is
 proven to be secure and simple enough not to impact the network's robustness.
 
-## 3. Why not become a layer 2 Ethereum rollup?
+## Why not become a layer 2 Ethereum rollup?
 
 When it comes to scalability, everyone, their parents and parrots has an
 opinion. Let's begin with a hard fact: no decentralized layer 1 computer will
