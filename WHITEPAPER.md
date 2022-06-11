@@ -1320,28 +1320,29 @@ blame, the tech, or the greed of speculative markets?
 
 One of the main design goals of Kindelia is to have a simple, small reference
 implementation, promoting client diversity and decreasing our roles as
-figureheads. Blockchain projects spend a lot of effort to achieve technical
-decentralization, but not enough of them account for political decentralization.
-Proof of stake algorithms, while obviously superior in theory - after all,
-having the option, who would anyone choose to waste energy? - are, compared to
-proof of work, very hard to implement. Maintaining a PoS core would greatly
-increase the network's complexity, decrease client diversity, increase attack
-vectors, and put a lot of power in the hands of core developers. All these
-things go against the very philosophy of Kindelia, as it aims to be the most
-stable, robust, decentralized computer conceivable.
+figureheads. Blockchain projects spend too much effort trying to achieve
+technical decentralization, but not enough of them care about political
+decentralization. Proof of stake algorithms, while obviously superior in
+theory - after all, having the option, why would anyone choose to waste energy? - are,
+compared to proof of work, very hard to implement. Maintaining a PoS core would
+greatly increase the network's complexity, decrease client diversity, increase
+attack vectors, and require more core developers, increasing their power. All
+these things go against the very philosophy of Kindelia, as it aims to be the
+most stable, robust, decentralized computer conceivable.
 
 Furthermore, despite the greatly increased complexity, every PoS algorithm
 designed to date is strictly weaker than PoW, providing less guarantess. For
-example, in [a comment](https://ethresear.ch/t/explaining-the-liveness-guarantee/4228/3) about
+example, in [a
+comment](https://ethresear.ch/t/explaining-the-liveness-guarantee/4228/3) about
 50/50 netsplits, Vitalik Buterin notes that such events are extremelly unlikely,
 and that protecting the network against such cases is overkill. I agree with his
 thoughts, and I believe, and hope, that humanity will never find itself in a
 situation where two sides of the world go completely out of communication for
-weeks due to some catastrophic event. But **if** that does happen, I like the
+weeks due to some catastrophic event. But if that does happen, I like the
 concept of having a functioning digital economy capable of recovering. Kindelia
-is designed to be the most secure blockchain, the back-up plan in case
-everything goes wrong, and, as such, relying on Proof of Work is on par with
-that goal.
+is designed to be that back-up plan, an ultra-secure, meteor-proof blockchain
+that will still be there in case everything goes wrong, and, as such, relying on
+Proof of Work is on par with that goal.
 
 Finally, there is a common misconception that proof of stake increases a
 network's layer 1 scalability, efficiency and throughput. That is simply not
