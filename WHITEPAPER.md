@@ -159,7 +159,7 @@ The table below compares some attributes of each network:
 **cost: beta reduction**        | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
 **cost: pattern matching**      | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
 **cost: SSTORE (reuse)**        | ```     0 bits ~      5,000,000 op/s  ``` | ```      5,000 gas ~        460 op/s  ```
-**cost: SSTORE (alloc)**        | ```   128 bits ~             16 op/s  ``` | ```     20,000 gas ~     11,500 op/s  ```
+**cost: SSTORE (alloc)**        | ```   128 bits ~             16 op/s  ``` | ```     20,000 gas ~        115 op/s  ```
 
 The costs in this table were defined based on HVM benchmarks, using modern
 mid-end processors.
@@ -174,7 +174,7 @@ single statement, the actual throughput can be much higher, and it achieves that
 with a fraction of Ethereum's maximum blockchain growth.
 
 Computation-wise, Kindelia's layer-1 throughput is up to 434x higher, due to the
-HVM and stateful heaps respectivelly. Kindelia's functional opcodes allows it to
+HVM and stateful heaps respectivelly. Kindelia's functional opcodes allow it to
 host programs compiled from secure languages like Haskell, Idris, Agda and Kind,
 which is simply not economically viable on Ethereum. Kindelia's zero-cost reused
 SSTORE enables highly dynamic applications like layer-1 MMORPGs, which is also
