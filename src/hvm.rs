@@ -1,3 +1,240 @@
+// Welcome to Kindelia's High-order Virtual Machine!
+// =================================================
+//
+// This file is a modification of the project hosted on github.com/kindelia/hvm, and it makes a
+// series of changes with the goal of serving the requirements of a peer-to-peer computer.
+//
+// Kindelia-HVM's memory model
+// ---------------------------
+// 
+// The runtime memory consists of just a vector of u128 pointers. That is:
+//
+//   Mem ::= Vec<Ptr>
+// 
+// A pointer has 3 parts:
+//
+//   Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
+//
+// Where:
+//
+//   T : u8  is the pointer tag 
+//   A : u60 is the 1st value
+//   B : u60 is the 2nd value
+//
+// There are 12 possible tags:
+//
+//   Tag | Val | Meaning  
+//   ----| --- | -------------------------------
+//   DP0 |   0 | a variable, bound to the 1st argument of a duplication
+//   DP1 |   1 | a variable, bound to the 2nd argument of a duplication
+//   VAR |   2 | a variable, bound to the one argument of a lambda
+//   ARG |   3 | an used argument of a lambda or duplication
+//   ERA |   4 | an erased argument of a lambda or duplication
+//   LAM |   5 | a lambda
+//   APP |   6 | an application
+//   SUP |   7 | a superposition
+//   CTR |   8 | a constructor
+//   FUN |   9 | a function
+//   OP2 |  10 | a numeric operation
+//   NUM |  11 | a 120-bit number
+//
+// The semantics of the 1st and 2nd values depend on the pointer tag. 
+//
+//   Tag | 1st ptr value                | 2nd ptr value
+//   --- | ---------------------------- | ---------------------------------
+//   DP0 | the duplication label        | points to the duplication node
+//   DP1 | the duplication label        | points to the duplication node
+//   VAR | not used                     | points to the lambda node
+//   ARG | not used                     | points to the variable occurrence
+//   ERA | not used                     | not used
+//   LAM | not used                     | points to the lambda node
+//   APP | not used                     | points to the application node
+//   SUP | the duplication label        | points to the superposition node
+//   CTR | the constructor name         | points to the constructor node
+//   FUN | the function name            | points to the function node
+//   OP2 | the operation name           | points to the operation node
+//   NUM | the most significant 60 bits | the least significant 60 bits
+//
+// Notes:
+//
+//   1. The duplication label is an internal value used on the DUP-SUP rule.
+//   2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
+//   3. NUM pointers don't point anywhere, they just store the number directly.
+//
+// A node is a tuple of N pointers stored on sequential memory indices.
+// The meaning of each index depends on the node. There are 6 types:
+//
+//   Duplication Node:
+//   - [0] => either an ERA or an ARG pointing to the 1st variable location
+//   - [1] => either an ERA or an ARG pointing to the 2nd variable location
+//   - [2] => pointer to the duplicated expression
+//
+//   Lambda Node:
+//   - [0] => either and ERA or an ERA pointing to the variable location
+//   - [1] => pointer to the lambda's body
+//   
+//   Application Node:
+//   - [0] => pointer to the lambda
+//   - [1] => pointer to the argument
+//
+//   Superposition Node:
+//   - [0] => pointer to the 1st superposed value
+//   - [1] => pointer to the 2sd superposed value
+//
+//   Constructor Node:
+//   - [0] => pointer to the 1st field
+//   - [1] => pointer to the 2nd field
+//   - ... => ...
+//   - [N] => pointer to the Nth field
+//
+//   Function Node:
+//   - [0] => pointer to the 1st argument
+//   - [1] => pointer to the 2nd argument
+//   - ... => ...
+//   - [N] => pointer to the Nth argument
+//
+//   Operation Node:
+//   - [0] => pointer to the 1st operand
+//   - [1] => pointer to the 2nd operand
+//
+// Notes:
+//
+//   1. Duplication nodes DON'T have a body. They "float" on the global scope.
+//   2. Lambdas and Duplications point to their variables, and vice-versa.
+//   3. ARG pointers can only show up inside Lambdas and Duplications.
+//   4. Nums and vars don't require a node type, because they're unboxed.
+//   5. Function and Constructor arities depends on the user-provided definition.
+//
+// Example 0:
+// 
+//   Term:
+//
+//    {Tuple2 #7 #8}
+//
+//   Memory:
+//
+//     Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
+//     0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
+//     0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
+//
+//   Notes:
+//     
+//     1. This is just a pair with two numbers.
+//     2. The root pointer is not stored on memory.
+//     3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
+//     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
+//
+// Example 1:
+//
+//   Term:
+//
+//     λ~ λb b
+//
+//   Memory:
+//
+//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+//     0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
+//     0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
+//     0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
+//
+//   Notes:
+//
+//     1. This is a λ-term that discards the 1st argument and returns the 2nd.
+//     2. The 1st lambda's argument not used, thus, an ERA pointer.
+//     3. The 2nd lambda's argument points to its variable, and vice-versa.
+//     4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
+//     
+// Example 2:
+//
+//   Term:
+//     
+//     λx dup x0 x1 = x; (* x0 x1)
+//
+//   Memory:
+//
+//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+//     0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
+//     0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
+//     0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
+//     0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
+//     0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
+//     0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
+//
+//   Notes:
+//     
+//     1. This is a lambda function that squares a number.
+//     2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
+//     3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
+//     4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
+//     5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+//     6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
+//     7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
+//     8. In-memory size is different to, and larger than, serialization size.
+//
+// How is Kindelia's HVM different from the conventional HVM?
+// ----------------------------------------------------------
+//
+// First, it is a 128-bit, rather than a 64-bit architecture. It can store 120-bit unboxed
+// integers, up from 32-bit unboxed uints stored by the conventional HVM. It allows addressing up
+// to 2^60 function names, up from 2^30 allowed by the conventional HVM, which isn't enough for
+// Kindelia. This change comes with a cost of about ~30% reduced performance, which is acceptable.
+//
+// Second, it implements a reversible heap machinery, which allows saving periodic snapshots of
+// past heap states, and jump back to them. This is necessary because of decentralized consensus.
+// If we couldn't revert to past states, we'd have to recompute the entire history anytime there is
+// a block reorg, which isn't practical. On Ethereum, this is achieved by storing the state as a
+// Map<U256> using Merkle Trees, which, being an immutable structure, allows non-destructive
+// insertions and rollbacks. We could do the same, but we decided to further leverage the HVM by
+// saving its whole heap as the network state. In other words, applications are allowed to persist
+// arbitrary HVM structures on disk by using the IO.save operation. For example:
+//
+//   (IO.save {Cons #1 {Cons #2 {Cons #3 {Nil}}}} ...)
+//
+// The operation above would persist the [1,2,3] list as the app's state, with no need for
+// serialization. As such, when the app stops running, that list will not be freed from memory.
+// Instead, the heap will persist between blocks, so the app just needs to store a pointer to
+// the list's head, allowing it to retrieve its state later on. This is only possible because the
+// HVM is garbage-collection free, otherwise, leaks would overwhelm the memory.
+//
+// How are reversible heaps stored?
+// --------------------------------
+//
+// Kindelia's heap is set to grow exactly 8 GB per year. In other words, 10 years after the genesis
+// block, the heap size will be of exactly 80 GB. But that doesn't mean a full node will be able
+// to operate with even that much ram, because Kindelia must also save snapshots. Right now, it
+// stores at most 10 snapshots, trying to keep them distributed with exponentially decreasing ages.
+// For example, if we're on block 1000, it might store a snapshot of blocks 998, 996, 992, 984,
+// 968, 872, 744 and 488, which is compatible with the fact that longer-term rollbacks are
+// incresingly unlikely. If there is a rollback to block 990, we just go back to the earliest
+// snapshot, 984, and reprocess blocks 985-1000, which is much faster than recomputing the entire
+// history.
+//
+// In order to keep a good set of snapshots, we must be able to create and discard these heaps.
+// Obviously, if this operation required copying the entire heap buffer every block, it would
+// completely destroy the network's performance. As such, instead, heaps only actually store
+// data that changed. So, using the example above, if a list was allocated and persisted on block 980,
+// it will actually be stored on the snapshot 984, which is the earliest snapshot after 980. If the
+// runtime, now on block 1000, attempts to read the memory where the list is allocated, it will
+// actually receive a signal that it is stored on a past heap, and look for it on 996 and 992,
+// until it is found on block 984.
+//
+// To achieve that, hashmaps are used to store defined functions and persistent state pointers.  If
+// a key isn't present, Kindelia will look for it on past snapshots. As for the runtime's memory,
+// where HVM constructors and lambdas are stored, it doesn't use a hashmap. Instead, it uses a
+// Nodes type, which stores data in a big pre-allocated u128 buffer, and keeps track of used memory
+// slots in a separate buffer. We then reserve a constant, U128_NONE, to signal that an index isn't
+// present, and must be found ina  past heap. This is different from 0, which means that this index
+// is empty, and can be allocated. This allows for fast write, read, disposal and merging of heaps,
+// but comes at the cost of wasting a lot of memory. Because of that, Kindelia's current
+// implementation demands up to ~10x more available memory than the current heap size, but that
+// could be reduced ten-fold by replacing vectors by a hashmap, or by just saving fewer past heaps.
+//
+// Other than a 128-bit architecture and reversible heaps, Kindelia's HVM is similar to the
+// conventional HVM. This file will be extensively commented, with in-depth explanations of every
+// little aspect, from the HVM's memory model to interaction net rewrite rules.
+
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};
@@ -17,6 +254,17 @@ use crate::util;
 // Types
 // -----
 
+// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
+// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
+// later on. Below is a description of each variant:
+// - Var: variable. Note an u128 is used instead of a string. It stores up to 20 6-bit letters.
+// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
+// - Lam: an affine lambda. Written as: `λvar body`.
+// - App: a lambda application. Written as: `(! f x)`.
+// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
+// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
+// - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
+// - Op2: a numeric operation.
 /// A native HVM term
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
@@ -31,6 +279,22 @@ pub enum Term {
 }
 
 // A native HVM 60-bit machine integer operation
+// - Add: addition
+// - Sub: subtraction
+// - Mul: multiplication
+// - Div: division
+// - Mod: modulo
+// - And: bitwise and
+// - Or : bitwise or
+// - Xor: bitwise xor
+// - Shl: shift left
+// - Shr: shift right
+// - Ltn: less than
+// - Lte: less than or equal
+// - Eql: equal
+// - Gte: greater than or equal
+// - Gtn: greater than
+// - Neq: not equal
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Oper {
   Add, Sub, Mul, Div,
@@ -42,17 +306,20 @@ pub enum Oper {
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 
-/// A rewrite rule (equation)
+// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
   pub lhs: Term,
   pub rhs: Term,
 }
 
-// A function (vector of rules)
+// A function, which is just a vector of rewrite rules.
 pub type Func = Vec<Rule>;
 
-// A left-hand side variable in a rewrite rule (equation)
+// The types below are used by the runtime to evaluate rewrite rules. They store the same data as
+// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
+
+// Compiled information about a left-hand side variable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
   pub name : u128,         // this variable's name
@@ -61,16 +328,16 @@ pub struct Var {
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
-// A compiled rewrite rule
+// Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<Lnk>,          // left-hand side matching conditions
+  pub cond: Vec<Ptr>,          // left-hand side matching conditions
   pub vars: Vec<Var>,          // left-hand side variable locations
   pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
   pub body: Term,              // right-hand side body of rule
 }
 
-// A compiled function
+// Compiled information about a function.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   func: Func,           // the original function
@@ -79,26 +346,29 @@ pub struct CompFunc {
   rules: Vec<CompRule>, // vector of rules
 }
 
-// A file is a map of `FuncID -> Function`
+// A file, which is just a map of `FuncID -> CompFunc`
+// It is used to find a function when it is called, in order to apply its rewrite rules.
 #[derive(Clone, Debug)]
-pub struct File {
+pub struct Funcs {
   pub funcs: Map<Arc<CompFunc>>,
 }
 
 // A map of `FuncID -> Arity`
+// It is used in many places to find the arity (argument count) of functions and constructors.
 #[derive(Clone, Debug)]
-pub struct Arit {
+pub struct Arits {
   pub arits: Map<u128>,
 }
 
-// A map of `FuncID -> Lnk`, pointing to a function's state
+// A map of `FuncID -> Ptr`
+// It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug)]
-pub struct Disk {
-  pub links: Map<Lnk>,
+pub struct Store {
+  pub links: Map<Ptr>,
 }
 
-/// Can point to a node, a variable, or hold an unboxed value
-pub type Lnk = u128;
+// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
+pub type Ptr = u128;
 
 /// A global statement that alters the state of the blockchain
 pub enum Statement {
@@ -109,7 +379,7 @@ pub enum Statement {
 
 // A mergeable vector of u128 values
 #[derive(Debug, Clone)]
-pub struct Blob {
+pub struct Nodes {
   data: Vec<u128>,
   used: Vec<usize>,
 }
@@ -117,18 +387,18 @@ pub struct Blob {
 // HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug)]
 pub struct Heap {
-  pub uuid: u128, // unique identifier
-  pub blob: Blob, // memory block holding HVM nodes
-  pub disk: Disk, // points to stored function states
-  pub file: File, // function codes
-  pub arit: Arit, // function arities
-  pub tick: u128, // time counter
-  pub funs: u128, // total function count
-  pub dups: u128, // total dups count
-  pub rwts: u128, // total graph rewrites
-  pub mana: u128, // total mana cost
-  pub size: i128, // total used memory (in 64-bit words)
-  pub next: u128, // memory index that *may* be empty
+  pub uuid: u128,  // unique identifier
+  pub blob: Nodes, // memory block holding HVM nodes
+  pub disk: Store, // points to stored function states
+  pub file: Funcs, // function codes
+  pub arit: Arits, // function arities
+  pub tick: u128,  // time counter
+  pub funs: u128,  // total function count
+  pub dups: u128,  // total dups count
+  pub rwts: u128,  // total graph rewrites
+  pub mana: u128,  // total mana cost
+  pub size: i128,  // total used memory (in 64-bit words)
+  pub next: u128,  // memory index that *may* be empty
 }
 
 // A serialized Heap
@@ -401,6 +671,7 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
+// Tuple types
 ctr {Tuple0}
 ctr {Tuple1 x0}
 ctr {Tuple2 x0 x1}
@@ -415,38 +686,49 @@ ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
 ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
 ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
 
+// Used to pretty-print names
 ctr {Name name}
 
+// Below, we declare the built-in IO operations
+
+// IO.done returns from an IO operation
 ctr {IO.DONE expr}
 fun (IO.done expr) {
   (IO.done expr) = {IO.DONE expr}
 }
 
+// IO.take recovers an app's stored state
 ctr {IO.TAKE then}
 fun (IO.take then) {
   (IO.take then) = {IO.TAKE then}
 }
 
+// IO.save stores the app's state
 ctr {IO.SAVE expr then}
 fun (IO.save expr then) {
   (IO.save expr then) = {IO.SAVE expr then}
 }
 
+// IO.call calls another IO operation, assigning
+// the caller name to the current subject name
 ctr {IO.CALL name args then}
 fun (IO.call name args then) {
   (IO.call name args then) = {IO.CALL name args then}
 }
 
+// IO.name returns the name of the current subject
 ctr {IO.NAME then}
 fun (IO.name then) {
   (IO.name then) = {IO.NAME then}
 }
 
+// IO.from returns the name of the current caller
 ctr {IO.FROM then} 
 fun (IO.from then) {
   (IO.from then) = {IO.FROM then}
 }
 
+// Works like IO.take, but clones the state
 fun (IO.load cont) {
   (IO.load cont) =
     {IO.TAKE @x
@@ -455,6 +737,7 @@ fun (IO.load cont) {
     (! cont x1)}}
 }
 
+// This is here for debugging. Will be removed.
 ctr {Count.Inc}
 ctr {Count.Get}
 fun (Count action) {
@@ -497,10 +780,10 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.blob.read(idx);
   }
-  fn write_disk(&mut self, fid: u128, val: Lnk) {
+  fn write_disk(&mut self, fid: u128, val: Ptr) {
     return self.disk.write(fid, val);
   }
-  fn read_disk(&self, fid: u128) -> Option<Lnk> {
+  fn read_disk(&self, fid: u128) -> Option<Ptr> {
     return self.disk.read(fid);
   }
   fn write_file(&mut self, fid: u128, fun: Arc<CompFunc>) {
@@ -585,19 +868,19 @@ impl Heap {
     self.next = U128_NONE;
   }
   fn serialize(&self) -> SerializedHeap {
-    // Serializes Blob
+    // Serializes Nodes
     let mut blob_buff : Vec<u128> = vec![];
     for used_index in &self.blob.used {
       blob_buff.push(*used_index as u128);
       blob_buff.push(self.blob.data[*used_index]);
     }
-    // Serializes Disk
+    // Serializes Store
     let mut disk_buff : Vec<u128> = vec![];
     for (fnid, lnk) in &self.disk.links {
       disk_buff.push(*fnid as u128);
       disk_buff.push(*lnk as u128);
     }
-    // Serializes File
+    // Serializes Funcs
     let mut file_buff : Vec<u128> = vec![];
     for (fnid, func) in &self.file.funcs {
       let mut func_buff = util::u8s_to_u128s(&mut bits::serialized_func(&func.func).to_bytes());
@@ -605,7 +888,7 @@ impl Heap {
       file_buff.push(func_buff.len() as u128);
       file_buff.append(&mut func_buff);
     }
-    // Serializes Arit
+    // Serializes Arits
     let mut arit_buff : Vec<u128> = vec![];
     for (fnid, arit) in &self.arit.arits {
       arit_buff.push(*fnid as u128);
@@ -631,7 +914,7 @@ impl Heap {
     };
   }
   fn deserialize(&mut self, serial: &SerializedHeap) {
-    // Deserializes Blob
+    // Deserializes Nodes
     let mut i = 0;
     while i < serial.blob.len() {
       let idx = serial.blob[i + 0];
@@ -639,7 +922,7 @@ impl Heap {
       self.write(idx as usize, val);
       i += 2;
     }
-    // Deserializes Disk
+    // Deserializes Store
     let mut i = 0;
     while i < serial.disk.len() {
       let fnid = serial.disk[i + 0];
@@ -647,7 +930,7 @@ impl Heap {
       self.write_disk(fnid, lnk);
       i += 2;
     }
-    // Deserializes File
+    // Deserializes Funcs
     let mut i = 0;
     while i < serial.file.len() {
       let fnid = serial.file[i * 2 + 0];
@@ -657,7 +940,7 @@ impl Heap {
       self.write_file(fnid, Arc::new(func));
       i += 1;
     }
-    // Deserializes Arit
+    // Deserializes Arits
     for i in 0 .. serial.arit.len() / 2 {
       let fnid = serial.file[i * 2 + 0];
       let arit = serial.file[i * 2 + 1];
@@ -711,9 +994,9 @@ pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
     blob: init_heap_data(U128_NONE),
-    disk: Disk { links: init_map() },
-    file: File { funcs: init_map() },
-    arit: Arit { arits: init_map() },
+    disk: Store { links: init_map() },
+    file: Funcs { funcs: init_map() },
+    arit: Arits { arits: init_map() },
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
@@ -724,14 +1007,14 @@ pub fn init_heap() -> Heap {
   }
 }
 
-pub fn init_heap_data(zero: u128) -> Blob {
-  return Blob {
+pub fn init_heap_data(zero: u128) -> Nodes {
+  return Nodes {
     data: vec![zero; HEAP_SIZE as usize],
     used: vec![],
   };
 }
 
-impl Blob {
+impl Nodes {
   fn write(&mut self, idx: usize, val: u128) {
     unsafe {
       let got = self.data.get_unchecked_mut(idx);
@@ -781,11 +1064,11 @@ fn show_buff(vec: &[u128]) -> String {
   return result;
 }
 
-impl Disk {
-  fn write(&mut self, fid: u128, val: Lnk) {
+impl Store {
+  fn write(&mut self, fid: u128, val: Ptr) {
     self.links.insert(fid as u64, val);
   }
-  fn read(&self, fid: u128) -> Option<Lnk> {
+  fn read(&self, fid: u128) -> Option<Ptr> {
     self.links.get(&(fid as u64)).map(|x| *x)
   }
   fn clear(&mut self) {
@@ -800,7 +1083,7 @@ impl Disk {
   }
 }
 
-impl File {
+impl Funcs {
   fn write(&mut self, fid: u128, val: Arc<CompFunc>) {
     self.funcs.entry(fid as u64).or_insert(val);
   }
@@ -819,7 +1102,7 @@ impl File {
   }
 }
 
-impl Arit {
+impl Arits {
   fn write(&mut self, fid: u128, val: u128) {
     self.arits.entry(fid as u64).or_insert(val);
   }
@@ -873,7 +1156,7 @@ impl Runtime {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
     return create_term(self, term, loc, vars_data);
   }
 
@@ -888,7 +1171,7 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  pub fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
+  pub fn collect(&mut self, term: Ptr, mana: u128) -> Option<()> {
     collect(self, term, mana)
   }
 
@@ -896,13 +1179,13 @@ impl Runtime {
     collect(self, self.read(loc as usize), mana)
   }
 
-  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
+  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Ptr> {
     //let main = self.alloc_term(term);
     //let done = self.run_io(subject, caller, main);
     //return done;
   //}
 
-  //fn run_io_from_code(&mut self, code: &str) -> Option<Lnk> {
+  //fn run_io_from_code(&mut self, code: &str) -> Option<Ptr> {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
@@ -916,18 +1199,18 @@ impl Runtime {
     return self.run_statements(&read_statements(code).1);
   }
 
-  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
+  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Ptr> {
     compute_at(self, loc, mana)
   }
 
-  pub fn compute(&mut self, lnk: Lnk, mana: u128) -> Option<Lnk> {
+  pub fn compute(&mut self, lnk: Ptr, mana: u128) -> Option<Ptr> {
     let host = alloc_lnk(self, lnk);
     let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Some(done);
   }
 
-  pub fn show_term(&self, lnk: Lnk) -> String {
+  pub fn show_term(&self, lnk: Ptr) -> String {
     return show_term(self, lnk, None);
   }
 
@@ -973,7 +1256,7 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
+  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Ptr> {
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term));
     match get_tag(term) {
@@ -1448,11 +1731,11 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
+  pub fn write_disk(&mut self, fid: u128, val: Ptr) {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
-  pub fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
+  pub fn read_disk(&mut self, fid: u128) -> Option<Ptr> {
     return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
   }
 
@@ -1568,53 +1851,53 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // Constructors
 // ------------
 
-pub fn Var(pos: u128) -> Lnk {
+pub fn Var(pos: u128) -> Ptr {
   (VAR * TAG) | pos
 }
 
-pub fn Dp0(col: u128, pos: u128) -> Lnk {
+pub fn Dp0(col: u128, pos: u128) -> Ptr {
   (DP0 * TAG) | (col * EXT) | pos
 }
 
-pub fn Dp1(col: u128, pos: u128) -> Lnk {
+pub fn Dp1(col: u128, pos: u128) -> Ptr {
   (DP1 * TAG) | (col * EXT) | pos
 }
 
-pub fn Arg(pos: u128) -> Lnk {
+pub fn Arg(pos: u128) -> Ptr {
   (ARG * TAG) | pos
 }
 
-pub fn Era() -> Lnk {
+pub fn Era() -> Ptr {
   ERA * TAG
 }
 
-pub fn Lam(pos: u128) -> Lnk {
+pub fn Lam(pos: u128) -> Ptr {
   (LAM * TAG) | pos
 }
 
-pub fn App(pos: u128) -> Lnk {
+pub fn App(pos: u128) -> Ptr {
   (APP * TAG) | pos
 }
 
-pub fn Par(col: u128, pos: u128) -> Lnk {
+pub fn Par(col: u128, pos: u128) -> Ptr {
   (SUP * TAG) | (col * EXT) | pos
 }
 
-pub fn Op2(ope: u128, pos: u128) -> Lnk {
+pub fn Op2(ope: u128, pos: u128) -> Ptr {
   (OP2 * TAG) | (ope * EXT) | pos
 }
 
-pub fn Num(val: u128) -> Lnk {
+pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
   (NUM * TAG) | val
 }
 
-pub fn Ctr(fun: u128, pos: u128) -> Lnk {
+pub fn Ctr(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 60, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
   (CTR * TAG) | (fun * EXT) | pos
 }
 
-pub fn Fun(fun: u128, pos: u128) -> Lnk {
+pub fn Fun(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 60, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
@@ -1622,43 +1905,43 @@ pub fn Fun(fun: u128, pos: u128) -> Lnk {
 // Getters
 // -------
 
-pub fn get_tag(lnk: Lnk) -> u128 {
+pub fn get_tag(lnk: Ptr) -> u128 {
   lnk / TAG
 }
 
-pub fn get_ext(lnk: Lnk) -> u128 {
+pub fn get_ext(lnk: Ptr) -> u128 {
   (lnk / EXT) & 0xFFF_FFFF_FFFF_FFFF
 }
 
-pub fn get_val(lnk: Lnk) -> u128 {
+pub fn get_val(lnk: Ptr) -> u128 {
   lnk & 0xFFF_FFFF_FFFF_FFFF
 }
 
-pub fn get_num(lnk: Lnk) -> u128 {
+pub fn get_num(lnk: Ptr) -> u128 {
   lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
 }
 
-//pub fn get_ari(lnk: Lnk) -> u128 {
+//pub fn get_ari(lnk: Ptr) -> u128 {
   //(lnk / ARI) & 0xF
 //}
 
-pub fn get_loc(lnk: Lnk, arg: u128) -> u128 {
+pub fn get_loc(lnk: Ptr, arg: u128) -> u128 {
   get_val(lnk) + arg
 }
 
 // Memory
 // ------
 
-pub fn ask_lnk(rt: &Runtime, loc: u128) -> Lnk {
+pub fn ask_lnk(rt: &Runtime, loc: u128) -> Ptr {
   rt.read(loc as usize)
   //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
-pub fn ask_arg(rt: &Runtime, term: Lnk, arg: u128) -> Lnk {
+pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
   ask_lnk(rt, get_loc(term, arg))
 }
 
-pub fn link(rt: &mut Runtime, loc: u128, lnk: Lnk) -> Lnk {
+pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
   rt.write(loc as usize, lnk);
   if get_tag(lnk) <= VAR {
     let pos = get_loc(lnk, get_tag(lnk) & 0x01);
@@ -1705,8 +1988,8 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
-  let mut stack : Vec<Lnk> = Vec::new();
+pub fn collect(rt: &mut Runtime, term: Ptr, mana: u128) -> Option<()> {
+  let mut stack : Vec<Ptr> = Vec::new();
   let mut next = term;
   let mut dups : Vec<u128> = Vec::new();
   loop {
@@ -1883,8 +2166,8 @@ pub fn is_linear(term: &Term) -> bool {
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
+  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<u128>) {
     //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
     if name == VAR_NONE {
       link(rt, loc, Era());
@@ -2131,14 +2414,14 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   });
 }
 
-pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
+pub fn create_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> Ptr {
   let node = alloc(rt, 2);
   link(rt, node + 0, func);
   link(rt, node + 1, argm);
   App(node)
 }
 
-pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> Lnk {
+pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> Ptr {
   let node = alloc(rt, args.len() as u128);
   for i in 0 .. args.len() {
     link(rt, node + i as u128, args[i]);
@@ -2146,18 +2429,18 @@ pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> Lnk {
   Fun(fun, node)
 }
 
-pub fn alloc_lnk(rt: &mut Runtime, term: Lnk) -> u128 {
+pub fn alloc_lnk(rt: &mut Runtime, term: Ptr) -> u128 {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
 }
 
-pub fn alloc_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> u128 {
+pub fn alloc_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> u128 {
   let app = create_app(rt, func, argm);
   return alloc_lnk(rt, app);
 }
 
-pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
+pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
   let fun = create_fun(rt, fun, args);
   return alloc_lnk(rt, fun);
 }
@@ -2165,7 +2448,7 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
+pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr, mana: u128) -> Option<()> {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
@@ -2174,7 +2457,7 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
   return Some(());
 }
 
-pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
+pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
   let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
@@ -2437,16 +2720,16 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
             let b_u = get_num(arg1);
             let res = match op {
               // U120
-              ADD => (a_u +  b_u) & NUM_MASK,
-              SUB => (a_u -  b_u) & NUM_MASK,
-              MUL => (a_u *  b_u) & NUM_MASK,
-              DIV => (a_u /  b_u) & NUM_MASK,
-              MOD => (a_u %  b_u) & NUM_MASK,
+              ADD => a_u.wrapping_add(b_u) & NUM_MASK,
+              SUB => a_u.wrapping_sub(b_u) & NUM_MASK,
+              MUL => a_u.wrapping_mul(b_u) & NUM_MASK,
+              DIV => a_u.wrapping_div(b_u) & NUM_MASK,
+              MOD => a_u.wrapping_rem(b_u) & NUM_MASK,
               AND => (a_u &  b_u) & NUM_MASK,
               OR  => (a_u |  b_u) & NUM_MASK,
               XOR => (a_u ^  b_u) & NUM_MASK,
-              SHL => (a_u << b_u) & NUM_MASK,
-              SHR => (a_u >> b_u) & NUM_MASK,
+              SHL => a_u.wrapping_shl(b_u as u32) & NUM_MASK,
+              SHR => a_u.wrapping_shr(b_u as u32) & NUM_MASK,
               LTN => u128::from(a_u <  b_u),
               LTE => u128::from(a_u <= b_u),
               EQL => u128::from(a_u == b_u),
@@ -2504,7 +2787,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -2657,7 +2940,7 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 /// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
+pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Ptr> {
   enum StackItem {
     LinkResolver(u128),
     Host(u128, u128)
@@ -2737,7 +3020,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
 // Debug
 // -----
 
-pub fn show_lnk(x: Lnk) -> String {
+pub fn show_lnk(x: Ptr) -> String {
   if x == 0 {
     String::from("~")
   } else {
@@ -2775,15 +3058,15 @@ pub fn show_rt(rt: &Runtime) -> String {
 }
 
 // TODO: this should be renamed to "readback", and should return a term instead of a string. 
-pub fn show_term(rt: &Runtime, term: Lnk, focus: Option<u128>) -> String {
+pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   enum StackItem {
-    Term(Lnk),
+    Term(Ptr),
     Str(String),
   }
   let mut names: HashMap<u128, String> = HashMap::new();
   fn find_lets(
     rt: &Runtime,
-    term: Lnk,
+    term: Ptr,
     names: &mut HashMap<u128, String>,
     focus: Option<u128>
   ) -> String {
@@ -2857,7 +3140,7 @@ pub fn show_term(rt: &Runtime, term: Lnk, focus: Option<u128>) -> String {
     text
   }
 
-  fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
+  fn go(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {
@@ -2972,15 +3255,15 @@ pub fn show_term(rt: &Runtime, term: Lnk, focus: Option<u128>) -> String {
   text
 }
 
-pub fn readback(rt: &Runtime, term: Lnk) -> Term {
+pub fn readback(rt: &Runtime, term: Ptr) -> Term {
   enum StackItem {
-    Term(Lnk),
-    Resolver(Lnk),
+    Term(Ptr),
+    Resolver(Ptr),
   }
   let mut names: HashMap<u128, String> = HashMap::new();
   fn dups(
     rt: &Runtime,
-    term: Lnk,
+    term: Ptr,
     names: &mut HashMap<u128, String>,
   ) -> Term {
     let mut lets: HashMap<u128, u128> = HashMap::new();
@@ -3059,7 +3342,7 @@ pub fn readback(rt: &Runtime, term: Lnk) -> Term {
     }
   }
 
-  fn expr(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> Term {
+  fn expr(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>) -> Term {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {

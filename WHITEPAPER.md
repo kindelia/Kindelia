@@ -47,8 +47,10 @@ Table of Contents
 * [Technical Overview](#technical-overview)
   * [Blocks and Statements](#blocks-and-statements)
   * [Expressions](#expressions)
-  * [Effects](#effects)
+  * [IO Effects](#io-effects)
   * [Computation Rules](#computation-rules)
+  * [Memory Model](#memory-model)
+  * [Genesis Block](#genesis-block)
   * [Garbage Collection](#garbage-collection)
   * [Table of Costs](#table-of-costs)
   * [Serialization](#serialization)
@@ -485,16 +487,8 @@ run {
 Note that `load` and `save` aren't side-effective functions. Instead, they
 *describe* effects using a pure datatype, exactly like Haskell's IO. These
 effects can be passed as first-class expressions, and are evaluated when placed
-directly inside a `run{}` block. In Haskellish pseudo-code:
-
-```
-data IO s a
-  = Done { retr :: a }                                             -- returns a value
-  | Take { cont :: s -> (IO s a) }                                 -- loads the state
-  | Save { expr :: s, cont :: () -> (IO s a) }                     -- saves the state
-  | Call { func :: Name, args :: (ArgsOf func), cont :: (IO s a) } -- calls a function
-  | From { cont :: Name -> (IO s a) }                              -- gets the caller name
-```
+directly inside a `run{}` block. For a complete list, see the section [IO
+Effects](#io-effects) section.
 
 A function's state can be any arbitrary HVM structure: a number, a list, a tree.
 There is no forced, costly and error-prone `U256` serialization, like on
@@ -678,25 +672,38 @@ So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
 human-readable source codes.
 
-Effects
--------
+IO Effects
+----------
 
 Finally, Kindelia has side-effective operations that allow functions to save
-states, request information from the network, etc.:
+states, request information from the network. These operations are performed
+using a pure description type that work similarly to Haskell's IO. In Haskellish
+pseudocode, it would look like:
 
-```c
-(IO.take           @r ...) // takes this function's internal state
-(IO.save expr      @r ...) // saves this function's internal state
-(IO.call func args @r ...) // calls another IO function
-(IO.from           @r ...) // gets the caller name
-... TODO ...               // ...
-(IO.done expr)             // returns from the IO action
 ```
+data IO s a
+  = Done { retr :: a }                                             -- returns a value
+  | Take { cont :: s -> (IO s a) }                                 -- takes the state
+  | Save { expr :: s, cont :: () -> (IO s a) }                     -- saves the state
+  | Call { func :: Name, args :: (ArgsOf func), cont :: (IO s a) } -- calls a function
+  | Name { cont :: Name -> (IO s a) }                              -- gets the subject name
+  | From { cont :: Name -> (IO s a) }                              -- gets the caller name
+```
+
 
 Note that, since Kindelia's language is pure, these side-effects are only
 performed when placed directly inside top-level `run{}` statements, otherwise
-they are treated as pure expressions, exactly like Haskell's IO type. To receive
-values from the external environment, a continuation (`@r ...`) is used.
+they are treated as pure expressions, exactly like Haskell's IO. To receive
+values from the external environment, a continuation (`@r ...`) is used. The
+reason the code above isn't actual Haskell is that some of these constructors
+would require dependent types to be expressed properly.
+
+Note also that the `IO.take` operation actually removes the contract state,
+rather than copying it. That's a consequence of HVM's linearity. This allows
+implementing efficient functions that don't require cloning the state, but if
+you don't include the state back later with `IO.save`, it will be emptied. As an
+alternative, an `IO.load` function is defined on the genesis block, which works
+exactly like `IO.take`, except it will clone the state.
 
 Computation Rules
 -----------------
@@ -801,6 +808,8 @@ y <- (K a1 b1 c1 ...)
 
 ### Erasure Duplication
 
+Erases a duplication.
+
 ```
 dup x y = ~
 ----------- DUP-ERA
@@ -884,30 +893,265 @@ global pattern-matching rewrite rule.
 (user-defined)
 ```
 
-Garbage Collection
-------------------
+Memory Model
+------------
 
-Kindelia represents its state as reversible runtime heaps. In other words, it
-would be as if we stored the memory of a JavaScript engine, or of Haskell's STG
-runtime, as the network state. An `IO.save` operation merely links the active
-function name to a pointer to a runtime expression. That is why it is has
-basically no cost, and is only restricted by the total state size limit.
+HVM's memory model is documented on `src/hvm.rs`, and trascribed below:
 
-This idea has an obvious problem, though: if there is any kind of space leak on
-the runtime, the blockchain size will grow permanently. This could be fixed with
-a global garbage collector, but that raises the question: who pays for it?
-Fortunatelly, we don't have to deal with this question, since HVM doesn't
-require a global search pass to collect garbage. Running an IO statement will
-always free all the memory it used, so, the only way the heap can grow is by
-using `IO.save`.
+```
+HVM's runtime memory consists of a vector of u128 pointers. That is:
 
-In order for that to be possible, the HVM has an auxiliary garbage collection
-procedure that is triggered whenever a value goes out of scope. This happens
-when, and only when, a function or lambda that doesn't use its variable is
-applied to some value. In that case, that value must be freed. Note that there
-is no global "search" procedure, nor reference counting system, required to find
-what memory must be freed. As soon as a value is unreachable, its memory is
-released, cheaply and efficiently.
+  Mem ::= Vec<Ptr>
+
+A pointer has 3 parts:
+
+  Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
+
+Where:
+
+  T : u8  is the pointer tag 
+  A : u60 is the 1st value
+  B : u60 is the 2nd value
+
+There are 12 possible tags:
+
+  Tag | Val | Meaning  
+  ----| --- | -------------------------------
+  DP0 |   0 | a variable, bound to the 1st argument of a duplication
+  DP1 |   1 | a variable, bound to the 2nd argument of a duplication
+  VAR |   2 | a variable, bound to the one argument of a lambda
+  ARG |   3 | an used argument of a lambda or duplication
+  ERA |   4 | an erased argument of a lambda or duplication
+  LAM |   5 | a lambda
+  APP |   6 | an application
+  SUP |   7 | a superposition
+  CTR |   8 | a constructor
+  FUN |   9 | a function
+  OP2 |  10 | a numeric operation
+  NUM |  11 | a 120-bit number
+
+The semantics of the 1st and 2nd values depend on the pointer tag. 
+
+  Tag | 1st ptr value                | 2nd ptr value
+  --- | ---------------------------- | ---------------------------------
+  DP0 | the duplication label        | points to the duplication node
+  DP1 | the duplication label        | points to the duplication node
+  VAR | not used                     | points to the lambda node
+  ARG | not used                     | points to the variable occurrence
+  ERA | not used                     | not used
+  LAM | not used                     | points to the lambda node
+  APP | not used                     | points to the application node
+  SUP | the duplication label        | points to the superposition node
+  CTR | the constructor name         | points to the constructor node
+  FUN | the function name            | points to the function node
+  OP2 | the operation name           | points to the operation node
+  NUM | the most significant 60 bits | the least significant 60 bits
+
+Notes:
+
+  1. The duplication label is an internal value used on the DUP-SUP rule.
+  2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
+  3. NUM pointers don't point anywhere, they just store the number directly.
+
+A node is a tuple of N pointers stored on sequential memory indices.
+The meaning of each index depends on the node. There are 6 types:
+
+  Duplication Node:
+  - [0] => either an ERA or an ARG pointing to the 1st variable location
+  - [1] => either an ERA or an ARG pointing to the 2nd variable location
+  - [2] => pointer to the duplicated expression
+
+  Lambda Node:
+  - [0] => either and ERA or an ERA pointing to the variable location
+  - [1] => pointer to the lambda's body
+  
+  Application Node:
+  - [0] => pointer to the lambda
+  - [1] => pointer to the argument
+
+  Superposition Node:
+  - [0] => pointer to the 1st superposed value
+  - [1] => pointer to the 2sd superposed value
+
+  Constructor Node:
+  - [0] => pointer to the 1st field
+  - [1] => pointer to the 2nd field
+  - ... => ...
+  - [N] => pointer to the Nth field
+
+  Function Node:
+  - [0] => pointer to the 1st argument
+  - [1] => pointer to the 2nd argument
+  - ... => ...
+  - [N] => pointer to the Nth argument
+
+  Operation Node:
+  - [0] => pointer to the 1st operand
+  - [1] => pointer to the 2nd operand
+
+Notes:
+
+  1. Duplication nodes DON'T have a body. They "float" on the global scope.
+  2. Lambdas and Duplications point to their variables, and vice-versa.
+  3. ARG pointers can only show up inside Lambdas and Duplications.
+  4. Nums and vars don't require a node type, because they're unboxed.
+  5. Function and Constructor arities depends on the user-provided definition.
+
+Example 0:
+
+  Term:
+
+   {Tuple2 #7 #8}
+
+  Memory:
+
+    Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
+    0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
+    0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
+
+  Notes:
+    
+    1. This is just a pair with two numbers.
+    2. The root pointer is not stored on memory.
+    3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
+    4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
+
+Example 1:
+
+  Term:
+
+    λ~ λb b
+
+  Memory:
+
+    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+    0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
+    0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
+    0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
+
+  Notes:
+
+    1. This is a λ-term that discards the 1st argument and returns the 2nd.
+    2. The 1st lambda's argument not used, thus, an ERA pointer.
+    3. The 2nd lambda's argument points to its variable, and vice-versa.
+    4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
+    
+Example 2:
+
+  Term:
+    
+    λx dup x0 x1 = x; (* x0 x1)
+
+  Memory:
+
+    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+    0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
+    0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
+    0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
+    0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
+    0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
+    0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
+
+  Notes:
+    
+    1. This is a lambda function that squares a number.
+    2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
+    3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
+    4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
+    5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+    6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
+    7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
+    8. In-memory size is different to, and larger than, serialization size.
+```
+
+HVM's runtime is essentially a lazy graph traversal machine that finds redexes
+(expressions subject to computation rules) and rewrites them until there is no
+more work to do. It does so while automatically allocating and freeing memory of
+expressions that go out of scope. When a term's reduction is complete, HVM's
+memory will be fully emptied, leaving no leaks, which is what allows Kindelia to
+replace state trees by heap snapshots. The only exception is when an app
+explicitly asks to preserve an expression by using the `IO.save` operation,
+which will simply store a pointer to the app's state, and keep it in memory.
+That is why Kindelia's "SSTORE" has zero-cost: the operation itself is very
+cheap as it just saves a pointer. We only have to "charge" an app when it uses
+more of the available heap space.
+
+Genesis Block
+-------------
+
+Kindelia starts the network by running a single block before the first mined
+block. This is called the genesis block. That block installs some utilities on
+the network, as shown below:
+
+```c
+// Tuple types
+ctr {Tuple0}
+ctr {Tuple1 x0}
+ctr {Tuple2 x0 x1}
+ctr {Tuple3 x0 x1 x2}
+ctr {Tuple4 x0 x1 x2 x3}
+ctr {Tuple5 x0 x1 x2 x3 x4}
+ctr {Tuple6 x0 x1 x2 x3 x4 x5}
+ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
+ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+
+// Used to pretty-print names
+ctr {Name name}
+
+// Below, we declare the built-in IO operations
+
+// IO.done returns from an IO operation
+ctr {IO.DONE expr}
+fun (IO.done expr) {
+  (IO.done expr) = {IO.DONE expr}
+}
+
+// IO.take recovers an app's stored state
+ctr {IO.TAKE then}
+fun (IO.take then) {
+  (IO.take then) = {IO.TAKE then}
+}
+
+// IO.save stores the app's state
+ctr {IO.SAVE expr then}
+fun (IO.save expr then) {
+  (IO.save expr then) = {IO.SAVE expr then}
+}
+
+// IO.call calls another IO operation, assigning
+// the caller name to the current subject name
+ctr {IO.CALL name args then}
+fun (IO.call name args then) {
+  (IO.call name args then) = {IO.CALL name args then}
+}
+
+// IO.name returns the name of the current subject
+ctr {IO.NAME then}
+fun (IO.name then) {
+  (IO.name then) = {IO.NAME then}
+}
+
+// IO.from returns the name of the current caller
+ctr {IO.FROM then} 
+fun (IO.from then) {
+  (IO.from then) = {IO.FROM then}
+}
+
+// Works like IO.take, but clones the state
+fun (IO.load cont) {
+  (IO.load cont) =
+    {IO.TAKE @x
+    dup x0 x1 = x;
+    {IO.SAVE x0 @~
+    (! cont x1)}}
+}
+```
 
 Table of Costs
 --------------
