@@ -308,9 +308,10 @@ compile, resulting in a denial-of-service (DoS) attack that would stop the
 entire network. That is why Ethereum can't compile contracts, and why Cardano
 can't use the GHC, even though its contracts are written in Haskell.
 
-The HVM achieves its performance with a single-pass compilation of serialized
-programs to runtime objects. That pass is so cheap that it doesn't even need to
-be accounted for, making the HVM, unlike GHC, capable of dealing with arbitrary
+The HVM achieves its performance without a slow compiler. Instead, a single pass
+converts serialized programs coming from blocks straight into runtime objects on
+the node's memory. That pass is so cheap that it doesn't even need to be
+accounted for, making the HVM, unlike GHC, capable of dealing with arbitrary
 user-submitted code without exposing DoS vectors.
 
 ### 2. Computation costs are measurable, including space and time.
