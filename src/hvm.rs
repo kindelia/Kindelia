@@ -1403,9 +1403,9 @@ impl Runtime {
           //println!("- subj: {}", subj);
           //println!("- addr: {}", addr);
           let host = self.alloc_term(expr);
+          // eprintln!("  => run term:\n{}", show_term(self,ask_lnk(self, host), None));
+          // eprintln!("  => run term:\n{}", view_term(&readback(self, ask_lnk(self, host))));
           if let Some(done) = self.run_io(subj, 0, host, mana_lim) {
-          // eprintln!("  => run term: {}", show_term(self,ask_lnk(self, host))); // ?? why this is showing dups?
-          // eprintln!("  => run term: {}", view_term(&readback(self, ask_lnk(self, host))));
             if let Some(done) = self.compute(done, mana_lim) {
               let done_code = self.show_term(done);
               if let Some(()) = self.collect(done, mana_lim) {
@@ -1737,6 +1737,12 @@ impl Runtime {
 
   pub fn read_disk(&mut self, fid: u128) -> Option<Ptr> {
     return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
+  }
+
+  pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
+    let host = self.read_disk(fid)?;
+    let term = readback(self, host);
+    Some(term)
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
@@ -3075,12 +3081,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
     let mut count: u128 = 0;
     let mut stack = vec![term];
     let mut text = String::new();
-    while !stack.is_empty() {
-      // if let Some(focus) = focus {
-      //   if focus == term {
-      //     text.push_str("$");
-      //   }
-      // }
+    while !stack.is_empty() { 
       let term = stack.pop().unwrap();
       match get_tag(term) {
         LAM => {
@@ -3217,13 +3218,24 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               output.push(format!("#{}", numb));
             }
             CTR => {
-              let func = get_ext(term);
-              output.push(format!("{{{}", u128_to_name(func)));
+              let name = get_ext(term);
+              let mut arit = rt.get_arity(name);
+              let mut name = view_name(name);
+              // Pretty print names
+              if name == "Name" && arit == 1 {
+                let arg = ask_arg(rt, term, 0);
+                if get_tag(arg) == NUM {
+                  name = format!("Name '{}'", view_name(get_num(arg)));
+                  arit = 0; // erase arit to avoid for
+                }
+              }
+              output.push(format!("{{{}", name));
               stack.push(StackItem::Str("}".to_string()));
-              let arit = rt.get_arity(func);
+              
               for i in (0..arit).rev() {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
                 stack.push(StackItem::Str(" ".to_string()));
+      
               }
             }
             FUN => {
@@ -3958,7 +3970,7 @@ pub fn view_term(term: &Term) -> String {
       // Pretty print names
       if name == "Name" && args.len() == 1 {
         if let Term::Num { numb } = args[0] {
-          return format!("{{Name {}}}", numb);
+          return format!("{{Name '{}'}}", view_name(numb));
         }
       }
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");

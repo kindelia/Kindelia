@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender, Receiver};
-use futures::sync::oneshot;
+use tokio::sync::oneshot;
 
 use crate::util::*;
 use crate::bits::*;
@@ -67,24 +67,27 @@ type RequestAnswer<T> = oneshot::Sender<T>;
 
 // TODO: store and serve tick where stuff where last changed
 pub enum Request {
-  Double {
-    value: u128,
-    answer: RequestAnswer<u128>,
-  },
   GetTick {
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<u128>,
+  },
+  GetBlocks {
+    range: (i64, i64),
+    tx: RequestAnswer<Vec<Block>>,
   },
   GetBlock {
     block_height: u128,
-    answer: RequestAnswer<Block>,
+    tx: RequestAnswer<Block>,
   },
-  GetFunc {
+  GetFunctions {
+    tx: RequestAnswer<Vec<u128>>,
+  },
+  GetFunction {
     name: u128,
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<u128>,
   },
   GetState {
     name: u128,
-    answer: RequestAnswer<u128>,
+    tx: RequestAnswer<Option<Term>>,
   },
 }
 
@@ -620,13 +623,20 @@ pub fn node_compute_block(node: &mut Node, block: &Block) {
   node.runtime.tick();
 }
 
-pub fn get_longest_chain(node: &Node) -> Vec<Block> {
+pub fn get_longest_chain(node: &Node, num: Option<usize>) -> Vec<Block> {
   let mut longest = Vec::new();
   let mut bhash = node.tip;
+  let mut count = 0;
   while node.block.contains_key(&bhash) && bhash != ZERO_HASH() {
     let block = node.block.get(&bhash).unwrap();
     longest.push(block.clone());
     bhash = block.prev;
+    count += 1;
+    if let Some(num) = num {
+      if count >= num {
+        break;
+      }
+    }
   }
   longest.reverse();
   return longest;
@@ -641,19 +651,31 @@ pub fn node_message_receive(node: &mut Node) {
 pub fn node_handle_request(node: &mut Node, request: Request) {
   // TODO: handle unwraps
   match request {
-    Request::Double { value, answer } => {
-      answer.send(value * 2).unwrap();
-    }
-    Request::GetTick { answer } => {
+    Request::GetTick { tx: answer } => {
       answer.send(node.runtime.get_tick()).unwrap();
     }
-    Request::GetBlock { block_height, answer } => {
+    Request::GetBlocks { range, tx: answer } => {
+      let (start, end) = range;
+      debug_assert!(start <= end);
+      debug_assert!(end == -1);
+      let num = (end - start + 1) as usize;
+      let blocks = get_longest_chain(node, Some(num));
+      answer.send(blocks).unwrap();
+    },
+    Request::GetBlock { block_height, tx: answer } => {
       // TODO
       let block = node.block.get(&node.tip).expect("No tip block");
       answer.send(block.clone()).unwrap();
     },
-    Request::GetFunc { name, answer } => todo!(),
-    Request::GetState { name, answer } => todo!(),
+    Request::GetFunctions { tx } => {
+      let funcs = vec![name_to_u128("Count")];
+      tx.send(funcs).unwrap();
+    },
+    Request::GetFunction { name, tx: answer } => todo!(),
+    Request::GetState { name, tx: answer } => {
+      let state = node.runtime.read_disk_as_term(name);
+      answer.send(state).unwrap();
+    },
   }
 }
 

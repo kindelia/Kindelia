@@ -40,11 +40,11 @@ priority-queue = "1.2.1"
 # termion = "1.5.6"
 
 # == API == #
-futures = "0.1.31"
 json = "0.12.4"
 serde = { version = "1.0.137", features = [] } # "derive"
 serde_json = "1.0"
 tokio = { version = "1.19.1", features = ["full"] }
+tokio-stream = { version = "0.1.9", features = ["net"] }
 warp = "0.3"
 
 # [dev-dependencies]

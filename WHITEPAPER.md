@@ -1540,10 +1540,10 @@ believe. But who is to blame, the tech, or the greed of speculative markets?
 
 Many criticize crypto projects that end up creating an associated token, even in
 cases where such a token isn't necessary, because their network already provides
-one that would serve the purpose. But few people ask raise the same criticisms
-for crypto computers, like Ethereum? Do they actually need a token? We don't
-think so, and, if that is the case, then including one would be as dishonest as
-most utility tokens.
+one that would serve the purpose. But why nobody raises the same criticisms for
+crypto computers, like Ethereum? Do they actually need a token? We don't think
+so, and, if that is the case, then including one would be as dishonest as most
+utility tokens.
 
 One may wonder how an Ethereum-like network could operate without block rewards
 and miner fees, which are the core reasons it needs a native token, but both
@@ -1588,8 +1588,8 @@ That way, miners get not just ETH, or just BTC, or any single token, but rather
 a constellation of gifts from built-in apps, as an kind incentive for them to
 keep contributing to the network's security. Everyone wins with this exchange.
 
-In a similar fashion, users can pay miner fees by including an extra payment at
-the end of their transactions. For example:
+In a similar fashion, users can attach miner fees by including an extra payment
+at the end of their transactions. For example:
 
 ```c
 // A run statement signed by Bob, who can't mine a block
@@ -1616,8 +1616,8 @@ his own block. As such, he writes a `run{}` statement, performs the desired
 transactions and, before ending, gives 42 Kold coins to the block miner. He then
 signs the statement and broadcasts it to the network. Miners will be incentived
 to include it in order to collect the Kold coins, in the exact same way they're
-incentived by Ether fees, except without a native, hardcoded token, using any
-user-submitted token instead.
+incentived by Ether fees, except replacing the native, hardcoded token, by any
+user-submitted assets.
 
 If Kindelia doesn't need a native token to exist, then it won't have a native
 token, because that's our ethics work - simple as that. But, then, how do we
@@ -1625,20 +1625,21 @@ raise funds? That is a separate question, which, we believe, must have a
 separate answer. Ethereum, for example, minted and sold, out of thin air, more
 than 50% of its total supply, before the network was released, and an additional
 5% was granted to the Ethereum Foundation. We don't think that is wrong: whoever
-designed the network has the right to dictate it is rules, and there is nothing
+designed the network has the right to dictate its rules, and there is nothing
 wrong with that. Furthermore, from that presale came all the funding that
 allowed Ethereum to exist, and that is a great thing. But, on the long term,
 that agressively centralized distribution isn't aligned with the decentralized
 vision it sells, and, as such, I intend to make it differently.
 
 Kindelia Foundation, the non-profit entity, will launch a token on Kindelia,
-which it will use to fund its future developments, including the maintenance of
+which will be used to fund its future developments, including the maintenance of
 the network, ecosystem apps, as well as next-gen HVM compilers and processors.
 But that token will be launched as a normal app, under the same conditions as
 every other, with no privileged position on the network's code. If the token
-fails, the network can still exist, independent of its creator; as long, of
-course, as other developers, miners and users decide to keep it alive. That
-said, we believe we're doing a superb job, and hope Kindelia doesn't fire us! :)
+fails, then we'll not be able to keep working, but the network will still exist,
+independent of its creators, as long, of course, as other developers, miners and
+users decide to keep it alive. That said, we believe we're doing a superb job,
+and hope Kindelia doesn't fire us! :)
 
 ## Why Nakamoto Consensus (Proof of Work)?
 

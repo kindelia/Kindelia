@@ -21,7 +21,7 @@ run {
   !done (LeFun #3)
 }
 
-// Should not work, now it's leaking 21 cells
+// Should not work
 run {
   !done (LeFun2 #777)
 }
