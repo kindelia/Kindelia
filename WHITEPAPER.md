@@ -423,7 +423,8 @@ Other than defining constructors and functions, blocks can also evaluate
 side-effective actions inside `run {}` statements. These operate like Haskell's
 `IO` monad. Inside them, users can query information from the blockchain, call
 other functions, save and load a persistent state. Note that the `run{}`
-statement shown here is "useless": it just performs a computation and returns.
+statement shown here is "useless": it just performs a computation and returns
+without saving any state.
 
 Block #2: defining stateful functions
 -------------------------------------
