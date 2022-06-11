@@ -1739,6 +1739,12 @@ impl Runtime {
     return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
   }
 
+  pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
+    let host = self.read_disk(fid)?;
+    let term = readback(self, host);
+    Some(term)
+  }
+
   pub fn get_arity(&self, fid: u128) -> u128 {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
       return arity;
