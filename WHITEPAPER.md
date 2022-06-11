@@ -943,7 +943,7 @@ mana_limit = 10000000 * (block_number + 1)
 ```
 
 If a block passes that limit, it is rejected by nodes. Note that this limit
-accumulates: if a block doesn't fully use it, the next block can use, it, and so
+accumulates: if a block doesn't fully use it, the next block can use it, and so
 on. In effect, that causes times of low usage to "lend" computation to times of
 high usage, making Kindelia somewhat resistant to performance losses due to
 high-traffic applications or periods, while still keeping the maximum
