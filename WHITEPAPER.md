@@ -1329,54 +1329,60 @@ direct consequence of the overhead of consensus, the size of Earth and the speed
 of light. Because of that, layer 2 solutions are proposed to improve throughput,
 allowing computations to take place off-chain, in such way that that only the
 final result, plus some proof, must be submitted to the principal network. This
-increases the network scalability considerably.
+increases scalability considerably.
 
 With that in mind, one might ask: if layer 2 solutions increase scalability, and
-if the HVM is meant to increase scalability, then why not just make HVM an
+if the HVM is also meant to increase scalability, then why not just make HVM an
 Ethereum layer 2? That question makes as much sense as asking why don't running
 shoes make pasta cook faster. These are categorically different things. Layer 2
 solutions are algorithms that allow the network to find the result of certain
 computations without having to run them to begin with. HVM is a way to actually
 run these computations faster.
 
+### Why even bother with a fast layer 1?
+
 A question that does make sense, though, is: if layer 2 is the only long-term
 solution for scalability anyway, then why even bother with a faster layer 1? The
 thing is, even if that is the case, layer 2 solutions still rely on the layer 1
 for disputes, so, all things equal, a faster, safer layer 1 will result in
-better layer 2 solutions. Moreover, while there are some great layer 2
-solutions, truth is, no matter how well designed some of them are, there is a
-common issue in all of them: they all make some kind of compromise or impact the
-user experience in some way. Moving apps or computations in and out is an
-overhead. If an app could operate efficiently on the layer 1, it should never
-resort to moving to layer 2. A faster layer 1 increases the set of apps that
-don't need to be moved out.
+better second layers. Moreover, while there are some great layer 2 solutions,
+truth is, no matter how well designed some of them are, there is a common issue:
+they all make some kind of compromise or impact the user experience in some way.
+Moving apps or computations in and out is an unavoidable overhead. If an app
+could operate efficiently on the layer 1, it would never resort to layer 2. A
+faster layer 1 increases the set of apps that don't need to be moved out.
+
+### On optimistic rollups
 
 For example, optimistic rollups are just a fancy way of saying that someone will
-compute the app's state outside and send it to the network, which will blidntly
+compute the app's state outside and send it to the network, which will blindly
 trust that it is correct. If the submitter lies and someone notices, a dispute
 mechanism is triggered, halting the app until it is resolved, and punishing the
 lier. The clever bit is that the fact the dispute mechanism exists means it is
 almost never used, allowing most computations to be performed offchain.
 
-This is a great idea that works very well in practice, but it brings a lot of
+This is a great idea that works very well in practice, but it brings some nasty
 complications. The fact someone has complete write control over an app's state
-is worrisome. If a fraud goes unnoticed, that party can to do anything with the
-app's memory. A network dominated by optimistic rollups is inherently less
-robust than a traditional layer 1, where computations are independently
-validated by every node. The question is: is it worth? Let's see the numbers.
+is dangerous. If a fraud goes unnoticed, that person can to do anything with the
+app's memory. Not even 51% attacks have that much destructive power. A network
+dominated by optimistic rollups is inherently less robust than a traditional
+layer 1, where computations are independently validated by every node. The
+question is: is it worth? Let's see the numbers.
 
 From [@corwintines's
 article](https://ethereum.org/en/developers/docs/scaling/optimistic-rollups/#:~:text=Optimistic%20rollups%20sit%20in%20parallel,or%20%22notarise%22%20the%20transaction.)
 on [ethereum.org](ethereum.org), optimistic rollups are claimed to provide
 10-100x improvements in scalability. In our [comparison
 table](#comparison-table), though, we claim HVM apps offer 10-434x improvements
-over EVM onchain, without optimistic rollups! In other words, due to the sheer
-performance of the HVM, Kindelia apps are as scalable as layer 2 Ethereum apps,
-without the uncomfortable compromise of having someone with full write access
-over app states. And a layer 2 on top of Kindelia would possibly increase that
-10-100x further. It seems like the Ethereum community spent an lot of effort
-thinking of ways to avoid the EVM because it is terribly slow, but they didn't
-bother asking if they could replace it with something faster to begin with.
+over EVM apps, natively on layer 1, without any kind of rollups! In other words,
+due to the sheer performance of the HVM, Kindelia apps are as scalable as layer
+2 Ethereum apps in that case, without the dangerous compromise of someone having
+full write access over app states. And a layer 2 on top of Kindelia would
+possibly increase that 10-100x further. It seems like Ethereum spent an lot of
+effort thinking in ways to avoid the EVM, because it is very slow. Kindelia cuts
+all the trouble by just replacing it with something much faster to begin with.
+
+### On zero knowledge proofs
 
 A different, more cutting-edge solution, is that of zero-knowledge proofs, which
 allow replacing the dispute mechanism by a cryptographic proof that the computed
@@ -1386,28 +1392,30 @@ that a layer 2 wasn't even be needed. Users could submit the result of their
 transactions directly, and nodes would just update the network state, without
 even running the EVM. This idea is amazing and, if delivered properly, would,
 honestly, be inherently superior to running apps in a virtual machine, like the
-HVM. This idea isn't without complications, though.
+HVM. There is no free lunch, though. This idea has its own complications.
 
 First, zero knowledge proofs are new, unstandardized, complex cryptographic
 primitives. If any vulnerability is found in them, the network will be doomed.
-Moreover, their sheer complexity make the protocol much harder to implement.
-Kindelia's reference node has less than 10k lines of code, which promotes client
-diversity, allowing independent parties to implement their own nodes, decreasing
-our roles as lead developers and figureheads. Decentralized projects should aim
-not just for technical decentralization, but political decentralization matters
-too. In that sense, project based on zero knowledge proofs will never be as
-decentralized as a simple network which anyone can audit, implement and
-understand.
+Moreover, their sheer complexity make the protocol much harder to implement and
+understand. Kindelia's reference node has less than 10k lines of code, and its
+computation rules are all 5-20 lines long. This makes it easy to understand, and
+promotes client diversity, allowing independent parties to implement their own
+nodes, decreasing our roles as lead developers and figureheads. Decentralized
+projects spent a lot of money trying to achieve technical decentralization, but
+not enough of them account for political decentralization, resulting in core
+developers being in a privileged position of power. In that sense, a project
+based on zero knowledge proofs will never be as decentralized as a simpler
+network which anyone can audit, implement and understand.
 
 Second, one of the most important features of decentralized projects is the fact
 users can manually audit all the computations that resulted in a specific
 balance or state, and zk-proofs prevent that. Compare, for example, Bitcoin to
-zCash. On Bitcoin, anyone can easily navigate the entire history of a Bitcoin
+zCash. On Bitcoin, anyone can easily navigate the entire history of a bitcoin
 all the way to the block where it was minted, and the circulating supply is
 crystal clear. On zCash, this isn't possible at all. There could be billions of
 ZEC coins generated from an exploit lying in someone's wallet, and nobody would
-notice. Zero knowledge proofs would do that, to the entire network state.
-Finally, computation isn't the main 
+notice. In the case of decentralized computers, zero knowledge proofs would do
+that, except to the entire network state.
 
 Third, computation isn't the only factor impacting scalability. In fact, it
 isn't even the most relevant. SSTORE is, by far, the most problematic operation,
@@ -1420,3 +1428,13 @@ for Ethereum, its layer 1 already relies on patricia trees, so, unless it
 replaces the entire store machinery, dynamic apps like virual game worlds will
 never be viable on layer 1.
 
+### Conclusion
+
+In short, while layer 2 solutions are the only way to achieve VISA-level
+scalability, they come with unavoidable complications and compromises.
+Optimistic rollups require complex dispute mechanisms with terrible worst-case
+scenarios, zero knowledge proofs rely on unproven cryptography, decrease
+transparency and client diversity, and don't address the other half of the
+scalability bottleneck, which is not computation, but state growth. There is
+value in an efficient, secure, simple layer 1 computation network. Kindelia aims
+to maximize all these aspects, as far as theory allows.
