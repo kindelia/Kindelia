@@ -1468,7 +1468,8 @@ making it inherently independent from its original creators.
 
 Finally, note that we do not claim that Kindelia is *better* than Cardano. It is
 impossible to innovate without trying new things, and it is okay if some ideas
-don't work so well.
+don't work so well. Cardano has great minds, and has everything it takes to
+build a great decentralized computer.
 
 
 Notes
