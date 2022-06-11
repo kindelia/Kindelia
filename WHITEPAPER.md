@@ -963,7 +963,7 @@ bits_limit = 2048 * (block_number + 1)
 ```
 
 That means that, for every second that passes, the state size is allowed to grow
-2048 bits. That is equivalent to an HVM constructor with 8 numeric fields, or 4
+2048 bits. That is equivalent to an HVM constructor with 16 numeric fields, or 8
 HVM lambdas. That amounts to a blockchain state growth of about 8 GB per year.
 Just like mana, this accumulates, so, for example, if there are 3 empty blocks,
 the 4th block will be able to let the blockchain size grow up to 8192 bits.
