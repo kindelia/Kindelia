@@ -1527,9 +1527,9 @@ virtual worlds exist without complicated layer 2 indirections.
 In short, Kindelia is a functional, worldwide computer, capable of hosting
 eternal applications that can't ever be altered or turned off; not by their
 owners, not by governments. And, with formal verification, these applications
-can remain bug-free during their endless lifespans. Kindelia and Ethereum
-are distributed, but that is meant to maximize uptime and security, not
-performance. They aren't meant to beat cloud servers, and anyone who thinks
+can remain bug-free during their endless lifespans. Kindelia and Ethereum are
+distributed, but that is meant to maximize uptime and security, not performance.
+They aren't meant to beat cloud servers in raw throughput, and anyone who thinks
 that simply doesn't get the point. But only these can grant, to their hosted
 applications, the power of living forever, and that's the whole point that makes
 them valuable. Perhaps not as valuable as the hype and price tickers let us
