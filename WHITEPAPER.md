@@ -682,7 +682,7 @@ Notes:
   3. NUM pointers don't point anywhere, they just store the number directly.
 
 A node is a tuple of N pointers stored on sequential memory indices.
-The meaning of each index depends on the node. There are 6 types:
+The meaning of each index depends on the node. There are 7 types:
 
   Duplication Node:
   - [0] => either an ERA or an ARG pointing to the 1st variable location
