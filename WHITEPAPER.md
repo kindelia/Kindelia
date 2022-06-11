@@ -1464,9 +1464,9 @@ proofs, nor HVM, can do anything about that. Now, reused SSTOREs, i.e.,
 rewriting state without growing the total size, can be massively improved. HVM
 does so it by replacing merkle trees by reversible heaps, which are just cheap
 layered buffers. An hypothetical zero knowledge network could do the same. As
-for Ethereum, its layer 1 already relies on patricia trees, so, unless it
-replaces the entire store machinery, dynamic apps like virual game worlds will
-never be viable on layer 1.
+for Ethereum, its layer 1 already relies on Merkle trees, so, unless it replaces
+the entire store machinery, dynamic apps like virual game worlds will never be
+viable on layer 1.
 
 ### Conclusion
 
