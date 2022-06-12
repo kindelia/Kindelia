@@ -220,7 +220,7 @@
 // actually receive a signal that it is stored on a past heap, and look for it on 996 and 992,
 // until it is found on block 984.
 //
-// To achieve that, hashmaps are used to store defined functions and persistent state pointers.  If
+// To achieve that, hashmaps are used to store defined functions and persistent state pointers. If
 // a key isn't present, Kindelia will look for it on past snapshots. As for the runtime's memory,
 // where HVM constructors and lambdas are stored, it doesn't use a hashmap. Instead, it uses a
 // Nodes type, which stores data in a big pre-allocated u128 buffer, and keeps track of used memory

@@ -33,6 +33,7 @@ use crate::util::*;
 fn main() -> Result<(), String> {
   return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
+  //start_node(dirs::home_dir().unwrap().join(".kindelia_3"), Some("example/simple.kdl".to_string()));
   //hvm::test_statements_from_file("./example/block_4.kdl");
   //return Ok(());
 }
