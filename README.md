@@ -1,7 +1,7 @@
 Kindelia
 ========
 
-A peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it ss a complete redesign of Ethereum's idea made by a passionate type theorist. Main differences include:
+A peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea built upon type theoretic foundations. Main differences include:
 
 - There is no native coin. It is just a p2p computer, not a cryptocurrency.
 
