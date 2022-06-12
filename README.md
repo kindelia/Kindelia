@@ -1,7 +1,17 @@
 Kindelia
 ========
 
-A peer-to-peer functional computer where developers can host decentralized apps that stay up forever. It is like a massively simplified Ethereum, with no currency, and greatly increased efficiency and security. It replaces the [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a functional virtual machine capable of running mathematically unbreakable programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind). It also features zero-cost SSTOREs, making dynamic apps massively cheaper.
+A peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it ss a complete redesign of Ethereum's idea made by a passionate type theorist. Main differences include:
+
+- There is no native coin. It is just a p2p computer, not a cryptocurrency.
+
+- The [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), an optimal functional runtime.
+
+- It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind) natively.
+
+- New state engine with zero-cost SSTOREs, allowing dynamic apps, like MMORPGs, to run cheaply on layer 1.
+
+- Everything is much simpler, well-thought and saner in general.
 
 For more information, check the [whitepaper](WHITEPAPER.md).
 
