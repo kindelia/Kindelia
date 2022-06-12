@@ -41,7 +41,7 @@ pub type Transaction = Vec<u8>;
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 // TODO: dashmap?
 //
-// Blocks have 3 states of inclusion:
+// Blocks have 4 states of inclusion:
 //
 //   has wait_list? | is on .waiting? | is on .block? | meaning
 //   -------------- | --------------- | ------------- | ------------------------------------------------------
@@ -717,13 +717,19 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         node_add_block(node, &block);
 
         // Previously, we continously requested missing blocks to neighbors. Now, we removed such
-        // functionality. Instead, we just ask the first missing ancestor once, when we receive a
-        // new block. One issue is that, if this packet is lost, then we will never ask for the
-        // missing ancestor again. But that is actually fine, because nodes are constantly
-        // broadcasting their tips. So, whenever we receive the same tip again, or a new parent of
-        // this tip, we will ask the missing ancestor again. Note that this loop is a little CPU
-        // intensive, since it must traverse the entire history looking for a missing ancestor. As
-        // such, we only do it if the bhash isn't on .block (thus, all ancestors already included).
+        // functionality. Now, when we receive a tip, we find the first missing ancestor, and
+        // immediately ask it to the node that send that tip. That node, then, will send the
+        // missing block, plus a few of its ancestors. This massively improves the amount of time
+        // it will take to download all the missing blocks, and works in any situation. The only
+        // problem is that, since we're not requesting missing blocks continuously, then, if the
+        // packet where we ask the last missing ancestor is dropped, then we will never ask it
+        // again. It will be missing forever. But that does not actually happen, because nodes are
+        // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
+        // tip is received again, which will cause us to ask for that missing ancestor! In other
+        // words, the old functionality of continously requesting missing blocks was redundant and
+        // detrimental. Note that the loop below is slightly CPU hungry, since it requires
+        // traversing the whole history every time we receive the tip. As such, we don't do it when
+        // the received tip is included on .block, which means we already have all its ancestors.
         let bhash = hash_block(&block);
         if !node.block.contains_key(&bhash) {
           let mut missing = bhash;
