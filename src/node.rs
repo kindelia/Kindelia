@@ -123,6 +123,7 @@ pub type SharedInput = Arc<Mutex<String>>;
 pub enum Message {
   PutBlock {
     block: Block,
+    istip: bool,
     peers: Vec<Peer>,
   },
   AskBlock {
@@ -187,7 +188,7 @@ pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
 pub const BLOCKS_PER_PERIOD : u128 = 20;
 
 // How many ancestors do we send together with the requested missing block
-pub const SEND_BLOCK_ANCESTORS : u128 = 64;
+pub const SEND_BLOCK_ANCESTORS : u128 = 64; // FIXME: not working properly; crashing the receiver node when big
 
 // Readjusts difficulty every N seconds
 pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
@@ -685,10 +686,11 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
 
 // Sends a block to a target address; also share some random peers
 // FIXME: instead of sharing random peers, share recently active peers
-pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
+pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block, istip: bool) {
   //println!("- sending block: {:?}", block);
   let msg = Message::PutBlock {
     block: block,
+    istip: istip,
     peers: get_random_peers(node, 3),
   };
   udp_send(&mut node.socket, addr, &msg);
@@ -708,11 +710,11 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
           bhash = &node.block[bhash].prev;
         }
         for block in chunk {
-          node_send_block_to(node, addr, block.clone());
+          node_send_block_to(node, addr, block.clone(), false);
         }
       }
       // Someone sent us a block
-      Message::PutBlock { block, peers } => {
+      Message::PutBlock { block, istip, peers } => {
         // Adds the block to the database
         node_add_block(node, &block);
 
@@ -730,14 +732,19 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // detrimental. Note that the loop below is slightly CPU hungry, since it requires
         // traversing the whole history every time we receive the tip. As such, we don't do it when
         // the received tip is included on .block, which means we already have all its ancestors.
-        let bhash = hash_block(&block);
-        if !node.block.contains_key(&bhash) {
-          let mut missing = bhash;
-          // Finds the first ancestor that wasn't downloaded yet
-          while node.waiting.contains_key(&missing) {
-            missing = node.waiting[&missing].prev;
+        if *istip {
+          let bhash = hash_block(&block);
+          if !node.block.contains_key(&bhash) {
+            let mut missing = bhash;
+            // Finds the first ancestor that wasn't downloaded yet
+            let mut count = 0;
+            while node.waiting.contains_key(&missing) {
+              count += 1;
+              missing = node.waiting[&missing].prev;
+            }
+            println!("ask missing: {} {:x}", count, missing);
+            udp_send(&mut node.socket, addr, &Message::AskBlock { bhash: missing })
           }
-          udp_send(&mut node.socket, addr, &Message::AskBlock { bhash: missing })
         }
       }
     }
@@ -822,7 +829,7 @@ pub fn miner_loop(miner_comm: SharedMinerComm) {
 fn node_gossip_tip_block(node: &mut Node, peer_count: u128) {
   let random_peers = get_random_peers(node, peer_count);
   for peer in random_peers {
-    node_send_block_to(node, peer.address, node.block[&node.tip].clone());
+    node_send_block_to(node, peer.address, node.block[&node.tip].clone(), true);
   }
 }
 

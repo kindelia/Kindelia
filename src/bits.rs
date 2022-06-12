@@ -281,9 +281,10 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
       //serialize_fixlen(4, &u256(0), bits);
       //serialize_list(serialize_address, peers, bits);
     //}
-    Message::PutBlock { block, peers } => {
+    Message::PutBlock { block, istip, peers } => {
       serialize_fixlen(4, &u256(0), bits);
       serialize_block(block, bits);
+      serialize_fixlen(1, &(if *istip { u256(1) } else { u256(0) }), bits);
       serialize_list(serialize_peer, peers, bits);
     }
     Message::AskBlock { bhash } => {
@@ -302,8 +303,9 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128) -> Message {
     //}
     0 => {
       let block = deserialize_block(bits, index);
+      let istip = deserialize_fixlen(1, bits, index).low_u128() != 0;
       let peers = deserialize_list(deserialize_peer, bits, index);
-      Message::PutBlock { block, peers }
+      Message::PutBlock { block, istip, peers }
     }
     1 => {
       let bhash = deserialize_hash(bits, index);
