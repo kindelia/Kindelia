@@ -732,6 +732,11 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // detrimental. Note that the loop below is slightly CPU hungry, since it requires
         // traversing the whole history every time we receive the tip. As such, we don't do it when
         // the received tip is included on .block, which means we already have all its ancestors.
+        // FIXME: this opens up a DoS vector where an attacker creates a very long chain, and sends
+        // its tip to us, including all the ancestors, except the block #1. He then spam-sends the
+        // same tip over and over. Since we'll never get the entire chain, we'll always run this
+        // loop fully, exhausting this node's CPU resources. This isn't a very serious attack, but
+        // there are some solutions, which might be investigated in a future.
         if *istip {
           let bhash = hash_block(&block);
           if !node.block.contains_key(&bhash) {
