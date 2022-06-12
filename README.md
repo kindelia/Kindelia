@@ -5,9 +5,9 @@ A peer-to-peer functional computer capable of hosting decentralized apps that st
 
 - There is no native coin. It is just a p2p computer, not a cryptocurrency.
 
-- The [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a parallel functional runtime.
+- The [EVM](https://ethereum.org/en/developers/docs/evm/) by the [HVM](https://github.com/kindelia/hvm), a parallel, optimal functional runtime.
 
-- It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2), [Kind](https://github.com/kindelia/kind) natively.
+- It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind) cheaply.
 
 - Zero-cost SSTOREs, allowing highly dynamic apps (like MMORPGs) to run on layer 1!
 
