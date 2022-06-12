@@ -11,7 +11,7 @@ A peer-to-peer functional computer capable of hosting decentralized apps that st
 
 - Zero-cost SSTOREs, allowing dynamic games and virtual worlds to run on layer 1.
 
-- Everything is simple, well-thought and sane, for once.
+- Everything is massively simplified and optimized.
 
 For more information, check the [whitepaper](WHITEPAPER.md).
 
