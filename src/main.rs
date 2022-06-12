@@ -3,7 +3,6 @@
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
-// #![feature(async_closure)]
 
 mod api;
 mod bits;
@@ -12,9 +11,6 @@ mod hvm;
 mod node;
 mod test;
 mod util;
-
-//#[cfg(test)]
-//mod test;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -31,11 +27,10 @@ use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  return run_cli();
-  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
-  //start_node(dirs::home_dir().unwrap().join(".kindelia_3"), Some("example/simple.kdl".to_string()));
+  //return run_cli();
+  start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
   //hvm::test_statements_from_file("./example/block_4.kdl");
-  //return Ok(());
+  return Ok(());
 }
 
 // Environment variable where Kindelia path is stored

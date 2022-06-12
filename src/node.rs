@@ -40,19 +40,29 @@ pub type Transaction = Vec<u8>;
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 // TODO: dashmap?
+//
+// Blocks have 3 states of inclusion:
+//
+//   has wait_list? | is on .waiting? | is on .block? | meaning
+//   -------------- | --------------- | ------------- | ------------------------------------------------------
+//   no             | no              | no            | unseen   : never seen, may not exist
+//   yes            | no              | no            | missing  : some block cited it, but it wasn't downloaded
+//   yes            | yes             | no            | pending  : downloaded, but waiting ancestors for inclusion
+//   no             | yes             | yes           | included : fully included, as well as all its ancestors
+//
 pub struct Node {
   pub path       : PathBuf,                         // path where files are saved
   pub socket     : UdpSocket,                       // UDP socket
   pub port       : u16,                             // UDP port
   pub tip        : U256,                            // current tip
-  pub block      : U256Map<Block>,                  // block hash -> block information
-  pub children   : U256Map<Vec<U256>>,              // block hash -> blocks that have this as its parent
-  pub pending    : U256Map<Vec<Block>>,             // block hash -> blocks that are waiting for this block info
-  pub work       : U256Map<U256>,                   // block hash -> accumulated work
-  pub target     : U256Map<U256>,                   // block hash -> this block's target
-  pub height     : U256Map<u128>,                   // block hash -> cached height
-  pub seen       : U256Map<()>,                     // block hash -> have we received it yet?
-  pub was_mined  : U256Map<HashSet<Transaction>>,   // block hash -> set of transaction hashes that were already mined
+  pub block      : U256Map<Block>,                  // block_hash -> block
+  pub waiting    : U256Map<Block>,                  // block_hash -> downloaded block, waiting for ancestors
+  pub wait_list  : U256Map<Vec<U256>>,              // block_hash -> hashes of blocks that are waiting for this one
+  pub children   : U256Map<Vec<U256>>,              // block_hash -> hashes of this block's children
+  pub work       : U256Map<U256>,                   // block_hash -> accumulated work
+  pub target     : U256Map<U256>,                   // block_hash -> this block's target
+  pub height     : U256Map<u128>,                   // block_hash -> cached height
+  pub was_mined  : U256Map<HashSet<Transaction>>,   // block_hash -> set of transaction hashes that were already mined
   pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
@@ -164,9 +174,6 @@ pub const PORT_SIZE : usize = 2;
 // How many nodes we gossip an information to?
 pub const GOSSIP_FACTOR : u128 = 16;
 
-// When we need missing info, how many nodes do we ask?
-pub const MISSING_INFO_ASK_FACTOR : u128 = 3;
-
 // How many times the mining thread attempts before unblocking?
 pub const MINE_ATTEMPTS : u128 = 1024;
 
@@ -178,6 +185,9 @@ pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
   
 // Readjust difficulty every N blocks
 pub const BLOCKS_PER_PERIOD : u128 = 20;
+
+// How many ancestors do we send together with the requested missing block
+pub const SEND_BLOCK_ANCESTORS : u128 = 64;
 
 // Readjusts difficulty every N seconds
 pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
@@ -362,7 +372,7 @@ pub fn INITIAL_TARGET() -> U256 {
 }
 
 pub fn ZERO_HASH() -> U256 {
-  return hash_u256(u256(0));
+  return hash_u256(u256(0)); // why though
 }
 
 pub fn GENESIS_BLOCK() -> Block {
@@ -385,12 +395,12 @@ pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
     socket     : socket,
     port       : port,
     block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
+    waiting    : HashMap::new(),
+    wait_list  : HashMap::new(),
     children   : HashMap::from([(ZERO_HASH(), vec![])]),
-    pending    : HashMap::new(),
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-    seen       : HashMap::from([(ZERO_HASH(), ())]),
     tip        : ZERO_HASH(),
     was_mined  : HashMap::new(),
     pool       : PriorityQueue::new(),
@@ -465,7 +475,7 @@ pub fn get_random_peers(node: &mut Node, amount: u128) -> Vec<Peer> {
 // Registers a block on the node's database. This performs several actions:
 // - If this block is too far into the future, ignore it.
 // - If this block's parent isn't available:
-//   - Add this block to the parent's pending list
+//   - Add this block to the parent's wait_list
 //   - When the parent is available, register this block again
 // - If this block's parent is available:
 //   - Compute the block accumulated work, target, etc.
@@ -476,10 +486,10 @@ pub fn get_random_peers(node: &mut Node, amount: u128) -> Vec<Peer> {
 pub fn node_add_block(node: &mut Node, block: &Block) {
   // Adding a block might trigger the addition of other blocks
   // that were waiting for it. Because of that, we loop here.
-  let mut must_add = vec![block.clone()]; // blocks to be added
+  let mut must_include = vec![block.clone()]; // blocks to be added
   //println!("- add_block");
   // While there is a block to add...
-  while let Some(block) = must_add.pop() {
+  while let Some(block) = must_include.pop() {
     let btime = block.time; // the block timestamp
     //println!("- add block time={}", btime);
     // If block is too far into the future, ignore it
@@ -590,28 +600,22 @@ pub fn node_add_block(node: &mut Node, block: &Block) {
             }
           }
         }
-      } else {
-        //println!("# new_block: not enough work | not advances_time");
       }
       // Registers this block as a child of its parent
       node.children.insert(phash, vec![bhash]);
-      // If there were blocks waiting for this one, mark them for addition
-      for pending in node.pending.get(&bhash).unwrap_or(&vec![]) {
-        must_add.push(pending.clone());
+      // If there were blocks waiting for this one, include them on the next loop
+      // This will cause the block to be moved from node.waiting to node.block
+      if let Some(wait_list) = node.wait_list.get(&bhash) {
+        for waiting in wait_list {
+          must_include.push(node.waiting.remove(waiting).expect("block"));
+        }
+        node.wait_list.remove(&bhash);
       }
-      // Delete this block's pending vector
-      if node.pending.contains_key(&bhash) {
-        node.pending.remove(&bhash);
-        //println!("- NOT PENDING ANYMORE {}", bhash);
-      }
-    // Otherwise (if previous block is unavailable), and if it is the
-    // first time we see this block, add it to its parent's pending list
-    } else if node.seen.get(&bhash).is_none() {
-      //println!("# new block: previous unavailable");
-      node.pending.insert(phash, vec![block.clone()]);
+    // Otherwise, include this block on .waiting, and on its parent's wait_list
+    } else if node.waiting.get(&bhash).is_none() {
+      node.waiting.insert(bhash, block.clone());
+      node.wait_list.insert(phash, vec![bhash]);
     }
-    // Mark this block as seen
-    node.seen.insert(bhash, ());
   }
 }
 
@@ -642,9 +646,9 @@ pub fn get_longest_chain(node: &Node, num: Option<usize>) -> Vec<Block> {
   return longest;
 }
 
-pub fn node_message_receive(node: &mut Node) {
+pub fn node_receive_message(node: &mut Node) {
   for (addr, msg) in udp_receive(&mut node.socket) {
-    node_message_handle(node, addr, &msg);
+    node_handle_message(node, addr, &msg);
   }
 }
 
@@ -690,24 +694,45 @@ pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block) {
   udp_send(&mut node.socket, addr, &msg);
 }
 
-pub fn node_message_handle(node: &mut Node, addr: Address, msg: &Message) {
+pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
   if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: node.port }) {
     node_see_peer(node, Peer { address: addr, seen_at: get_time() });
     match msg {
       // Someone asked a block
       Message::AskBlock { bhash } => {
-        if let Some(block) = node.block.get(&bhash) {
-          let block = block.clone();
-          node_send_block_to(node, addr, block);
+        // Sends the requested block, plus some of its ancestors
+        let mut bhash = bhash;
+        let mut chunk = vec![];
+        while node.block.contains_key(&bhash) && *bhash != ZERO_HASH() && chunk.len() < SEND_BLOCK_ANCESTORS as usize {
+          chunk.push(node.block[bhash].clone());
+          bhash = &node.block[bhash].prev;
+        }
+        for block in chunk {
+          node_send_block_to(node, addr, block.clone());
         }
       }
       // Someone sent us a block
       Message::PutBlock { block, peers } => {
-        //println!("- getting block: {:?}", block);
+        // Adds the block to the database
         node_add_block(node, &block);
-        //for peer in peers {
-          //node_see_peer(node, *peer);
-        //}
+
+        // Previously, we continously requested missing blocks to neighbors. Now, we removed such
+        // functionality. Instead, we just ask the first missing ancestor once, when we receive a
+        // new block. One issue is that, if this packet is lost, then we will never ask for the
+        // missing ancestor again. But that is actually fine, because nodes are constantly
+        // broadcasting their tips. So, whenever we receive the same tip again, or a new parent of
+        // this tip, we will ask the missing ancestor again. Note that this loop is a little CPU
+        // intensive, since it must traverse the entire history looking for a missing ancestor. As
+        // such, we only do it if the bhash isn't on .block (thus, all ancestors already included).
+        let bhash = hash_block(&block);
+        if !node.block.contains_key(&bhash) {
+          let mut missing = bhash;
+          // Finds the first ancestor that wasn't downloaded yet
+          while node.waiting.contains_key(&missing) {
+            missing = node.waiting[&missing].prev;
+          }
+          udp_send(&mut node.socket, addr, &Message::AskBlock { bhash: missing })
+        }
       }
     }
   }
@@ -750,6 +775,7 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
   let time = get_time();
   let mut block = Block { time, rand, prev, body };
   for _i in 0 .. max_attempts {
+    //println!("{} {} > {}", _i, hash_block(&block), targ);
     if hash_block(&block) >= targ {
       return Some(block);
     } else {
@@ -807,16 +833,6 @@ fn node_peers_timeout(node: &mut Node) {
   }
 }
 
-fn node_ask_missing_blocks(node: &mut Node) {
-  //println!("- ask missing {}", node.pending.keys().len());
-  for bhash in node.pending.keys().cloned().collect::<Vec<U256>>() {
-    //println!("- ask missing {:x}", bhash);
-    if let None = node.seen.get(&bhash) {
-      gossip(node, MISSING_INFO_ASK_FACTOR, &Message::AskBlock { bhash });
-    }
-  }
-}
-
 fn node_load_blocks(node: &mut Node) {
   let blocks_dir = get_blocks_path(&node);
   std::fs::create_dir_all(&blocks_dir).ok();
@@ -825,10 +841,10 @@ fn node_load_blocks(node: &mut Node) {
     file_paths.push(entry.unwrap().path());
   }
   file_paths.sort();
+  println!("Loading {} blocks from disk...", file_paths.len());
   for file_path in file_paths {
     let buffer = std::fs::read(file_path.clone()).unwrap();
     let block = deserialized_block(&bytes_to_bitvec(&buffer));
-    println!("Adding block: {}", file_path.into_os_string().into_string().unwrap());
     node_add_block(node, &block);
   }
 }
@@ -856,13 +872,16 @@ pub fn node_loop(
   let mine_body = mine_file.map(|x| code_to_body(&x));
 
   // Loads all stored blocks
-  eprintln!("Loading blocks from disk...");
-  node_load_blocks(&mut node);
+  println!("Port: {}", node.port);
+  if node.port == 42000 { // for debugging, won't load blocks if it isn't the main node. FIXME: remove
+    node_load_blocks(&mut node);
+  }
 
   loop {
     tick += 1;
 
     {
+
       // If the miner thread mined a block, gets and registers it
       if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
         mined += 1;
@@ -870,36 +889,27 @@ pub fn node_loop(
       }
 
       // Spreads the tip block
-      if tick % 2 == 0 {
+      if tick % 10 == 0 {
         node_gossip_tip_block(&mut node, 8);
       }
 
       // Receives and handles incoming API requests
-      if tick % 10 == 0 {
+      if tick % 5 == 0 {
         if let Ok(request) = node.receiver.try_recv() {
           node_handle_request(&mut node, request);
         }
       }
 
       // Receives and handles incoming network messages
-      if tick % 10 == 0 {
-        node_message_receive(&mut node);
+      if tick % 1 == 0 {
+        node_receive_message(&mut node);
       }
 
-      // Requests missing blocks
-      if tick % 2 == 0 {
-        node_ask_missing_blocks(&mut node);
-      }
-
-      // Asks the miner to mine a block
+      // Asks the miner thread to mine a block
       if tick % 10 == 0 {
         // This branch is here for testing purposes. FIXME: remove
-        if node.tip == ZERO_HASH() {
-          node_ask_mine(&mut node, &miner_comm, init_body.clone());
-        } else {
-          if let Some(mine_body) = &mine_body {
-            node_ask_mine(&mut node, &miner_comm, mine_body.clone()); // FIXME: avoid clone
-          }
+        if let Some(mine_body) = &mine_body {
+          node_ask_mine(&mut node, &miner_comm, mine_body.clone()); // FIXME: avoid clone
         }
       }
 
@@ -916,12 +926,11 @@ pub fn node_loop(
 
     // Sleep for 1/100 seconds
     // TODO: just sleep remaining time <- good idea
-    std::thread::sleep(std::time::Duration::from_micros(10000));
+    std::thread::sleep(std::time::Duration::from_micros(1000000 / TICKS_PER_SEC));
   }
 }
 
 fn log_heartbeat(node: &Node) {
-  let blocks_num = node.block.keys().count();
 
   let tip = node.tip;
   let tip_height = *node.height.get(&tip).unwrap() as u64;
@@ -930,19 +939,20 @@ fn log_heartbeat(node: &Node) {
   let difficulty = target_to_difficulty(tip_target);
   let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
 
-  let mut pending_num: u64 = 0;
-  let mut pending_seen_num: u64 = 0;
-  for (bhash, _) in node.pending.iter() {
-    if node.seen.get(bhash).is_some() {
-      pending_seen_num += 1;
+  // Counts missing, pending and included blocks
+  let included_count = node.block.keys().count();
+  let mut missing_count: u64 = 0;
+  let mut pending_count: u64 = 0;
+  for (bhash, _) in node.wait_list.iter() {
+    if node.waiting.get(bhash).is_some() {
+      pending_count += 1;
     }
-    pending_num += 1;
+    missing_count += 1;
   }
-  //let last_blocks = get_longest_chain(node);
 
   let log = object!{
     event: "heartbeat",
-    num_peers: node.peers.len(),
+    peers: node.peers.len(),
     tip: {
       height: tip_height,
       // target: u256_to_hex(tip_target),
@@ -950,8 +960,9 @@ fn log_heartbeat(node: &Node) {
       hash_rate: hash_rate.low_u64(),
     },
     blocks: {
-      num: blocks_num,
-      pending: { num: pending_num, seen: { num: pending_seen_num }, },
+      missing: missing_count,
+      pending: pending_count,
+      included: included_count,
     },
     total_mana: node.runtime.get_mana() as u64,
   };
