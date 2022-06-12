@@ -9,7 +9,7 @@ A peer-to-peer functional computer capable of hosting decentralized apps that st
 
 - It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind) natively.
 
-- Zero-cost SSTOREs, allowing highly dynamic apps (like MMORPGs) to run on layer 1!
+- Zero-cost SSTOREs, allowing dynamic games and virtual worlds to run on layer 1.
 
 - Everything is simple, well-thought and sane, for once.
 
