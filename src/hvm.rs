@@ -1,3 +1,240 @@
+// Welcome to Kindelia's High-order Virtual Machine!
+// =================================================
+//
+// This file is a modification of the project hosted on github.com/kindelia/hvm, and it makes a
+// series of changes with the goal of serving the requirements of a peer-to-peer computer.
+//
+// Kindelia-HVM's memory model
+// ---------------------------
+// 
+// The runtime memory consists of just a vector of u128 pointers. That is:
+//
+//   Mem ::= Vec<Ptr>
+// 
+// A pointer has 3 parts:
+//
+//   Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
+//
+// Where:
+//
+//   T : u8  is the pointer tag 
+//   A : u60 is the 1st value
+//   B : u60 is the 2nd value
+//
+// There are 12 possible tags:
+//
+//   Tag | Val | Meaning  
+//   ----| --- | -------------------------------
+//   DP0 |   0 | a variable, bound to the 1st argument of a duplication
+//   DP1 |   1 | a variable, bound to the 2nd argument of a duplication
+//   VAR |   2 | a variable, bound to the one argument of a lambda
+//   ARG |   3 | an used argument of a lambda or duplication
+//   ERA |   4 | an erased argument of a lambda or duplication
+//   LAM |   5 | a lambda
+//   APP |   6 | an application
+//   SUP |   7 | a superposition
+//   CTR |   8 | a constructor
+//   FUN |   9 | a function
+//   OP2 |  10 | a numeric operation
+//   NUM |  11 | a 120-bit number
+//
+// The semantics of the 1st and 2nd values depend on the pointer tag. 
+//
+//   Tag | 1st ptr value                | 2nd ptr value
+//   --- | ---------------------------- | ---------------------------------
+//   DP0 | the duplication label        | points to the duplication node
+//   DP1 | the duplication label        | points to the duplication node
+//   VAR | not used                     | points to the lambda node
+//   ARG | not used                     | points to the variable occurrence
+//   ERA | not used                     | not used
+//   LAM | not used                     | points to the lambda node
+//   APP | not used                     | points to the application node
+//   SUP | the duplication label        | points to the superposition node
+//   CTR | the constructor name         | points to the constructor node
+//   FUN | the function name            | points to the function node
+//   OP2 | the operation name           | points to the operation node
+//   NUM | the most significant 60 bits | the least significant 60 bits
+//
+// Notes:
+//
+//   1. The duplication label is an internal value used on the DUP-SUP rule.
+//   2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
+//   3. NUM pointers don't point anywhere, they just store the number directly.
+//
+// A node is a tuple of N pointers stored on sequential memory indices.
+// The meaning of each index depends on the node. There are 7 types:
+//
+//   Duplication Node:
+//   - [0] => either an ERA or an ARG pointing to the 1st variable location
+//   - [1] => either an ERA or an ARG pointing to the 2nd variable location
+//   - [2] => pointer to the duplicated expression
+//
+//   Lambda Node:
+//   - [0] => either and ERA or an ERA pointing to the variable location
+//   - [1] => pointer to the lambda's body
+//   
+//   Application Node:
+//   - [0] => pointer to the lambda
+//   - [1] => pointer to the argument
+//
+//   Superposition Node:
+//   - [0] => pointer to the 1st superposed value
+//   - [1] => pointer to the 2sd superposed value
+//
+//   Constructor Node:
+//   - [0] => pointer to the 1st field
+//   - [1] => pointer to the 2nd field
+//   - ... => ...
+//   - [N] => pointer to the Nth field
+//
+//   Function Node:
+//   - [0] => pointer to the 1st argument
+//   - [1] => pointer to the 2nd argument
+//   - ... => ...
+//   - [N] => pointer to the Nth argument
+//
+//   Operation Node:
+//   - [0] => pointer to the 1st operand
+//   - [1] => pointer to the 2nd operand
+//
+// Notes:
+//
+//   1. Duplication nodes DON'T have a body. They "float" on the global scope.
+//   2. Lambdas and Duplications point to their variables, and vice-versa.
+//   3. ARG pointers can only show up inside Lambdas and Duplications.
+//   4. Nums and vars don't require a node type, because they're unboxed.
+//   5. Function and Constructor arities depends on the user-provided definition.
+//
+// Example 0:
+// 
+//   Term:
+//
+//    {Tuple2 #7 #8}
+//
+//   Memory:
+//
+//     Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
+//     0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
+//     0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
+//
+//   Notes:
+//     
+//     1. This is just a pair with two numbers.
+//     2. The root pointer is not stored on memory.
+//     3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
+//     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
+//
+// Example 1:
+//
+//   Term:
+//
+//     λ~ λb b
+//
+//   Memory:
+//
+//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+//     0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
+//     0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
+//     0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
+//
+//   Notes:
+//
+//     1. This is a λ-term that discards the 1st argument and returns the 2nd.
+//     2. The 1st lambda's argument not used, thus, an ERA pointer.
+//     3. The 2nd lambda's argument points to its variable, and vice-versa.
+//     4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
+//     
+// Example 2:
+//
+//   Term:
+//     
+//     λx dup x0 x1 = x; (* x0 x1)
+//
+//   Memory:
+//
+//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
+//     0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
+//     0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
+//     0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
+//     0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
+//     0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
+//     0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
+//
+//   Notes:
+//     
+//     1. This is a lambda function that squares a number.
+//     2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
+//     3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
+//     4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
+//     5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+//     6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
+//     7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
+//     8. In-memory size is different to, and larger than, serialization size.
+//
+// How is Kindelia's HVM different from the conventional HVM?
+// ----------------------------------------------------------
+//
+// First, it is a 128-bit, rather than a 64-bit architecture. It can store 120-bit unboxed
+// integers, up from 32-bit unboxed uints stored by the conventional HVM. It allows addressing up
+// to 2^60 function names, up from 2^30 allowed by the conventional HVM, which isn't enough for
+// Kindelia. This change comes with a cost of about ~30% reduced performance, which is acceptable.
+//
+// Second, it implements a reversible heap machinery, which allows saving periodic snapshots of
+// past heap states, and jump back to them. This is necessary because of decentralized consensus.
+// If we couldn't revert to past states, we'd have to recompute the entire history anytime there is
+// a block reorg, which isn't practical. On Ethereum, this is achieved by storing the state as a
+// Map<U256> using Merkle Trees, which, being an immutable structure, allows non-destructive
+// insertions and rollbacks. We could do the same, but we decided to further leverage the HVM by
+// saving its whole heap as the network state. In other words, applications are allowed to persist
+// arbitrary HVM structures on disk by using the IO.save operation. For example:
+//
+//   (IO.save {Cons #1 {Cons #2 {Cons #3 {Nil}}}} ...)
+//
+// The operation above would persist the [1,2,3] list as the app's state, with no need for
+// serialization. As such, when the app stops running, that list will not be freed from memory.
+// Instead, the heap will persist between blocks, so the app just needs to store a pointer to
+// the list's head, allowing it to retrieve its state later on. This is only possible because the
+// HVM is garbage-collection free, otherwise, leaks would overwhelm the memory.
+//
+// How are reversible heaps stored?
+// --------------------------------
+//
+// Kindelia's heap is set to grow exactly 8 GB per year. In other words, 10 years after the genesis
+// block, the heap size will be of exactly 80 GB. But that doesn't mean a full node will be able
+// to operate with even that much ram, because Kindelia must also save snapshots. Right now, it
+// stores at most 10 snapshots, trying to keep them distributed with exponentially decreasing ages.
+// For example, if we're on block 1000, it might store a snapshot of blocks 998, 996, 992, 984,
+// 968, 872, 744 and 488, which is compatible with the fact that longer-term rollbacks are
+// incresingly unlikely. If there is a rollback to block 990, we just go back to the earliest
+// snapshot, 984, and reprocess blocks 985-1000, which is much faster than recomputing the entire
+// history.
+//
+// In order to keep a good set of snapshots, we must be able to create and discard these heaps.
+// Obviously, if this operation required copying the entire heap buffer every block, it would
+// completely destroy the network's performance. As such, instead, heaps only actually store
+// data that changed. So, using the example above, if a list was allocated and persisted on block 980,
+// it will actually be stored on the snapshot 984, which is the earliest snapshot after 980. If the
+// runtime, now on block 1000, attempts to read the memory where the list is allocated, it will
+// actually receive a signal that it is stored on a past heap, and look for it on 996 and 992,
+// until it is found on block 984.
+//
+// To achieve that, hashmaps are used to store defined functions and persistent state pointers. If
+// a key isn't present, Kindelia will look for it on past snapshots. As for the runtime's memory,
+// where HVM constructors and lambdas are stored, it doesn't use a hashmap. Instead, it uses a
+// Nodes type, which stores data in a big pre-allocated u128 buffer, and keeps track of used memory
+// slots in a separate buffer. We then reserve a constant, U128_NONE, to signal that an index isn't
+// present, and must be found ina  past heap. This is different from 0, which means that this index
+// is empty, and can be allocated. This allows for fast write, read, disposal and merging of heaps,
+// but comes at the cost of wasting a lot of memory. Because of that, Kindelia's current
+// implementation demands up to ~10x more available memory than the current heap size, but that
+// could be reduced ten-fold by replacing vectors by a hashmap, or by just saving fewer past heaps.
+//
+// Other than a 128-bit architecture and reversible heaps, Kindelia's HVM is similar to the
+// conventional HVM. This file will be extensively commented, with in-depth explanations of every
+// little aspect, from the HVM's memory model to interaction net rewrite rules.
+
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};
@@ -8,14 +245,26 @@ use std::time::Instant;
 
 use nohash_hasher::NoHashHasher;
 
-use crate::util;
 use crate::bits;
+use crate::crypto;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
+use crate::util;
 
 // Types
 // -----
 
+// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
+// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
+// later on. Below is a description of each variant:
+// - Var: variable. Note an u128 is used instead of a string. It stores up to 20 6-bit letters.
+// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
+// - Lam: an affine lambda. Written as: `λvar body`.
+// - App: a lambda application. Written as: `(! f x)`.
+// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
+// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
+// - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
+// - Op2: a numeric operation.
 /// A native HVM term
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
@@ -30,6 +279,22 @@ pub enum Term {
 }
 
 // A native HVM 60-bit machine integer operation
+// - Add: addition
+// - Sub: subtraction
+// - Mul: multiplication
+// - Div: division
+// - Mod: modulo
+// - And: bitwise and
+// - Or : bitwise or
+// - Xor: bitwise xor
+// - Shl: shift left
+// - Shr: shift right
+// - Ltn: less than
+// - Lte: less than or equal
+// - Eql: equal
+// - Gte: greater than or equal
+// - Gtn: greater than
+// - Neq: not equal
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Oper {
   Add, Sub, Mul, Div,
@@ -41,17 +306,20 @@ pub enum Oper {
 // A u64 HashMap
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
 
-/// A rewrite rule (equation)
+// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
   pub lhs: Term,
   pub rhs: Term,
 }
 
-// A function (vector of rules)
+// A function, which is just a vector of rewrite rules.
 pub type Func = Vec<Rule>;
 
-// A left-hand side variable in a rewrite rule (equation)
+// The types below are used by the runtime to evaluate rewrite rules. They store the same data as
+// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
+
+// Compiled information about a left-hand side variable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
   pub name : u128,         // this variable's name
@@ -60,16 +328,16 @@ pub struct Var {
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
-// A compiled rewrite rule
+// Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<Lnk>,          // left-hand side matching conditions
+  pub cond: Vec<Ptr>,          // left-hand side matching conditions
   pub vars: Vec<Var>,          // left-hand side variable locations
   pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
   pub body: Term,              // right-hand side body of rule
 }
 
-// A compiled function
+// Compiled information about a function.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   func: Func,           // the original function
@@ -78,37 +346,40 @@ pub struct CompFunc {
   rules: Vec<CompRule>, // vector of rules
 }
 
-// A file is a map of `FuncID -> Function`
+// A file, which is just a map of `FuncID -> CompFunc`
+// It is used to find a function when it is called, in order to apply its rewrite rules.
 #[derive(Clone, Debug)]
-pub struct File {
+pub struct Funcs {
   pub funcs: Map<Arc<CompFunc>>,
 }
 
 // A map of `FuncID -> Arity`
+// It is used in many places to find the arity (argument count) of functions and constructors.
 #[derive(Clone, Debug)]
-pub struct Arit {
+pub struct Arits {
   pub arits: Map<u128>,
 }
 
-// A map of `FuncID -> Lnk`, pointing to a function's state
+// A map of `FuncID -> Ptr`
+// It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug)]
-pub struct Disk {
-  pub links: Map<Lnk>,
+pub struct Store {
+  pub links: Map<Ptr>,
 }
 
-/// Can point to a node, a variable, or hold an unboxed value
-pub type Lnk = u128;
+// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
+pub type Ptr = u128;
 
 /// A global statement that alters the state of the blockchain
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },
-  Run { expr: Term },
+  Run { expr: Term, sign: Option<crypto::Signature> },
 }
 
 // A mergeable vector of u128 values
 #[derive(Debug, Clone)]
-pub struct Blob {
+pub struct Nodes {
   data: Vec<u128>,
   used: Vec<usize>,
 }
@@ -116,18 +387,18 @@ pub struct Blob {
 // HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug)]
 pub struct Heap {
-  pub uuid: u128, // unique identifier
-  pub blob: Blob, // memory block holding HVM nodes
-  pub disk: Disk, // points to stored function states
-  pub file: File, // function codes
-  pub arit: Arit, // function arities
-  pub tick: u128, // time counter
-  pub funs: u128, // total function count
-  pub dups: u128, // total dups count
-  pub rwts: u128, // total graph rewrites
-  pub mana: u128, // total mana cost
-  pub size: i128, // total used memory (in 64-bit words)
-  pub next: u128, // memory index that *may* be empty
+  pub uuid: u128,  // unique identifier
+  pub blob: Nodes, // memory block holding HVM nodes
+  pub disk: Store, // points to stored function states
+  pub file: Funcs, // function codes
+  pub arit: Arits, // function arities
+  pub tick: u128,  // time counter
+  pub funs: u128,  // total function count
+  pub dups: u128,  // total dups count
+  pub rwts: u128,  // total graph rewrites
+  pub mana: u128,  // total mana cost
+  pub size: i128,  // total used memory (in 64-bit words)
+  pub next: u128,  // memory index that *may* be empty
 }
 
 // A serialized Heap
@@ -234,137 +505,22 @@ pub const FUN: u128 = 0x9;
 pub const OP2: u128 = 0xA;
 pub const NUM: u128 = 0xB;
 
-// Numeric primitives. Up to:
-// - 32 u120 operations
-// - 32 i120 operations
-// - 32 uTUP operations
-// - 32 iTUP operations
-// where uTUP = (u8,u16,u32,u64)
-//       iTUP = (i8,i16,i32,i64)
-
-pub const OP_U120: u128 = 0b00 << 5;
-pub const OP_I120: u128 = 0b01 << 5;
-pub const OP_UTUP: u128 = 0b10 << 5;
-pub const OP_ITUP: u128 = 0b11 << 5;
-
-pub const ADD : u128 = 0x00;
-pub const SUB : u128 = 0x01;
-pub const MUL : u128 = 0x02;
-pub const DIV : u128 = 0x03;
-pub const MOD : u128 = 0x04;
-pub const AND : u128 = 0x05;
-pub const OR  : u128 = 0x06;
-pub const XOR : u128 = 0x07;
-pub const SHL : u128 = 0x08;
-pub const SHR : u128 = 0x09;
-pub const LTN : u128 = 0x0A;
-pub const LTE : u128 = 0x0B;
-pub const EQL : u128 = 0x0C;
-pub const GTE : u128 = 0x0D;
-pub const GTN : u128 = 0x0E;
-pub const NEQ : u128 = 0x0F;
-pub const RTL : u128 = 0x10;
-pub const RTR : u128 = 0x11;
-
-/// kind:  0 -> x120     ; 1 -> xTUP
-/// sig:   0 -> unsigned ; 1 -> signed
-/// op: see above (5-bits)
-fn make_oper(kind: u128, sig: u128, op_code: u128) -> u128 {
-  let res = kind;
-  let res = (res << 1) | sig;
-  let res = (res << 5) | op_code;
-  res
-}
-
-fn decompose_oper(op: u128) -> (u128, u128, u128) {
-  let op_code = op & ((1<<5) - 1);
-  let op = op >> 5;
-  let sig = op & 1;
-  let op = op >> 1;
-  let kind = op & 1;
-  let op = op >> 1;
-  debug_assert!(op == 0, "Invalid operation");
-  (kind, sig, op_code)
-}
-
-// ?? This entire block can be replaced by a single clever macro
-
-// U120
-pub const U120_ADD: u128 = OP_U120 | ADD;
-pub const U120_SUB: u128 = OP_U120 | SUB;
-pub const U120_MUL: u128 = OP_U120 | MUL;
-pub const U120_DIV: u128 = OP_U120 | DIV;
-pub const U120_MOD: u128 = OP_U120 | MOD;
-pub const U120_AND: u128 = OP_U120 | AND;
-pub const U120_OR : u128 = OP_U120 | OR;
-pub const U120_XOR: u128 = OP_U120 | XOR;
-pub const U120_SHL: u128 = OP_U120 | SHL;
-pub const U120_SHR: u128 = OP_U120 | SHR;
-pub const U120_LTN: u128 = OP_U120 | LTN;
-pub const U120_LTE: u128 = OP_U120 | LTE;
-pub const U120_EQL: u128 = OP_U120 | EQL;
-pub const U120_GTE: u128 = OP_U120 | GTE;
-pub const U120_GTN: u128 = OP_U120 | GTN;
-pub const U120_NEQ: u128 = OP_U120 | NEQ;
-pub const U120_RTL: u128 = OP_U120 | RTL;
-pub const U120_RTR: u128 = OP_U120 | RTR;
-// I120
-pub const I120_ADD: u128 = OP_I120 | ADD;
-pub const I120_SUB: u128 = OP_I120 | SUB;
-pub const I120_MUL: u128 = OP_I120 | MUL;
-pub const I120_DIV: u128 = OP_I120 | DIV;
-pub const I120_MOD: u128 = OP_I120 | MOD;
-pub const I120_AND: u128 = OP_I120 | AND;
-pub const I120_OR : u128 = OP_I120 | OR;
-pub const I120_XOR: u128 = OP_I120 | XOR;
-pub const I120_SHL: u128 = OP_I120 | SHL;
-pub const I120_SHR: u128 = OP_I120 | SHR;
-pub const I120_LTN: u128 = OP_I120 | LTN;
-pub const I120_LTE: u128 = OP_I120 | LTE;
-pub const I120_EQL: u128 = OP_I120 | EQL;
-pub const I120_GTE: u128 = OP_I120 | GTE;
-pub const I120_GTN: u128 = OP_I120 | GTN;
-pub const I120_NEQ: u128 = OP_I120 | NEQ;
-pub const I120_RTL: u128 = OP_I120 | RTL;
-pub const I120_RTR: u128 = OP_I120 | RTR;
-// UTUP
-pub const UTUP_ADD: u128 = OP_UTUP | ADD;
-pub const UTUP_SUB: u128 = OP_UTUP | SUB;
-pub const UTUP_MUL: u128 = OP_UTUP | MUL;
-pub const UTUP_DIV: u128 = OP_UTUP | DIV;
-pub const UTUP_MOD: u128 = OP_UTUP | MOD;
-pub const UTUP_AND: u128 = OP_UTUP | AND;
-pub const UTUP_OR : u128 = OP_UTUP | OR;
-pub const UTUP_XOR: u128 = OP_UTUP | XOR;
-pub const UTUP_SHL: u128 = OP_UTUP | SHL;
-pub const UTUP_SHR: u128 = OP_UTUP | SHR;
-pub const UTUP_LTN: u128 = OP_UTUP | LTN;
-pub const UTUP_LTE: u128 = OP_UTUP | LTE;
-pub const UTUP_EQL: u128 = OP_UTUP | EQL;
-pub const UTUP_GTE: u128 = OP_UTUP | GTE;
-pub const UTUP_GTN: u128 = OP_UTUP | GTN;
-pub const UTUP_NEQ: u128 = OP_UTUP | NEQ;
-pub const UTUP_RTL: u128 = OP_UTUP | RTL;
-pub const UTUP_RTR: u128 = OP_UTUP | RTR;
-// ITUP
-pub const ITUP_ADD: u128 = OP_ITUP | ADD;
-pub const ITUP_SUB: u128 = OP_ITUP | SUB;
-pub const ITUP_MUL: u128 = OP_ITUP | MUL;
-pub const ITUP_DIV: u128 = OP_ITUP | DIV;
-pub const ITUP_MOD: u128 = OP_ITUP | MOD;
-pub const ITUP_AND: u128 = OP_ITUP | AND;
-pub const ITUP_OR : u128 = OP_ITUP | OR;
-pub const ITUP_XOR: u128 = OP_ITUP | XOR;
-pub const ITUP_SHL: u128 = OP_ITUP | SHL;
-pub const ITUP_SHR: u128 = OP_ITUP | SHR;
-pub const ITUP_LTN: u128 = OP_ITUP | LTN;
-pub const ITUP_LTE: u128 = OP_ITUP | LTE;
-pub const ITUP_EQL: u128 = OP_ITUP | EQL;
-pub const ITUP_GTE: u128 = OP_ITUP | GTE;
-pub const ITUP_GTN: u128 = OP_ITUP | GTN;
-pub const ITUP_NEQ: u128 = OP_ITUP | NEQ;
-pub const ITUP_RTL: u128 = OP_ITUP | RTL;
-pub const ITUP_RTR: u128 = OP_ITUP | RTR;
+pub const ADD : u128 = 0x0;
+pub const SUB : u128 = 0x1;
+pub const MUL : u128 = 0x2;
+pub const DIV : u128 = 0x3;
+pub const MOD : u128 = 0x4;
+pub const AND : u128 = 0x5;
+pub const OR  : u128 = 0x6;
+pub const XOR : u128 = 0x7;
+pub const SHL : u128 = 0x8;
+pub const SHR : u128 = 0x9;
+pub const LTN : u128 = 0xA;
+pub const LTE : u128 = 0xB;
+pub const EQL : u128 = 0xC;
+pub const GTE : u128 = 0xD;
+pub const GTN : u128 = 0xE;
+pub const NEQ : u128 = 0xF;
 
 pub const VAR_NONE  : u128 = 0x3FFFF;
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -375,18 +531,21 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (IO.take           then) : (IO r)
 //   (IO.save expr      then) : (IO r)
 //   (IO.call expr args then) : (IO r)
+//   (IO.name           then) : (IO r)
 //   (IO.from           then) : (IO r)
-const IO_DONE : u128 = 0x1364039960f; // name_to_u128('IO.DONE')
-const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128('IO.TAKE')
-const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128('IO.SAVE')
-const IO_CALL : u128 = 0x1364034b596; // name_to_u128('IO.CALL')
-const IO_FROM : u128 = 0x1364041c657; // name_to_u128('IO.FROM')
-const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
-const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take')
-const MC_LOAD : u128 = 0xc33968; // name_to_u128('load')
-const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
-const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
-const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
+const IO_DONE : u128 = 0x1364039960f; // name_to_u128("IO.DONE")
+const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128("IO.TAKE")
+const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128("IO.SAVE")
+const IO_CALL : u128 = 0x1364034b596; // name_to_u128("IO.CALL")
+const IO_NAME : u128 = 0x1364060b5cf; // name_to_u128("IO.NAME");
+const IO_FROM : u128 = 0x1364041c657; // name_to_u128("IO.FROM")
+const MC_DONE : u128 = 0xa33ca9; // name_to_u128("done")
+const MC_TAKE : u128 = 0xe25be9; // name_to_u128("take")
+const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
+const MC_SAVE : u128 = 0xde5ea9; // name_to_u128("save")
+const MC_CALL : u128 = 0x9e5c30; // name_to_u128("call")
+const MC_NAME : u128 = 0xca5c69; // name_to_u128("name");
+const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
@@ -513,6 +672,7 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
+// Tuple types
 ctr {Tuple0}
 ctr {Tuple1 x0}
 ctr {Tuple2 x0 x1}
@@ -527,40 +687,58 @@ ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
 ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
 ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
 
-ctr {IO.DONE expr}
-ctr {IO.TAKE then}
-ctr {IO.SAVE expr then}
-ctr {IO.CALL name args then}
-ctr {IO.FROM then} 
+// Used to pretty-print names
+ctr {Name name}
 
+// Below, we declare the built-in IO operations
+
+// IO.done returns from an IO operation
+ctr {IO.DONE expr}
 fun (IO.done expr) {
   (IO.done expr) = {IO.DONE expr}
-} = #0
+}
 
+// IO.take recovers an app's stored state
+ctr {IO.TAKE then}
 fun (IO.take then) {
   (IO.take then) = {IO.TAKE then}
-} = #0
+}
 
+// IO.save stores the app's state
+ctr {IO.SAVE expr then}
 fun (IO.save expr then) {
   (IO.save expr then) = {IO.SAVE expr then}
-} = #0
+}
 
+// IO.call calls another IO operation, assigning
+// the caller name to the current subject name
+ctr {IO.CALL name args then}
 fun (IO.call name args then) {
   (IO.call name args then) = {IO.CALL name args then}
-} = #0
+}
 
+// IO.name returns the name of the current subject
+ctr {IO.NAME then}
+fun (IO.name then) {
+  (IO.name then) = {IO.NAME then}
+}
+
+// IO.from returns the name of the current caller
+ctr {IO.FROM then} 
 fun (IO.from then) {
   (IO.from then) = {IO.FROM then}
-} = #0
+}
 
+// Works like IO.take, but clones the state
 fun (IO.load cont) {
   (IO.load cont) =
     {IO.TAKE @x
     dup x0 x1 = x;
     {IO.SAVE x0 @~
     (! cont x1)}}
-} = #0
+}
 
+// This is here for debugging. Will be removed.
 ctr {Count.Inc}
 ctr {Count.Get}
 fun (Count action) {
@@ -571,7 +749,7 @@ fun (Count action) {
   (Count {Count.Get}) =
     !load x
     !done x
-} = #0
+}
 ";
 
 // Utils
@@ -603,10 +781,10 @@ impl Heap {
   fn read(&self, idx: usize) -> u128 {
     return self.blob.read(idx);
   }
-  fn write_disk(&mut self, fid: u128, val: Lnk) {
+  fn write_disk(&mut self, fid: u128, val: Ptr) {
     return self.disk.write(fid, val);
   }
-  fn read_disk(&self, fid: u128) -> Option<Lnk> {
+  fn read_disk(&self, fid: u128) -> Option<Ptr> {
     return self.disk.read(fid);
   }
   fn write_file(&mut self, fid: u128, fun: Arc<CompFunc>) {
@@ -701,13 +879,13 @@ impl Heap {
       blob_buff.push(*used_index as u128);
       blob_buff.push(self.blob.data[*used_index]);
     }
-    // Serializes Disk
+    // Serializes Store
     let mut disk_buff : Vec<u128> = vec![];
     for (fnid, lnk) in &self.disk.links {
       disk_buff.push(*fnid as u128);
       disk_buff.push(*lnk as u128);
     }
-    // Serializes File
+    // Serializes Funcs
     let mut file_buff : Vec<u128> = vec![];
     for (fnid, func) in &self.file.funcs {
       let mut func_buff = util::u8s_to_u128s(&mut bits::serialized_func(&func.func).to_bytes());
@@ -715,21 +893,23 @@ impl Heap {
       file_buff.push(func_buff.len() as u128);
       file_buff.append(&mut func_buff);
     }
-    // Serializes Arit
+    // Serializes Arits
     let mut arit_buff : Vec<u128> = vec![];
     for (fnid, arit) in &self.arit.arits {
       arit_buff.push(*fnid as u128);
       arit_buff.push(*arit);
     }
     // Serializes Nums
-    let mut nums_buff : Vec<u128> = vec![];
-    nums_buff.push(self.tick);
-    nums_buff.push(self.funs);
-    nums_buff.push(self.dups);
-    nums_buff.push(self.rwts);
-    nums_buff.push(self.mana);
-    nums_buff.push(self.size as u128);
-    nums_buff.push(self.next);
+    let nums_buff : Vec<u128> = vec![
+      self.tick,
+      self.funs,
+      self.dups,
+      self.rwts,
+      self.mana,
+      self.size as u128,
+      self.next
+    ];
+    
     // Returns the serialized heap
     return SerializedHeap {
       uuid: self.uuid,
@@ -751,7 +931,7 @@ impl Heap {
     self.size = serial.nums[5] as i128;
     self.next = serial.nums[6];
 
-    // Deserializes Blob
+    // Deserializes Nodes
     let mut i = 0;
     while i < serial.blob.len() {
       let idx = serial.blob[i + 0];
@@ -759,7 +939,7 @@ impl Heap {
       self.write(idx as usize, val);
       i += 2;
     }
-    // Deserializes Disk
+    // Deserializes Store
     let mut i = 0;
     while i < serial.disk.len() {
       let fnid = serial.disk[i + 0];
@@ -767,7 +947,7 @@ impl Heap {
       self.write_disk(fnid, lnk);
       i += 2;
     }
-    // Deserializes File
+    // Deserializes Funcs
     let mut i = 0;
     while i < serial.file.len() {
       let fnid = serial.file[i + 0];
@@ -777,7 +957,7 @@ impl Heap {
       self.write_file(fnid, Arc::new(func));
       i = i + 2 + size as usize;
     }
-    // Deserializes Arit
+    // Deserializes Arits
     for i in 0 .. serial.arit.len() / 2 {
       let fnid = serial.arit[i * 2 + 0];
       let arit = serial.arit[i * 2 + 1];
@@ -834,9 +1014,9 @@ pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
     blob: init_heap_data(U128_NONE),
-    disk: Disk { links: init_map() },
-    file: File { funcs: init_map() },
-    arit: Arit { arits: init_map() },
+    disk: Store { links: init_map() },
+    file: Funcs { funcs: init_map() },
+    arit: Arits { arits: init_map() },
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
@@ -847,14 +1027,14 @@ pub fn init_heap() -> Heap {
   }
 }
 
-pub fn init_heap_data(zero: u128) -> Blob {
-  return Blob {
+pub fn init_heap_data(zero: u128) -> Nodes {
+  return Nodes {
     data: vec![zero; HEAP_SIZE as usize],
     used: vec![],
   };
 }
 
-impl Blob {
+impl Nodes {
   fn write(&mut self, idx: usize, val: u128) {
     unsafe {
       let got = self.data.get_unchecked_mut(idx);
@@ -904,11 +1084,11 @@ fn show_buff(vec: &[u128]) -> String {
   return result;
 }
 
-impl Disk {
-  fn write(&mut self, fid: u128, val: Lnk) {
+impl Store {
+  fn write(&mut self, fid: u128, val: Ptr) {
     self.links.insert(fid as u64, val);
   }
-  fn read(&self, fid: u128) -> Option<Lnk> {
+  fn read(&self, fid: u128) -> Option<Ptr> {
     self.links.get(&(fid as u64)).map(|x| *x)
   }
   fn clear(&mut self) {
@@ -923,7 +1103,7 @@ impl Disk {
   }
 }
 
-impl File {
+impl Funcs {
   fn write(&mut self, fid: u128, val: Arc<CompFunc>) {
     self.funcs.entry(fid as u64).or_insert(val);
   }
@@ -942,7 +1122,7 @@ impl File {
   }
 }
 
-impl Arit {
+impl Arits {
   fn write(&mut self, fid: u128, val: u128) {
     self.arits.entry(fid as u64).or_insert(val);
   }
@@ -996,7 +1176,7 @@ impl Runtime {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
     return create_term(self, term, loc, vars_data);
   }
 
@@ -1011,7 +1191,7 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  pub fn collect(&mut self, term: Lnk, mana: u128) -> Option<()> {
+  pub fn collect(&mut self, term: Ptr, mana: u128) -> Option<()> {
     collect(self, term, mana)
   }
 
@@ -1019,13 +1199,13 @@ impl Runtime {
     collect(self, self.read(loc as usize), mana)
   }
 
-  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Lnk> {
+  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Ptr> {
     //let main = self.alloc_term(term);
     //let done = self.run_io(subject, caller, main);
     //return done;
   //}
 
-  //fn run_io_from_code(&mut self, code: &str) -> Option<Lnk> {
+  //fn run_io_from_code(&mut self, code: &str) -> Option<Ptr> {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
@@ -1039,23 +1219,23 @@ impl Runtime {
     return self.run_statements(&read_statements(code).1);
   }
 
-  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Lnk> {
+  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Ptr> {
     compute_at(self, loc, mana)
   }
 
-  pub fn compute(&mut self, lnk: Lnk, mana: u128) -> Option<Lnk> {
+  pub fn compute(&mut self, lnk: Ptr, mana: u128) -> Option<Ptr> {
     let host = alloc_lnk(self, lnk);
     let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Some(done);
   }
 
-  pub fn show_term(&self, lnk: Lnk) -> String {
-    return show_term(self, lnk);
+  pub fn show_term(&self, lnk: Ptr) -> String {
+    return show_term(self, lnk, None);
   }
 
   pub fn show_term_at(&self, loc: u128) -> String {
-    return show_term(self, self.read(loc as usize));
+    return show_term(self, self.read(loc as usize), None);
   }
 
   // Heaps
@@ -1096,7 +1276,7 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Lnk> {
+  pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Option<Ptr> {
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term));
     match get_tag(term) {
@@ -1160,9 +1340,17 @@ impl Runtime {
             clear(self, get_loc(term, 0), 3);
             return done;
           }
+          IO_NAME => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(caller));
+            let cont = alloc_app(self, cont, Num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
@@ -1214,15 +1402,30 @@ impl Runtime {
         }
         println!("- ctr {} fail", u128_to_name(*name));
       }
-      Statement::Run { expr } => {
+      Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
         let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        if self.check_term_arities(expr) && is_linear(expr) {
+        if self.check_term(expr) {
+          let hash = hash_term(&expr);
+          let subj = match sign {
+            None       => 0,
+            Some(sign) => sign.signer_name(&hash).map(|x| x.0).unwrap_or(1),
+          };
+          //let addr = match sign {
+            //None       => "?".to_string(),
+            //Some(sign) => sign.signer_address(&hash).map(|x| hex::encode(x.0)).unwrap_or("?".to_string()),
+          //};
+          //println!("checking signature...");
+          //println!("- hash: {}", hex::encode(hash.0));
+          //println!("- sign: {}", if let Some(s) = sign { hex::encode(s.0) } else { "".to_string() });
+          //println!("- subj: {}", subj);
+          //println!("- addr: {}", addr);
           let host = self.alloc_term(expr);
-          // eprintln!("  => run term: {}", show_term(self, host)); // ?? why this is showing dups?
-          if let Some(done) = self.run_io(0, 0, host, mana_lim) {
+          // eprintln!("  => run term:\n{}", show_term(self,ask_lnk(self, host), None));
+          // eprintln!("  => run term:\n{}", view_term(&readback(self, ask_lnk(self, host))));
+          if let Some(done) = self.run_io(subj, 0, host, mana_lim) {
             if let Some(done) = self.compute(done, mana_lim) {
               let done_code = self.show_term(done);
               if let Some(()) = self.collect(done, mana_lim) {
@@ -1250,54 +1453,57 @@ impl Runtime {
     }
   }
 
+  // FIXME: check_term_arities disabled due to #55; a better solution might be to just handle
+  //   incorrect arities when the term is constructed. update:: done by changing create_term, but
+  //   must review the codebase to ensure there aren't places allocating terms with wrong arities
   pub fn check_term(&self, term: &Term) -> bool {
-    return self.check_term_arities(term) && self.check_term_depth(term, 0) && is_linear(term);
+    return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
   }
 
-  pub fn check_term_arities(&self, term: &Term) -> bool {
-    match term {
-      Term::Var { name } => {
-        return true;
-      },
-      Term::Dup { nam0, nam1, expr, body } => {
-        return self.check_term_arities(expr) && self.check_term_arities(body);
-      }
-      Term::Lam { name, body } => {
-        return self.check_term_arities(body);
-      }
-      Term::App { func, argm } => {
-        return self.check_term_arities(func) && self.check_term_arities(argm);
-      }
-      Term::Ctr { name, args } => {
-        if self.get_arity(*name) != args.len() as u128 {
-          return false;
-        }
-        for arg in args {
-          if !self.check_term_arities(arg) {
-            return false;
-          }
-        }
-        return true;
-      }
-      Term::Fun { name, args } => {
-        if self.get_arity(*name) != args.len() as u128 {
-          return false;
-        }
-        for arg in args {
-          if !self.check_term_arities(arg) {
-            return false;
-          }
-        }
-        return true;
-      }
-      Term::Num { numb } => {
-        return true;
-      }
-      Term::Op2 { oper, val0, val1 } => {
-        return self.check_term_arities(val0) && self.check_term_arities(val1);
-      }
-    }
-  }
+  //pub fn check_term_arities(&self, term: &Term) -> bool {
+    //match term {
+      //Term::Var { name } => {
+        //return true;
+      //},
+      //Term::Dup { nam0, nam1, expr, body } => {
+        //return self.check_term_arities(expr) && self.check_term_arities(body);
+      //}
+      //Term::Lam { name, body } => {
+        //return self.check_term_arities(body);
+      //}
+      //Term::App { func, argm } => {
+        //return self.check_term_arities(func) && self.check_term_arities(argm);
+      //}
+      //Term::Ctr { name, args } => {
+        //if self.get_arity(*name) != args.len() as u128 {
+          //return false;
+        //}
+        //for arg in args {
+          //if !self.check_term_arities(arg) {
+            //return false;
+          //}
+        //}
+        //return true;
+      //}
+      //Term::Fun { name, args } => {
+        //if self.get_arity(*name) != args.len() as u128 {
+          //return false;
+        //}
+        //for arg in args {
+          //if !self.check_term_arities(arg) {
+            //return false;
+          //}
+        //}
+        //return true;
+      //}
+      //Term::Num { numb } => {
+        //return true;
+      //}
+      //Term::Op2 { oper, val0, val1 } => {
+        //return self.check_term_arities(val0) && self.check_term_arities(val1);
+      //}
+    //}
+  //}
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
@@ -1468,7 +1674,7 @@ impl Runtime {
           rt, 
           uuids, 
           next, 
-           Arc::new(Rollback::Cons { keep: 0, head: index, tail: back.clone() }
+           Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
         ));
       }
     }
@@ -1551,12 +1757,18 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, fid: u128, val: Lnk) {
+  pub fn write_disk(&mut self, fid: u128, val: Ptr) {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
-  pub fn read_disk(&mut self, fid: u128) -> Option<Lnk> {
+  pub fn read_disk(&mut self, fid: u128) -> Option<Ptr> {
     return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
+  }
+
+  pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
+    let host = self.read_disk(fid)?;
+    let term = readback(self, host);
+    Some(term)
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
@@ -1671,53 +1883,53 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // Constructors
 // ------------
 
-pub fn Var(pos: u128) -> Lnk {
+pub fn Var(pos: u128) -> Ptr {
   (VAR * TAG) | pos
 }
 
-pub fn Dp0(col: u128, pos: u128) -> Lnk {
+pub fn Dp0(col: u128, pos: u128) -> Ptr {
   (DP0 * TAG) | (col * EXT) | pos
 }
 
-pub fn Dp1(col: u128, pos: u128) -> Lnk {
+pub fn Dp1(col: u128, pos: u128) -> Ptr {
   (DP1 * TAG) | (col * EXT) | pos
 }
 
-pub fn Arg(pos: u128) -> Lnk {
+pub fn Arg(pos: u128) -> Ptr {
   (ARG * TAG) | pos
 }
 
-pub fn Era() -> Lnk {
+pub fn Era() -> Ptr {
   ERA * TAG
 }
 
-pub fn Lam(pos: u128) -> Lnk {
+pub fn Lam(pos: u128) -> Ptr {
   (LAM * TAG) | pos
 }
 
-pub fn App(pos: u128) -> Lnk {
+pub fn App(pos: u128) -> Ptr {
   (APP * TAG) | pos
 }
 
-pub fn Par(col: u128, pos: u128) -> Lnk {
+pub fn Par(col: u128, pos: u128) -> Ptr {
   (SUP * TAG) | (col * EXT) | pos
 }
 
-pub fn Op2(ope: u128, pos: u128) -> Lnk {
+pub fn Op2(ope: u128, pos: u128) -> Ptr {
   (OP2 * TAG) | (ope * EXT) | pos
 }
 
-pub fn Num(val: u128) -> Lnk {
+pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
   (NUM * TAG) | val
 }
 
-pub fn Ctr(fun: u128, pos: u128) -> Lnk {
+pub fn Ctr(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 60, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
   (CTR * TAG) | (fun * EXT) | pos
 }
 
-pub fn Fun(fun: u128, pos: u128) -> Lnk {
+pub fn Fun(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 60, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
@@ -1725,43 +1937,43 @@ pub fn Fun(fun: u128, pos: u128) -> Lnk {
 // Getters
 // -------
 
-pub fn get_tag(lnk: Lnk) -> u128 {
+pub fn get_tag(lnk: Ptr) -> u128 {
   lnk / TAG
 }
 
-pub fn get_ext(lnk: Lnk) -> u128 {
+pub fn get_ext(lnk: Ptr) -> u128 {
   (lnk / EXT) & 0xFFF_FFFF_FFFF_FFFF
 }
 
-pub fn get_val(lnk: Lnk) -> u128 {
+pub fn get_val(lnk: Ptr) -> u128 {
   lnk & 0xFFF_FFFF_FFFF_FFFF
 }
 
-pub fn get_num(lnk: Lnk) -> u128 {
+pub fn get_num(lnk: Ptr) -> u128 {
   lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
 }
 
-//pub fn get_ari(lnk: Lnk) -> u128 {
+//pub fn get_ari(lnk: Ptr) -> u128 {
   //(lnk / ARI) & 0xF
 //}
 
-pub fn get_loc(lnk: Lnk, arg: u128) -> u128 {
+pub fn get_loc(lnk: Ptr, arg: u128) -> u128 {
   get_val(lnk) + arg
 }
 
 // Memory
 // ------
 
-pub fn ask_lnk(rt: &Runtime, loc: u128) -> Lnk {
+pub fn ask_lnk(rt: &Runtime, loc: u128) -> Ptr {
   rt.read(loc as usize)
   //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
-pub fn ask_arg(rt: &Runtime, term: Lnk, arg: u128) -> Lnk {
+pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
   ask_lnk(rt, get_loc(term, arg))
 }
 
-pub fn link(rt: &mut Runtime, loc: u128, lnk: Lnk) -> Lnk {
+pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
   rt.write(loc as usize, lnk);
   if get_tag(lnk) <= VAR {
     let pos = get_loc(lnk, get_tag(lnk) & 0x01);
@@ -1808,8 +2020,8 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Lnk, mana: u128) -> Option<()> {
-  let mut stack : Vec<Lnk> = Vec::new();
+pub fn collect(rt: &mut Runtime, term: Ptr, mana: u128) -> Option<()> {
+  let mut stack : Vec<Ptr> = Vec::new();
   let mut next = term;
   let mut dups : Vec<u128> = Vec::new();
   loop {
@@ -1986,8 +2198,8 @@ pub fn is_linear(term: &Term) -> bool {
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Lnk {
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Lnk, vars_data: &mut Map<u128>) {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
+  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<u128>) {
     //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
     if name == VAR_NONE {
       link(rt, loc, Era());
@@ -2046,22 +2258,30 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       App(node)
     }
     Term::Fun { name, args } => {
-      let size = args.len() as u128;
-      let node = alloc(rt, size);
-      for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
-        link(rt, node + i as u128, arg_lnk);
+      if args.len() != rt.get_arity(*name) as usize {
+        Num(0)
+      } else {
+        let size = args.len() as u128;
+        let node = alloc(rt, size);
+        for (i, arg) in args.iter().enumerate() {
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          link(rt, node + i as u128, arg_lnk);
+        }
+        Fun(*name, node)
       }
-      Fun(*name, node)
     }
     Term::Ctr { name, args } => {
-      let size = args.len() as u128;
-      let node = alloc(rt, size);
-      for (i, arg) in args.iter().enumerate() {
-        let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
-        link(rt, node + i as u128, arg_lnk);
+      if args.len() != rt.get_arity(*name) as usize {
+        Num(0)
+      } else {
+        let size = args.len() as u128;
+        let node = alloc(rt, size);
+        for (i, arg) in args.iter().enumerate() {
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          link(rt, node + i as u128, arg_lnk);
+        }
+        Ctr(*name, node)
       }
-      Ctr(*name, node)
     }
     Term::Num { numb } => {
       // TODO: assert numb size
@@ -2226,14 +2446,14 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   });
 }
 
-pub fn create_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> Lnk {
+pub fn create_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> Ptr {
   let node = alloc(rt, 2);
   link(rt, node + 0, func);
   link(rt, node + 1, argm);
   App(node)
 }
 
-pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> Lnk {
+pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> Ptr {
   let node = alloc(rt, args.len() as u128);
   for i in 0 .. args.len() {
     link(rt, node + i as u128, args[i]);
@@ -2241,18 +2461,18 @@ pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> Lnk {
   Fun(fun, node)
 }
 
-pub fn alloc_lnk(rt: &mut Runtime, term: Lnk) -> u128 {
+pub fn alloc_lnk(rt: &mut Runtime, term: Ptr) -> u128 {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
 }
 
-pub fn alloc_app(rt: &mut Runtime, func: Lnk, argm: Lnk) -> u128 {
+pub fn alloc_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> u128 {
   let app = create_app(rt, func, argm);
   return alloc_lnk(rt, app);
 }
 
-pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
+pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
   let fun = create_fun(rt, fun, args);
   return alloc_lnk(rt, fun);
 }
@@ -2260,7 +2480,7 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Lnk]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
+pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr, mana: u128) -> Option<()> {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
@@ -2269,7 +2489,7 @@ pub fn subst(rt: &mut Runtime, lnk: Lnk, val: Lnk, mana: u128) -> Option<()> {
   return Some(());
 }
 
-pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
+pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
   let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
@@ -2287,9 +2507,9 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
       return None;
     }
 
-    //if debug || true {
-      //println!("------------------------");
-      //println!("{}", show_term(rt, ask_lnk(rt, 0)));
+    //if true {
+      // println!("------------------------");
+      // println!("{}", show_term(rt, ask_lnk(rt, root), Some(term)));
     //}
 
     if init == 1 {
@@ -2527,133 +2747,27 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             // eprintln!("op2-num");
-            fn gu08(tup: u128) -> u8 {
-              tup as u8
-            }
-            fn gu16(tup: u128) -> u16 {
-              (tup >> 8) as u16
-            }
-            fn gu32(tup: u128) -> u32 {
-              (tup >> 24) as u32
-            }
-            fn gu64(tup: u128) -> u64 {
-              (tup >> 56) as u64
-            }
-            fn gi08(tup: u128) -> i8 {
-              tup as i8
-            }
-            fn gi16(tup: u128) -> i16 {
-              (tup >> 8) as i16
-            }
-            fn gi32(tup: u128) -> i32 {
-              (tup >> 24) as i32
-            }
-            fn gi64(tup: u128) -> i64 {
-              (tup >> 56) as i64
-            }
-            fn utup(x8: u8, x16: u16, x32: u32, x64: u64) -> u128 {
-              let x8  = (x8  as u128) << (0);
-              let x16 = (x16 as u128) << (8);
-              let x32 = (x32 as u128) << (8 + 16);
-              let x64 = (x64 as u128) << (8 + 16 + 32);
-              return x8 | x16 | x32 | x64;
-            }
-            fn itup(x8: i8, x16: i16, x32: i32, x64: i64) -> u128 {
-              let x8  = (x8  as  u8 as u128) << (0);
-              let x16 = (x16 as u16 as u128) << (8);
-              let x32 = (x32 as u32 as u128) << (8 + 16);
-              let x64 = (x64 as u64 as u128) << (8 + 16 + 32);
-              return x8 | x16 | x32 | x64;
-            }
-            rt.set_mana(rt.get_mana() + Op2NumMana());
-            rt.set_rwts(rt.get_rwts() + 1);
+            let op  = get_ext(term);
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
-            let a_i = a_u as i128;
-            let b_i = b_u as i128;
-            let a_u08 = gu08(a_u); let a_u16 = gu16(a_u); let a_u32 = gu32(a_u); let a_u64 = gu64(a_u); // TODO: replace by single function
-            let a_i08 = gi08(a_u); let a_i16 = gi16(a_u); let a_i32 = gi32(a_u); let a_i64 = gi64(a_u);
-            let b_u08 = gu08(b_u); let b_u16 = gu16(b_u); let b_u32 = gu32(b_u); let b_u64 = gu64(b_u);
-            let b_i08 = gi08(b_u); let b_i16 = gi16(b_u); let b_i32 = gi32(b_u); let b_i64 = gi64(b_u);
-
-            let op = get_ext(term);
             let res = match op {
               // U120
-              U120_ADD => (a_u +  b_u) & NUM_MASK,
-              U120_SUB => (a_u -  b_u) & NUM_MASK,
-              U120_MUL => (a_u *  b_u) & NUM_MASK,
-              U120_DIV => (a_u /  b_u) & NUM_MASK,
-              U120_MOD => (a_u %  b_u) & NUM_MASK,
-              U120_AND => (a_u &  b_u) & NUM_MASK,
-              U120_OR  => (a_u |  b_u) & NUM_MASK,
-              U120_XOR => (a_u ^  b_u) & NUM_MASK,
-              U120_SHL => (a_u << b_u) & NUM_MASK,
-              U120_SHR => (a_u >> b_u) & NUM_MASK,
-              U120_LTN => u128::from(a_u <  b_u),
-              U120_LTE => u128::from(a_u <= b_u),
-              U120_EQL => u128::from(a_u == b_u),
-              U120_GTE => u128::from(a_u >= b_u),
-              U120_GTN => u128::from(a_u >  b_u),
-              U120_NEQ => u128::from(a_u != b_u),
-              U120_RTL => todo!("U120_RTL"), // TODO
-              U120_RTR => todo!("U120_RTR"), // TODO
-              // I120
-              I120_ADD => (a_i +  b_i) as u128 & NUM_MASK,
-              I120_SUB => (a_i -  b_i) as u128 & NUM_MASK,
-              I120_MUL => (a_i *  b_i) as u128 & NUM_MASK,
-              I120_DIV => (a_i /  b_i) as u128 & NUM_MASK,
-              I120_MOD => (a_i %  b_i) as u128 & NUM_MASK,
-              I120_AND => (a_i &  b_i) as u128 & NUM_MASK,
-              I120_OR  => (a_i |  b_i) as u128 & NUM_MASK,
-              I120_XOR => (a_i ^  b_i) as u128 & NUM_MASK,
-              I120_SHL => (a_i << b_i) as u128 & NUM_MASK,
-              I120_SHR => (a_i >> b_i) as u128 & NUM_MASK,
-              I120_LTN => u128::from(a_i <  b_i),
-              I120_LTE => u128::from(a_i <= b_i),
-              I120_EQL => u128::from(a_i == b_i),
-              I120_GTE => u128::from(a_i >= b_i),
-              I120_GTN => u128::from(a_i >  b_i),
-              I120_NEQ => u128::from(a_i != b_i),
-              I120_RTL => todo!("I120_RTL"), // TODO
-              I120_RTR => todo!("I120_RTR"), // TODO
-              // UTUP
-              UTUP_ADD => utup(a_u08 +  b_u08, a_u16 +  b_u16, a_u32 +  b_u32, a_u64 +  b_u64),
-              UTUP_SUB => utup(a_u08 -  b_u08, a_u16 -  b_u16, a_u32 -  b_u32, a_u64 -  b_u64),
-              UTUP_MUL => utup(a_u08 *  b_u08, a_u16 *  b_u16, a_u32 *  b_u32, a_u64 *  b_u64),
-              UTUP_DIV => utup(a_u08 /  b_u08, a_u16 /  b_u16, a_u32 /  b_u32, a_u64 /  b_u64),
-              UTUP_MOD => utup(a_u08 %  b_u08, a_u16 %  b_u16, a_u32 %  b_u32, a_u64 %  b_u64),
-              UTUP_AND => utup(a_u08 &  b_u08, a_u16 &  b_u16, a_u32 &  b_u32, a_u64 &  b_u64),
-              UTUP_OR  => utup(a_u08 |  b_u08, a_u16 |  b_u16, a_u32 |  b_u32, a_u64 |  b_u64),
-              UTUP_XOR => utup(a_u08 ^  b_u08, a_u16 ^  b_u16, a_u32 ^  b_u32, a_u64 ^  b_u64),
-              UTUP_SHL => utup(a_u08 << b_u08, a_u16 << b_u16, a_u32 << b_u32, a_u64 << b_u64),
-              UTUP_SHR => utup(a_u08 >> b_u08, a_u16 >> b_u16, a_u32 >> b_u32, a_u64 >> b_u64),
-              UTUP_LTN => utup(u8::from(a_u08 <  b_u08), u16::from(a_u16 <  b_u16), u32::from(a_u32 <  b_u32), u64::from(a_u64 <  b_u64)),
-              UTUP_LTE => utup(u8::from(a_u08 <= b_u08), u16::from(a_u16 <= b_u16), u32::from(a_u32 <= b_u32), u64::from(a_u64 <= b_u64)),
-              UTUP_EQL => utup(u8::from(a_u08 == b_u08), u16::from(a_u16 == b_u16), u32::from(a_u32 == b_u32), u64::from(a_u64 == b_u64)),
-              UTUP_GTE => utup(u8::from(a_u08 >= b_u08), u16::from(a_u16 >= b_u16), u32::from(a_u32 >= b_u32), u64::from(a_u64 >= b_u64)),
-              UTUP_GTN => utup(u8::from(a_u08 >  b_u08), u16::from(a_u16 >  b_u16), u32::from(a_u32 >  b_u32), u64::from(a_u64 >  b_u64)),
-              UTUP_NEQ => utup(u8::from(a_u08 != b_u08), u16::from(a_u16 != b_u16), u32::from(a_u32 != b_u32), u64::from(a_u64 != b_u64)),
-              UTUP_RTL => utup(a_u08.rotate_left(b_u08 as u32),  a_u16.rotate_left(b_u16 as u32),  a_u32.rotate_left(b_u32 as u32),  a_u64.rotate_left(b_u64 as u32) ), // ?? I think the u64 to u32 cast can panic
-              UTUP_RTR => utup(a_u08.rotate_right(b_u08 as u32), a_u16.rotate_right(b_u16 as u32), a_u32.rotate_right(b_u32 as u32), a_u64.rotate_right(b_u64 as u32)),
-              // ITUP
-              ITUP_ADD => itup(a_i08 +  b_i08, a_i16 +  b_i16, a_i32 +  b_i32, a_i64 +  b_i64),
-              ITUP_SUB => itup(a_i08 -  b_i08, a_i16 -  b_i16, a_i32 -  b_i32, a_i64 -  b_i64),
-              ITUP_MUL => itup(a_i08 *  b_i08, a_i16 *  b_i16, a_i32 *  b_i32, a_i64 *  b_i64),
-              ITUP_DIV => itup(a_i08 /  b_i08, a_i16 /  b_i16, a_i32 /  b_i32, a_i64 /  b_i64),
-              ITUP_MOD => itup(a_i08 %  b_i08, a_i16 %  b_i16, a_i32 %  b_i32, a_i64 %  b_i64),
-              ITUP_AND => itup(a_i08 &  b_i08, a_i16 &  b_i16, a_i32 &  b_i32, a_i64 &  b_i64),
-              ITUP_OR  => itup(a_i08 |  b_i08, a_i16 |  b_i16, a_i32 |  b_i32, a_i64 |  b_i64),
-              ITUP_XOR => itup(a_i08 ^  b_i08, a_i16 ^  b_i16, a_i32 ^  b_i32, a_i64 ^  b_i64),
-              ITUP_SHL => itup(a_i08 << b_i08, a_i16 << b_i16, a_i32 << b_i32, a_i64 << b_i64),
-              ITUP_SHR => itup(a_i08 >> b_i08, a_i16 >> b_i16, a_i32 >> b_i32, a_i64 >> b_i64),
-              ITUP_LTN => itup(i8::from(a_i08 <  b_i08), i16::from(a_i16 <  b_i16), i32::from(a_i32 <  b_i32), i64::from(a_i64 <  b_i64)),
-              ITUP_LTE => itup(i8::from(a_i08 <= b_i08), i16::from(a_i16 <= b_i16), i32::from(a_i32 <= b_i32), i64::from(a_i64 <= b_i64)),
-              ITUP_EQL => itup(i8::from(a_i08 == b_i08), i16::from(a_i16 == b_i16), i32::from(a_i32 == b_i32), i64::from(a_i64 == b_i64)),
-              ITUP_GTE => itup(i8::from(a_i08 >= b_i08), i16::from(a_i16 >= b_i16), i32::from(a_i32 >= b_i32), i64::from(a_i64 >= b_i64)),
-              ITUP_GTN => itup(i8::from(a_i08 >  b_i08), i16::from(a_i16 >  b_i16), i32::from(a_i32 >  b_i32), i64::from(a_i64 >  b_i64)),
-              ITUP_NEQ => itup(i8::from(a_i08 != b_i08), i16::from(a_i16 != b_i16), i32::from(a_i32 != b_i32), i64::from(a_i64 != b_i64)),
-              ITUP_RTL => itup(a_i08.rotate_left(b_i08 as u32),  a_i16.rotate_left(b_i16 as u32),  a_i32.rotate_left(b_i32 as u32),  a_i64.rotate_left(b_i64 as u32)),
-              ITUP_RTR => itup(a_i08.rotate_right(b_i08 as u32), a_i16.rotate_right(b_i16 as u32), a_i32.rotate_right(b_i32 as u32), a_i64.rotate_right(b_i64 as u32)),
+              ADD => a_u.wrapping_add(b_u) & NUM_MASK,
+              SUB => a_u.wrapping_sub(b_u) & NUM_MASK,
+              MUL => a_u.wrapping_mul(b_u) & NUM_MASK,
+              DIV => a_u.wrapping_div(b_u) & NUM_MASK,
+              MOD => a_u.wrapping_rem(b_u) & NUM_MASK,
+              AND => (a_u &  b_u) & NUM_MASK,
+              OR  => (a_u |  b_u) & NUM_MASK,
+              XOR => (a_u ^  b_u) & NUM_MASK,
+              SHL => a_u.wrapping_shl(b_u as u32) & NUM_MASK,
+              SHR => a_u.wrapping_shr(b_u as u32) & NUM_MASK,
+              LTN => u128::from(a_u <  b_u),
+              LTE => u128::from(a_u <= b_u),
+              EQL => u128::from(a_u == b_u),
+              GTE => u128::from(a_u >= b_u),
+              GTN => u128::from(a_u >  b_u),
+              NEQ => u128::from(a_u != b_u),
               _ => panic!("Invalid operation!"),
             };
             let done = Num(res);
@@ -2705,7 +2819,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Lnk> {
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Lnk, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<u128>) -> Option<bool> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -2858,7 +2972,7 @@ pub fn get_bit(bits: &[u128], bit: u128) -> bool {
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 /// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
+pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Ptr> {
   enum StackItem {
     LinkResolver(u128),
     Host(u128, u128)
@@ -2938,7 +3052,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Option<Lnk> {
 // Debug
 // -----
 
-pub fn show_lnk(x: Lnk) -> String {
+pub fn show_lnk(x: Ptr) -> String {
   if x == 0 {
     String::from("~")
   } else {
@@ -2976,17 +3090,220 @@ pub fn show_rt(rt: &Runtime) -> String {
 }
 
 // TODO: this should be renamed to "readback", and should return a term instead of a string. 
-pub fn show_term(rt: &Runtime, term: Lnk) -> String {
+pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   enum StackItem {
-    Term(Lnk),
+    Term(Ptr),
     Str(String),
   }
   let mut names: HashMap<u128, String> = HashMap::new();
   fn find_lets(
     rt: &Runtime,
-    term: Lnk,
+    term: Ptr,
     names: &mut HashMap<u128, String>,
+    focus: Option<u128>
   ) -> String {
+    let mut lets: HashMap<u128, u128> = HashMap::new();
+    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut count: u128 = 0;
+    let mut stack = vec![term];
+    let mut text = String::new();
+    while !stack.is_empty() { 
+      let term = stack.pop().unwrap();
+      match get_tag(term) {
+        LAM => {
+          names.insert(get_loc(term, 0), format!("{}", count));
+          count += 1;
+          stack.push(ask_arg(rt, term, 1));
+        }
+        APP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        SUP => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        DP0 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        DP1 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", count));
+            count += 1;
+            kinds.insert(get_loc(term, 0), get_ext(term));
+            e.insert(get_loc(term, 0));
+            stack.push(ask_arg(rt, term, 2));
+          }
+        }
+        OP2 => {
+          stack.push(ask_arg(rt, term, 1));
+          stack.push(ask_arg(rt, term, 0));
+        }
+        CTR | FUN => {
+          let arity = rt.get_arity(get_ext(term));
+          for i in (0..arity).rev() {
+            stack.push(ask_arg(rt, term, i));
+          }
+        }
+        _ => {}
+      }
+    }
+
+    for (_key, pos) in lets {
+      // todo: reverse
+      let what = String::from("?h");
+      //let kind = kinds.get(&key).unwrap_or(&0);
+      let name = names.get(&pos).unwrap_or(&what);
+      let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
+      let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+      text.push_str(&format!("dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)));
+    }
+    text
+  }
+
+  fn go(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
+    let mut stack = vec![StackItem::Term(term)];
+    let mut output = Vec::new();
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Str(txt) => {
+          output.push(txt);
+        },
+        StackItem::Term(term) => {
+          if let Some(focus) = focus {
+            if focus == term {
+              output.push("$".to_string());
+            }
+          }
+          match get_tag(term) {
+            DP0 => {
+              output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
+            }
+            DP1 => {
+              output.push(format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b"))));
+            }
+            VAR => {
+              output.push(format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c"))));
+            }
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              output.push(format!("@{}", name));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+            }
+            APP => {
+              output.push("(".to_string());
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            SUP => {
+              output.push("{".to_string());
+              stack.push(StackItem::Str("}".to_string()));
+              //let kind = get_ext(term);
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            OP2 => {
+              let oper = get_ext(term);
+              let symb = match oper {
+                ADD => "+",
+                SUB => "-",
+                MUL => "*",
+                DIV => "/",
+                MOD => "%",
+                AND => "&",
+                OR  => "|",
+                XOR => "^",
+                SHL => "<<",
+                SHR => ">>",
+                LTN => "<",
+                LTE => "<=",
+                EQL => "=",
+                GTE => ">=",
+                GTN => ">",
+                NEQ => "!=",
+                _        => "?",
+              };
+              output.push(format!("({}", symb));
+              stack.push(StackItem::Str(")".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Str(" ".to_string()));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            NUM => {
+              let numb = get_num(term);
+              output.push(format!("#{}", numb));
+            }
+            CTR => {
+              let name = get_ext(term);
+              let mut arit = rt.get_arity(name);
+              let mut name = view_name(name);
+              // Pretty print names
+              if name == "Name" && arit == 1 {
+                let arg = ask_arg(rt, term, 0);
+                if get_tag(arg) == NUM {
+                  name = format!("Name '{}'", view_name(get_num(arg)));
+                  arit = 0; // erase arit to avoid for
+                }
+              }
+              output.push(format!("{{{}", name));
+              stack.push(StackItem::Str("}".to_string()));
+              
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+      
+              }
+            }
+            FUN => {
+              let func = get_ext(term);
+              output.push(format!("({}", u128_to_name(func)));
+              stack.push(StackItem::Str(")".to_string()));
+              let arit = rt.get_arity(func);
+              for i in (0..arit).rev() {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+            ERA => {
+              output.push(String::from("*"));
+            }
+            _ => output.push(format!("?g({})", get_tag(term))),
+          }
+        }
+        }
+      }
+
+    let res = output.join("");
+    return res;
+
+  }
+
+  let mut text = find_lets(rt, term, &mut names, focus);
+  text.push_str( &go(rt, term, &names, focus));
+  text
+}
+
+pub fn readback(rt: &Runtime, term: Ptr) -> Term {
+  enum StackItem {
+    Term(Ptr),
+    Resolver(Ptr),
+  }
+  let mut names: HashMap<u128, String> = HashMap::new();
+  fn dups(
+    rt: &Runtime,
+    term: Ptr,
+    names: &mut HashMap<u128, String>,
+  ) -> Term {
     let mut lets: HashMap<u128, u128> = HashMap::new();
     let mut kinds: HashMap<u128, u128> = HashMap::new();
     let mut count: u128 = 0;
@@ -3039,144 +3356,156 @@ pub fn show_term(rt: &Runtime, term: Lnk) -> String {
       }
     }
 
-    let mut text = String::new();
-    for (_key, pos) in lets {
-      // todo: reverse
-      let what = String::from("?h");
-      //let kind = kinds.get(&key).unwrap_or(&0);
-      let name = names.get(&pos).unwrap_or(&what);
-      let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
-      let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("&dup {{{} {}}} = {};", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names)));
+    let cont = expr(rt, term, &names);
+    if lets.is_empty() {
+      cont
+    } else {
+      let mut output = Term::Var { name: 0 };
+      for (i, (_key, pos)) in lets.iter().enumerate() {
+        // todo: reverse
+        let what = String::from("?h");
+        //let kind = kinds.get(&key).unwrap_or(&0);
+        let name = names.get(&pos).unwrap_or(&what);
+        let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
+        let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+        let expr = expr(rt, ask_lnk(rt, pos + 2), &names);
+
+        if i == 0 {
+          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(cont.clone()) };
+        } else {
+          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(output) };
+        }
+      }
+      output
     }
-    text
   }
 
-  fn go(rt: &Runtime, term: Lnk, names: &HashMap<u128, String>) -> String {
+  fn expr(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>) -> Term {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {
       let item = stack.pop().unwrap();
       match item {
-        StackItem::Str(txt) => {
-          output.push(txt);
-        },
-        StackItem::Term(term) =>
+        StackItem::Resolver(term) => {
           match get_tag(term) {
-            DP0 => {
-              output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
-            }
-            DP1 => {
-              output.push(format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b"))));
-            }
-            VAR => {
-              output.push(format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c"))));
-            }
+            CTR => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              let mut args = Vec::new();
+              for i in 0..arit {
+                args.push(output.pop().unwrap());
+              }
+              output.push(Term::Ctr { name: func, args });
+            },
             LAM => {
               let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-              output.push(format!("@{}", name));
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              let body = Box::new(output.pop().unwrap());
+              output.push(Term::Lam { name: name_to_u128(&name), body });
             }
             APP => {
-              output.push("(".to_string());
-              stack.push(StackItem::Str(")".to_string()));
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-              stack.push(StackItem::Str(" ".to_string()));
-              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
-            }
-            SUP => {
-              output.push("{".to_string());
-              stack.push(StackItem::Str("}".to_string()));
-              //let kind = get_ext(term);
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-              stack.push(StackItem::Str(" ".to_string()));
-              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+              let argm = Box::new(output.pop().unwrap());
+              let func = Box::new(output.pop().unwrap());
+              output.push(Term::App { func , argm });
             }
             OP2 => {
               let oper = get_ext(term);
               let symb = match oper {
-                U120_ADD => "+",
-                U120_SUB => "-",
-                U120_MUL => "*",
-                U120_DIV => "/",
-                U120_MOD => "%",
-                U120_AND => "&",
-                U120_OR  => "|",
-                U120_XOR => "^",
-                U120_SHL => "<<",
-                U120_SHR => ">>",
-                U120_LTN => "<",
-                U120_LTE => "<=",
-                U120_EQL => "=",
-                U120_GTE => ">=",
-                U120_GTN => ">",
-                U120_NEQ => "!=",
-                UTUP_ADD => "~+",
-                UTUP_SUB => "~-",
-                UTUP_MUL => "~*",
-                UTUP_DIV => "~/",
-                UTUP_MOD => "~%",
-                UTUP_AND => "~&",
-                UTUP_OR  => "~|",
-                UTUP_XOR => "~^",
-                UTUP_SHL => "~<<",
-                UTUP_SHR => "~>>",
-                UTUP_LTN => "~<",
-                UTUP_LTE => "~<=",
-                UTUP_EQL => "~=",
-                UTUP_GTE => "~>=",
-                UTUP_GTN => "~>",
-                UTUP_NEQ => "~!=",
-                UTUP_RTL => "~<~",
-                UTUP_RTR => "~>~",
-                _        => "?",
+                ADD => "+",
+                SUB => "-",
+                MUL => "*",
+                DIV => "/",
+                MOD => "%",
+                AND => "&",
+                OR  => "|",
+                XOR => "^",
+                SHL => "<<",
+                SHR => ">>",
+                LTN => "<",
+                LTE => "<=",
+                EQL => "=",
+                GTE => ">=",
+                GTN => ">",
+                NEQ => "!=",
+                _   => "?",
               };
-              output.push(format!("({}", symb));
-              stack.push(StackItem::Str(")".to_string()));
+              let val1 = Box::new(output.pop().unwrap());
+              let val0 = Box::new(output.pop().unwrap());
+              output.push(Term::Op2 { oper, val0, val1 })
+            }
+            FUN => {
+              let func = get_ext(term);
+              let arit = rt.get_arity(func);
+              let mut args = Vec::new();
+              for i in 0..arit {
+                args.push(output.pop().unwrap());
+              }
+              output.push(Term::Fun { name: func, args });
+            }
+            _ => panic!("Term not valid in readback"),
+          }
+        },
+        StackItem::Term(term) =>
+          match get_tag(term) {
+            DP0 => {
+              let name = format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            DP1 => {
+              let name = format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            VAR => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?x")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            LAM => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              stack.push(StackItem::Resolver(term));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-              stack.push(StackItem::Str(" ".to_string()));
+            }
+            APP => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            SUP => {}
+            OP2 => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
             NUM => {
               let numb = get_num(term);
-              output.push(format!("#{}", numb));
+              output.push(Term::Num { numb });
             }
             CTR => {
               let func = get_ext(term);
-              output.push(format!("{{{}", u128_to_name(func)));
-              stack.push(StackItem::Str("}".to_string()));
               let arit = rt.get_arity(func);
-              for i in (0..arit).rev() {
+              stack.push(StackItem::Resolver(term));
+              for i in 0..arit {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
-                stack.push(StackItem::Str(" ".to_string()));
               }
             }
             FUN => {
               let func = get_ext(term);
-              output.push(format!("({} ", u128_to_name(func)));
-              stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(func);
-              for i in (0..arit).rev() {
+              stack.push(StackItem::Resolver(term));
+              for i in 0..arit {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
-                stack.push(StackItem::Str(" ".to_string()));
               }
             }
-            ERA => {
-              output.push(String::from("*"));
-            }
-            _ => output.push(format!("?g({})", get_tag(term))),
+            ERA => {}
+            _ => {}
           }
         }
       }
 
-    let res = output.join("");
+    let res = output.pop().unwrap();
     return res;
 
   }
 
-  let mut text = find_lets(rt, term, &mut names);
-  text.push_str( &go(rt, term, &names));
-  text
+  dups(rt, term, &mut names)
 }
 
 // Parsing
@@ -3194,6 +3523,18 @@ fn tail(code: &str) -> &str {
   }
 }
 
+fn drop(code: &str, amount: u128) -> &str {
+  let mut code = code;
+  for _ in 0 .. amount {
+    code = tail(code);
+  }
+  return code;
+}
+
+fn nth(code: &str, index: u128) -> char {
+  return head(drop(code, index));
+}
+
 fn skip(code: &str) -> &str {
   let mut code = code;
   loop {
@@ -3203,7 +3544,7 @@ fn skip(code: &str) -> &str {
       }
       continue;
     }
-    if head(code) == '/' && head(tail(code)) == '/' {
+    if head(code) == '/' && nth(code,1) == '/' {
       while head(code) != '\n' && head(code) != '\0' {
         code = tail(code);
       }
@@ -3227,7 +3568,7 @@ fn is_name_char(chr: char) -> bool {
       || chr >= '0' && chr <= '9';
 }
 
-fn read_char(code: &str, chr: char) -> (&str, ()) {
+pub fn read_char(code: &str, chr: char) -> (&str, ()) {
   let code = skip(code);
   if head(code) == chr {
     return (tail(code), ());
@@ -3236,10 +3577,9 @@ fn read_char(code: &str, chr: char) -> (&str, ()) {
   }
 }
 
-fn read_numb(code: &str) -> (&str, u128) {
+pub fn read_numb(code: &str) -> (&str, u128) {
   let mut code = skip(code);
   if head(code) == 'x' {
-    println!("is hex");
     code = tail(code);
     let mut numb = 0;
     let mut code = code;
@@ -3268,7 +3608,7 @@ fn read_numb(code: &str) -> (&str, u128) {
   }
 }
 
-fn read_name(code: &str) -> (&str, u128) {
+pub fn read_name(code: &str) -> (&str, u128) {
   let code = skip(code);
   let mut name = String::new();
   if head(code) == '~' {
@@ -3285,6 +3625,16 @@ fn read_name(code: &str) -> (&str, u128) {
     // TODO: check identifier size and propagate error
     return (code, name_to_u128(&name));
   }
+}
+
+pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
+  let mut data : Vec<u8> = Vec::new();
+  let mut code = skip(code);
+  while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
+    data.append(&mut hex::decode(&String::from_iter([nth(code,0),nth(code,1)])).unwrap());
+    code = drop(code, 2);
+  }
+  return (code, data);
 }
 
 /// Converts a name to a number, using the following table:
@@ -3335,7 +3685,7 @@ pub fn u128_to_name(num: u128) -> String {
   name.chars().rev().collect()
 }
 
-fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
+pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
   let mut elems = Vec::new();
   let mut code = code;
   while code.len() > 0 && head(skip(code)) != stop {
@@ -3363,13 +3713,13 @@ pub fn read_term(code: &str) -> (&str, Term) {
         let code = tail(code);
         let (code, val0) = read_term(code);
         let (code, val1) = read_term(code);
-        let (code, skip) = read_char(code, ')');
+        let (code, unit) = read_char(code, ')');
         return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
       } else if head(code) == '!' {
         let code = tail(code);
         let (code, func) = read_term(code);
         let (code, argm) = read_term(code);
-        let (code, skip) = read_char(code, ')');
+        let (code, unit) = read_char(code, ')');
         return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
       } else {
         let (code, name) = read_name(code);
@@ -3404,17 +3754,12 @@ pub fn read_term(code: &str) -> (&str, Term) {
     '\'' => {
       let code = tail(code);
       let (code, numb) = read_name(code);
-      let (code, skip) = read_char(code, '\'');
+      let (code, unit) = read_char(code, '\'');
       return (code, Term::Num { numb });
     },
     '!' => {
       let code = tail(code);
       let (code, macro_name) = read_name(code);
-      //const MC_DONE : u128 = 0xa33ca9; // name_to_u128('done')
-      //const MC_TAKE : u128 = 0xe25be9; // name_to_u128('take') 
-      //const MC_SAVE : u128 = 0xde5ea9; // name_to_u128('save')
-      //const MC_CALL : u128 = 0x9e5c30; // name_to_u128('call')
-      //const MC_FROM : u128 = 0xab6cf1; // name_to_u128('from')
       match macro_name {
         MC_DONE => {
           let (code, expr) = read_term(code);
@@ -3457,6 +3802,14 @@ pub fn read_term(code: &str) -> (&str, Term) {
             args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
+        MC_NAME => {
+          let (code, bind) = read_name(code);
+          let (code, then) = read_term(code);
+          return (code, Term::Ctr {
+            name: name_to_u128("IO.NAME"),
+            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
+          });
+        }
         MC_FROM => {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
@@ -3471,13 +3824,13 @@ pub fn read_term(code: &str) -> (&str, Term) {
       }
     },
     _ => {
-      if let ('d','u','p',' ') = (head(code), head(tail(code)), head(tail(tail(code))), head(tail(tail(tail(code))))) {
-        let code = tail(tail(tail(code)));
+      if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,3);
         let (code, nam0) = read_name(code);
         let (code, nam1) = read_name(code);
-        let (code, skip) = read_char(code, '=');
+        let (code, unit) = read_char(code, '=');
         let (code, expr) = read_term(code);
-        let (code, skip) = read_char(code, ';');
+        let (code, unit) = read_char(code, ';');
         let (code, body) = read_term(code);
         return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
       } else {
@@ -3488,84 +3841,53 @@ pub fn read_term(code: &str) -> (&str, Term) {
   }
 }
 
-fn read_oper(in_code: &str) -> (&str, Option<u128>) {
-  fn head_is(ch: char, code: &str) -> (&str, u128) {
-    if head(code) == ch {
-      (tail(code), 1)
-    } else {
-      (code, 0)
-    }
-  }
-
-  fn read_op(code: &str) -> (&str, Option<u128>) {
-    let tl = tail(code);
-    match head(code) {
-      // Should not match with `~`
-      '+' => (tl, Some(ADD)),
-      '-' => (tl, Some(SUB)),
-      '*' => (tl, Some(MUL)),
-      '/' => (tl, Some(DIV)),
-      '%' => (tl, Some(MOD)),
-      '&' => (tl, Some(AND)),
-      '|' => (tl, Some(OR)),
-      '^' => (tl, Some(XOR)),
-      '<' => match head(tl) {
-        '=' => (tail(tl), Some(LTE)),
-        '<' => (tail(tl), Some(SHL)),
-        '~' => (tail(tl), Some(RTL)),
-        _   => (code, Some(LTN)),
-      },
-      '>' => match head(tl) {
-        '=' => (tail(tl), Some(GTE)),
-        '>' => (tail(tl), Some(SHR)),
-        '~' => (tail(tl), Some(RTR)),
-        _   => (code, Some(GTN)),
-      },
-      '=' => match head(tl) {
-        '=' => (tail(tl), Some(EQL)),
-        _   => (code, None),
-      },
-      '!' => match head(tl) {
-        '=' => (tail(tl), Some(NEQ)),
-        _   => (code, None),
-      },
-      _ => (code, None),
-    }
-  }
-
+pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
   let code = skip(in_code);
-
-  // U120 vs UTUP
-  let (code, op_kind) = head_is('~', code);
-
-  // The actual operation code
-  let (code, op_code) = read_op(code);
-  let op = if let Some(op) = op_code {
-    op
-  } else {
-    return (in_code, None);
-  };
-
-  // Unsigned vs signed
-  let (code, is_sig) = head_is('i', code);
-
-  let oper = make_oper(op_kind, is_sig, op);
-  (code, Some(oper))
+  match head(code) {
+    // Should not match with `~`
+    '+' => (tail(code), Some(ADD)),
+    '-' => (tail(code), Some(SUB)),
+    '*' => (tail(code), Some(MUL)),
+    '/' => (tail(code), Some(DIV)),
+    '%' => (tail(code), Some(MOD)),
+    '&' => (tail(code), Some(AND)),
+    '|' => (tail(code), Some(OR)),
+    '^' => (tail(code), Some(XOR)),
+    '<' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(LTE)),
+      '<' => (tail(tail(code)), Some(SHL)),
+      _   => (code, Some(LTN)),
+    },
+    '>' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(GTE)),
+      '>' => (tail(tail(code)), Some(SHR)),
+      _   => (code, Some(GTN)),
+    },
+    '=' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(EQL)),
+      _   => (code, None),
+    },
+    '!' => match head(tail(code)) {
+      '=' => (tail(tail(code)), Some(NEQ)),
+      _   => (code, None),
+    },
+    _ => (code, None),
+  }
 }
 
-fn read_rule(code: &str) -> (&str, Rule) {
+pub fn read_rule(code: &str) -> (&str, Rule) {
   let (code, lhs) = read_term(code);
   let (code, ())  = read_char(code, '=');
   let (code, rhs) = read_term(code);
   return (code, Rule{lhs, rhs});
 }
 
-fn read_rules(code: &str) -> (&str, Vec<Rule>) {
+pub fn read_rules(code: &str) -> (&str, Vec<Rule>) {
   let (code, rules) = read_until(code, '\0', read_rule);
   return (code, rules);
 }
 
-fn read_func(code: &str) -> (&str, CompFunc) {
+pub fn read_func(code: &str) -> (&str, CompFunc) {
   let (code, rules) = read_until(code, '\0', read_rule);
   if let Some(func) = build_func(&rules, false) {
     return (code, func);
@@ -3574,33 +3896,53 @@ fn read_func(code: &str) -> (&str, CompFunc) {
   }
 }
 
-fn read_statement(code: &str) -> (&str, Statement) {
+pub fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
-  match (head(code), head(tail(code)), head(tail(tail(code)))) {
+  match (nth(code,0), nth(code,1), nth(code,2)) {
     ('f','u','n') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '(');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '(');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, ')', read_name);
-      let (code, skip) = read_char(code, '{');
+      let (code, unit) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
-      let (code, skip) = read_char(code, '=');
-      let (code, init) = read_term(code);
-      return (code, Statement::Fun { name, args, func, init });
+      let code = skip(code);
+      if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,4);
+        let (code, unit) = read_char(code, '{');
+        let (code, init) = read_term(code);
+        let (code, unit) = read_char(code, '}');
+        return (code, Statement::Fun { name, args, func, init });
+      } else {
+        return (code, Statement::Fun { name, args, func, init: Term::Num { numb: 0 } });
+      }
     }
     ('c','t','r') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '{');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '{');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, '}', read_name);
       return (code, Statement::Ctr { name, args });
     }
     ('r','u','n') => {
-      let code = tail(tail(tail(code)));
-      let (code, skip) = read_char(code, '{');
+      let code = drop(code,3);
+      let (code, unit) = read_char(code, '{');
       let (code, expr) = read_term(code);
-      let (code, skip) = read_char(code, '}');
-      return (code, Statement::Run { expr });
+      let (code, unit) = read_char(code, '}');
+      let code = skip(code);
+      if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,4);
+        let (code, unit) = read_char(code, '{');
+        let (code, sign) = read_hex(code);
+        let (code, unit) = read_char(code, '}');
+        if sign.len() == 65 {
+          return (code, Statement::Run { expr, sign: Some(crypto::Signature(sign.as_slice().try_into().unwrap()))  });
+        } else {
+          panic!("Wrong signature size.");
+        }
+      } else {
+        return (code, Statement::Run { expr, sign: None });
+      }
     }
     _ => {
       panic!("Couldn't parse statement.");
@@ -3651,6 +3993,12 @@ pub fn view_term(term: &Term) -> String {
     }
     Term::Ctr { name, args } => {
       let name = view_name(*name);
+      // Pretty print names
+      if name == "Name" && args.len() == 1 {
+        if let Term::Num { numb } = args[0] {
+          return format!("{{Name '{}'}}", view_name(numb));
+        }
+      }
       let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
       return format!("{{{}{}}}", name, args);
     }
@@ -3677,32 +4025,25 @@ pub fn view_term(term: &Term) -> String {
 }
 
 pub fn view_oper(oper: &u128) -> String {
-  let (kind, sig, op_code) = decompose_oper(*oper);
-  let kind = if kind > 0 { "~" } else { "" };
-  let sig = if sig > 0 { "i" } else { "" };
-  let op = 
-    match op_code {
-      ADD => "+",
-      SUB => "-",
-      MUL => "*",
-      DIV => "/",
-      MOD => "%",
-      AND => "&",
-      OR  => "|",
-      XOR => "^",
-      SHL => "<<",
-      SHR => ">>",
-      LTN => "<",
-      LTE => "<=",
-      EQL => "==",
-      GTE => ">=",
-      GTN => ">",
-      NEQ => "!=",
-      RTL => "<~",
-      RTR => ">~",
-      _ => "??",
-    };
-  format!("{}{}{}", kind, op, sig)
+  match *oper {
+    ADD => "+",
+    SUB => "-",
+    MUL => "*",
+    DIV => "/",
+    MOD => "%",
+    AND => "&",
+    OR  => "|",
+    XOR => "^",
+    SHL => "<<",
+    SHR => ">>",
+    LTN => "<",
+    LTE => "<=",
+    EQL => "==",
+    GTE => ">=",
+    GTN => ">",
+    NEQ => "!=",
+    _   => "??",
+  }.to_string()
 }
 
 pub fn view_statement(statement: &Statement) -> String {
@@ -3720,9 +4061,12 @@ pub fn view_statement(statement: &Statement) -> String {
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       return format!("ctr {{{} {}}}", name, args);
     }
-    Statement::Run { expr } => {
+    Statement::Run { expr, sign } => {
       let expr = view_term(expr);
-      return format!("run {{\n  {}\n}}", expr);
+      match sign {
+        None => format!("run {{\n  {}\n}}", expr),
+        Some(sign) => format!("run {{\n  {}\n}} sign {{\n  {}\n}}", expr, hex::encode(sign.0)),
+      }
     }
   }
 }
@@ -3734,6 +4078,13 @@ pub fn view_statements(statements: &[Statement]) -> String {
     result.push_str("\n");
   }
   return result;
+}
+
+// Hashing
+// -------
+
+pub fn hash_term(term: &Term) -> crypto::Hash {
+  crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_term(&term)))
 }
 
 // Tests

@@ -39,7 +39,7 @@ pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id);
     if let Some(term_lnk) = term_lnk {
-      let term_lnk = show_term(rt, term_lnk);
+      let term_lnk = show_term(rt, term_lnk, None);
 
       // dbg!(term_lnk.clone());
       term_lnk.hash(&mut hasher);
@@ -250,11 +250,6 @@ pub fn persistence2() {
   assert_eq!(s2, s3);
 }
 
-#[test]
-pub fn asd() {
-  println!("{}", u128_to_name(1332521514319));
-}
-
 // ===========================================================
 // Codes
 pub const PRE_COUNTER: &'static str = "
@@ -263,12 +258,12 @@ pub const PRE_COUNTER: &'static str = "
 
   fun (Add n) {
     (Add n) = {Succ n}
-  } = #0
+  }
 
   fun (Sub n) {
     (Sub {Succ p}) = p
     (Sub {Zero}) = {Zero}
-  } = #0
+  }
 
   ctr {StoreAdd}
   ctr {StoreSub}
@@ -286,7 +281,7 @@ pub const PRE_COUNTER: &'static str = "
     (Store {StoreGet}) = 
       !load l
       !done l
-  } = {Zero}
+  } with { {Zero} }
 ";
 
 pub const COUNTER: &'static str = "
