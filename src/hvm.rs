@@ -1434,7 +1434,7 @@ impl Runtime {
                 let size_dif = size_end - size_ini;
                 // dbg!(size_end, size_dif, size_lim);
                 if size_end <= size_lim {
-                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
                 } else {
                   println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
@@ -1587,7 +1587,7 @@ impl Runtime {
   pub fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
-    //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
+    // println!("- tick={} self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.get_tick(), self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     // println!(" - back {}", view_rollback(&self.back));
     if included {
@@ -1626,7 +1626,7 @@ impl Runtime {
       }
       self.curr = self.nuls.pop().expect("No heap available!");
     }
-
+    // println!("- rolled back to {}", self.get_tick());
   }
 
   // Persistence

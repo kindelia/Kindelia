@@ -181,8 +181,25 @@ pub fn advanced_rollback_in_random_state() {
 #[test]
 pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  let path = [1000, 768, 1000, 768, 1000, 768];
-  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  assert_eq!(s1, s2);
+  assert_eq!(s2, s3);
 }
 
 #[test]
