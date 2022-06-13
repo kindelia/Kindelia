@@ -898,6 +898,7 @@ pub fn node_loop(
   loop {
     tick += 1;
 
+    #[allow(clippy::modulo_one)]
     {
 
       // If the miner thread mined a block, gets and registers it
@@ -919,9 +920,9 @@ pub fn node_loop(
       }
 
       // Receives and handles incoming network messages
-      // if tick % 1 == 0 {
-      node_receive_message(&mut node);
-      // }
+      if tick % 1 == 0 {
+        node_receive_message(&mut node);
+      }
 
       // Asks the miner thread to mine a block
       if tick % 10 == 0 {
@@ -940,6 +941,7 @@ pub fn node_loop(
       if tick % TICKS_PER_SEC == 0 {
         log_heartbeat(&node);
       }
+
     }
 
     // Sleep for 1/100 seconds
