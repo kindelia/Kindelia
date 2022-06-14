@@ -1364,11 +1364,10 @@ impl Runtime {
               self.draw();
               return;
             }
-          } else {
-            println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
-            self.undo();
-            return;
           }
+          println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
+          self.undo();
+          return;
         }
         println!("- fun {} fail: already exists", u128_to_name(*name));
       }
