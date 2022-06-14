@@ -1784,6 +1784,16 @@ impl Runtime {
     }
   }
 
+  pub fn reduce_with<A>(&self, acc: &mut A, reduce: impl Fn(&mut A, &Heap)) {
+    reduce(acc, &self.get_heap(self.draw));
+    reduce(acc, &self.get_heap(self.curr));
+    let mut back = &self.back;
+    while let Rollback::Cons { keep: _, head, tail } = &**back {
+      reduce(acc, self.get_heap(*head));
+      back = &*tail;
+    }
+  }
+
   pub fn write(&mut self, idx: usize, val: u128) {
     return self.get_heap_mut(self.draw).write(idx, val);
   }

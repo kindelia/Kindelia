@@ -98,7 +98,7 @@ pub enum Request {
     tx: RequestAnswer<Block>,
   },
   GetFunctions {
-    tx: RequestAnswer<Vec<u128>>,
+    tx: RequestAnswer<HashSet<u64>>,
   },
   GetFunction {
     name: u128,
@@ -685,7 +685,12 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
       answer.send(block.clone()).unwrap();
     },
     Request::GetFunctions { tx } => {
-      let funcs = vec![name_to_u128("Count")];
+      let mut funcs: HashSet<u64> = HashSet::new();
+      node.runtime.reduce_with(&mut funcs, |acc, heap| {
+        for func in heap.disk.links.keys() {
+          acc.insert(*func);
+        }
+      });
       tx.send(funcs).unwrap();
     },
     Request::GetFunction { name, tx: answer } => todo!(),
@@ -907,6 +912,7 @@ pub fn node_loop(
     node_load_blocks(&mut node);
   }
 
+  #[allow(clippy::modulo_one)]
   loop {
     tick += 1;
 

@@ -102,7 +102,9 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
         let (tx, rx) = oneshot::channel();
         node_query_tx.send(NodeRequest::GetFunctions { tx }).unwrap();
         let functions = rx.await.unwrap();
-        ok_json(u128_names_to_strings(&functions))
+        let functions: Vec<u128> = functions.into_iter().map(|x| x as u128).collect();
+        let functions = u128_names_to_strings(&functions);
+        ok_json(functions)
       }
     });
 
