@@ -533,19 +533,19 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (IO.call expr args then) : (IO r)
 //   (IO.name           then) : (IO r)
 //   (IO.from           then) : (IO r)
-const IO_DONE : u128 = 0x1364039960f; // name_to_u128("IO.DONE")
-const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128("IO.TAKE")
-const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128("IO.SAVE")
-const IO_CALL : u128 = 0x1364034b596; // name_to_u128("IO.CALL")
-const IO_NAME : u128 = 0x1364060b5cf; // name_to_u128("IO.NAME");
-const IO_FROM : u128 = 0x1364041c657; // name_to_u128("IO.FROM")
-const MC_DONE : u128 = 0xa33ca9; // name_to_u128("done")
-const MC_TAKE : u128 = 0xe25be9; // name_to_u128("take")
-const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
-const MC_SAVE : u128 = 0xde5ea9; // name_to_u128("save")
-const MC_CALL : u128 = 0x9e5c30; // name_to_u128("call")
-const MC_NAME : u128 = 0xca5c69; // name_to_u128("name");
-const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
+const IO_DONE : u128 = const_name_to_u128("IO.DONE");
+const IO_TAKE : u128 = const_name_to_u128("IO.TAKE");
+const IO_SAVE : u128 = const_name_to_u128("IO.SAVE");
+const IO_CALL : u128 = const_name_to_u128("IO.CALL");
+const IO_NAME : u128 = const_name_to_u128("IO.NAME");
+const IO_FROM : u128 = const_name_to_u128("IO.FROM");
+const MC_DONE : u128 = const_name_to_u128("done");
+const MC_TAKE : u128 = const_name_to_u128("take");
+const MC_LOAD : u128 = const_name_to_u128("load");
+const MC_SAVE : u128 = const_name_to_u128("save");
+const MC_CALL : u128 = const_name_to_u128("call");
+const MC_NAME : u128 = const_name_to_u128("name");
+const MC_FROM : u128 = const_name_to_u128("from");
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
@@ -3655,19 +3655,47 @@ pub fn name_to_u128(name: &str) -> u128 {
   let mut num: u128 = 0;
   for (i, chr) in name.chars().enumerate() {
     debug_assert!(i < 20, "Name too big: `{}`.", name);
-    if chr == '.' {
-      num = num * 64 + 0;
-    } else if chr >= '0' && chr <= '9' {
-      num = num * 64 + 1 + chr as u128 - '0' as u128;
-    } else if chr >= 'A' && chr <= 'Z' {
-      num = num * 64 + 11 + chr as u128 - 'A' as u128;
-    } else if chr >= 'a' && chr <= 'z' {
-      num = num * 64 + 37 + chr as u128 - 'a' as u128;
-    } else if chr == '_' {
-      num = num * 64 + 63;
-    }
+    num = (num << 6) + char_to_u128(chr);
   }
   return num;
+}
+
+pub const fn char_to_u128(chr: char) -> u128 {
+  match chr {
+    '.'       => 0,
+    '0'..='9' =>  1 + chr as u128 - '0' as u128,
+    'A'..='Z' => 11 + chr as u128 - 'A' as u128,
+    'a'..='z' => 37 + chr as u128 - 'a' as u128,
+    '_'       => 63,
+    _         => panic!("Invalid name character."),
+  }
+}
+
+pub const fn const_name_to_u128(name: &str) -> u128 {
+  // Input string will be treated as bytes.
+  let name = name.as_bytes();
+  let len = name.len() as isize;
+  // Resulting encoded u128
+  let mut res: u128 = 0;
+  /// Reads one byte of the input string and sets the character code in the
+  /// corresponding position of the resulting u128.
+  macro_rules! go {
+    ( $I:expr ) => {
+      let i = $I;             // Position on resulting u128
+      let pos = len - 1 - i;  // Position on input string
+      if pos >= 0 {           // If it's a valid position on input string
+        let byte = name[pos as usize];
+        let char_code = char_to_u128(byte as char);
+        res = res | char_code << (i*6);
+      }
+    };
+  }
+  // Unrolled loop from 0 to 19  :3
+  go!( 0); go!( 1); go!( 2); go!( 3); go!( 4);
+  go!( 5); go!( 6); go!( 7); go!( 8); go!( 9);
+  go!(10); go!(11); go!(12); go!(13); go!(14);
+  go!(15); go!(16); go!(17); go!(18); go!(19);
+  res
 }
 
 /// Inverse of `name_to_u128`
