@@ -1,9 +1,8 @@
+use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use im::HashMap;
 use proptest::proptest;
-
-use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime};
 
 // Struct used to store interesting parts of runtime state
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -126,7 +125,7 @@ pub fn rollback_simple(
   // Calculates new checksum, after rollback
   let new_state =
     RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-  dbg!(old_state.clone(), new_state.clone());
+  // dbg!(old_state.clone(), new_state.clone());
   // Returns if checksums are equal
   old_state == new_state
 }
@@ -159,7 +158,7 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
     insert_state(&mut rt);
   }
 
-  dbg!(states_store.clone());
+  // dbg!(states_store.clone());
   // Verify if all values from all vectors from all ticks of interest are equal
   states_store.values().all(|vec| are_all_elemenets_equal(vec))
 }
@@ -180,10 +179,28 @@ pub fn advanced_rollback_in_random_state() {
 }
 
 #[test]
+#[ignore]
 pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  let path = [1000, 768, 1000, 768, 1000, 768];
-  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.rollback(900);
+  println!(" - tick: {}", rt.get_tick());
+  let s3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  assert_eq!(s1, s2);
+  assert_eq!(s2, s3);
 }
 
 #[test]
@@ -193,42 +210,62 @@ pub fn advanced_rollback_run_fail() {
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
-// Still in progress
-//#[test]
-//pub fn rollback_buffers() {
-  //let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  //let mut rt = init_runtime();
-  //rt.run_statements_from_code(PRE_COUNTER);
-
-  //advance(&mut rt, 48, Some(COUNTER));
-  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  ////advance(&mut rt, 48, Some(COUNTER));
-  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  ////advance(&mut rt, 48, Some(COUNTER));
-
-  //rt.save_curr_heap().expect("Could not save heap");
-  //let curr_uuid = rt.get_curr_heap().uuid;
-  //let state1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  ////rollback(&mut rt, 12, Some(PRE_COUNTER), Some(COUNTER));
-  //rt.load_heap(curr_uuid).expect("Could not load heap");
-  //let state2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  ////advance(&mut rt, 50, Some(COUNTER));
-  ////rt.load_heap(curr_uuid).expect("Could not load heap");
-  ////let state3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  //// dbg!(state1.clone(), state2.clone());
-  //println!("{:?} {:?}", state1, state2);
-  //assert_eq!(state1, state2);
-  ////assert_eq!(state2, state3);
-//}
-
 #[test]
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER);
-  advance(&mut rt, 2000, Some(COUNTER));
+  advance(&mut rt, 1, Some(COUNTER));
+}
+
+#[test]
+pub fn persistence1() {
+  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+  advance(&mut rt, 50, Some(COUNTER));
+
+  rt.clear_current_heap();
+  let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  
+  rt.snapshot();
+  rt.persist_state().expect("Could not persist state");
+
+  advance(&mut rt, 55, Some(COUNTER));
+  let s2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  
+  rt.restore_state().expect("Could not restore state");
+  let s3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 55, Some(COUNTER));
+  let s4 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  
+  assert_eq!(s1, s3);
+  assert_eq!(s2, s4);
+}
+
+#[test]
+pub fn persistence2() {
+  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER);
+  advance(&mut rt, 1000, Some(COUNTER));
+  rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
+  let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  rt.persist_state().expect("Could not persist state");
+  rt.clear_current_heap();
+  let s2 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rt.restore_state().expect("Could not restore state");
+  let s3 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+
+  advance(&mut rt, 1000, Some(COUNTER));
+  rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
+  let s4 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  
+  assert_eq!(s1, s4);
+  assert_eq!(s2, s3);
 }
 
 // ===========================================================
@@ -239,12 +276,12 @@ pub const PRE_COUNTER: &'static str = "
 
   fun (Add n) {
     (Add n) = {Succ n}
-  } = #0
+  }
 
   fun (Sub n) {
     (Sub {Succ p}) = p
     (Sub {Zero}) = {Zero}
-  } = #0
+  }
 
   ctr {StoreAdd}
   ctr {StoreSub}
@@ -262,7 +299,7 @@ pub const PRE_COUNTER: &'static str = "
     (Store {StoreGet}) = 
       !load l
       !done l
-  } = {Zero}
+  } with { {Zero} }
 ";
 
 pub const COUNTER: &'static str = "

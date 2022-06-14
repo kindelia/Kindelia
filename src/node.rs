@@ -919,9 +919,9 @@ pub fn node_loop(
       }
 
       // Receives and handles incoming network messages
-      if tick % 1 == 0 {
-        node_receive_message(&mut node);
-      }
+      // if tick % 1 == 0 {
+      node_receive_message(&mut node);
+      // }
 
       // Asks the miner thread to mine a block
       if tick % 10 == 0 {
