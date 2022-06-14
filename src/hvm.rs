@@ -1663,19 +1663,25 @@ impl Runtime {
     // }
     let mut uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
     fn load_heaps(rt: &mut Runtime, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
-      if uuids.is_empty() || rt.nuls.is_empty() {
-        return Ok(back);
-      } else {
-        let uuid = uuids.pop().unwrap();
-        let next = rt.nuls.pop().unwrap();
-        rt.heap[index as usize].load_buffers(uuid)?;
-        rt.curr = index;
-        return load_heaps(
-          rt, 
-          uuids, 
-          next, 
-           Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
-        ));
+      let uuid = uuids.pop();
+      let next = rt.nuls.pop();
+      match (uuid, next) {
+        (Some(uuid), Some(next)) => {
+          rt.heap[index as usize].load_buffers(uuid)?;
+          rt.curr = index;
+          return load_heaps(
+            rt, 
+            uuids, 
+            next, 
+            Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
+          ));
+        }
+        (None, Some(..)) => {
+          return Ok(back);
+        }
+        (.., None) => {
+          panic!("Not enough heaps.");
+        }
       }
     }
     self.draw = 0;
