@@ -179,6 +179,7 @@ pub fn advanced_rollback_in_random_state() {
 }
 
 #[test]
+#[ignore]
 pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
