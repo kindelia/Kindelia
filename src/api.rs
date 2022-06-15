@@ -194,7 +194,7 @@ mod ser {
           let mut s = serializer.serialize_struct_variant("Statement", 0, "Fun", 4)?;
           s.serialize_field("name", &u128_to_name(*name))?;
           s.serialize_field("args", &u128_names_to_strings(args))?;
-          s.serialize_field("args", func)?;
+          s.serialize_field("func", func)?;
           s.serialize_field("init", init)?;
           s.end()
         }

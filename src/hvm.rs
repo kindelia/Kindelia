@@ -1209,13 +1209,11 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_statements(&mut self, statements: &[Statement]) {
-    for statement in statements {
-      self.run_statement(statement);
-    }
+  pub fn run_statements(&mut self, statements: &[Statement]) -> Vec<Result<(), String>> {
+    statements.iter().map(|s| self.run_statement(s)).collect()
   }
 
-  pub fn run_statements_from_code(&mut self, code: &str) {
+  pub fn run_statements_from_code(&mut self, code: &str) -> Vec<Result<(), String>> {
     return self.run_statements(&read_statements(code).1);
   }
 
@@ -1368,7 +1366,7 @@ impl Runtime {
     }
   }
 
-  pub fn run_statement(&mut self, statement: &Statement) {
+  pub fn run_statement(&mut self, statement: &Statement) -> Result<(), String> {
     match statement {
       Statement::Fun { name, args, func, init } => {
         // TODO: if arity is set, fail
@@ -1382,15 +1380,18 @@ impl Runtime {
               let state = self.create_term(init, 0, &mut init_map());
               self.write_disk(*name, state);
               self.draw();
-              return;
+              return Ok(());
             }
           } else {
-            println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
+            let err = format!("Function {} didn't pass the checks", u128_to_name(*name));
+            println!("- {}", err);
             self.undo();
-            return;
+            return Err(err);
           }
         }
-        println!("- fun {} fail: already exists", u128_to_name(*name));
+        let err = format!("Function {} already exists", u128_to_name(*name));
+        println!("- {}", err);
+        return Err(err);
       }
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
@@ -1398,9 +1399,11 @@ impl Runtime {
           println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
-          return;
+          return Ok(());
         }
-        println!("- ctr {} fail", u128_to_name(*name));
+        let err = format!("Constructor {} already exists", u128_to_name(*name));
+        println!("- {}", err);
+        return Err(err);
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -1434,20 +1437,26 @@ impl Runtime {
                 let size_dif = size_end - size_ini;
                 // dbg!(size_end, size_dif, size_lim);
                 if size_end <= size_lim {
-                  // println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
+                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
+                  return Ok(());
                 } else {
-                  println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                  let err = format!("Run {} ({} mana, {} end size) exceeded limit ({} size)", done_code, mana_dif, size_end, size_lim);
+                  println!("- {}", err);
                   self.undo();
+                  return Err(err);
                 }
-                return;
               }
             }
           }
-          println!("- run fail");
+          let err = "Run failed".to_string();
+          println!("- {}", err);
           self.undo();
+          return Err(err);
         } else {
-          println!("- run fail: doesn't pass the checks");
+          let err = "Run failed: term didn't pass the checks".to_string();
+          println!("- {}", err);
+          return Err(err);
         }
       }
     }
