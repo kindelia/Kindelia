@@ -1,8 +1,9 @@
-use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name};
+use crate::crypto;
+use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name, Statement, Rule, Term};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use im::HashMap;
-use proptest::proptest;
+use proptest::{*, strategy::*, collection::*, prelude::*};
 
 // Struct used to store interesting parts of runtime state
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -214,7 +215,7 @@ pub fn advanced_rollback_run_fail() {
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER);
-  advance(&mut rt, 1, Some(COUNTER));
+  advance(&mut rt, 1000, Some(COUNTER));
 }
 
 #[test]
@@ -317,11 +318,72 @@ pub const COUNTER: &'static str = "
 ";
 
 // ===========================================================
-// TODO
-// fazer funcao de teste (ou modificar a atual) para testar ir e voltar mais de uma vez com o rollback
-// colocar testes em outro arquivo DONE
-// criar funcao iterativa para substituir a show_term (usando XOR sum) DONE (fiz sem XOR SUM)
-// estudar proptest?
-// criar contratos que usam: dups de construtores, dups de lambdas,
-// salvar lambda em um estado e usá-la, criar árvores, tuplas, qlqr coisa mais complicada
+// Proptest
 
+pub fn name() -> impl Strategy<Value = u128> {
+  "[a-zA-Z0-9_][a-zA-Z0-9_.]{1,19}".prop_map(|s| name_to_u128(&s))
+}
+
+pub fn term() -> impl Strategy<Value = Term> {
+    let leaf = prop_oneof![
+        name().prop_map(|n| Term::Var{name: n}),
+        name().prop_map(|n| Term::Num{numb: n}),
+    ];
+
+    leaf.prop_recursive(
+      16, // 16 levels deep
+      256, // Shoot for maximum size of 256 nodes
+      10, // We put up to 10 items per collection
+      |inner| {
+        prop_oneof![
+          (name(), name(), inner.clone(), inner.clone()).prop_map(|(n0, n1, e, b)| {
+            Term::Dup { nam0: n0, nam1: n1, expr: Box::new(e), body: Box::new(b) }
+          }),
+          (name(), inner.clone()).prop_map(|(n, e)| {
+            Term::Lam { name: n, body: Box::new(e) }
+          }),
+          (inner.clone(), inner.clone()).prop_map(|(f, a)| {
+            Term::App { func: Box::new(f), argm: Box::new(a) }
+          }),
+          (name(), vec(inner.clone(), 0..10)).prop_map(|(n, v)| {
+            Term::Ctr { name: n, args: v }
+          }),
+          (name(), vec(inner.clone(), 0..10)).prop_map(|(n, v)| {
+            Term::Fun { name: n, args: v }
+          }),
+          (0..15_u128, inner.clone(), inner).prop_map(|(o, v0, v1)| {
+            Term::Op2 { oper: o, val0: Box::new(v0), val1: Box::new(v1) }
+          }),
+        ]
+      }
+    )
+}
+
+pub fn rule() -> impl Strategy<Value = Rule> {
+  (term(), term()).prop_map(|(lhs, rhs)| Rule{lhs, rhs})
+}
+
+pub fn statement() -> impl Strategy<Value = Statement> {
+  prop_oneof![
+    (name(), vec(name(), 0..10), vec(rule(), 0..10), term()).prop_map(|(n, a, r, i)| {
+      Statement::Fun { name: n, args: a, func: r, init: i }
+    }),
+    (name(), vec(name(), 0..10)).prop_map(|(n, a)| {
+      Statement::Ctr { name: n, args: a }
+    }),
+    (term(), name()).prop_map(|(t, s)| {
+      Statement::Run { expr: t, sign: Some(crypto::Signature([0; 65])) }
+    }),
+  ]
+}
+
+proptest!{
+  #[test]
+  fn name_conversion(name in name()) {
+    let a = u128_to_name(name);
+    let b = name_to_u128(&a);
+    let c = u128_to_name(b);
+    assert_eq!(name, b);
+    assert_eq!(a, c);
+  }
+}

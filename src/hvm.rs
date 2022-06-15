@@ -371,6 +371,7 @@ pub struct Store {
 pub type Ptr = u128;
 
 /// A global statement that alters the state of the blockchain
+#[derive(Debug)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },

@@ -5,6 +5,7 @@ use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
 use tiny_keccak::Hasher;
 
+#[derive(Debug)]
 pub struct Signature(pub [u8; 65]);
 pub struct Address(pub [u8; 20]);
 pub struct Hash(pub [u8; 32]);
