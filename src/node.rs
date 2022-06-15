@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 
 use crate::util::*;
 use crate::bits::*;
-use crate::hvm::*;
+use crate::hvm::{self,*};
 
 // Types
 // -----
@@ -63,8 +63,8 @@ pub struct Node {
   pub target     : U256Map<U256>,                   // block_hash -> this block's target
   pub height     : U256Map<u128>,                   // block_hash -> cached height
   pub was_mined  : U256Map<HashSet<Transaction>>,   // block_hash -> set of transaction hashes that were already mined
-  pub results    : U256Map<Vec<Result<(), String>>>,// block_hash -> results of the statements in this block
-  pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
+  pub results    : U256Map<Vec<StatementResult>>,   // block_hash -> results of the statements in this block
+  pub pool       : PriorityQueue<Transaction, u128>,// transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
   pub runtime    : Runtime,                         // Kindelia's runtime
@@ -73,6 +73,14 @@ pub struct Node {
 
 // API
 // ===
+
+pub struct BlockInfo {
+  block: Block,
+  hash: U256,
+  height: u64,
+  content: Vec<hvm::Statement>,
+  results: Vec<hvm::StatementResult>,
+}
 
 type RequestAnswer<T> = oneshot::Sender<T>;
 
@@ -722,7 +730,7 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // Adds the block to the database
         node_add_block(node, &block);
 
-        // Previously, we continously requested missing blocks to neighbors. Now, we removed such
+        // Previously, we continuously requested missing blocks to neighbors. Now, we removed such
         // functionality. Now, when we receive a tip, we find the first missing ancestor, and
         // immediately ask it to the node that send that tip. That node, then, will send the
         // missing block, plus a few of its ancestors. This massively improves the amount of time
@@ -732,7 +740,7 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // again. It will be missing forever. But that does not actually happen, because nodes are
         // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
         // tip is received again, which will cause us to ask for that missing ancestor! In other
-        // words, the old functionality of continously requesting missing blocks was redundant and
+        // words, the old functionality of continuously requesting missing blocks was redundant and
         // detrimental. Note that the loop below is slightly CPU hungry, since it requires
         // traversing the whole history every time we receive the tip. As such, we don't do it when
         // the received tip is included on .block, which means we already have all its ancestors.
