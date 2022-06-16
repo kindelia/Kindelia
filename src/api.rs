@@ -14,7 +14,6 @@ use warp::reject;
 use warp::{path, Filter};
 
 use crate::hvm::{name_to_u128, u128_to_name};
-use crate::node::Block;
 
 use crate::node::Request as NodeRequest;
 
@@ -83,15 +82,16 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
 
     let get_block_go = get_block().and(path!()).map(ok_json);
 
-    let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
-      let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-      let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-      ok_json(stmts)
-    });
+    // let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
+    //   let bits = crate::bits::BitVec::from_bytes(&block.body.value);
+    //   let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
+    //   ok_json(stmts)
+    // });
 
     let blocks_router = get_blocks //
       .or(get_block_go) //
-      .or(get_block_content);
+      // .or(get_block_content)
+      ;
 
     // == Functions ==
 
@@ -165,10 +165,78 @@ where
 
 mod ser {
   use super::u128_names_to_strings;
-  use crate::hvm::u128_to_name;
-  use crate::hvm::{Rule, Statement, Term};
-  use crate::node::Block;
+  use crate::hvm::{u128_to_name, Rule, Statement, StatementErr, StatementInfo, Term};
+  use crate::node::{Block, BlockInfo};
+  use crate::util::U256;
   use serde::ser::{SerializeStruct, SerializeStructVariant};
+  use serde::Serialize;
+
+  // U256 to hexadecimal string
+  pub fn u256_to_hex(value: &U256) -> String {
+    let mut be_bytes = [0u8; 32];
+    value.to_big_endian(&mut be_bytes);
+    format!("0x{}", hex::encode(be_bytes))
+  }
+
+  impl Serialize for BlockInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("BlockInfo", 5)?;
+      s.serialize_field("block", &self.block)?;
+      s.serialize_field("height", &self.height)?;
+      s.serialize_field("hash", &u256_to_hex(&self.hash))?;
+      s.serialize_field("content", &self.content)?;
+      s.serialize_field("results", &self.results)?;
+
+      s.end()
+    }
+  }
+
+  impl Serialize for StatementInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      match self {
+        StatementInfo::Ctr { name, args } => {
+          let code = 0;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Ctr", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.end()
+        }
+        StatementInfo::Fun { name, args } => {
+          let code = 1;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Fun", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.end()
+        }
+        StatementInfo::Run { done_term, used_mana, size_diff, end_size } => {
+          let code = 2;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Run", 4)?;
+          s.serialize_field("done_term", &done_term)?;
+          s.serialize_field("used_mana", &used_mana.to_string())?;
+          s.serialize_field("size_diff", &size_diff.to_string())?;
+          s.serialize_field("end_size", &end_size.to_string())?;
+          s.end()
+        }
+      }
+    }
+  }
+
+  impl Serialize for StatementErr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("StatementErr", 1)?;
+      s.serialize_field("err", &self.err)?;
+      s.end()
+    }
+  }
 
   impl serde::Serialize for Block {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

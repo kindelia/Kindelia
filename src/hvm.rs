@@ -371,6 +371,7 @@ pub struct Store {
 pub type Ptr = u128;
 
 /// A global statement that alters the state of the blockchain
+#[derive(Debug)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },
@@ -459,12 +460,14 @@ pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
+#[derive(Debug, Clone)]
 pub enum StatementInfo {
   Ctr { name: u128, args: Vec<u128> },
   Fun { name: u128, args: Vec<u128> },
   Run { done_term: Term, used_mana: u128, size_diff: i128, end_size: u128 },
 }
 
+#[derive(Debug, Clone)]
 pub struct StatementErr {
   pub err: String,
 }

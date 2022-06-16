@@ -5,6 +5,7 @@ use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
 use tiny_keccak::Hasher;
 
+#[derive(Debug)]
 pub struct Signature(pub [u8; 65]);
 pub struct Address(pub [u8; 20]);
 pub struct Hash(pub [u8; 32]);
@@ -42,7 +43,7 @@ impl Signature {
     let recovery_id = RecoveryId::from_i32(self.0[0] as i32).ok()?;
     let sign_data = self.0[1..65].try_into().unwrap();
     let signature = RecoverableSignature::from_compact(sign_data, recovery_id).ok()?;
-    return Some(signature.recover(&Message::from_slice(&hash.0).expect("32 bytes hash")).ok()?);
+    return signature.recover(&Message::from_slice(&hash.0).expect("32 bytes hash")).ok();
   }
 
   pub fn signer_address(&self, hash: &Hash) -> Option<Address> {
