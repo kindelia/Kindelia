@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 
 use crate::util::*;
 use crate::bits::*;
-use crate::hvm::*;
+use crate::hvm::{self,*};
 
 // Types
 // -----
@@ -63,8 +63,8 @@ pub struct Node {
   pub target     : U256Map<U256>,                   // block_hash -> this block's target
   pub height     : U256Map<u128>,                   // block_hash -> cached height
   pub was_mined  : U256Map<HashSet<Transaction>>,   // block_hash -> set of transaction hashes that were already mined
-  pub results    : U256Map<Vec<Result<(), String>>>,// block_hash -> results of the statements in this block
-  pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
+  pub results    : U256Map<Vec<StatementResult>>,   // block_hash -> results of the statements in this block
+  pub pool       : PriorityQueue<Transaction, u128>,// transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
   pub runtime    : Runtime,                         // Kindelia's runtime
@@ -73,6 +73,15 @@ pub struct Node {
 
 // API
 // ===
+
+#[derive(Debug)]
+pub struct BlockInfo {
+  pub block: Block,
+  pub hash: U256,
+  pub height: u64,
+  pub results: Vec<hvm::StatementResult>,
+  pub content: Vec<hvm::Statement>,
+}
 
 type RequestAnswer<T> = oneshot::Sender<T>;
 
@@ -83,14 +92,14 @@ pub enum Request {
   },
   GetBlocks {
     range: (i64, i64),
-    tx: RequestAnswer<Vec<Block>>,
+    tx: RequestAnswer<Vec<BlockInfo>>,
   },
   GetBlock {
     block_height: u128,
     tx: RequestAnswer<Block>,
   },
   GetFunctions {
-    tx: RequestAnswer<Vec<u128>>,
+    tx: RequestAnswer<HashSet<u64>>,
   },
   GetFunction {
     name: u128,
@@ -632,13 +641,13 @@ pub fn node_compute_block(node: &mut Node, block: &Block) {
   node.runtime.tick();
 }
 
-pub fn get_longest_chain(node: &Node, num: Option<usize>) -> Vec<Block> {
+pub fn get_longest_chain(node: &Node, num: Option<usize>) -> Vec<U256> {
   let mut longest = Vec::new();
   let mut bhash = node.tip;
   let mut count = 0;
   while node.block.contains_key(&bhash) && bhash != ZERO_HASH() {
     let block = node.block.get(&bhash).unwrap();
-    longest.push(block.clone());
+    longest.push(bhash);
     bhash = block.prev;
     count += 1;
     if let Some(num) = num {
@@ -668,16 +677,37 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
       debug_assert!(start <= end);
       debug_assert!(end == -1);
       let num = (end - start + 1) as usize;
-      let blocks = get_longest_chain(node, Some(num));
-      answer.send(blocks).unwrap();
+      let hashes = get_longest_chain(node, Some(num));
+      let infos = hashes.iter().map(move |h| {
+        let block = node.block.get(h).expect("Missing block.");
+        let height = node.height.get(h).expect("Missing block height.");
+        let height: u64 = (*height).try_into().expect("Block height is too big.");
+        let results = node.results.get(h).expect("Missing block result.").clone();
+        let bits = crate::bits::BitVec::from_bytes(&block.body.value);
+        let content = crate::bits::deserialize_statements(&bits, &mut 0);
+        let info = BlockInfo {
+          block: block.clone(),
+          hash: *h,
+          height,
+          results,
+          content,
+        };
+        info
+      }).collect();
+      answer.send(infos).unwrap();
     },
     Request::GetBlock { block_height, tx: answer } => {
-      // TODO
+      // TODO: actual indexing
       let block = node.block.get(&node.tip).expect("No tip block");
       answer.send(block.clone()).unwrap();
     },
     Request::GetFunctions { tx } => {
-      let funcs = vec![name_to_u128("Count")];
+      let mut funcs: HashSet<u64> = HashSet::new();
+      node.runtime.reduce_with(&mut funcs, |acc, heap| {
+        for func in heap.disk.links.keys() {
+          acc.insert(*func);
+        }
+      });
       tx.send(funcs).unwrap();
     },
     Request::GetFunction { name, tx: answer } => todo!(),
@@ -722,7 +752,7 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // Adds the block to the database
         node_add_block(node, &block);
 
-        // Previously, we continously requested missing blocks to neighbors. Now, we removed such
+        // Previously, we continuously requested missing blocks to neighbors. Now, we removed such
         // functionality. Now, when we receive a tip, we find the first missing ancestor, and
         // immediately ask it to the node that send that tip. That node, then, will send the
         // missing block, plus a few of its ancestors. This massively improves the amount of time
@@ -732,7 +762,7 @@ pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
         // again. It will be missing forever. But that does not actually happen, because nodes are
         // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
         // tip is received again, which will cause us to ask for that missing ancestor! In other
-        // words, the old functionality of continously requesting missing blocks was redundant and
+        // words, the old functionality of continuously requesting missing blocks was redundant and
         // detrimental. Note that the loop below is slightly CPU hungry, since it requires
         // traversing the whole history every time we receive the tip. As such, we don't do it when
         // the received tip is included on .block, which means we already have all its ancestors.
@@ -899,6 +929,7 @@ pub fn node_loop(
     node_load_blocks(&mut node);
   }
 
+  #[allow(clippy::modulo_one)]
   loop {
     tick += 1;
 

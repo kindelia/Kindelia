@@ -207,7 +207,7 @@
 // stores at most 10 snapshots, trying to keep them distributed with exponentially decreasing ages.
 // For example, if we're on block 1000, it might store a snapshot of blocks 998, 996, 992, 984,
 // 968, 872, 744 and 488, which is compatible with the fact that longer-term rollbacks are
-// incresingly unlikely. If there is a rollback to block 990, we just go back to the earliest
+// increasingly unlikely. If there is a rollback to block 990, we just go back to the earliest
 // snapshot, 984, and reprocess blocks 985-1000, which is much faster than recomputing the entire
 // history.
 //
@@ -371,6 +371,7 @@ pub struct Store {
 pub type Ptr = u128;
 
 /// A global statement that alters the state of the blockchain
+#[derive(Debug)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
   Ctr { name: u128, args: Vec<u128>, },
@@ -455,6 +456,20 @@ pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
   }
   let failed = seen.iter().all(|c| *c == 1);
   (failed, seen, heaps)
+}
+
+pub type StatementResult = Result<StatementInfo, StatementErr>;
+
+#[derive(Debug, Clone)]
+pub enum StatementInfo {
+  Ctr { name: u128, args: Vec<u128> },
+  Fun { name: u128, args: Vec<u128> },
+  Run { done_term: Term, used_mana: u128, size_diff: i128, end_size: u128 },
+}
+
+#[derive(Debug, Clone)]
+pub struct StatementErr {
+  pub err: String,
 }
 
 // Constants
@@ -909,7 +924,7 @@ impl Heap {
     };
   }
   fn deserialize(&mut self, serial: &SerializedHeap) {
-    // Deseializes stat and size
+    // Deserializes stat and size
     self.tick = serial.nums[0];
     self.funs = serial.nums[1];
     self.dups = serial.nums[2];
@@ -1196,11 +1211,11 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_statements(&mut self, statements: &[Statement]) -> Vec<Result<(), String>> {
+  pub fn run_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
     statements.iter().map(|s| self.run_statement(s)).collect()
   }
 
-  pub fn run_statements_from_code(&mut self, code: &str) -> Vec<Result<(), String>> {
+  pub fn run_statements_from_code(&mut self, code: &str) -> Vec<StatementResult> {
     return self.run_statements(&read_statements(code).1);
   }
 
@@ -1353,7 +1368,7 @@ impl Runtime {
     }
   }
 
-  pub fn run_statement(&mut self, statement: &Statement) -> Result<(), String> {
+  pub fn run_statement(&mut self, statement: &Statement) -> StatementResult {
     match statement {
       Statement::Fun { name, args, func, init } => {
         // TODO: if arity is set, fail
@@ -1367,17 +1382,17 @@ impl Runtime {
               let state = self.create_term(init, 0, &mut init_map());
               self.write_disk(*name, state);
               self.draw();
-              return Ok(());
+              return Ok(StatementInfo::Fun { name: *name, args: args.clone() });
             }
           }
           let err = format!("Function {} didn't pass the checks", u128_to_name(*name));
           println!("- {}", err);
           self.undo();
-          return Err(err);
+          return Err(StatementErr{ err });
         }
         let err = format!("Function {} already exists", u128_to_name(*name));
         println!("- {}", err);
-        return Err(err);
+        return Err(StatementErr{ err });
       }
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
@@ -1385,11 +1400,11 @@ impl Runtime {
           println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
-          return Ok(());
+          return Ok(StatementInfo::Ctr{ name: *name, args: args.clone() });
         }
         let err = format!("Constructor {} already exists", u128_to_name(*name));
         println!("- {}", err);
-        return Err(err);
+        return Err(StatementErr{ err });
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -1417,6 +1432,7 @@ impl Runtime {
           if let Some(done) = self.run_io(subj, 0, host, mana_lim) {
             if let Some(done) = self.compute(done, mana_lim) {
               let done_code = self.show_term(done);
+              let done_term = readback(self, done);
               if let Some(()) = self.collect(done, mana_lim) {
                 let size_end = self.get_size();
                 let mana_dif = self.get_mana() - mana_ini;
@@ -1425,12 +1441,17 @@ impl Runtime {
                 if size_end <= size_lim {
                   println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
-                  return Ok(());
+                  return Ok(StatementInfo::Run {
+                    done_term: done_term,
+                    used_mana: mana_dif,
+                    size_diff: size_dif,
+                    end_size: size_end as u128,
+                  });
                 } else {
                   let err = format!("Run {} ({} mana, {} end size) exceeded limit ({} size)", done_code, mana_dif, size_end, size_lim);
                   println!("- {}", err);
                   self.undo();
-                  return Err(err);
+                  return Err(StatementErr{ err });
                 }
               }
             }
@@ -1438,11 +1459,11 @@ impl Runtime {
           let err = "Run failed".to_string();
           println!("- {}", err);
           self.undo();
-          return Err(err);
+          return Err(StatementErr{ err });
         } else {
           let err = "Run failed: term didn't pass the checks".to_string();
           println!("- {}", err);
-          return Err(err);
+          return Err(StatementErr{ err });
         }
       }
     }
@@ -1750,6 +1771,16 @@ impl Runtime {
           return None;
         }
       }
+    }
+  }
+
+  pub fn reduce_with<A>(&self, acc: &mut A, reduce: impl Fn(&mut A, &Heap)) {
+    reduce(acc, &self.get_heap(self.draw));
+    reduce(acc, &self.get_heap(self.curr));
+    let mut back = &self.back;
+    while let Rollback::Cons { keep: _, head, tail } = &**back {
+      reduce(acc, self.get_heap(*head));
+      back = &*tail;
     }
   }
 
