@@ -63,6 +63,7 @@ pub struct Node {
   pub target     : U256Map<U256>,                   // block_hash -> this block's target
   pub height     : U256Map<u128>,                   // block_hash -> cached height
   pub was_mined  : U256Map<HashSet<Transaction>>,   // block_hash -> set of transaction hashes that were already mined
+  pub results    : U256Map<Vec<Result<(), String>>>,// block_hash -> results of the statements in this block
   pub pool       : PriorityQueue<Transaction,u128>, // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
@@ -402,6 +403,7 @@ pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
+    results    : HashMap::new(),
     tip        : ZERO_HASH(),
     was_mined  : HashMap::new(),
     pool       : PriorityQueue::new(),
@@ -624,7 +626,9 @@ pub fn node_compute_block(node: &mut Node, block: &Block) {
   let bits = BitVec::from_bytes(&block.body.value);
   let acts = deserialized_statements(&bits);
   //println!("Computing block:\n{}", view_statements(&acts));
-  node.runtime.run_statements(&acts);
+  let res = node.runtime.run_statements(&acts);
+  let bhash = hash_block(block);
+  node.results.insert(bhash, res);
   node.runtime.tick();
 }
 
@@ -919,9 +923,9 @@ pub fn node_loop(
       }
 
       // Receives and handles incoming network messages
-      if tick % 1 == 0 {
-        node_receive_message(&mut node);
-      }
+      // if tick % 1 == 0 {
+      node_receive_message(&mut node);
+      // }
 
       // Asks the miner thread to mine a block
       if tick % 10 == 0 {

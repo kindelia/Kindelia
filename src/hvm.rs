@@ -409,6 +409,7 @@ pub struct SerializedHeap {
   pub file: Vec<u128>,
   pub arit: Vec<u128>,
   pub nums: Vec<u128>,
+  pub stat: Vec<u128>,
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -868,7 +869,11 @@ impl Heap {
     self.next = U128_NONE;
   }
   fn serialize(&self) -> SerializedHeap {
-    // Serializes Nodes
+    // Serializes stat and size
+    let size = self.size as u128;
+    let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.next];
+
+    // Serializes Blob
     let mut blob_buff : Vec<u128> = vec![];
     for used_index in &self.blob.used {
       blob_buff.push(*used_index as u128);
@@ -895,14 +900,16 @@ impl Heap {
       arit_buff.push(*arit);
     }
     // Serializes Nums
-    let mut nums_buff : Vec<u128> = vec![];
-    nums_buff.push(self.tick);
-    nums_buff.push(self.funs);
-    nums_buff.push(self.dups);
-    nums_buff.push(self.rwts);
-    nums_buff.push(self.mana);
-    nums_buff.push(self.size as u128);
-    nums_buff.push(self.next);
+    let nums_buff : Vec<u128> = vec![
+      self.tick,
+      self.funs,
+      self.dups,
+      self.rwts,
+      self.mana,
+      self.size as u128,
+      self.next
+    ];
+    
     // Returns the serialized heap
     return SerializedHeap {
       uuid: self.uuid,
@@ -911,9 +918,19 @@ impl Heap {
       file: file_buff,
       arit: arit_buff,
       nums: nums_buff,
+      stat,
     };
   }
   fn deserialize(&mut self, serial: &SerializedHeap) {
+    // Deseializes stat and size
+    self.tick = serial.nums[0];
+    self.funs = serial.nums[1];
+    self.dups = serial.nums[2];
+    self.rwts = serial.nums[3];
+    self.mana = serial.nums[4];
+    self.size = serial.nums[5] as i128;
+    self.next = serial.nums[6];
+
     // Deserializes Nodes
     let mut i = 0;
     while i < serial.blob.len() {
@@ -933,28 +950,29 @@ impl Heap {
     // Deserializes Funcs
     let mut i = 0;
     while i < serial.file.len() {
-      let fnid = serial.file[i * 2 + 0];
-      let size = serial.file[i * 2 + 1];
-      let buff = &serial.file[i * 2 + 2 .. i * 2 + 2 + size as usize];
+      let fnid = serial.file[i + 0];
+      let size = serial.file[i + 1];
+      let buff = &serial.file[i + 2 .. i + 2 + size as usize];
       let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))),false).unwrap();
       self.write_file(fnid, Arc::new(func));
-      i += 1;
+      i = i + 2 + size as usize;
     }
     // Deserializes Arits
     for i in 0 .. serial.arit.len() / 2 {
-      let fnid = serial.file[i * 2 + 0];
-      let arit = serial.file[i * 2 + 1];
+      let fnid = serial.arit[i * 2 + 0];
+      let arit = serial.arit[i * 2 + 1];
       self.write_arit(fnid, arit);
     }
   }
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
     heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
-  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128]) -> std::io::Result<()> {
+  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128], append: bool) -> std::io::Result<()> {
     use std::io::Write;
     std::fs::create_dir_all(&heap_dir_path())?;
     std::fs::OpenOptions::new()
-      .append(true)
+      .write(true)
+      .append(append)
       .create(true)
       .open(self.buffer_file_path(self.uuid, buffer_name))?
       .write_all(&util::u128s_to_u8s(buffer))?;
@@ -968,11 +986,12 @@ impl Heap {
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
     let serial = self.serialize();
-    self.write_buffer(serial.uuid, "blob", &serial.blob)?;
-    self.write_buffer(serial.uuid, "disk", &serial.disk)?;
-    self.write_buffer(serial.uuid, "file", &serial.file)?;
-    self.write_buffer(serial.uuid, "arit", &serial.arit)?;
-    self.write_buffer(serial.uuid, "nums", &serial.nums)?;
+    self.write_buffer(serial.uuid, "blob", &serial.blob, true)?;
+    self.write_buffer(serial.uuid, "disk", &serial.disk, true)?;
+    self.write_buffer(serial.uuid, "file", &serial.file, true)?;
+    self.write_buffer(serial.uuid, "arit", &serial.arit, true)?;
+    self.write_buffer(serial.uuid, "nums", &serial.nums, true)?;
+    self.write_buffer(serial.uuid, "stat", &serial.stat, false)?;
     return Ok(());
   }
   pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
@@ -981,7 +1000,8 @@ impl Heap {
     let file = self.read_buffer(uuid, "file")?;
     let arit = self.read_buffer(uuid, "arit")?;
     let nums = self.read_buffer(uuid, "nums")?;
-    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums });
+    let stat = self.read_buffer(uuid, "stat")?;
+    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums, stat });
     return Ok(());
   }
   fn delete_buffers(&mut self) -> std::io::Result<()> {
@@ -1189,13 +1209,11 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_statements(&mut self, statements: &[Statement]) {
-    for statement in statements {
-      self.run_statement(statement);
-    }
+  pub fn run_statements(&mut self, statements: &[Statement]) -> Vec<Result<(), String>> {
+    statements.iter().map(|s| self.run_statement(s)).collect()
   }
 
-  pub fn run_statements_from_code(&mut self, code: &str) {
+  pub fn run_statements_from_code(&mut self, code: &str) -> Vec<Result<(), String>> {
     return self.run_statements(&read_statements(code).1);
   }
 
@@ -1348,7 +1366,7 @@ impl Runtime {
     }
   }
 
-  pub fn run_statement(&mut self, statement: &Statement) {
+  pub fn run_statement(&mut self, statement: &Statement) -> Result<(), String> {
     match statement {
       Statement::Fun { name, args, func, init } => {
         // TODO: if arity is set, fail
@@ -1362,14 +1380,17 @@ impl Runtime {
               let state = self.create_term(init, 0, &mut init_map());
               self.write_disk(*name, state);
               self.draw();
-              return;
+              return Ok(());
             }
           }
-          println!("- fun {} fail: doesn't pass the checks", u128_to_name(*name));
+          let err = format!("Function {} didn't pass the checks", u128_to_name(*name));
+          println!("- {}", err);
           self.undo();
-          return;
+          return Err(err);
         }
-        println!("- fun {} fail: already exists", u128_to_name(*name));
+        let err = format!("Function {} already exists", u128_to_name(*name));
+        println!("- {}", err);
+        return Err(err);
       }
       Statement::Ctr { name, args } => {
         // TODO: if arity is set, fail
@@ -1377,9 +1398,11 @@ impl Runtime {
           println!("- ctr {}", u128_to_name(*name));
           self.set_arity(*name, args.len() as u128);
           self.draw();
-          return;
+          return Ok(());
         }
-        println!("- ctr {} fail", u128_to_name(*name));
+        let err = format!("Constructor {} already exists", u128_to_name(*name));
+        println!("- {}", err);
+        return Err(err);
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -1415,18 +1438,24 @@ impl Runtime {
                 if size_end <= size_lim {
                   println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
                   self.draw();
+                  return Ok(());
                 } else {
-                  println!("- run fail: exceeded size limit {}/{}", size_end, size_lim);
+                  let err = format!("Run {} ({} mana, {} end size) exceeded limit ({} size)", done_code, mana_dif, size_end, size_lim);
+                  println!("- {}", err);
                   self.undo();
+                  return Err(err);
                 }
-                return;
               }
             }
           }
-          println!("- run fail");
+          let err = "Run failed".to_string();
+          println!("- {}", err);
           self.undo();
+          return Err(err);
         } else {
-          println!("- run fail: doesn't pass the checks");
+          let err = "Run failed: term didn't pass the checks".to_string();
+          println!("- {}", err);
+          return Err(err);
         }
       }
     }
@@ -1563,10 +1592,10 @@ impl Runtime {
     self.snapshot();
   }
 
-  fn snapshot(&mut self) {
+  pub fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
     let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
-    //println!("- tick self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.curr, included, absorber, deleted, view_rollback(&self.back));
+    // println!("- tick={} self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.get_tick(), self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     // println!(" - back {}", view_rollback(&self.back));
     if included {
@@ -1574,7 +1603,7 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[deleted as usize].append_buffers(self.heap[absorber as usize].uuid).expect("Couldn't append buffers.");
+          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers.");
         }
         self.clear_heap(deleted);
         self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
@@ -1608,7 +1637,7 @@ impl Runtime {
       }
       self.curr = self.nuls.pop().expect("No heap available!");
     }
-
+    // println!("- rolled back to {}", self.get_tick());
   }
 
   // Persistence
@@ -1618,7 +1647,7 @@ impl Runtime {
   // their uuids. Note that this will NOT save the current heap, nor anything after the last heap
   // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
   // function is used to avoid re-processing the entire block history on node startup.
-  fn persist_state(&self) -> std::io::Result<()> {
+  pub fn persist_state(&self) -> std::io::Result<()> {
     fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
       match rollback {
         Rollback::Cons { keep, head, tail } => {
@@ -1635,34 +1664,46 @@ impl Runtime {
   }
 
   // Restores the saved state. This loads the persisted Rollback list and its heaps.
-  fn restore_state(&mut self, uuids: &[u128]) -> std::io::Result<()> {
+  pub fn restore_state(&mut self) -> std::io::Result<()> {
     for i in 0 .. 10 {
       self.heap[i].clear();
     }
-    for i in 0 .. std::cmp::max(uuids.len(), 8) {
-      self.heap[i + 2].load_buffers(uuids[i])?;
-    }
-    let uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
-    fn load_heaps(rt: &mut Runtime, uuids: &[u128], index: usize) -> std::io::Result<Arc<Rollback>> {
-      if index == rt.heap.len() {
-        return Ok(Arc::new(Rollback::Nil));
-      } else {
-        rt.heap[index].load_buffers(uuids[index])?;
-        return Ok(Arc::new(Rollback::Cons {
-          keep: 0,
-          head: index as u64, 
-          tail: load_heaps(rt, &uuids, index + 1)?,
-        }));
+    self.nuls = vec![2,3,4,5,6,7,8,9];
+    // for i in 0 .. std::cmp::max(uuids.len(), 8) {
+    //   self.heap[i + 2].load_buffers(uuids[i])?;
+    // }
+    let mut uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
+    fn load_heaps(rt: &mut Runtime, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
+      let uuid = uuids.pop();
+      let next = rt.nuls.pop();
+      match (uuid, next) {
+        (Some(uuid), Some(next)) => {
+          rt.heap[index as usize].load_buffers(uuid)?;
+          rt.curr = index;
+          return load_heaps(
+            rt, 
+            uuids, 
+            next, 
+            Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
+          ));
+        }
+        (None, Some(..)) => {
+          return Ok(back);
+        }
+        (.., None) => {
+          panic!("Not enough heaps.");
+        }
       }
     }
     self.draw = 0;
     self.curr = 1;
-    self.back = load_heaps(self, &uuids, 2)?;
+    self.back = load_heaps(self, &mut uuids, self.curr, Arc::new(Rollback::Nil))?;
+    self.curr = self.nuls.pop().expect("No heap available!");
     return Ok(());
   }
 
   // Reverts until the last 
-  fn clear_current_heap(&mut self) {
+  pub fn clear_current_heap(&mut self) {
     self.heap[self.curr as usize].clear();
   }
 
@@ -4001,7 +4042,7 @@ pub fn view_term(term: &Term) -> String {
 }
 
 pub fn view_oper(oper: &u128) -> String {
-  format!("{}", match *oper {
+  match *oper {
     ADD => "+",
     SUB => "-",
     MUL => "*",
@@ -4019,7 +4060,7 @@ pub fn view_oper(oper: &u128) -> String {
     GTN => ">",
     NEQ => "!=",
     _   => "??",
-  })
+  }.to_string()
 }
 
 pub fn view_statement(statement: &Statement) -> String {
