@@ -1,5 +1,5 @@
 // TODO
 
 run {
-  !done {Tuple2 #1 #2}
+  !done (+ #1 #2)
 }

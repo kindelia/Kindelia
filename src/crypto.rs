@@ -69,8 +69,10 @@ impl Name {
     return Name::from_hash(&Account::hash_public_key(pubk));
   }
 
+  // A Kindelia name is the first 120 bits of an Ethereum address
+  // This corresponds to the bytes 12-27 of the ECDSA public key.
   pub fn from_hash(hash: &Hash) -> Self {
-    return Name(u128::from_le_bytes(vec![hash.0[17..32].to_vec(), vec![0]].concat().try_into().unwrap()));
+    return Name(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
   }
 }
 

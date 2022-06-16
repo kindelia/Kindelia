@@ -314,7 +314,7 @@ language with 8 variants. Its grammar is described below:
 Numb = Uint<120>
 
 // A name
-Name = Uint<60>
+Name = Uint<72>
 
 // A native int operation
 Oper ::=
@@ -487,7 +487,7 @@ x <- {x0 x1}
 
 ### Superposition Duplication
 
-Superpositions and duplications hold a 60-bit integer label. If the label is
+Superpositions and duplications hold a 72-bit integer label. If the label is
 equal, this rule collapses the superposition.
 
 ```
@@ -627,19 +627,22 @@ Memory Model
 HVM's memory model is documented on `src/hvm.rs`, and trascribed below:
 
 ```
-HVM's runtime memory consists of a vector of u128 pointers. That is:
+Kindelia-HVM's memory model
+---------------------------
+
+The runtime memory consists of just a vector of u128 pointers. That is:
 
   Mem ::= Vec<Ptr>
 
 A pointer has 3 parts:
 
-  Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
+  Ptr ::= TT AAAAAAAAAAAAAAAAAA BBBBBBBBBBBB
 
 Where:
 
   T : u8  is the pointer tag 
-  A : u60 is the 1st value
-  B : u60 is the 2nd value
+  A : u72 is the 1st value
+  B : u48 is the 2nd value
 
 There are 12 possible tags:
 
@@ -673,12 +676,12 @@ The semantics of the 1st and 2nd values depend on the pointer tag.
   CTR | the constructor name         | points to the constructor node
   FUN | the function name            | points to the function node
   OP2 | the operation name           | points to the operation node
-  NUM | the most significant 60 bits | the least significant 60 bits
+  NUM | the most significant 72 bits | the least significant 48 bits
 
 Notes:
 
   1. The duplication label is an internal value used on the DUP-SUP rule.
-  2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
+  2. The operation name only uses 4 of the 72 bits, as there are only 16 ops.
   3. NUM pointers don't point anywhere, they just store the number directly.
 
 A node is a tuple of N pointers stored on sequential memory indices.
@@ -733,15 +736,15 @@ Example 0:
 
   Memory:
 
-    Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
-    0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
-    0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
+    Root : Ptr(CTR, 0x0000000007b9d30a43, 0x000000000000)
+    0x00 | Ptr(NUM, 0x000000000000000000, 0x000000000007) // the tuple's 1st field
+    0x01 | Ptr(NUM, 0x000000000000000000, 0x000000000008) // the tuple's 2nd field
 
   Notes:
     
     1. This is just a pair with two numbers.
     2. The root pointer is not stored on memory.
-    3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
+    3. The '0x0000000007b9d30a43' constant encodes the 'Tuple2' name.
     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
 
 Example 1:
@@ -752,11 +755,11 @@ Example 1:
 
   Memory:
 
-    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-    0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
-    0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
-    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
-    0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
+    Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+    0x00 | Ptr(ERA, 0x000000000000000000, 0x000000000000) // 1st lambda's argument
+    0x01 | Ptr(LAM, 0x000000000000000000, 0x000000000002) // 1st lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000003) // 2nd lambda's argument
+    0x03 | Ptr(VAR, 0x000000000000000000, 0x000000000002) // 2nd lambda's body
 
   Notes:
 
@@ -773,14 +776,14 @@ Example 2:
 
   Memory:
 
-    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-    0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
-    0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
-    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
-    0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
-    0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
-    0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
-    0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
+    Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+    0x00 | Ptr(ARG, 0x000000000000000000, 0x000000000004) // the lambda's argument
+    0x01 | Ptr(OP2, 0x000000000000000002, 0x000000000005) // the lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000005) // the duplication's 1st argument
+    0x03 | Ptr(ARG, 0x000000000000000000, 0x000000000006) // the duplication's 2nd argument
+    0x04 | Ptr(VAR, 0x000000000000000000, 0x000000000000) // the duplicated expression
+    0x05 | Ptr(DP0, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 1st operand
+    0x06 | Ptr(DP1, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 2st operand
 
   Notes:
     
@@ -788,7 +791,7 @@ Example 2:
     2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
     3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
     4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
-    5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+    5. 0x7b93e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
     6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
     7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
     8. In-memory size is different to, and larger than, serialization size.
@@ -1070,11 +1073,8 @@ when these are used repeatedly. These optimizations aren't implemented yet, but,
 in order to make that possible in a future, we reserve a bit for this flag.
 
 Note also that, while the serialization of a name allows for an arbitrary number
-of letters, HVM constructors and functions reserve 60 bits for the name, which
-means the maximum constructor name is 10 letters long, and that it is impossible
-to call a function with a name larger than 10 letters directly. Functions with
-11-20 letters are deployable, but they can only be called with `IO.call`, which
-receives a 120-bit number.
+of letters, HVM pointers can only address function and constructor names of up
+to 72 bits, which means the maximum addressable name is 12 letters long.
 
 ### Term
 
@@ -1216,10 +1216,10 @@ account the rise of parallel processors, and the discovery of new data
 structures and algorithms that take advantage of beta-optimality.
 
 When it comes to Kindelia, though, its main role is to make functional programs
-and algorithms run natively, which directly reduces costs by 100x to 1000x,
-compared to emulating them on stack machines such as the EVM. Other than raw
-performance, there are two additional characteristics that make it the ideal
-virtual machine for a functional peer-to-peer computer:
+and algorithms run natively, which directly reduces costs by ~434x compared to
+emulating them on stack machines such as the EVM. Other than raw performance,
+there are two additional characteristics that make it the ideal virtual machine
+for a functional peer-to-peer computer:
 
 ### 1. It has negligible compilation times.
 

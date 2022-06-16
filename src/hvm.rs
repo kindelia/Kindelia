@@ -13,13 +13,13 @@
 // 
 // A pointer has 3 parts:
 //
-//   Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
+//   Ptr ::= TT AAAAAAAAAAAAAAAAAA BBBBBBBBBBBB
 //
 // Where:
 //
 //   T : u8  is the pointer tag 
-//   A : u60 is the 1st value
-//   B : u60 is the 2nd value
+//   A : u72 is the 1st value
+//   B : u48 is the 2nd value
 //
 // There are 12 possible tags:
 //
@@ -53,12 +53,12 @@
 //   CTR | the constructor name         | points to the constructor node
 //   FUN | the function name            | points to the function node
 //   OP2 | the operation name           | points to the operation node
-//   NUM | the most significant 60 bits | the least significant 60 bits
+//   NUM | the most significant 72 bits | the least significant 48 bits
 //
 // Notes:
 //
 //   1. The duplication label is an internal value used on the DUP-SUP rule.
-//   2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
+//   2. The operation name only uses 4 of the 72 bits, as there are only 16 ops.
 //   3. NUM pointers don't point anywhere, they just store the number directly.
 //
 // A node is a tuple of N pointers stored on sequential memory indices.
@@ -113,15 +113,15 @@
 //
 //   Memory:
 //
-//     Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
-//     0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
-//     0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
+//     Root : Ptr(CTR, 0x0000000007b9d30a43, 0x000000000000)
+//     0x00 | Ptr(NUM, 0x000000000000000000, 0x000000000007) // the tuple's 1st field
+//     0x01 | Ptr(NUM, 0x000000000000000000, 0x000000000008) // the tuple's 2nd field
 //
 //   Notes:
 //     
 //     1. This is just a pair with two numbers.
 //     2. The root pointer is not stored on memory.
-//     3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
+//     3. The '0x0000000007b9d30a43' constant encodes the 'Tuple2' name.
 //     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
 //
 // Example 1:
@@ -132,11 +132,11 @@
 //
 //   Memory:
 //
-//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-//     0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
-//     0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
-//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
-//     0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
+//     Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+//     0x00 | Ptr(ERA, 0x000000000000000000, 0x000000000000) // 1st lambda's argument
+//     0x01 | Ptr(LAM, 0x000000000000000000, 0x000000000002) // 1st lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000003) // 2nd lambda's argument
+//     0x03 | Ptr(VAR, 0x000000000000000000, 0x000000000002) // 2nd lambda's body
 //
 //   Notes:
 //
@@ -153,14 +153,14 @@
 //
 //   Memory:
 //
-//     Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-//     0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
-//     0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
-//     0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
-//     0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
-//     0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
-//     0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
-//     0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
+//     Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+//     0x00 | Ptr(ARG, 0x000000000000000000, 0x000000000004) // the lambda's argument
+//     0x01 | Ptr(OP2, 0x000000000000000002, 0x000000000005) // the lambda's body
+//     0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000005) // the duplication's 1st argument
+//     0x03 | Ptr(ARG, 0x000000000000000000, 0x000000000006) // the duplication's 2nd argument
+//     0x04 | Ptr(VAR, 0x000000000000000000, 0x000000000000) // the duplicated expression
+//     0x05 | Ptr(DP0, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 1st operand
+//     0x06 | Ptr(DP1, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 2st operand
 //
 //   Notes:
 //     
@@ -168,7 +168,7 @@
 //     2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
 //     3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
 //     4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
-//     5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+//     5. 0x7b93e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
 //     6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
 //     7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
 //     8. In-memory size is different to, and larger than, serialization size.
@@ -178,7 +178,7 @@
 //
 // First, it is a 128-bit, rather than a 64-bit architecture. It can store 120-bit unboxed
 // integers, up from 32-bit unboxed uints stored by the conventional HVM. It allows addressing up
-// to 2^60 function names, up from 2^30 allowed by the conventional HVM, which isn't enough for
+// to 2^72 function names, up from 2^30 allowed by the conventional HVM, which isn't enough for
 // Kindelia. This change comes with a cost of about ~30% reduced performance, which is acceptable.
 //
 // Second, it implements a reversible heap machinery, which allows saving periodic snapshots of
@@ -278,7 +278,7 @@ pub enum Term {
   Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
 }
 
-// A native HVM 60-bit machine integer operation
+// A native HVM 120-bit machine integer operation
 // - Add: addition
 // - Sub: subtraction
 // - Mul: multiplication
@@ -466,31 +466,18 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 
 const HEAP_SIZE: u128 = 32 * U128_PER_MB;
 
-pub const MAX_ARITY: u128 = 16;
-pub const MAX_FUNCS: u128 = 1 << 24; // TODO: increase to 2^30 once arity is moved out
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
-pub const VARS_SIZE: usize = 1 << 18; // maximum variables per rule
 
 pub const VAL: u128 = 1 << 0;
-pub const EXT: u128 = 1 << 60;
+pub const EXT: u128 = 1 << 48;
 pub const TAG: u128 = 1 << 120;
 
-pub const VAL_MASK: u128 = EXT - 1;
-pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
-pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
-pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
-
-// | --------- | -----------------------|
-// | TAG = NUM |        num (u120)      |
-// | --------- | ---------------------- |
-// | TAG = CTR |                        |
-// | TAG = APP | ext (u60) | val (u60)  |
-// | TAG = OP2 |                        |
-// ...
-// | --------- | ---------------------- |
-// | TAG = LAM |       pos (u120)       |
-// ...
-// | --------- | -----------------------|
+// FIXME: what were these used for? can this be explained if uncommented?
+//pub const VAL_MASK: u128 = EXT - 1;
+//pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
+//pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
+//pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
+pub const NUM_MASK: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -1326,7 +1313,7 @@ impl Runtime {
               args.push(ask_arg(self, tupl, i));
             }
             // Calls called function IO, changing the subject
-            // TODO: this should not alloc a Fun as it's limited to 60-bit names
+            // TODO: this should not alloc a Fun as it's limited to 72-bit names
             let ioxp = alloc_fun(self, get_num(fnid), &args);
             let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
             // Calls the continuation with the value returned
@@ -1422,7 +1409,7 @@ impl Runtime {
           //println!("checking signature...");
           //println!("- hash: {}", hex::encode(hash.0));
           //println!("- sign: {}", if let Some(s) = sign { hex::encode(s.0) } else { "".to_string() });
-          //println!("- subj: {}", subj);
+          //println!("- subj: {:x}", subj);
           //println!("- addr: {}", addr);
           let host = self.alloc_term(expr);
           // eprintln!("  => run term:\n{}", show_term(self,ask_lnk(self, host), None));
@@ -1942,12 +1929,12 @@ pub fn Num(val: u128) -> Ptr {
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 60, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
+  debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
   (CTR * TAG) | (fun * EXT) | pos
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 60, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
+  debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
   (FUN * TAG) | (fun * EXT) | pos
 }
 
@@ -1959,11 +1946,11 @@ pub fn get_tag(lnk: Ptr) -> u128 {
 }
 
 pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT) & 0xFFF_FFFF_FFFF_FFFF
+  (lnk / EXT) & 0xFF_FFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Ptr) -> u128 {
-  lnk & 0xFFF_FFFF_FFFF_FFFF
+  lnk & 0xFFFF_FFFF_FFFF
 }
 
 pub fn get_num(lnk: Ptr) -> u128 {
@@ -2975,14 +2962,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
   //rt.get_heap_mut(self.curr).file = file;
 
   return Some(ask_lnk(rt, root));
-}
-
-pub fn set_bit(bits: &mut [u128], bit: u128) {
-  bits[bit as usize >> 6] |= 1 << (bit & 0x3f);
-}
-
-pub fn get_bit(bits: &[u128], bit: u128) -> bool {
-  (((bits[bit as usize >> 6] >> (bit & 0x3f)) as u8) & 1) == 1
 }
 
 /// Evaluates redexes iteratively. This is used to save space before storing a term, since,
