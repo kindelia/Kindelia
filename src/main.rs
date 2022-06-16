@@ -9,8 +9,10 @@ mod bits;
 mod crypto;
 mod hvm;
 mod node;
-mod test;
 mod util;
+
+#[cfg(test)]
+mod test;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -18,11 +20,10 @@ use std::thread;
 
 pub use clap::{Parser, Subcommand};
 
-use crate::api::*;
+use crate::api::api_loop;
 use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
-use crate::test::*;
 use crate::util::*;
 
 // Starts the node process
@@ -33,13 +34,13 @@ fn main() -> Result<(), String> {
   // return Ok(());
 }
 
-// Environment variable where Kindelia path is stored
+/// Environment variable where Kindelia path should be passed.
 const KINDELIA_PATH_ENV_VAR: &str = "KINDELIA_PATH";
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
-  /// Path where blockchain data is stored
+  /// Path where Kindelia files are stored
   #[clap(long)]
   path: Option<String>,
   #[clap(subcommand)]
@@ -50,6 +51,7 @@ pub struct Cli {
 pub enum CliCmd {
   /// Starts a Kindelia node
   Start {
+    /// Source of code that will be executed on mined blocks
     //#[clap(short, long)]
     file: Option<String>,
   },
@@ -66,23 +68,30 @@ pub enum CliCmd {
     term_file: String,
     /// File containing the 256-bit secret key, as a hex string
     skey_file: String,
-  }
+  },
 }
 
-// Returns the path where Kindelia files are saved
+/// Gets the path where Kindelia files should be saved.
+///
+/// Priority is:
+/// 1. CLI argument
+/// 2. Environment variable
+/// 3. Default path (`$HOME/.kindelia`)
 fn get_kindelia_path(dir_cli: Option<String>) -> Result<PathBuf, String> {
+  let default = || dirs::home_dir().unwrap().join(".kindelia");
+  if let Some(dir_cli) = dir_cli {
+    return Ok(PathBuf::from(dir_cli));
+  }
   match std::env::var(KINDELIA_PATH_ENV_VAR) {
-    Ok(dir) => {
-      return Ok(PathBuf::from(dir));
-    }
+    Ok(dir) => Ok(PathBuf::from(dir)),
     Err(err) => {
       if let std::env::VarError::NotPresent = err {
-        return Ok(dirs::home_dir().unwrap().join(".kindelia"));
+        Ok(default())
       } else {
-        return Err(format!("{} environment variable is not valid: '{}'", KINDELIA_PATH_ENV_VAR, err));
+        Err(format!("{} environment variable is not valid: '{}'", KINDELIA_PATH_ENV_VAR, err))
       }
     }
-  };
+  }
 }
 
 fn run_cli() -> Result<(), String> {
@@ -91,7 +100,6 @@ fn run_cli() -> Result<(), String> {
   let kindelia_path = get_kindelia_path(arguments.path)?;
 
   match arguments.command {
-
     // Starts the node process
     CliCmd::Start { file } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
@@ -114,7 +122,9 @@ fn run_cli() -> Result<(), String> {
 
     // Signs a run statement
     CliCmd::Sign { term_file, skey_file } => {
-      if let (Ok(code), Ok(skey)) = (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file)) {
+      if let (Ok(code), Ok(skey)) =
+        (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file))
+      {
         let statements = hvm::read_statements(&code).1;
         if let Some(hvm::Statement::Run { expr, sign: None }) = &statements.last() {
           let skey = hex::decode(&skey[0..64]).expect("hex string");
@@ -171,4 +181,3 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
   miner_thread.join().unwrap();
   api_thread.join().unwrap();
 }
-
