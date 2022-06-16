@@ -1603,6 +1603,9 @@ impl Runtime {
           self.back = tail.clone();
         }
       }
+      if let Rollback::Cons { keep, head, tail } = &*self.back {
+        self.back = Arc::new(Rollback::Cons { keep: 0, head: *head, tail: tail.clone() });
+      }
       self.curr = self.nuls.pop().expect("No heap available!");
     }
 
