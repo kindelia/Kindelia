@@ -90,13 +90,13 @@ pub enum Request {
   GetTick {
     tx: RequestAnswer<u128>,
   },
+  GetBlock {
+    hash: U256,
+    tx: RequestAnswer<Option<BlockInfo>>,
+  },
   GetBlocks {
     range: (i64, i64),
     tx: RequestAnswer<Vec<BlockInfo>>,
-  },
-  GetBlock {
-    block_height: u128,
-    tx: RequestAnswer<Block>,
   },
   GetFunctions {
     tx: RequestAnswer<HashSet<u64>>,
@@ -666,6 +666,23 @@ pub fn node_receive_message(node: &mut Node) {
   }
 }
 
+pub fn get_block_info(node: &Node, hash: &U256) -> Option<BlockInfo> {
+  let block = node.block.get(hash)?;
+  let height = node.height.get(hash).expect("Missing block height.");
+  let height: u64 = (*height).try_into().expect("Block height is too big.");
+  let results = node.results.get(hash).expect("Missing block result.").clone();
+  let bits = crate::bits::BitVec::from_bytes(&block.body.value);
+  let content = crate::bits::deserialize_statements(&bits, &mut 0);
+  let info = BlockInfo {
+    block: block.clone(),
+    hash: *hash,
+    height,
+    results,
+    content,
+  };
+  Some(info)
+}
+
 pub fn node_handle_request(node: &mut Node, request: Request) {
   // TODO: handle unwraps
   match request {
@@ -678,28 +695,16 @@ pub fn node_handle_request(node: &mut Node, request: Request) {
       debug_assert!(end == -1);
       let num = (end - start + 1) as usize;
       let hashes = get_longest_chain(node, Some(num));
-      let infos = hashes.iter().map(move |h| {
-        let block = node.block.get(h).expect("Missing block.");
-        let height = node.height.get(h).expect("Missing block height.");
-        let height: u64 = (*height).try_into().expect("Block height is too big.");
-        let results = node.results.get(h).expect("Missing block result.").clone();
-        let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-        let content = crate::bits::deserialize_statements(&bits, &mut 0);
-        let info = BlockInfo {
-          block: block.clone(),
-          hash: *h,
-          height,
-          results,
-          content,
-        };
-        info
-      }).collect();
+      let infos = hashes.iter()
+        .map(|h| 
+          get_block_info(node, h).expect("Missing block.")
+        ).collect();
       answer.send(infos).unwrap();
     },
-    Request::GetBlock { block_height, tx: answer } => {
+    Request::GetBlock { hash, tx: answer } => {
       // TODO: actual indexing
-      let block = node.block.get(&node.tip).expect("No tip block");
-      answer.send(block.clone()).unwrap();
+      let info = get_block_info(node, &hash);
+      answer.send(info).unwrap();
     },
     Request::GetFunctions { tx } => {
       let mut funcs: HashSet<u64> = HashSet::new();
