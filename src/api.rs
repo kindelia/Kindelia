@@ -297,8 +297,8 @@ mod ser {
       let body_bytes = body.into_iter().collect::<Vec<_>>();
       let mut s = serializer.serialize_struct("Block", 4)?;
       s.serialize_field("time", &self.time.to_string())?;
-      s.serialize_field("rand", &self.rand.to_string())?;
-      s.serialize_field("prev", &self.prev.to_string())?;
+      s.serialize_field("rand", &self.rand.to_string())?;  // ?? hex?
+      s.serialize_field("prev", &u256_to_hex(&self.prev))?;
       s.serialize_field("body", &body_bytes)?;
       s.end()
     }

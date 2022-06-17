@@ -86,6 +86,7 @@ pub struct BlockInfo {
 type RequestAnswer<T> = oneshot::Sender<T>;
 
 // TODO: store and serve tick where stuff where last changed
+// TODO: interaction API
 pub enum Request {
   GetTick {
     tx: RequestAnswer<u128>,
