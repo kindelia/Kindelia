@@ -419,7 +419,7 @@ pub struct SerializedHeap {
 pub enum Rollback {
   Cons {
     keep: u64,
-    head: u64,
+    head: Option<u64>,
     tail: Arc<Rollback>,
   },
   Nil,
@@ -434,29 +434,29 @@ pub struct Runtime {
   back: Arc<Rollback>,  // past states
 }
 
-pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
-  let mut seen = vec![0u8; 10];
-  let mut heaps = vec![0u64; 0];
-  let mut push = |id: u64| {
-    let idx = id as usize;
-    seen[idx] += 1;
-    heaps.push(id);
-  };
-  push(rt.draw);
-  push(rt.curr);
-  for nul in &rt.nuls {
-    push(*nul);
-  }
-  {
-    let mut back = &*rt.back;
-    while let Rollback::Cons { keep, head, tail } = back {
-      push(*head);
-      back = &*tail;
-    }
-  }
-  let failed = seen.iter().all(|c| *c == 1);
-  (failed, seen, heaps)
-}
+//pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
+  //let mut seen = vec![0u8; 10];
+  //let mut heaps = vec![0u64; 0];
+  //let mut push = |id: u64| {
+    //let idx = id as usize;
+    //seen[idx] += 1;
+    //heaps.push(id);
+  //};
+  //push(rt.draw);
+  //push(rt.curr);
+  //for nul in &rt.nuls {
+    //push(*nul);
+  //}
+  //{
+    //let mut back = &*rt.back;
+    //while let Rollback::Cons { keep, head, tail } = back {
+      //push(*head);
+      //back = &*tail;
+    //}
+  //}
+  //let failed = seen.iter().all(|c| *c == 1);
+  //(failed, seen, heaps)
+//}
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
@@ -1602,7 +1602,7 @@ impl Runtime {
 
   pub fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
-    let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
+    let (included, absorber, deleted, rollback) = rollback_push(Some(self.curr), self.back.clone());
     // println!("- tick={} self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.get_tick(), self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     // println!(" - back {}", view_rollback(&self.back));
@@ -1632,16 +1632,25 @@ impl Runtime {
       println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
+      let mut ghosts = 0;
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
         if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
-          self.clear_heap(*head);
-          self.nuls.push(*head);
+          if let Some(head) = head {
+            self.clear_heap(*head);
+            self.nuls.push(*head);
+          }
           self.back = tail.clone();
+          ghosts += 1;
         }
       }
       if let Rollback::Cons { keep, head, tail } = &*self.back {
+        let mut tail = tail.clone();
+        for i in 0 .. ghosts {
+          tail = Arc::new(Rollback::Cons { keep: 0xF, head: None, tail: tail.clone() });
+        }
         self.back = Arc::new(Rollback::Cons { keep: 0, head: *head, tail: tail.clone() });
+
       }
       self.curr = self.nuls.pop().expect("No heap available!");
     }
@@ -1659,7 +1668,11 @@ impl Runtime {
     fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
       match rollback {
         Rollback::Cons { keep, head, tail } => {
-          uuids.push(rt.heap[*head as usize].uuid);
+          if let Some(head) = head {
+            uuids.push(rt.heap[*head as usize].uuid);
+          } else {
+            uuids.push(0);
+          }
           get_uuids(rt, tail, uuids);
         }
         Rollback::Nil => {}
@@ -1692,7 +1705,7 @@ impl Runtime {
             rt, 
             uuids, 
             next, 
-            Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
+            Arc::new(Rollback::Cons { keep: 0, head: Some(index), tail: back }
           ));
         }
         (None, Some(..)) => {
@@ -1733,9 +1746,11 @@ impl Runtime {
     loop {
       match &**back {
         Rollback::Cons { keep, head, tail } => {
-          let val = get(self.get_heap(*head));
-          if val != none {
-            return val;
+          if let Some(head) = head {
+            let val = get(self.get_heap(*head));
+            if val != none {
+              return val;
+            }
           }
           back = &*tail;
         }
@@ -1761,9 +1776,11 @@ impl Runtime {
     loop {
       match &**back {
         Rollback::Cons { keep, head, tail } => {
-          let got = self.get_heap(*head).file.read(fid);
-          if let Some(func) = got {
-            return Some(func);
+          if let Some(head) = head {
+            let got = self.get_heap(*head).file.read(fid);
+            if let Some(func) = got {
+              return Some(func);
+            }
           }
           back = &*tail;
         }
@@ -1779,7 +1796,9 @@ impl Runtime {
     reduce(acc, &self.get_heap(self.curr));
     let mut back = &self.back;
     while let Rollback::Cons { keep: _, head, tail } = &**back {
-      reduce(acc, self.get_heap(*head));
+      if let Some(head) = head {
+        reduce(acc, self.get_heap(*head));
+      }
       back = &*tail;
     }
   }
@@ -1883,7 +1902,7 @@ impl Runtime {
 // - absorber : Option<Box<u64>> = the index of the dropped heap absorber (if any)
 // - deleted  : Option<Box<u64>> = the index of the dropped heap (if any)
 // - rollback : Rollback         = the updated rollback object
-pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
+pub fn rollback_push(elem: Option<u64>, back: Arc<Rollback>) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
   match &*back {
     Rollback::Nil => {
       let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail: Arc::new(Rollback::Nil) });
@@ -1892,12 +1911,12 @@ pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Opti
     Rollback::Cons { keep, head, tail } => {
       if *keep == 0xF {
         let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone());
-        let absorber = if !included { Some(elem) } else { absorber };
+        let absorber = if !included { elem } else { absorber };
         let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail });
         return (true, absorber, deleted, rollback);
       } else {
         let rollback = Arc::new(Rollback::Cons { keep: keep + 1, head: *head, tail: tail.clone() });
-        return (false, None, Some(elem), rollback);
+        return (false, None, elem, rollback);
       }
     }
   }
@@ -1909,7 +1928,11 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
       return String::new();
     }
     Rollback::Cons { keep, head, tail } => {
-      return format!("[{:x} {}] {}", keep, head, view_rollback(tail));
+      if let Some(head) = head {
+        return format!("[{:x} {}] {}", keep, head, view_rollback(tail));
+      } else {
+        return format!("[{:x} ~] {}", keep, view_rollback(tail));
+      }
     }
   }
 }
