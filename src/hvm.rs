@@ -419,6 +419,7 @@ pub struct SerializedHeap {
 pub enum Rollback {
   Cons {
     keep: u64,
+    life: u64,
     head: u64,
     tail: Arc<Rollback>,
   },
@@ -449,7 +450,7 @@ pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
   }
   {
     let mut back = &*rt.back;
-    while let Rollback::Cons { keep, head, tail } = back {
+    while let Rollback::Cons { keep, life, head, tail } = back {
       push(*head);
       back = &*tail;
     }
@@ -1632,16 +1633,18 @@ impl Runtime {
       println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
+      let mut cuts = 0;
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
-        if let Rollback::Cons { keep, head, tail } = &*self.back.clone() {
+        if let Rollback::Cons { keep, life, head, tail } = &*self.back.clone() {
           self.clear_heap(*head);
           self.nuls.push(*head);
           self.back = tail.clone();
+          cuts += 1;
         }
       }
-      if let Rollback::Cons { keep, head, tail } = &*self.back {
-        self.back = Arc::new(Rollback::Cons { keep: 0, head: *head, tail: tail.clone() });
+      if let Rollback::Cons { keep, life, head, tail } = &*self.back {
+        self.back = Arc::new(Rollback::Cons { keep: 0, life: *life + cuts, head: *head, tail: tail.clone() });
       }
       self.curr = self.nuls.pop().expect("No heap available!");
     }
@@ -1656,17 +1659,23 @@ impl Runtime {
   // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
   // function is used to avoid re-processing the entire block history on node startup.
   pub fn persist_state(&self) -> std::io::Result<()> {
-    fn get_uuids(rt: &Runtime, rollback: &Rollback, uuids: &mut Vec<u128>) {
+    fn build_persistence_buffers(rt: &Runtime, rollback: &Rollback, keeps: &mut Vec<u128>, lifes: &mut Vec<u128>, uuids: &mut Vec<u128>) {
       match rollback {
-        Rollback::Cons { keep, head, tail } => {
+        Rollback::Cons { keep, life, head, tail } => {
+          keeps.push(*keep as u128);
+          lifes.push(*life as u128);
           uuids.push(rt.heap[*head as usize].uuid);
-          get_uuids(rt, tail, uuids);
+          build_persistence_buffers(rt, tail, keeps, lifes, uuids);
         }
         Rollback::Nil => {}
       }
     }
+    let mut keeps : Vec<u128> = vec![];
+    let mut lifes : Vec<u128> = vec![];
     let mut uuids : Vec<u128> = vec![];
-    get_uuids(self, &self.back, &mut uuids);
+    build_persistence_buffers(self, &self.back, &mut uuids, &mut lifes, &mut keeps);
+    std::fs::write(heap_dir_path().join("_keeps_"), &util::u128s_to_u8s(&uuids))?;
+    std::fs::write(heap_dir_path().join("_lifes_"), &util::u128s_to_u8s(&uuids))?;
     std::fs::write(heap_dir_path().join("_uuids_"), &util::u128s_to_u8s(&uuids))?;
     return Ok(());
   }
@@ -1680,23 +1689,25 @@ impl Runtime {
     // for i in 0 .. std::cmp::max(uuids.len(), 8) {
     //   self.heap[i + 2].load_buffers(uuids[i])?;
     // }
+    let mut keeps = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_keeps_"))?);
+    let mut lifes = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_lifes_"))?);
     let mut uuids = util::u8s_to_u128s(&std::fs::read(heap_dir_path().join("_uuids_"))?);
-    fn load_heaps(rt: &mut Runtime, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
+    fn load_heaps(rt: &mut Runtime, keeps: &mut Vec<u128>, lifes: &mut Vec<u128>, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
+      let keep = keeps.pop();
+      let life = lifes.pop();
       let uuid = uuids.pop();
       let next = rt.nuls.pop();
-      match (uuid, next) {
-        (Some(uuid), Some(next)) => {
+      match (keep, life, uuid, next) {
+        (Some(keep), Some(life), Some(uuid), Some(next)) => {
           rt.heap[index as usize].load_buffers(uuid)?;
           rt.curr = index;
-          return load_heaps(
-            rt, 
-            uuids, 
-            next, 
-            Arc::new(Rollback::Cons { keep: 0, head: index, tail: back }
-          ));
+          return load_heaps(rt, keeps, lifes, uuids, next, Arc::new(Rollback::Cons { keep: keep as u64, life: life as u64, head: index, tail: back }));
         }
-        (None, Some(..)) => {
+        (None, None, None, Some(..)) => {
           return Ok(back);
+        }
+        (.., Some(..)) => {
+          panic!("Error loading saved heap files.");
         }
         (.., None) => {
           panic!("Not enough heaps.");
@@ -1705,7 +1716,7 @@ impl Runtime {
     }
     self.draw = 0;
     self.curr = 1;
-    self.back = load_heaps(self, &mut uuids, self.curr, Arc::new(Rollback::Nil))?;
+    self.back = load_heaps(self, &mut keeps, &mut lifes, &mut uuids, self.curr, Arc::new(Rollback::Nil))?;
     self.curr = self.nuls.pop().expect("No heap available!");
     return Ok(());
   }
@@ -1732,7 +1743,7 @@ impl Runtime {
     let mut back = &self.back;
     loop {
       match &**back {
-        Rollback::Cons { keep, head, tail } => {
+        Rollback::Cons { keep, life, head, tail } => {
           let val = get(self.get_heap(*head));
           if val != none {
             return val;
@@ -1760,7 +1771,7 @@ impl Runtime {
     let mut back = &self.back;
     loop {
       match &**back {
-        Rollback::Cons { keep, head, tail } => {
+        Rollback::Cons { keep, life, head, tail } => {
           let got = self.get_heap(*head).file.read(fid);
           if let Some(func) = got {
             return Some(func);
@@ -1778,7 +1789,7 @@ impl Runtime {
     reduce(acc, &self.get_heap(self.draw));
     reduce(acc, &self.get_heap(self.curr));
     let mut back = &self.back;
-    while let Rollback::Cons { keep: _, head, tail } = &**back {
+    while let Rollback::Cons { keep: _, life, head, tail } = &**back {
       reduce(acc, self.get_heap(*head));
       back = &*tail;
     }
@@ -1886,17 +1897,23 @@ impl Runtime {
 pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
   match &*back {
     Rollback::Nil => {
-      let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail: Arc::new(Rollback::Nil) });
+      let rollback = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail: Arc::new(Rollback::Nil) });
       return (true, None, None, rollback);
     }
-    Rollback::Cons { keep, head, tail } => {
+    Rollback::Cons { keep, life, head, tail } => {
       if *keep == 0xF {
-        let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone());
-        let absorber = if !included { Some(elem) } else { absorber };
-        let rollback = Arc::new(Rollback::Cons { keep: 0, head: elem, tail });
-        return (true, absorber, deleted, rollback);
+        if *life > 0 {
+          let tail = Arc::new(Rollback::Cons { keep: 0, life: life - 1, head: *head, tail: tail.clone() });
+          let back = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail });
+          return (true, None, None, back);
+        } else {
+          let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone());
+          let absorber = if !included { Some(elem) } else { absorber };
+          let rollback = Arc::new(Rollback::Cons { keep: 0, life: *life, head: elem, tail });
+          return (true, absorber, deleted, rollback);
+        }
       } else {
-        let rollback = Arc::new(Rollback::Cons { keep: keep + 1, head: *head, tail: tail.clone() });
+        let rollback = Arc::new(Rollback::Cons { keep: keep + 1, life: *life, head: *head, tail: tail.clone() });
         return (false, None, Some(elem), rollback);
       }
     }
@@ -1908,7 +1925,7 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
     Rollback::Nil => {
       return String::new();
     }
-    Rollback::Cons { keep, head, tail } => {
+    Rollback::Cons { keep, life, head, tail } => {
       return format!("[{:x} {}] {}", keep, head, view_rollback(tail));
     }
   }
