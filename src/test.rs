@@ -316,12 +316,17 @@ pub const COUNTER: &'static str = "
   }
 ";
 
-// ===========================================================
-// TODO
-// fazer funcao de teste (ou modificar a atual) para testar ir e voltar mais de uma vez com o rollback
-// colocar testes em outro arquivo DONE
-// criar funcao iterativa para substituir a show_term (usando XOR sum) DONE (fiz sem XOR SUM)
-// estudar proptest?
-// criar contratos que usam: dups de construtores, dups de lambdas,
-// salvar lambda em um estado e usá-la, criar árvores, tuplas, qlqr coisa mais complicada
+pub const SIMPLE_COUNTER: &'static str = "
+  run {
+    !call ~ 'Count' [{Count.Inc}]
+    !call x 'Count' [{Count.Get}]
+    !done x
+  }
+";
 
+#[test]
+fn one_hundred_snapshots() {
+  // run this with rollback in each 4th snapshot
+  let mut rt = init_runtime();
+  advance(&mut rt, 100000, Some(SIMPLE_COUNTER));
+}
