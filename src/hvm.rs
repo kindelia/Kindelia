@@ -188,9 +188,9 @@
 // Map<U256> using Merkle Trees, which, being an immutable structure, allows non-destructive
 // insertions and rollbacks. We could do the same, but we decided to further leverage the HVM by
 // saving its whole heap as the network state. In other words, applications are allowed to persist
-// arbitrary HVM structures on disk by using the IO.save operation. For example:
+// arbitrary HVM structures on disk by using the io_save operation. For example:
 //
-//   (IO.save {Cons #1 {Cons #2 {Cons #3 {Nil}}}} ...)
+//   (io_save {Cons #1 {Cons #2 {Cons #3 {Nil}}}} ...)
 //
 // The operation above would persist the [1,2,3] list as the app's state, with no need for
 // serialization. As such, when the app stops running, that list will not be freed from memory.
@@ -360,6 +360,13 @@ pub struct Arits {
   pub arits: Map<u128>,
 }
 
+// A map of `FuncID -> FuncID
+// Stores the owner of the 'FuncID' a namespace.
+#[derive(Clone, Debug)]
+pub struct Ownrs {
+  pub ownrs: Map<u128>,
+}
+
 // A map of `FuncID -> Ptr`
 // It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug)]
@@ -367,16 +374,17 @@ pub struct Store {
   pub links: Map<Ptr>,
 }
 
-// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
-pub type Ptr = u128;
-
 /// A global statement that alters the state of the blockchain
 #[derive(Debug)]
 pub enum Statement {
-  Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term },
-  Ctr { name: u128, args: Vec<u128>, },
+  Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term, sign: Option<crypto::Signature> },
+  Ctr { name: u128, args: Vec<u128>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
+  Reg { name: u128, ownr: u128, sign: Option<crypto::Signature> },
 }
+
+// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
+pub type Ptr = u128;
 
 // A mergeable vector of u128 values
 #[derive(Debug, Clone)]
@@ -393,6 +401,7 @@ pub struct Heap {
   pub disk: Store, // points to stored function states
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
+  pub ownr: Ownrs, // namespace owners
   pub tick: u128,  // time counter
   pub funs: u128,  // total function count
   pub dups: u128,  // total dups count
@@ -409,6 +418,7 @@ pub struct SerializedHeap {
   pub disk: Vec<u128>,
   pub file: Vec<u128>,
   pub arit: Vec<u128>,
+  pub ownr: Vec<u128>,
   pub nums: Vec<u128>,
   pub stat: Vec<u128>,
 }
@@ -466,6 +476,7 @@ pub enum StatementInfo {
   Ctr { name: u128, args: Vec<u128> },
   Fun { name: u128, args: Vec<u128> },
   Run { done_term: Term, used_mana: u128, size_diff: i128, end_size: u128 },
+  Reg { name: u128, ownr: u128 },
 }
 
 #[derive(Debug, Clone)]
@@ -530,25 +541,26 @@ pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
-//   (IO.done expr)           : (IO r)
-//   (IO.take           then) : (IO r)
-//   (IO.save expr      then) : (IO r)
-//   (IO.call expr args then) : (IO r)
-//   (IO.name           then) : (IO r)
-//   (IO.from           then) : (IO r)
-const IO_DONE : u128 = 0x1364039960f; // name_to_u128("IO.DONE")
-const IO_TAKE : u128 = 0x1364078b54f; // name_to_u128("IO.TAKE")
-const IO_SAVE : u128 = 0x1364074b80f; // name_to_u128("IO.SAVE")
-const IO_CALL : u128 = 0x1364034b596; // name_to_u128("IO.CALL")
-const IO_NAME : u128 = 0x1364060b5cf; // name_to_u128("IO.NAME");
-const IO_FROM : u128 = 0x1364041c657; // name_to_u128("IO.FROM")
+//   (io_done expr)           : (IO r)
+//   (io_take           then) : (IO r)
+//   (io_save expr      then) : (IO r)
+//   (io_call expr args then) : (IO r)
+//   (io_subj           then) : (IO r)
+//   (io_from           then) : (IO r)
+const IO_DONE : u128 = 0x1367f39960f; // name_to_u128("IO_DONE")
+const IO_TAKE : u128 = 0x1367f78b54f; // name_to_u128("IO_TAKE")
+const IO_SAVE : u128 = 0x1367f74b80f; // name_to_u128("IO_SAVE")
+const IO_CALL : u128 = 0x1367f34b596; // name_to_u128("IO_CALL")
+const IO_SUBJ : u128 = 0x1367f75f314; // name_to_u128("IO_SUBJ")
+const IO_FROM : u128 = 0x1367f41c657; // name_to_u128("IO_FROM")
+const IO_LOAD : u128 = 0x1367f5992ce; // name_to_u128("IO_LOAD")
 const MC_DONE : u128 = 0xa33ca9; // name_to_u128("done")
 const MC_TAKE : u128 = 0xe25be9; // name_to_u128("take")
-const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
 const MC_SAVE : u128 = 0xde5ea9; // name_to_u128("save")
 const MC_CALL : u128 = 0x9e5c30; // name_to_u128("call")
-const MC_NAME : u128 = 0xca5c69; // name_to_u128("name");
+const MC_SUBJ : u128 = 0xdf99ae; // name_to_u128("subj")
 const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
+const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
@@ -695,63 +707,68 @@ ctr {Name name}
 
 // Below, we declare the built-in IO operations
 
-// IO.done returns from an IO operation
-ctr {IO.DONE expr}
-fun (IO.done expr) {
-  (IO.done expr) = {IO.DONE expr}
+// IO_DONE returns from an IO operation
+ctr {IO_DONE expr}
+fun (io_done expr) {
+  (io_done expr) = {IO_DONE expr}
 }
 
-// IO.take recovers an app's stored state
-ctr {IO.TAKE then}
-fun (IO.take then) {
-  (IO.take then) = {IO.TAKE then}
+// IO_TAKE recovers an app's stored state
+ctr {IO_TAKE then}
+fun (io_take then) {
+  (io_take then) = {IO_TAKE then}
 }
 
-// IO.save stores the app's state
-ctr {IO.SAVE expr then}
-fun (IO.save expr then) {
-  (IO.save expr then) = {IO.SAVE expr then}
+// IO_SAVE stores the app's state
+ctr {IO_SAVE expr then}
+fun (io_save expr then) {
+  (io_save expr then) = {IO_SAVE expr then}
 }
 
-// IO.call calls another IO operation, assigning
+// IO_CALL calls another IO operation, assigning
 // the caller name to the current subject name
-ctr {IO.CALL name args then}
-fun (IO.call name args then) {
-  (IO.call name args then) = {IO.CALL name args then}
+ctr {IO_CALL name args then}
+fun (io_call name args then) {
+  (io_call name args then) = {IO_CALL name args then}
 }
 
-// IO.name returns the name of the current subject
-ctr {IO.NAME then}
-fun (IO.name then) {
-  (IO.name then) = {IO.NAME then}
+// IO_SUBJ returns the name of the current subject
+ctr {IO_SUBJ then}
+fun (io_subj then) {
+  (io_subj then) = {IO_SUBJ then}
 }
 
-// IO.from returns the name of the current caller
-ctr {IO.FROM then} 
-fun (IO.from then) {
-  (IO.from then) = {IO.FROM then}
+// IO_FROM returns the name of the current caller
+ctr {IO_FROM then} 
+fun (io_from then) {
+  (io_from then) = {IO_FROM then}
 }
 
-// Works like IO.take, but clones the state
-fun (IO.load cont) {
-  (IO.load cont) =
-    {IO.TAKE @x
+// IO_LOAD works like IO_TAKE, but clones the state
+fun (io_load cont) {
+  (io_load cont) =
+    {IO_TAKE @x
     dup x0 x1 = x;
-    {IO.SAVE x0 @~
+    {IO_SAVE x0 @~
     (! cont x1)}}
 }
 
 // This is here for debugging. Will be removed.
-ctr {Count.Inc}
-ctr {Count.Get}
+ctr {Count_Inc}
+ctr {Count_Get}
 fun (Count action) {
-  (Count {Count.Inc}) =
+  (Count {Count_Inc}) =
     !take x
     !save (+ x #1)
     !done #0
-  (Count {Count.Get}) =
+  (Count {Count_Get}) =
     !load x
     !done x
+}
+
+// Registers the empty namespace.
+reg {
+  #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
 }
 ";
 
@@ -760,6 +777,60 @@ fun (Count action) {
 
 fn init_map<A>() -> Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+// Names
+// -----
+
+pub fn split_names(name: u128) -> Vec<String> {
+  u128_to_name(name).split('.').map(|x| x.to_string()).collect()
+}
+
+pub fn get_namespace(name: u128) -> Option<u128> {
+  let names = split_names(name);
+  if names.len() > 1 {
+    return Some(name_to_u128(&names[0 .. names.len() - 1].join(".")));
+  } else {
+    return None;
+  }
+}
+
+// Statements
+// ----------
+
+// Removes the signature from a statement
+fn remove_sign(statement: &Statement) -> Statement {
+  match statement {
+    Statement::Fun { name, args, func, init, sign } => {
+      Statement::Fun {
+        name: *name,
+        args: args.clone(),
+        func: func.clone(),
+        init: init.clone(),
+        sign: None,
+      }
+    }
+    Statement::Ctr { name, args, sign } => {
+      Statement::Ctr {
+        name: *name,
+        args: args.clone(),
+        sign: None,
+      }
+    }
+    Statement::Run { expr, sign } => {
+      Statement::Run {
+        expr: expr.clone(),
+        sign: None,
+      }
+    }
+    Statement::Reg { name, ownr, sign } => {
+      Statement::Reg {
+        name: *name,
+        ownr: *ownr,
+        sign: None,
+      }
+    }
+  }
 }
 
 // Rollback
@@ -801,6 +872,12 @@ impl Heap {
   }
   fn read_arit(&self, fid: u128) -> Option<u128> {
     return self.arit.read(fid);
+  }
+  fn write_ownr(&mut self, fid: u128, val: u128) {
+    return self.ownr.write(fid, val);
+  }
+  fn read_ownr(&self, fid: u128) -> Option<u128> {
+    return self.ownr.read(fid);
   }
   fn set_tick(&mut self, tick: u128) {
     self.tick = tick;
@@ -902,6 +979,12 @@ impl Heap {
       arit_buff.push(*fnid as u128);
       arit_buff.push(*arit);
     }
+    // Serializes Ownrs
+    let mut ownr_buff : Vec<u128> = vec![];
+    for (fnid, ownr) in &self.ownr.ownrs {
+      ownr_buff.push(*fnid as u128);
+      ownr_buff.push(*ownr);
+    }
     // Serializes Nums
     let nums_buff : Vec<u128> = vec![
       self.tick,
@@ -920,6 +1003,7 @@ impl Heap {
       disk: disk_buff,
       file: file_buff,
       arit: arit_buff,
+      ownr: ownr_buff,
       nums: nums_buff,
       stat,
     };
@@ -966,6 +1050,12 @@ impl Heap {
       let arit = serial.arit[i * 2 + 1];
       self.write_arit(fnid, arit);
     }
+    // Deserializes Ownrs
+    for i in 0 .. serial.ownr.len() / 2 {
+      let fnid = serial.ownr[i * 2 + 0];
+      let ownr = serial.ownr[i * 2 + 1];
+      self.write_ownr(fnid, ownr);
+    }
   }
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str) -> PathBuf {
     heap_dir_path().join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
@@ -993,6 +1083,7 @@ impl Heap {
     self.write_buffer(serial.uuid, "disk", &serial.disk, true)?;
     self.write_buffer(serial.uuid, "file", &serial.file, true)?;
     self.write_buffer(serial.uuid, "arit", &serial.arit, true)?;
+    self.write_buffer(serial.uuid, "ownr", &serial.ownr, true)?;
     self.write_buffer(serial.uuid, "nums", &serial.nums, true)?;
     self.write_buffer(serial.uuid, "stat", &serial.stat, false)?;
     return Ok(());
@@ -1002,9 +1093,10 @@ impl Heap {
     let disk = self.read_buffer(uuid, "disk")?;
     let file = self.read_buffer(uuid, "file")?;
     let arit = self.read_buffer(uuid, "arit")?;
+    let ownr = self.read_buffer(uuid, "ownr")?;
     let nums = self.read_buffer(uuid, "nums")?;
     let stat = self.read_buffer(uuid, "stat")?;
-    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, nums, stat });
+    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, ownr, nums, stat });
     return Ok(());
   }
   fn delete_buffers(&mut self) -> std::io::Result<()> {
@@ -1020,6 +1112,7 @@ pub fn init_heap() -> Heap {
     disk: Store { links: init_map() },
     file: Funcs { funcs: init_map() },
     arit: Arits { arits: init_map() },
+    ownr: Ownrs { ownrs: init_map() },
     tick: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
@@ -1144,6 +1237,25 @@ impl Arits {
   }
 }
 
+impl Ownrs {
+  fn write(&mut self, fid: u128, val: u128) {
+    self.ownrs.entry(fid as u64).or_insert(val);
+  }
+  fn read(&self, fid: u128) -> Option<u128> {
+    return self.ownrs.get(&(fid as u64)).map(|x| *x);
+  }
+  fn clear(&mut self) {
+    self.ownrs.clear();
+  }
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    for (fid, ownr) in other.ownrs.drain() {
+      if overwrite || !self.ownrs.contains_key(&fid) {
+        self.ownrs.insert(fid, ownr);
+      }
+    }
+  }
+}
+
 pub fn init_runtime() -> Runtime {
   let mut heap = Vec::new();
   for i in 0 .. 10 {
@@ -1156,7 +1268,7 @@ pub fn init_runtime() -> Runtime {
     nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
     back: Arc::new(Rollback::Nil),
   };
-  rt.run_statements_from_code(GENESIS);
+  rt.run_statements_from_code(GENESIS, true);
   rt.snapshot();
   return rt;
 }
@@ -1194,12 +1306,12 @@ impl Runtime {
     self.alloc_term(&read_term(code).1)
   }
 
-  pub fn collect(&mut self, term: Ptr, mana: u128) -> Option<()> {
-    collect(self, term, mana)
+  pub fn collect(&mut self, term: Ptr) {
+    collect(self, term)
   }
 
-  pub fn collect_at(&mut self, loc: u128, mana: u128) -> Option<()> {
-    collect(self, self.read(loc as usize), mana)
+  pub fn collect_at(&mut self, loc: u128) {
+    collect(self, self.read(loc as usize))
   }
 
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Ptr> {
@@ -1212,12 +1324,12 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
-    statements.iter().map(|s| self.run_statement(s)).collect()
+  pub fn run_statements(&mut self, statements: &[Statement], silent: bool) -> Vec<StatementResult> {
+    statements.iter().map(|s| self.run_statement(s, silent)).collect()
   }
 
-  pub fn run_statements_from_code(&mut self, code: &str) -> Vec<StatementResult> {
-    return self.run_statements(&read_statements(code).1);
+  pub fn run_statements_from_code(&mut self, code: &str, silent: bool) -> Vec<StatementResult> {
+    return self.run_statements(&read_statements(code).1, silent);
   }
 
   pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Ptr> {
@@ -1341,7 +1453,7 @@ impl Runtime {
             clear(self, get_loc(term, 0), 3);
             return done;
           }
-          IO_NAME => {
+          IO_SUBJ => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(subject));
             let done = self.run_io(subject, caller, cont, mana);
@@ -1369,158 +1481,159 @@ impl Runtime {
     }
   }
 
-  pub fn run_statement(&mut self, statement: &Statement) -> StatementResult {
-    match statement {
-      Statement::Fun { name, args, func, init } => {
-        // TODO: if arity is set, fail
-        if !self.exists(*name) {
-          self.set_arity(*name, args.len() as u128);
-          if self.check_func(&func) {
-            if let Some(func) = build_func(func, true) {
-              println!("- fun {}", u128_to_name(*name));
-              self.set_arity(*name, args.len() as u128);
-              self.define_function(*name, func);
-              let state = self.create_term(init, 0, &mut init_map());
-              self.write_disk(*name, state);
-              self.draw();
-              return Ok(StatementInfo::Fun { name: *name, args: args.clone() });
-            }
-          }
-          let err = format!("Function {} didn't pass the checks", u128_to_name(*name));
-          println!("- {}", err);
-          self.undo();
-          return Err(StatementErr{ err });
+  // Gets the subject of a signature
+  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: crypto::Hash) -> u128 {
+    match sign {
+      None       => 0,
+      Some(sign) => sign.signer_name(&hash).map(|x| x.0).unwrap_or(1),
+    }
+  }
+
+  // Can this subject deploy this name?
+  pub fn can_deploy(&mut self, subj: u128, name: u128) -> bool {
+    if name == 0 {
+      // nobody can deploy the empty name
+      return false;
+    } else {
+      match get_namespace(name) {
+        None => {
+          // anyone can deploy a namespace-less name
+          return true;
         }
-        let err = format!("Function {} already exists", u128_to_name(*name));
-        println!("- {}", err);
-        return Err(StatementErr{ err });
-      }
-      Statement::Ctr { name, args } => {
-        // TODO: if arity is set, fail
-        if !self.exists(*name) {
-          println!("- ctr {}", u128_to_name(*name));
-          self.set_arity(*name, args.len() as u128);
-          self.draw();
-          return Ok(StatementInfo::Ctr{ name: *name, args: args.clone() });
-        }
-        let err = format!("Constructor {} already exists", u128_to_name(*name));
-        println!("- {}", err);
-        return Err(StatementErr{ err });
-      }
-      Statement::Run { expr, sign } => {
-        let mana_ini = self.get_mana(); 
-        let mana_lim = self.get_mana_limit(); // max mana we can reach on this statement
-        let size_ini = self.get_size();
-        let size_lim = self.get_size_limit(); // max size we can reach on this statement
-        if self.check_term(expr) {
-          let hash = hash_term(&expr);
-          let subj = match sign {
-            None       => 0,
-            Some(sign) => sign.signer_name(&hash).map(|x| x.0).unwrap_or(1),
-          };
-          //let addr = match sign {
-            //None       => "?".to_string(),
-            //Some(sign) => sign.signer_address(&hash).map(|x| hex::encode(x.0)).unwrap_or("?".to_string()),
-          //};
-          //println!("checking signature...");
-          //println!("- hash: {}", hex::encode(hash.0));
-          //println!("- sign: {}", if let Some(s) = sign { hex::encode(s.0) } else { "".to_string() });
-          //println!("- subj: {:x}", subj);
-          //println!("- addr: {}", addr);
-          let host = self.alloc_term(expr);
-          // eprintln!("  => run term:\n{}", show_term(self,ask_lnk(self, host), None));
-          // eprintln!("  => run term:\n{}", view_term(&readback(self, ask_lnk(self, host))));
-          if let Some(done) = self.run_io(subj, 0, host, mana_lim) {
-            if let Some(done) = self.compute(done, mana_lim) {
-              let done_code = self.show_term(done);
-              let done_term = readback(self, done);
-              if let Some(()) = self.collect(done, mana_lim) {
-                let size_end = self.get_size();
-                let mana_dif = self.get_mana() - mana_ini;
-                let size_dif = size_end - size_ini;
-                // dbg!(size_end, size_dif, size_lim);
-                if size_end <= size_lim {
-                  println!("- run {} ({} mana, {} size)", done_code, mana_dif, size_dif);
-                  self.draw();
-                  return Ok(StatementInfo::Run {
-                    done_term: done_term,
-                    used_mana: mana_dif,
-                    size_diff: size_dif,
-                    end_size: size_end as u128,
-                  });
-                } else {
-                  let err = format!("Run {} ({} mana, {} end size) exceeded limit ({} size)", done_code, mana_dif, size_end, size_lim);
-                  println!("- {}", err);
-                  self.undo();
-                  return Err(StatementErr{ err });
-                }
-              }
-            }
-          }
-          let err = "Run failed".to_string();
-          println!("- {}", err);
-          self.undo();
-          return Err(StatementErr{ err });
-        } else {
-          let err = "Run failed: term didn't pass the checks".to_string();
-          println!("- {}", err);
-          return Err(StatementErr{ err });
+        Some(namespace) => {
+          // only owner can deploy on its namespace
+          return subj == self.get_owner(namespace);
         }
       }
     }
   }
 
-  // FIXME: check_term_arities disabled due to #55; a better solution might be to just handle
-  //   incorrect arities when the term is constructed. update:: done by changing create_term, but
-  //   must review the codebase to ensure there aren't places allocating terms with wrong arities
+  // Can this subject register this namespace?
+  pub fn can_register(&mut self, subj: u128, name: u128) -> bool {
+    if name == 0 {
+      // anyone can register the empty namespace (should happen on Genesis Block)
+      return true;
+    } else {
+      // only namespace owner can register a sub-namespace
+      return subj == self.get_owner(get_namespace(name).unwrap_or(0));
+    }
+  }
+
+  pub fn run_statement(&mut self, statement: &Statement, silent: bool) -> StatementResult {
+    fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
+      rt.undo();
+      println!("[{}] Error. {}", tag, err);
+      return Err(StatementErr { err });
+    }
+    let hash = hash_statement(statement);
+    match statement {
+      Statement::Fun { name, args, func, init, sign } => {
+        if self.exists(*name) {
+          return error(self, "fun", format!("Can't redefine '{}'.", u128_to_name(*name)));
+        }
+        let subj = self.get_subject(&sign, hash);
+        if !self.can_deploy(subj, *name) {
+          return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, u128_to_name(*name)));
+        }
+        if !self.check_func(&func) {
+          return error(self, "fun", format!("Invalid function {}.", u128_to_name(*name)));
+        }
+        let func = build_func(func, true);
+        if func.is_none() {
+          return error(self, "fun", format!("Invalid function {}.", u128_to_name(*name)));
+        }
+        let func = func.unwrap();
+        if !silent {
+          println!("[fun] {}", u128_to_name(*name));
+        }
+        self.set_arity(*name, args.len() as u128);
+        self.define_function(*name, func);
+        let state = self.create_term(init, 0, &mut init_map());
+        self.write_disk(*name, state);
+        self.draw();
+        return Ok(StatementInfo::Fun { name: *name, args: args.clone() });
+      }
+      Statement::Ctr { name, args, sign } => {
+        if self.exists(*name) {
+          return error(self, "ctr", format!("Can't redefine '{}'.", u128_to_name(*name)));
+        }
+        let subj = self.get_subject(&sign, hash);
+        if !self.can_deploy(subj, *name) {
+          return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, u128_to_name(*name)));
+        }
+        if args.len() > 16 {
+          return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
+        }
+        if !silent {
+          println!("[ctr] {}", u128_to_name(*name));
+        }
+        self.set_arity(*name, args.len() as u128);
+        self.draw();
+        return Ok(StatementInfo::Ctr { name: *name, args: args.clone() });
+      }
+      Statement::Run { expr, sign } => {
+        let mana_ini = self.get_mana(); 
+        let mana_lim = self.get_mana_limit();
+        let size_ini = self.get_size();
+        let size_lim = self.get_size_limit(); 
+        if !self.check_term(expr) {
+          return error(self, "run", format!("Term is not valid."));
+        }
+        let subj = self.get_subject(&sign, hash);
+        let host = self.alloc_term(expr);
+        let done = self.run_io(subj, 0, host, mana_lim);
+        if done.is_none() {
+          return error(self, "run", format!("Execution failed."));
+        }
+        let done = done.unwrap();
+        let done = self.compute(done, mana_lim);
+        if done.is_none() {
+          return error(self, "run", format!("Mana limit exceeded."));
+        }
+        let done = done.unwrap();
+        let term = readback(self, done);
+        self.collect(done);
+        let size_end = self.get_size();
+        let mana_dif = self.get_mana() - mana_ini;
+        let size_dif = size_end - size_ini;
+        if size_end > size_lim {
+          return error(self, "fun", format!("Size limit exceeded."));
+        }
+        self.draw();
+        if !silent {
+          println!("[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&term), mana_dif, size_dif);
+        }
+        return Ok(StatementInfo::Run {
+          done_term: term,
+          used_mana: mana_dif,
+          size_diff: size_dif,
+          end_size: size_end as u128, // TODO: rename to done_size for consistency?
+        });
+      }
+      Statement::Reg { name, ownr, sign } => {
+        if self.exists(*name) {
+          return error(self, "run", format!("Can't redefine '{}'.", u128_to_name(*name)));
+        }
+        let subj = self.get_subject(sign, hash);
+        if !self.can_register(subj, *name) {
+          return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, u128_to_name(*name)));
+        }
+        self.set_owner(*name, *ownr);
+        self.draw();
+        if !silent {
+          println!("[reg] #x{:0>30x} {}", ownr, u128_to_name(*name));
+        }
+        return Ok(StatementInfo::Reg {
+          name: *name,
+          ownr: *ownr,
+        });
+      }
+    }
+  }
+
   pub fn check_term(&self, term: &Term) -> bool {
     return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
   }
-
-  //pub fn check_term_arities(&self, term: &Term) -> bool {
-    //match term {
-      //Term::Var { name } => {
-        //return true;
-      //},
-      //Term::Dup { nam0, nam1, expr, body } => {
-        //return self.check_term_arities(expr) && self.check_term_arities(body);
-      //}
-      //Term::Lam { name, body } => {
-        //return self.check_term_arities(body);
-      //}
-      //Term::App { func, argm } => {
-        //return self.check_term_arities(func) && self.check_term_arities(argm);
-      //}
-      //Term::Ctr { name, args } => {
-        //if self.get_arity(*name) != args.len() as u128 {
-          //return false;
-        //}
-        //for arg in args {
-          //if !self.check_term_arities(arg) {
-            //return false;
-          //}
-        //}
-        //return true;
-      //}
-      //Term::Fun { name, args } => {
-        //if self.get_arity(*name) != args.len() as u128 {
-          //return false;
-        //}
-        //for arg in args {
-          //if !self.check_term_arities(arg) {
-            //return false;
-          //}
-        //}
-        //return true;
-      //}
-      //Term::Num { numb } => {
-        //return true;
-      //}
-      //Term::Op2 { oper, val0, val1 } => {
-        //return self.check_term_arities(val0) && self.check_term_arities(val1);
-      //}
-    //}
-  //}
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in func {
@@ -1829,8 +1942,22 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(fid, arity);
   }
 
+  pub fn get_owner(&self, name: u128) -> u128 {
+    if let Some(owner) = self.get_with(None, None, |heap| heap.read_ownr(name)) {
+      return owner;
+    } else {
+      return U128_NONE;
+    }
+  }
+
+  pub fn set_owner(&mut self, name: u128, owner: u128) {
+    self.get_heap_mut(self.draw).write_ownr(name, owner);
+  }
+
   pub fn exists(&self, fid: u128) -> bool {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(fid)) {
+      return true;
+    } else if let Some(owner) = self.get_with(None, None, |heap| heap.read_ownr(fid)) {
       return true;
     } else {
       return false;
@@ -2072,7 +2199,7 @@ pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Ptr, mana: u128) -> Option<()> {
+pub fn collect(rt: &mut Runtime, term: Ptr) {
   let mut stack : Vec<Ptr> = Vec::new();
   let mut next = term;
   let mut dups : Vec<u128> = Vec::new();
@@ -2143,11 +2270,10 @@ pub fn collect(rt: &mut Runtime, term: Ptr, mana: u128) -> Option<()> {
     let fst = ask_arg(rt, dup, 0);
     let snd = ask_arg(rt, dup, 1);
     if get_tag(fst) == ERA && get_tag(snd) == ERA {
-      collect(rt, ask_arg(rt, dup, 2), mana);
+      collect(rt, ask_arg(rt, dup, 2));
       clear(rt, get_loc(dup, 0), 3);
     }
   }
-  return Some(());
 }
 
 // Term
@@ -2532,13 +2658,12 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr, mana: u128) -> Option<()> {
+pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
-    collect(rt, val, mana)?;
+    collect(rt, val);
   }
-  return Some(());
 }
 
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
@@ -2618,7 +2743,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
             //println!("app-lam");
             rt.set_mana(rt.get_mana() + AppLamMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1), mana);
+            subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1));
             let _done = link(rt, host, ask_arg(rt, arg0, 1));
             clear(rt, get_loc(term, 0), 2);
             clear(rt, get_loc(arg0, 0), 2);
@@ -2668,13 +2793,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
             link(rt, par0 + 1, Var(lam1));
             let arg0_arg_0 = ask_arg(rt, arg0, 0);
             link(rt, par0 + 0, Var(lam0));
-            subst(rt, arg0_arg_0, Par(get_ext(term), par0), mana);
+            subst(rt, arg0_arg_0, Par(get_ext(term), par0));
             let term_arg_0 = ask_arg(rt, term, 0);
             link(rt, lam0 + 1, Dp0(get_ext(term), let0));
-            subst(rt, term_arg_0, Lam(lam0), mana);
+            subst(rt, term_arg_0, Lam(lam0));
             let term_arg_1 = ask_arg(rt, term, 1);
             link(rt, lam1 + 1, Dp1(get_ext(term), let0));
-            subst(rt, term_arg_1, Lam(lam1), mana);
+            subst(rt, term_arg_1, Lam(lam1));
             let done = Lam(if get_tag(term) == DP0 { lam0 } else { lam1 });
             link(rt, host, done);
             init = 1;
@@ -2688,8 +2813,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
               //println!("dup-sup-e");
               rt.set_mana(rt.get_mana() + DupSupMana());
               rt.set_rwts(rt.get_rwts() + 1);
-              subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0), mana);
-              subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1), mana);
+              subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0));
+              subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1));
               let _done = link(rt, host, ask_arg(rt, arg0, if get_tag(term) == DP0 { 0 } else { 1 }));
               clear(rt, get_loc(term, 0), 3);
               clear(rt, get_loc(arg0, 0), 2);
@@ -2717,8 +2842,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
               link(rt, par1 + 1, Dp1(get_ext(term), let1));
               link(rt, par0 + 0, Dp0(get_ext(term), let0));
               link(rt, par0 + 1, Dp0(get_ext(term), let1));
-              subst(rt, term_arg_0, Par(get_ext(arg0), par0), mana);
-              subst(rt, term_arg_1, Par(get_ext(arg0), par1), mana);
+              subst(rt, term_arg_0, Par(get_ext(arg0), par0));
+              subst(rt, term_arg_1, Par(get_ext(arg0), par1));
               let done = Par(get_ext(arg0), if get_tag(term) == DP0 { par0 } else { par1 });
               link(rt, host, done);
             }
@@ -2731,8 +2856,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
             //println!("dup-num");
             rt.set_mana(rt.get_mana() + DupNumMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), arg0, mana);
-            subst(rt, ask_arg(rt, term, 1), arg0, mana);
+            subst(rt, ask_arg(rt, term, 0), arg0);
+            subst(rt, ask_arg(rt, term, 1), arg0);
             clear(rt, get_loc(term, 0), 3);
             let _done = arg0;
             link(rt, host, arg0);
@@ -2751,8 +2876,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
-              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0), mana);
-              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0), mana);
+              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0));
+              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0));
               clear(rt, get_loc(term, 0), 3);
               let _done = link(rt, host, Ctr(func, 0));
             } else {
@@ -2768,10 +2893,10 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
               link(rt, leti + 2, ask_arg(rt, arg0, arit - 1));
               let term_arg_0 = ask_arg(rt, term, 0);
               link(rt, ctr0 + arit - 1, Dp0(get_ext(term), leti));
-              subst(rt, term_arg_0, Ctr(func, ctr0), mana);
+              subst(rt, term_arg_0, Ctr(func, ctr0));
               let term_arg_1 = ask_arg(rt, term, 1);
               link(rt, ctr1 + arit - 1, Dp1(get_ext(term), leti));
-              subst(rt, term_arg_1, Ctr(func, ctr1), mana);
+              subst(rt, term_arg_1, Ctr(func, ctr1));
               let done = Ctr(func, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
@@ -2783,8 +2908,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
             //println!("dup-era");
             rt.set_mana(rt.get_mana() + DupEraMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), Era(), mana);
-            subst(rt, ask_arg(rt, term, 1), Era(), mana);
+            subst(rt, ask_arg(rt, term, 0), Era());
+            subst(rt, ask_arg(rt, term, 1), Era());
             link(rt, host, Era());
             clear(rt, get_loc(term, 0), 3);
             init = 1;
@@ -2956,7 +3081,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
                     vars_data.insert(rule_var.name as u64, var);
                   } else {
                     // Collects unused argument
-                    collect(rt, var, mana)?;
+                    collect(rt, var);
                   }
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
@@ -3677,6 +3802,7 @@ pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
   while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
     data.append(&mut hex::decode(&String::from_iter([nth(code,0),nth(code,1)])).unwrap());
     code = drop(code, 2);
+    code = skip(code);
   }
   return (code, data);
 }
@@ -3808,7 +3934,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
         MC_DONE => {
           let (code, expr) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.DONE"),
+            name: name_to_u128("IO_DONE"),
             args: vec![expr],
           });
         }
@@ -3816,7 +3942,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.TAKE"),
+            name: name_to_u128("IO_TAKE"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
@@ -3824,7 +3950,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
           return (code, Term::Fun {
-            name: name_to_u128("IO.load"), // attention: lowercase, because it is a function call
+            name: name_to_u128("io_load"), // attention: lowercase, because it is a function call
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
@@ -3832,7 +3958,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
           let (code, expr) = read_term(code);
           let (code, then) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.SAVE"),
+            name: name_to_u128("IO_SAVE"),
             args: vec![expr, Term::Lam { name: VAR_NONE, body: Box::new(then) }],
           });
         }
@@ -3842,15 +3968,15 @@ pub fn read_term(code: &str) -> (&str, Term) {
           let (code, args) = read_term(code);
           let (code, then) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.CALL"),
+            name: name_to_u128("IO_CALL"),
             args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
-        MC_NAME => {
+        MC_SUBJ => {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.NAME"),
+            name: name_to_u128("IO_SUBJ"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
@@ -3858,7 +3984,7 @@ pub fn read_term(code: &str) -> (&str, Term) {
           let (code, bind) = read_name(code);
           let (code, then) = read_term(code);
           return (code, Term::Ctr {
-            name: name_to_u128("IO.FROM"),
+            name: name_to_u128("IO_FROM"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
           });
         }
@@ -3940,6 +4066,22 @@ pub fn read_func(code: &str) -> (&str, CompFunc) {
   }
 }
 
+pub fn read_sign(code: &str) -> (&str, Option<crypto::Signature>) {
+  let code = skip(code);
+  if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+    let code = drop(code,4);
+    let (code, unit) = read_char(code, '{');
+    let (code, sign) = read_hex(code);
+    let (code, unit) = read_char(code, '}');
+    if sign.len() == 65 {
+      return (code, Some(crypto::Signature(sign.as_slice().try_into().unwrap())));
+    } else {
+      panic!("Wrong signature size.");
+    }
+  }
+  return (code, None);
+}
+
 pub fn read_statement(code: &str) -> (&str, Statement) {
   let code = skip(code);
   match (nth(code,0), nth(code,1), nth(code,2)) {
@@ -3951,42 +4093,44 @@ pub fn read_statement(code: &str) -> (&str, Statement) {
       let (code, unit) = read_char(code, '{');
       let (code, func) = read_until(code, '}', read_rule);
       let code = skip(code);
-      if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+      let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);
         let (code, unit) = read_char(code, '{');
         let (code, init) = read_term(code);
         let (code, unit) = read_char(code, '}');
-        return (code, Statement::Fun { name, args, func, init });
+        (code, init)
       } else {
-        return (code, Statement::Fun { name, args, func, init: Term::Num { numb: 0 } });
-      }
+        (code, Term::Num { numb: 0 })
+      };
+      let (code, sign) = read_sign(code);
+      return (code, Statement::Fun { name, args, func, init, sign });
     }
     ('c','t','r') => {
       let code = drop(code,3);
       let (code, unit) = read_char(code, '{');
       let (code, name) = read_name(code);
       let (code, args) = read_until(code, '}', read_name);
-      return (code, Statement::Ctr { name, args });
+      let (code, sign) = read_sign(code);
+      return (code, Statement::Ctr { name, args, sign });
     }
     ('r','u','n') => {
       let code = drop(code,3);
       let (code, unit) = read_char(code, '{');
       let (code, expr) = read_term(code);
       let (code, unit) = read_char(code, '}');
-      let code = skip(code);
-      if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
-        let code = drop(code,4);
-        let (code, unit) = read_char(code, '{');
-        let (code, sign) = read_hex(code);
-        let (code, unit) = read_char(code, '}');
-        if sign.len() == 65 {
-          return (code, Statement::Run { expr, sign: Some(crypto::Signature(sign.as_slice().try_into().unwrap()))  });
-        } else {
-          panic!("Wrong signature size.");
-        }
-      } else {
-        return (code, Statement::Run { expr, sign: None });
-      }
+      let (code, sign) = read_sign(code);
+      return (code, Statement::Run { expr, sign  });
+    }
+    // reg Foo.Bar { #x123456 } sign { signature }
+    ('r','e','g') => {
+      let code = skip(drop(code, 3));
+      let (code, name) = if nth(code,0) == '{' { (code, 0) } else { read_name(code) };
+      let (code, unit) = read_char(code, '{');
+      let (code, unit) = read_char(code, '#');
+      let (code, ownr) = read_numb(code);
+      let (code, unit) = read_char(code, '}');
+      let (code, sign) = read_sign(code);
+      return (code, Statement::Reg { name, ownr, sign });
     }
     _ => {
       panic!("Couldn't parse statement.");
@@ -3995,11 +4139,7 @@ pub fn read_statement(code: &str) -> (&str, Statement) {
 }
 
 pub fn read_statements(code: &str) -> (&str, Vec<Statement>) {
-  let (code, statements) = read_until(code, '\0', read_statement);
-  //for statement in &statements {
-    //println!("... statement {}", view_statement(statement));
-  //}
-  return (code, statements);
+  read_until(code, '\0', read_statement)
 }
 
 // View
@@ -4091,26 +4231,39 @@ pub fn view_oper(oper: &u128) -> String {
 }
 
 pub fn view_statement(statement: &Statement) -> String {
+  fn view_sign(sign: &Option<crypto::Signature>) -> String {
+    match sign {
+      None       => String::new(),
+      Some(sign) => format!(" sign {{ {} }}", hex::encode(sign.0)),
+    }
+  }
   match statement {
-    Statement::Fun { name, args, func, init } => {
+    Statement::Fun { name, args, func, init, sign } => {
       let name = u128_to_name(*name);
       let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.lhs), view_term(&x.rhs))).collect::<Vec<String>>().join("\n");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      return format!("fun ({} {}) {{\n{}\n}} = {}", name, args, func, init);
+      let init = format!(" with {{ {} }}", init);
+      let sign = view_sign(sign);
+      return format!("fun ({} {}) {{ {} }}{}{}", name, args, func, init, sign);
     }
-    Statement::Ctr { name, args } => {
+    Statement::Ctr { name, args, sign } => {
       // correct:
       let name = u128_to_name(*name);
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
-      return format!("ctr {{{} {}}}", name, args);
+      let sign = view_sign(sign);
+      return format!("ctr {{{} {}}}{}", name, args, sign);
     }
     Statement::Run { expr, sign } => {
       let expr = view_term(expr);
-      match sign {
-        None => format!("run {{\n  {}\n}}", expr),
-        Some(sign) => format!("run {{\n  {}\n}} sign {{\n  {}\n}}", expr, hex::encode(sign.0)),
-      }
+      let sign = view_sign(sign);
+      return format!("run {{\n  {}\n}}{}", expr, sign);
+    }
+    Statement::Reg { name, ownr, sign } => {
+      let name = u128_to_name(*name);
+      let ownr = format!("#x{:0>30x}", ownr);
+      let sign = view_sign(sign);
+      return format!("reg {} {{ {} }}{}", name, ownr, sign);
     }
   }
 }
@@ -4131,24 +4284,49 @@ pub fn hash_term(term: &Term) -> crypto::Hash {
   crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_term(&term)))
 }
 
+pub fn hash_statement(statement: &Statement) -> crypto::Hash {
+  crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_statement(&remove_sign(&statement))))
+}
+
 // Tests
 // -----
+
+// FIXME: since we don't have a proper macro, we're using this temporarily
+pub fn print_io_consts() {
+  let names = ["done", "take", "save", "call", "subj", "from", "load"];
+  for name in names {
+    let name = name.to_uppercase();
+    let numb = name_to_u128(&format!("IO_{}", name));
+    println!("const IO_{} : u128 = 0x{:x}; // name_to_u128(\"IO_{}\")", name, numb, name);
+  }
+  for name in names {
+    let numb = name_to_u128(&name);
+    println!("const MC_{} : u128 = 0x{:x}; // name_to_u128(\"{}\")", name.to_uppercase(), numb, name);
+  }
+}
 
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &[Statement]) {
   let str_0 = view_statements(statements);
   let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
 
-  println!("[Evaluation] {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
+  println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
+  println!("=====");
+  println!("");
+
   let mut rt = init_runtime();
   let init = Instant::now();
-  rt.run_statements(&statements);
+  rt.run_statements(&statements, false);
   println!();
 
-  println!("[Stats]");
-  println!("- cost: {} mana ({} rewrites)", rt.get_mana(), rt.get_rwts());
-  println!("- size: {} words", rt.get_size());
-  println!("- time: {} ms", init.elapsed().as_millis());
+  println!("Stats");
+  println!("=====");
+  println!("");
+
+  println!("[size] {}", rt.get_size());
+  println!("[mana] {}", rt.get_mana());
+  println!("[rwts] {}", rt.get_rwts());
+  println!("[time] {} ms", init.elapsed().as_millis());
 }
 
 pub fn test_statements_from_code(code: &str) {

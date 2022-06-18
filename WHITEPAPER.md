@@ -23,16 +23,19 @@ Table of Contents
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
   * [Block #3: signing statements](#block-3-signing-statements)
-  * [Block #4: playing the game](#block-4-playing-the-game)
+  * [Block #4: registering namespaces](#block-4-registering-namespaces)
+  * [Block #4: playing a multiplayer game](#block-5-playing-a-multiplayer-game)
 * [Technical Overview](#technical-overview)
-  * [Blocks and Statements](#blocks-and-statements)
+  * [Blocks](#blocks)
+  * [Statements](#statements)
   * [Expressions](#expressions)
-  * [IO Effects](#io-effects)
-  * [Computation Rules](#computation-rules)
-  * [Memory Model](#memory-model)
-  * [Genesis Block](#genesis-block)
+  * [Effects](#effects)
+  * [Normalization](#normalization)
   * [Table of Costs](#table-of-costs)
+  * [Validation](#validation)
+  * [Memory Model](#memory-model)
   * [Serialization](#serialization)
+  * [Genesis Block](#genesis-block)
 * [The High-order Virtual Machine (HVM)](#the-high-order-virtual-machine-hvm)
   * [Sequential tasks: as fast as Haskell's GHC](#1-for-normal-sequential-tasks-such-as-folds-it-holds-similar-performance)
   * [Parallel tasks: several times faster](#2-for-very-parallel-tasks-such-as-tree-based-quicksort-it-is-several-times-faster)
@@ -117,10 +120,8 @@ Block #1: defining pure functions
 The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// Declares a constructor, Leaf, with 1 field
+// Declares the constructors of a binary tree.
 ctr {Leaf value}
-
-// Declares a constructor, Branch, with 2 fields
 ctr {Branch left right}
 
 // Declares a pure function that sums a tree
@@ -240,29 +241,98 @@ as games and exchanges on its layer 1.
 Block #3: signing statements
 ----------------------------
 
-A `run{}` statement can also optionally include a signature:
+An statement can also optionally include a signature:
 
 ```c
 run {
-  !name x // get the signer's name
+  !subj x // gets the signer
   !done x // outputs it
 } sign {
-  0135ffd97b83f74843d93c4afb2d35d426c669f67bf3df8663de1d00768de179cd6215ccde6fe332845a5a4e72553bf9777b634b4f8ed91a1934620712e354887f
+  00c0777281fe0a814d0f1826ad
+  7f4228f7308df5c4365f8dc577
+  ed64b3e32505a143d5566b8d38
+  1f5b93988d19a82924fcef232e
+  6ccc5a0e006e5b6f946cd15372
 }
 ```
 
 That hexadecimal string represents the secp256k1 signature of the serialization
 of the `run{}` statement above. This will set the *subject* of the execution as
-the signer, changing the behavior of the `IO.name` and `IO.from` primitives,
+the signer, changing the behavior of the `IO.subj` and `IO.from` primitives,
 which return the subject's name, and the caller's name, respectively. To sign a
-statement, just place it in the end of a `.kdl` file, and, enter the command:
+statement, just place it at the end of a `.kdl` file, and enter the command:
 
 ```
 kindelia sign block_file.kdl key_file
 ```
 
-Block #4: playing a game
-------------------------
+Block #4: registering namespaces
+--------------------------------
+ 
+Kindelia also has a simple, optional namespace system, which allows users to
+reserve blocks of names for themselves. That system is based on a name hierarchy
+based on the special dot character (`.`). Names that have no dots aren't
+affected by this system, and can be deployed by anyone. Names that have one or
+more dots can only be deployed by the owner of its namespace. For example, a
+`Foo.Bar.cats` function can only be deployed by the owner of the `Foo.Bar`
+namespace. The owner of a namespace can register a sub-namespace for someone
+else using the `reg{}` statement. The owner of the top-level namespace, which
+we call `Namer`, is defined on the genesis block.
+
+On the block below, the global Namer registers the `Foo` namespace to Alice, who
+then registers the `Foo.Bar` namespace to Bob, who deploys the `Foo.Bar.cats`
+function:
+
+```c
+// Subjects:
+// - Namer = #x7e5f4552091a69125d5dfcb7b8c265
+// - Alice = #x2b5ad5c4795c026514f8317c7a215e
+// - Bob   = #x6813eb9362372eef6200f3b1dbc3f8
+
+// Registers the "Foo" namespace to Alice.
+// Since this is a top-level name, this must be signed by the global Namer.
+reg Foo { 
+  #x2b5ad5c4795c026514f8317c7a215e
+} sign { 
+  0055db2c36550b962462a80acb
+  acb562aa04638674ce654a4fbc
+  2ef195591414ee3e87b8e08543
+  10818e8f46ccf15a0f2e338c4f
+  ee20fa177e4c1cf0365b4acae8
+}
+
+// Registers the "Foo.Bar" namespace to Bob.
+// Since "Foo" is owned by Alice, this must be signed by her.
+reg Foo.Bar {
+  #x6813eb9362372eef6200f3b1dbc3f8
+} sign {
+  0145ccb8ab88d3f07822a0cff7
+  85d3eb3c8183afffa7d03efa0e
+  5956dcc54e0e7007d608aff377
+  05c51d7336c05c37f1e210fbfa
+  13621c960eaadedc839b6b86fa
+}
+
+// Defines a "Foo.Bar.cats" function that always returns 42.
+// Since "Foo.Bar" is owned by Bob, this must be signed by him.
+fun (Foo.Bar.cats) {
+  (Foo.Bar.cats) = #42
+} sign {
+  007b87c77fd353a5ca9ef2da43
+  e315c4e0f08b24694c46919067
+  3e247f297e9a3a7b35d7257c5c
+  8d77b58b08633437a2f4299c51
+  3dc4d7b756156569137328520b
+}
+
+// Runs Bob's cats function!
+run {
+  !done (Foo.Bar.cats)
+}
+```
+
+Block #5: playing a multiplayer game
+------------------------------------
 
 ```c
 // TODO
@@ -271,37 +341,124 @@ Block #4: playing a game
 Technical Overview
 ==================
 
-Blocks and Statements
----------------------
+Blocks
+------
 
-Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
-(Proof of Work). Kindelia blocks are just groups of statements. Kindelia
-statements can be one of 3 variants:
+A block is just a list of statements. A Kindelia node is just a process that
+broadcasts timestamped blocks to a peer-to-peer network, using Nakamoto
+Consensus (Proof of Work) to give these blocks a canonical ordering. The
+statements in these blocks are then evaluated in order, causing each node to
+compute the same canonical state.
 
-- **ctr**: declares a new constructor
+Statements
+----------
 
-    ```c
-    ctr {ConstructorName field_0_name field_1_name ...}
-    ```
+Kindelia statements alter the network's state. They can be one of 4 variants:
 
+### **CTR**: defines a new constructor
 
-- **fun**: declares a new function 
+#### Syntax:
 
-    ```c
-    fun (FunctionName argument_0_name argument_1_name ...) {
-      (ConstructorName arg_0 arg_1 ...) = returned_value_0
-      (ConstructorName arg_0 arg_1 ...) = returned_value_1
-      ...
-    } with { initial_state }
-    ```
+```c
+ctr {
+  Name field_0 field_1 ...
+} sign {
+  optional_signature
+}
+```
 
-- **run**: runs an IO expression
+#### Effect:
 
-    ```c
-    run {
-      IO_expression
-    }
-    ```
+- If `Name` is already defined, abort.
+
+- If the signer can't deploy `Name`, abort.
+
+- If the constructor arity is larger than 16, abort.
+
+- Define the `Name` constructor globally.
+
+- Output the defined constructor.
+
+### **FUN**: defines a new function 
+
+```c
+fun (Name arg_0 arg_1 ...) {
+  (Ctr0 field_0 field_1 ...) = body_0
+  (Ctr1 field_0 field_1 ...) = body_1
+  (Ctr2 field_0 field_1 ...) = body_2
+  ...
+} with {
+  initial_state
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `Name` is already defined, abort.
+
+- If the signer can't deploy `Name`, abort.
+
+- If the function is invalid, abort.
+
+- Define the `Name` function globally.
+
+- Allocate the `initial_state` term on memory.
+
+- Point `Name`'s state to `initial_state`'s term.
+
+- Output the defined function.
+
+### **RUN**: runs an IO expression
+
+#### Syntax:
+
+```c
+run {
+  IO_expression
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `IO_expression` isn't valid, abort.
+
+- Evaluate `IO_expression`, with the signer as the subject.
+
+- If the execution failed, abort.
+
+- Normalize the result of the evaluation.
+
+- If the mana limit was exceeded, revert.
+
+- Collect the memory used by the normalized result.
+
+- If the size limit was exceeded, revert.
+
+- Output the normalized result.
+
+### **REG**: registers a namespace
+
+```c
+reg Name {
+  owner_address
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `Name` is already defined, abort.
+
+- If the signer can't register `Name`, abort.
+
+- Register `Name` to `owner_address`.
+
+- Output the registration receipt.
 
 Expressions
 -----------
@@ -400,8 +557,8 @@ So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
 human-readable source codes.
 
-IO Effects
-----------
+Effects
+-------
 
 Finally, Kindelia has side-effective operations that allow functions to save
 states, request information from the network. These operations are performed
@@ -433,22 +590,21 @@ you don't include the state back later with `IO.save`, it will be emptied. As an
 alternative, an `IO.load` function is defined on the genesis block, which works
 exactly like `IO.take`, except it will clone the state.
 
-Computation Rules
------------------
+Normalization
+-------------
 
 Kindelia expressions are evaluated by the HVM, a functional virtual machine.
 The primitive operations in that machine are called rewrite rules, and they
 include beta reduction (lambda application), pattern-matching, numeric
-operators, and primitives for cloning and erasing data. It is important to
-stress that all these operations are constant-time, which is essential to make
-costs measurable: see the mana table in the next section. For more info on how
-that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
+operators, and primitives for cloning and erasing data. All these operations are
+constant-time, which is what allows costs to be measurable. For a simplified
+explanation on how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
-As explained on the document above, in addition to the 8 term variants, the HVM
-also has an internal superposition construct, which is just a pair that can show
-up as a byproduct of its lazy-cloning operation. That construct will be written
-as `{a b}`. It also has an erasure construct, which may appear as a byproduct of
-erasing data. Kindelia's rewrite rules are:
+Note: in addition to the 8 term variants, the HVM also has some internal
+constructs, such as superpositions and erasure nodes, which can't be submitted
+by an user, but can appear as a byproduct of its lazy-cloning operation.
+
+Kindelia's computation rules are:
 
 ### Lambda Application
 
@@ -620,6 +776,84 @@ global pattern-matching rewrite rule.
 -------------- FUN-CTR
 (user-defined)
 ```
+
+Table of Costs
+--------------
+
+Since Kindelia's built-in language is Turing complete, it must have a way to
+account for, and limit, performed computations; otherwise, anyone could freeze
+the entire network by deploying infinite loops, or expensive computations. Like
+Ethereum, it has a cost table linking primitive operations to a number, which is
+called mana instead of gas. Unlike Ethereum, that cost isn't associated with
+transactions, but with the block as a whole.
+
+    .---------------------------------------------------.
+    | Opcode  | Effect                          | Mana  |
+    |---------|---------------------------------|-------|
+    | APP-LAM | applies a lambda                | 2     |
+    | APP-SUP | applies a superposition         | 4     |
+    | OP2-NUM | operates on a number            | 2     |
+    | OP2-SUP | operates on a superposition     | 4     |
+    | FUN-CTR | pattern-matches a constructor   | 2 + M |
+    | FUN-SUP | pattern-matches a superposition | 2 + A |
+    | DUP-LAM | clones a lambda                 | 4     |
+    | DUP-NUM | clones a number                 | 2     |
+    | DUP-CTR | clones a constructor            | 2 + A |
+    | DUP-SUP | clones a superposition          | 4     |
+    | DUP-SUP | undoes a superposition          | 2     |
+    | DUP-ERA | clones an erasure               | 2     |
+    |---------------------------------------------------|
+    | * A is the constructor or function arity          |
+    | * M is the alloc count of the right-hand side     |
+    '---------------------------------------------------'
+
+
+Kindelia's elegant runtime is reflected by the simplicity of this table. In
+order to limit computations, nodes impose a hard ceiling on the amount of
+computation performed, as a function of the block number:
+
+```
+mana_limit = 10000000 * (block_number + 1)
+```
+
+If a block passes that limit, it is rejected by nodes. Note that this limit
+accumulates: if a block doesn't fully use it, the next block can use it, and so
+on. In effect, that causes times of low usage to "lend" computation to times of
+high usage, making Kindelia somewhat resistant to performance losses due to
+high-traffic applications or periods, while still keeping the maximum
+synchronization computation in check.
+
+The current Rust implementation is capable of computing about 55 million mana
+per second in an Apple M1 processor. This is about 7 times larger than the mana
+limit per block. That means that, for every 7 seconds a node spends offline, it
+must spend 1 second catching up, if single threaded. While that isn't a huge
+margin, blocks could be processed in a parallel fashion, and future improvements
+on the HVM and processors will improve this margin.
+
+Kindelia also has a hard ceiling on the state size, i.e., the size of its heap:
+
+```
+bits_limit = 2048 * (block_number + 1)
+```
+
+That means that, for every second that passes, the state size is allowed to grow
+2048 bits. That is equivalent to an HVM constructor with 16 numeric fields, or 8
+HVM lambdas. That amounts to a blockchain state growth of about 8 GB per year.
+Just like mana, this accumulates, so, for example, if there are 3 empty blocks,
+the 4th block will be able to let the blockchain size grow up to 8192 bits.
+
+### About miner fees
+
+An attentive reader may have noticed that there is no miner fee mechanism
+included on this implementation. That is by design. Kindelia restricts how much
+computation and space the network may use in total as a function of its age, but
+it says nothing about individual transactions. Kindelia relies on the principle
+that, during the early ages of the network, users will be mining their own
+blocks directly. After all, with 1 second per block, there are 86400 blocks per
+day. Until there are thousands of active users, mining a block won't be an issue
+for an average user. When that starts becoming practical, a fee market will
+emerge naturally, and users will pay miners in whatever currencies they like.
+For more on that, check the ["Why not include a currency?"](#why-not-include-a-currency) section.
 
 Memory Model
 ------------
@@ -809,158 +1043,6 @@ That is why Kindelia's "SSTORE" has zero-cost: the operation itself is very
 cheap as it just saves a pointer. We only have to "charge" an app when it uses
 more of the available heap space.
 
-Genesis Block
--------------
-
-Kindelia starts the network by running a single block before the first mined
-block. This is called the genesis block. That block installs some utilities on
-the network, as shown below:
-
-```c
-// Tuple types
-ctr {Tuple0}
-ctr {Tuple1 x0}
-ctr {Tuple2 x0 x1}
-ctr {Tuple3 x0 x1 x2}
-ctr {Tuple4 x0 x1 x2 x3}
-ctr {Tuple5 x0 x1 x2 x3 x4}
-ctr {Tuple6 x0 x1 x2 x3 x4 x5}
-ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
-ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
-ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
-ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
-ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
-ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
-
-// Used to pretty-print names
-ctr {Name name}
-
-// Below, we declare the built-in IO operations
-
-// IO.done returns from an IO operation
-ctr {IO.DONE expr}
-fun (IO.done expr) {
-  (IO.done expr) = {IO.DONE expr}
-}
-
-// IO.take recovers an app's stored state
-ctr {IO.TAKE then}
-fun (IO.take then) {
-  (IO.take then) = {IO.TAKE then}
-}
-
-// IO.save stores the app's state
-ctr {IO.SAVE expr then}
-fun (IO.save expr then) {
-  (IO.save expr then) = {IO.SAVE expr then}
-}
-
-// IO.call calls another IO operation, assigning
-// the caller name to the current subject name
-ctr {IO.CALL name args then}
-fun (IO.call name args then) {
-  (IO.call name args then) = {IO.CALL name args then}
-}
-
-// IO.name returns the name of the current subject
-ctr {IO.NAME then}
-fun (IO.name then) {
-  (IO.name then) = {IO.NAME then}
-}
-
-// IO.from returns the name of the current caller
-ctr {IO.FROM then} 
-fun (IO.from then) {
-  (IO.from then) = {IO.FROM then}
-}
-
-// Works like IO.take, but clones the state
-fun (IO.load cont) {
-  (IO.load cont) =
-    {IO.TAKE @x
-    dup x0 x1 = x;
-    {IO.SAVE x0 @~
-    (! cont x1)}}
-}
-```
-
-Table of Costs
---------------
-
-Since Kindelia's built-in language is Turing complete, it must have a way to
-account for, and limit, performed computations; otherwise, anyone could freeze
-the entire network by deploying infinite loops, or expensive computations. Like
-Ethereum, it has a cost table linking primitive operations to a number, which is
-called mana instead of gas. Unlike Ethereum, that cost isn't associated with
-transactions, but with the block as a whole.
-
-    .---------------------------------------------------.
-    | Opcode  | Effect                          | Mana  |
-    |---------|---------------------------------|-------|
-    | APP-LAM | applies a lambda                | 2     |
-    | APP-SUP | applies a superposition         | 4     |
-    | OP2-NUM | operates on a number            | 2     |
-    | OP2-SUP | operates on a superposition     | 4     |
-    | FUN-CTR | pattern-matches a constructor   | 2 + M |
-    | FUN-SUP | pattern-matches a superposition | 2 + A |
-    | DUP-LAM | clones a lambda                 | 4     |
-    | DUP-NUM | clones a number                 | 2     |
-    | DUP-CTR | clones a constructor            | 2 + A |
-    | DUP-SUP | clones a superposition          | 4     |
-    | DUP-SUP | undoes a superposition          | 2     |
-    | DUP-ERA | clones an erasure               | 2     |
-    |---------------------------------------------------|
-    | * A is the constructor or function arity          |
-    | * M is the alloc count of the right-hand side     |
-    '---------------------------------------------------'
-
-
-Kindelia's elegant runtime is reflected by the simplicity of this table. In
-order to limit computations, nodes impose a hard ceiling on the amount of
-computation performed, as a function of the block number:
-
-```
-mana_limit = 10000000 * (block_number + 1)
-```
-
-If a block passes that limit, it is rejected by nodes. Note that this limit
-accumulates: if a block doesn't fully use it, the next block can use it, and so
-on. In effect, that causes times of low usage to "lend" computation to times of
-high usage, making Kindelia somewhat resistant to performance losses due to
-high-traffic applications or periods, while still keeping the maximum
-synchronization computation in check.
-
-The current Rust implementation is capable of computing about 55 million mana
-per second in an Apple M1 processor. This is about 7 times larger than the mana
-limit per block. That means that, for every 7 seconds a node spends offline, it
-must spend 1 second catching up, if single threaded. While that isn't a huge
-margin, blocks could be processed in a parallel fashion, and future improvements
-on the HVM and processors will improve this margin.
-
-Kindelia also has a hard ceiling on the state size, i.e., the size of its heap:
-
-```
-bits_limit = 2048 * (block_number + 1)
-```
-
-That means that, for every second that passes, the state size is allowed to grow
-2048 bits. That is equivalent to an HVM constructor with 16 numeric fields, or 8
-HVM lambdas. That amounts to a blockchain state growth of about 8 GB per year.
-Just like mana, this accumulates, so, for example, if there are 3 empty blocks,
-the 4th block will be able to let the blockchain size grow up to 8192 bits.
-
-### About miner fees
-
-An attentive reader may have noticed that there is no miner fee mechanism
-included on this implementation. That is by design. Kindelia restricts how much
-computation and space the network may use in total as a function of its age, but
-it says nothing about individual transactions. Kindelia relies on the principle
-that, during the early ages of the network, users will be mining their own
-blocks directly. After all, with 1 second per block, there are 86400 blocks per
-day. Until there are thousands of active users, mining a block won't be an issue
-for an average user. When that starts becoming practical, a fee market will
-emerge naturally, and users will pay miners in whatever currencies they like.
-For more on that, check the ["Why not include a currency?"](#why-not-include-a-currency) section.
 
 Serialization
 -------------
@@ -1161,21 +1243,30 @@ serialize_rule((lhs,rhs))
   = serialize_term(lhs)
   + serialize_term(rhs)
 
-serialize_statement(Fun(name,args,func,init))
+serialize_statement(Fun(name,args,func,init,sign))
   = serialize_fixlen(4, 0)
   + serialize_name(name)
   + serialize_list(serialize_name, args)
   + serialize_list(serialize_rule, func)
   + serialize_term(init)
+  + serialize_sign(sign)
 
-serialize_statement(Ctr(name,ctrs))
+serialize_statement(Ctr(name,ctrs,sign))
   = serialize_fixlen(4, 1)
   + serialize_name(name)
   + serialize_list(serialize_name, ctrs)
+  + serialize_sign(sign)
 
-serialize_statement(Run(expr))
+serialize_statement(Run(expr,sign))
   = serialize_fixlen(4, 2)
   + serialize_term(expr)
+  + serialize_sign(sign)
+
+serialize_statement(Reg(name,ownr,sign))
+  = serialize_fixlen(4, 3)
+  + serialize_name(name)
+  + serialize_fixlen(128,ownr)
+  + serialize_sign(sign)
 ```
 
 
@@ -1186,6 +1277,111 @@ The Block encoding serializes a list of top-level statements, i.e., a block.
 ```
 serialize_block(statements) = serialize_list(serialize_statement, statements)
 ```
+
+Genesis Block
+-------------
+
+Kindelia starts the network by running a single block before the first mined
+block. This is called the genesis block. That block installs some utilities on
+the network. It may vary across different forks. Kindelia's mainnet uses the
+following genesis block:
+
+```c
+// Tuple types
+ctr {Tuple0}
+ctr {Tuple1 x0}
+ctr {Tuple2 x0 x1}
+ctr {Tuple3 x0 x1 x2}
+ctr {Tuple4 x0 x1 x2 x3}
+ctr {Tuple5 x0 x1 x2 x3 x4}
+ctr {Tuple6 x0 x1 x2 x3 x4 x5}
+ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
+ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+
+// Used to pretty-print names
+ctr {Name name}
+
+// Below, we declare the built-in IO operations
+
+// IO_DONE returns from an IO operation
+ctr {IO_DONE expr}
+fun (io_done expr) {
+  (io_done expr) = {IO_DONE expr}
+}
+
+// IO_TAKE recovers an app's stored state
+ctr {IO_TAKE then}
+fun (io_take then) {
+  (io_take then) = {IO_TAKE then}
+}
+
+// IO_SAVE stores the app's state
+ctr {IO_SAVE expr then}
+fun (io_save expr then) {
+  (io_save expr then) = {IO_SAVE expr then}
+}
+
+// IO_CALL calls another IO operation, assigning
+// the caller name to the current subject name
+ctr {IO_CALL name args then}
+fun (io_call name args then) {
+  (io_call name args then) = {IO_CALL name args then}
+}
+
+// IO_SUBJ returns the name of the current subject
+ctr {IO_SUBJ then}
+fun (io_subj then) {
+  (io_subj then) = {IO_SUBJ then}
+}
+
+// IO_FROM returns the name of the current caller
+ctr {IO_FROM then} 
+fun (io_from then) {
+  (io_from then) = {IO_FROM then}
+}
+
+// IO_LOAD works like IO_TAKE, but clones the state
+fun (io_load cont) {
+  (io_load cont) =
+    {IO_TAKE @x
+    dup x0 x1 = x;
+    {IO_SAVE x0 @~
+    (! cont x1)}}
+}
+
+// This is here for debugging. Will be removed.
+ctr {Count_Inc}
+ctr {Count_Get}
+fun (Count action) {
+  (Count {Count_Inc}) =
+    !take x
+    !save (+ x #1)
+    !done #0
+  (Count {Count_Get}) =
+    !load x
+    !done x
+}
+
+// Registers the empty namespace.
+reg {
+  #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
+}
+
+```
+
+It is important to note that, on Kindelia's mainnet, the genesis block will
+register the empty namespace to the Kindelia Foundation. This gives us the power
+to distribute top-level names, which we intend to do responsibly. This may be
+seen as a point of centralization, which we argue is minor and healthy. It
+allows us to grant names to their rightful owners, manage namespaces for core
+libraries and infrastructure, and auction disputed names, providing a clean
+source of funding. Of course, if the community is unhappy, namespaces are
+entirely optional and can be easily ignored, disabled or replaced; unlike
+premined native tokens which, once distributed, can't ever be forked away.
 
 The High-order Virtual Machine (HVM)
 ====================================

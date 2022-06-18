@@ -15,13 +15,13 @@ fun (Insert key val list) {
   (Insert key val {Entry k v xs}) =
     dup key0 key1 = key;
     dup k0   k1   = k;
-    (Insert.Aux (== key0 k0) key1 val k1 v xs)
+    (Insert_Aux (== key0 k0) key1 val k1 v xs)
 }
 
 // Insert's auxiliary function
-fun (Insert.Aux cond key val k v xs) {
-  (Insert.Aux #0 key val k v xs) = {Entry k v (Insert key val xs)}
-  (Insert.Aux #1 key val ~ ~ xs) = {Entry key val xs}
+fun (Insert_Aux cond key val k v xs) {
+  (Insert_Aux #0 key val k v xs) = {Entry k v (Insert key val xs)}
+  (Insert_Aux #1 key val ~ ~ xs) = {Entry key val xs}
 }
 
 run {

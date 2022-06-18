@@ -4,7 +4,7 @@
 #![warn(unused_variables)]
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
-use std::fmt::format;
+//use std::fmt::format;
 use std::sync::mpsc::SyncSender;
 
 use serde_json::json;
@@ -273,6 +273,9 @@ mod ser {
           s.serialize_field("end_size", &end_size.to_string())?;
           s.end()
         }
+        StatementInfo::Reg { .. } => {
+          panic!("TODO");
+        }
       }
     }
   }
@@ -310,7 +313,8 @@ mod ser {
       S: serde::Serializer,
     {
       match self {
-        Statement::Fun { name, args, func, init } => {
+        // TODO: serialize sign
+        Statement::Fun { name, args, func, init, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 0, "Fun", 4)?;
           s.serialize_field("name", &u128_to_name(*name))?;
           s.serialize_field("args", &u128_names_to_strings(args))?;
@@ -318,17 +322,22 @@ mod ser {
           s.serialize_field("init", init)?;
           s.end()
         }
-        Statement::Ctr { name, args } => {
+        // TODO: serialize sign
+        Statement::Ctr { name, args, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 1, "Ctr", 2)?;
           s.serialize_field("name", &u128_to_name(*name))?;
           s.serialize_field("args", &u128_names_to_strings(args))?;
           s.end()
         }
-        // TODO: serialize 'with'
+        // TODO: serialize sign
         Statement::Run { expr, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 2, "Run", 1)?;
           s.serialize_field("body", expr)?;
           s.end()
+        }
+        // TODO: serialize
+        Statement::Reg { .. } => {
+          panic!("TODO");
         }
       }
     }

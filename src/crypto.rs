@@ -63,6 +63,10 @@ impl Address {
   pub fn from_hash(hash: &Hash) -> Self {
     return Address(hash.0[12..32].try_into().unwrap());
   }
+
+  pub fn show(&self) -> String {
+    format!("0x{}", hex::encode(self.0))
+  }
 }
 
 impl Name {
@@ -74,6 +78,10 @@ impl Name {
   // This corresponds to the bytes 12-27 of the ECDSA public key.
   pub fn from_hash(hash: &Hash) -> Self {
     return Name(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
+  }
+
+  pub fn show(&self) -> String {
+    format!("#x{:0>30x}", self.0)
   }
 }
 
@@ -127,4 +135,5 @@ fn main() {
   let sign = Signature::from_hex("00d0bd2749ab84ce3851b4a28dd7f3b3e5a51ba6c38f36ef6e35fd0bd01c4a9d3418af687271eff0a37ed95e6a202f5d4efdb8663b361f301d899b3e5596313245").unwrap();
   let auth = sign.signer_address(&hash).unwrap();
   println!("addr: {}", hex::encode(auth.0));
+
 }
