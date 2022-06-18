@@ -1239,6 +1239,39 @@ impl Runtime {
     return show_term(self, self.read(loc as usize), None);
   }
 
+  pub fn view_rollback_ticks(&self) -> String {
+
+    fn view_rollback_ticks_go(rt: &Runtime, back: &Arc<Rollback>, heap: &[Heap]) -> Vec<Option<u128>> {
+      match &**back {
+        Rollback::Nil => {
+          return Vec::new()
+        }
+        Rollback::Cons { keep, head, tail, life } => {
+          let mut vec = view_rollback_ticks_go(&rt, tail, heap);
+          let tick = heap[*head as usize].get_tick();
+          vec.push(Some(tick));
+          return vec;
+        }
+      }
+    }
+
+    let ticks = view_rollback_ticks_go(&self, &self.back, &self.heap);
+    let elems = 
+      ticks
+        .iter()
+        .rev()
+        .map(|x| 
+          if let Some(x) = x {
+            format!("{}", if *x != U128_NONE { *x } else { 0 }) 
+          } else { 
+            "___________".to_string()
+          }
+        )
+        .collect::<Vec<String>>()
+        .join(", ");
+    return format!("[{}]", elems);
+  }
+
   // Heaps
   // -----
 
@@ -1901,7 +1934,7 @@ pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Opti
       return (true, None, None, rollback);
     }
     Rollback::Cons { keep, life, head, tail } => {
-      if *keep == 0xF {
+      if *keep == 0x3 {
         if *life > 0 {
           let tail = Arc::new(Rollback::Cons { keep: 0, life: life - 1, head: *head, tail: tail.clone() });
           let back = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail });

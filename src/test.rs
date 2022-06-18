@@ -327,6 +327,10 @@ pub const SIMPLE_COUNTER: &'static str = "
 #[test]
 fn one_hundred_snapshots() {
   // run this with rollback in each 4th snapshot
+  // note: this test has no state
   let mut rt = init_runtime();
-  advance(&mut rt, 100000, Some(SIMPLE_COUNTER));
+  for i in 0..100000 {
+    rt.tick();
+    println!(" - tick: {}, - rollback: {}", rt.get_tick(), rt.view_rollback_ticks());
+  }
 }
