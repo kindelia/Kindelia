@@ -103,7 +103,6 @@ impl Account {
     let sign = secp.sign_ecdsa_recoverable(&Message::from_slice(&hash.0).expect("32 bytes hash"), &self.secret_key).serialize_compact();
     return Signature([vec![sign.0.to_i32() as u8], sign.1.to_vec()].concat().try_into().unwrap());
   }
-
 }
 
 fn main() {
@@ -128,6 +127,4 @@ fn main() {
   let sign = Signature::from_hex("00d0bd2749ab84ce3851b4a28dd7f3b3e5a51ba6c38f36ef6e35fd0bd01c4a9d3418af687271eff0a37ed95e6a202f5d4efdb8663b361f301d899b3e5596313245").unwrap();
   let auth = sign.signer_address(&hash).unwrap();
   println!("addr: {}", hex::encode(auth.0));
-
-
 }

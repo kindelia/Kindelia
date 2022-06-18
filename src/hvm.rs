@@ -1640,7 +1640,7 @@ impl Runtime {
           self.clear_heap(*head);
           self.nuls.push(*head);
           self.back = tail.clone();
-          cuts += 1;
+          cuts += 1 + life;
         }
       }
       if let Rollback::Cons { keep, life, head, tail } = &*self.back {
