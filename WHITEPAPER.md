@@ -271,7 +271,7 @@ Block #4: registering namespaces
  
 Kindelia also has a simple, optional namespace system, which allows users to
 reserve blocks of names for themselves. That system is based on a name hierarchy
-based on the special dot character (`.`). Names that have no dots aren't
+that uses the special dot character (`.`). Names that have no dots aren't
 affected by this system, and can be deployed by anyone. Names that have one or
 more dots can only be deployed by the owner of its namespace. For example, a
 `Foo.Bar.cats` function can only be deployed by the owner of the `Foo.Bar`
