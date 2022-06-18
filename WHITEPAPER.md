@@ -271,7 +271,7 @@ Block #4: registering namespaces
  
 Kindelia also has a simple, optional namespace system, which allows users to
 reserve blocks of names for themselves. That system is based on a name hierarchy
-based on the special dot character (`.`). Names that have no dots aren't
+that uses the special dot character (`.`). Names that have no dots aren't
 affected by this system, and can be deployed by anyone. Names that have one or
 more dots can only be deployed by the owner of its namespace. For example, a
 `Foo.Bar.cats` function can only be deployed by the owner of the `Foo.Bar`
@@ -279,9 +279,8 @@ namespace. The owner of a namespace can register a sub-namespace for someone
 else using the `reg{}` statement. The owner of the top-level namespace, which
 we call `Namer`, is defined on the genesis block.
 
-On the block below, the global Namer registers the `Foo` namespace to Alice, who
-then registers the `Foo.Bar` namespace to Bob, who deploys the `Foo.Bar.cats`
-function:
+On the block below, Namer registers `Foo` to Alice, who registers `Foo.Bar`
+to Bob, who deploys the `Foo.Bars.cats` function:
 
 ```c
 // Subjects:
