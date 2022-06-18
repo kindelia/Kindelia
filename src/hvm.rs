@@ -445,29 +445,29 @@ pub struct Runtime {
   back: Arc<Rollback>,  // past states
 }
 
-pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
-  let mut seen = vec![0u8; 10];
-  let mut heaps = vec![0u64; 0];
-  let mut push = |id: u64| {
-    let idx = id as usize;
-    seen[idx] += 1;
-    heaps.push(id);
-  };
-  push(rt.draw);
-  push(rt.curr);
-  for nul in &rt.nuls {
-    push(*nul);
-  }
-  {
-    let mut back = &*rt.back;
-    while let Rollback::Cons { keep, life, head, tail } = back {
-      push(*head);
-      back = &*tail;
-    }
-  }
-  let failed = seen.iter().all(|c| *c == 1);
-  (failed, seen, heaps)
-}
+//pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
+  //let mut seen = vec![0u8; 10];
+  //let mut heaps = vec![0u64; 0];
+  //let mut push = |id: u64| {
+    //let idx = id as usize;
+    //seen[idx] += 1;
+    //heaps.push(id);
+  //};
+  //push(rt.draw);
+  //push(rt.curr);
+  //for nul in &rt.nuls {
+    //push(*nul);
+  //}
+  //{
+    //let mut back = &*rt.back;
+    //while let Rollback::Cons { keep, life, head, tail } = back {
+      //push(*head);
+      //back = &*tail;
+    //}
+  //}
+  //let failed = seen.iter().all(|c| *c == 1);
+  //(failed, seen, heaps)
+//}
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
@@ -491,7 +491,15 @@ const U128_PER_KB: u128 = (1024 / U128_SIZE) as u128;
 const U128_PER_MB: u128 = U128_PER_KB << 10;
 const U128_PER_GB: u128 = U128_PER_MB << 10;
 
-const HEAP_SIZE: u128 = 32 * U128_PER_MB;
+// With the constants below, we alloc 4 GB per heap, which holds for the first 6 months. We
+// pre-alloc 6 heaps, which is enough for 4 snapshots: 16 seconds old, 4 minutes old, 1 hour old
+// and 1 day old, on average. That requires 24 GB RAM. As such, 32 GB RAM is needed to host a full
+// node, on the first 6 months. After that, we must increase the HEAP_SIZE to 8 GB, which will
+// demand 64 GB RAM, increasing by an additional 64 GB RAM every year. Note that most of this is
+// empty space, so, future optimizations should reduce this to closer to the actual 8 GB per year
+// that the network actually uses.
+const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
+const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
@@ -1258,14 +1266,14 @@ impl Ownrs {
 
 pub fn init_runtime() -> Runtime {
   let mut heap = Vec::new();
-  for i in 0 .. 10 {
+  for i in 0 .. MAX_HEAPS {
     heap.push(init_heap());
   }
   let mut rt = Runtime {
     heap,
     draw: 0,
     curr: 1,
-    nuls: vec![2, 3, 4, 5, 6, 7, 8, 9],
+    nuls: (2 .. MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
   };
   rt.run_statements_from_code(GENESIS, true);
@@ -1716,7 +1724,7 @@ impl Runtime {
 
   pub fn snapshot(&mut self) {
     //println!("tick self.curr={}", self.curr);
-    let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone());
+    let (included, absorber, deleted, rollback) = rollback_push(self.curr, self.back.clone(), 0);
     // println!("- tick={} self.curr={}, included={:?} absorber={:?} deleted={:?} rollback={}", self.get_tick(), self.curr, included, absorber, deleted, view_rollback(&self.back));
     self.back = rollback;
     // println!(" - back {}", view_rollback(&self.back));
@@ -1795,10 +1803,10 @@ impl Runtime {
 
   // Restores the saved state. This loads the persisted Rollback list and its heaps.
   pub fn restore_state(&mut self) -> std::io::Result<()> {
-    for i in 0 .. 10 {
-      self.heap[i].clear();
+    for i in 0 .. MAX_HEAPS {
+      self.heap[i as usize].clear();
     }
-    self.nuls = vec![2,3,4,5,6,7,8,9];
+    self.nuls = (2 .. MAX_HEAPS).collect();
     // for i in 0 .. std::cmp::max(uuids.len(), 8) {
     //   self.heap[i + 2].load_buffers(uuids[i])?;
     // }
@@ -2021,27 +2029,31 @@ impl Runtime {
 // - absorber : Option<Box<u64>> = the index of the dropped heap absorber (if any)
 // - deleted  : Option<Box<u64>> = the index of the dropped heap (if any)
 // - rollback : Rollback         = the updated rollback object
-pub fn rollback_push(elem: u64, back: Arc<Rollback>) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
-  match &*back {
-    Rollback::Nil => {
-      let rollback = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail: Arc::new(Rollback::Nil) });
-      return (true, None, None, rollback);
-    }
-    Rollback::Cons { keep, life, head, tail } => {
-      if *keep == 0xF {
-        if *life > 0 {
-          let tail = Arc::new(Rollback::Cons { keep: 0, life: life - 1, head: *head, tail: tail.clone() });
-          let back = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail });
-          return (true, None, None, back);
+pub fn rollback_push(elem: u64, back: Arc<Rollback>, depth: u64) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
+  if depth >= MAX_HEAPS {
+    return (false, None, Some(elem), Arc::new(Rollback::Nil));
+  } else {
+    match &*back {
+      Rollback::Nil => {
+        let rollback = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail: Arc::new(Rollback::Nil) });
+        return (true, None, None, rollback);
+      }
+      Rollback::Cons { keep, life, head, tail } => {
+        if *keep == 0xF {
+          if *life > 0 {
+            let tail = Arc::new(Rollback::Cons { keep: 0, life: life - 1, head: *head, tail: tail.clone() });
+            let back = Arc::new(Rollback::Cons { keep: 0, life: 0, head: elem, tail });
+            return (true, None, None, back);
+          } else {
+            let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone(), depth + 1);
+            let absorber = if !included { Some(elem) } else { absorber };
+            let rollback = Arc::new(Rollback::Cons { keep: 0, life: *life, head: elem, tail });
+            return (true, absorber, deleted, rollback);
+          }
         } else {
-          let (included, absorber, deleted, tail) = rollback_push(*head, tail.clone());
-          let absorber = if !included { Some(elem) } else { absorber };
-          let rollback = Arc::new(Rollback::Cons { keep: 0, life: *life, head: elem, tail });
-          return (true, absorber, deleted, rollback);
+          let rollback = Arc::new(Rollback::Cons { keep: keep + 1, life: *life, head: *head, tail: tail.clone() });
+          return (false, None, Some(elem), rollback);
         }
-      } else {
-        let rollback = Arc::new(Rollback::Cons { keep: keep + 1, life: *life, head: *head, tail: tail.clone() });
-        return (false, None, Some(elem), rollback);
       }
     }
   }

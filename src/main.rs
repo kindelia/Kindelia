@@ -37,9 +37,9 @@ fn main() -> Result<(), String> {
   //return Ok(());
   //hvm::print_io_consts();
   return run_cli();
-  // start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
   // hvm::test_statements_from_file("./example/block_4.kdl");
-  // return Ok(());
+  //return Ok(());
 }
 
 /// Environment variable where Kindelia path should be passed.
