@@ -32,7 +32,6 @@ Table of Contents
   * [Effects](#effects)
   * [Normalization](#normalization)
   * [Table of Costs](#table-of-costs)
-  * [Validation](#validation)
   * [Memory Model](#memory-model)
   * [Serialization](#serialization)
   * [Genesis Block](#genesis-block)
@@ -354,7 +353,7 @@ Statements
 
 Kindelia statements alter the network's state. They can be one of 4 variants:
 
-### **CTR**: defines a new constructor
+### [CTR]: defines a new constructor
 
 #### Syntax:
 
@@ -378,7 +377,7 @@ ctr {
 
 - Output the defined constructor.
 
-### **FUN**: defines a new function 
+### [FUN]: defines a new function
 
 ```c
 fun (Name arg_0 arg_1 ...) {
@@ -409,7 +408,7 @@ fun (Name arg_0 arg_1 ...) {
 
 - Output the defined function.
 
-### **RUN**: runs an IO expression
+### [RUN]: runs an IO expression
 
 #### Syntax:
 
@@ -439,7 +438,7 @@ run {
 
 - Output the normalized result.
 
-### **REG**: registers a namespace
+### [REG]: registers a namespace
 
 ```c
 reg Name {
