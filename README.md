@@ -11,9 +11,7 @@ A peer-to-peer functional computer capable of hosting decentralized apps that st
 
 - Zero-cost SSTOREs, allowing dynamic games and virtual worlds to run on layer 1.
 
-- Everything is extremelly simplified and optimized.
-
-- For the functional nerds: it is basically a massively multiplayer λ-calculus REPL.
+- It is so minimalist and elegant you could call it a massively multiplayer λ-calculus REPL.
 
 For more information, check the [whitepaper](WHITEPAPER.md).
 
