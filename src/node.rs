@@ -413,7 +413,7 @@ pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
     work       : HashMap::from([(ZERO_HASH(), u256(0))]),
     height     : HashMap::from([(ZERO_HASH(), 0)]),
     target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-    results    : HashMap::new(),
+    results    : HashMap::from([(ZERO_HASH(), vec![])]),
     tip        : ZERO_HASH(),
     was_mined  : HashMap::new(),
     pool       : PriorityQueue::new(),
