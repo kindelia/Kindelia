@@ -24,7 +24,7 @@ Table of Contents
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
   * [Block #3: signing statements](#block-3-signing-statements)
   * [Block #4: registering namespaces](#block-4-registering-namespaces)
-  * [Block #4: playing a multiplayer game](#block-5-playing-a-multiplayer-game)
+  * [Block #5: playing a multiplayer game](#block-5-playing-a-multiplayer-game)
 * [Technical Overview](#technical-overview)
   * [Blocks](#blocks)
   * [Statements](#statements)
@@ -147,11 +147,21 @@ You can run it offline by installing Kindelia and entering the command below:
 kindelia run block_1.kdl
 ```
 
-When a Kindelia node runs that block, the global function `Sum` will be defined
-forever inside the network. Note how it follows a functional style, closely
-resembling Haskell's equational notation. Kindelia functions aren't compiled to
-fit stack machines: they run natively as is, because beta reduction and pattern
-matching are primitive, O(1) opcodes on the HVM.
+This will output the following execution log:
+
+```c
+[ctr] Leaf
+[ctr] Branch
+[fun] Sum
+[run] #10 [26 mana | 0 size]
+```
+
+When a Kindelia node runs that block, the constructors `Leaf` and `Branch`, as
+well as the global function `Sum`, will be defined forever inside the network.
+Note how it follows a functional style, closely resembling Haskell's equational
+notation. Kindelia functions aren't compiled to fit stack machines: they run
+natively as is, because beta reduction and pattern matching are primitive, O(1)
+opcodes on the HVM.
 
 Other than defining constructors and functions, blocks can also evaluate
 side-effective actions inside `run {}` statements. These operate like Haskell's
@@ -219,6 +229,16 @@ run {
 }
 ```
 
+It outputs:
+
+```
+[ctr] Inc
+[ctr] Get
+[fun] Counter
+[run] #0 [54 mana | 0 size]
+[run] #3 [30 mana | 0 size]
+```
+
 Note that `load` and `save` aren't side-effective functions. Instead, they
 *describe* effects using a pure datatype, exactly like Haskell's IO. These
 effects can be passed as first-class expressions, and are evaluated when placed
@@ -255,11 +275,20 @@ run {
 }
 ```
 
-That hexadecimal string represents the secp256k1 signature of the serialization
-of the `run{}` statement above. This will set the *subject* of the execution as
-the signer, changing the behavior of the `IO.subj` and `IO.from` primitives,
-which return the subject's name, and the caller's name, respectively. To sign a
-statement, just place it at the end of a `.kdl` file, and enter the command:
+It outputs:
+
+```c
+[run] #656161725219724531611238334681629285 [2 mana | 0 size]
+```
+
+That hexadecimal string inside `sign{}` represents the secp256k1 signature of
+the serialization of the `run{}` statement above. The result shown is the
+decimal for `7e5f4552091a69125d5dfcb7b8c265`, which is the first 15 bytes of the
+signer's address. Signing a statement has the effect of changing the *subject*
+of the execution to be the signer's identity, affecting the behavior of the
+`IO.subj` and `IO.from` primitives, which return the subject's name, and the
+caller's name, respectively. To sign a statement, just place it at the end of a
+`.kdl` file, and enter the command:
 
 ```
 kindelia sign block_file.kdl key_file
@@ -329,6 +358,15 @@ run {
 }
 ```
 
+It outputs:
+
+```c
+[reg] #x2b5ad5c4795c026514f8317c7a215e Foo
+[reg] #x6813eb9362372eef6200f3b1dbc3f8 Foo.Bar
+[fun] Foo.Bar.cats
+[run] #42 [2 mana | 0 size]
+```
+
 Block #5: playing a multiplayer game
 ------------------------------------
 
@@ -353,7 +391,7 @@ Statements
 
 Kindelia statements alter the network's state. They can be one of 4 variants:
 
-### [CTR]: defines a new constructor
+### `CTR`: defines a new constructor
 
 #### Syntax:
 
@@ -377,7 +415,9 @@ ctr {
 
 - Output the defined constructor.
 
-### [FUN]: defines a new function
+### `FUN`: defines a new function
+
+#### Syntax:
 
 ```c
 fun (Name arg_0 arg_1 ...) {
@@ -408,7 +448,7 @@ fun (Name arg_0 arg_1 ...) {
 
 - Output the defined function.
 
-### [RUN]: runs an IO expression
+### `RUN`: runs an IO expression
 
 #### Syntax:
 
@@ -438,7 +478,9 @@ run {
 
 - Output the normalized result.
 
-### [REG]: registers a namespace
+### `REG`: registers a namespace
+
+#### Syntax:
 
 ```c
 reg Name {
