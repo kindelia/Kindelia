@@ -365,7 +365,7 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
 }
 
 pub fn code_to_body(code: &str) -> Body {
-  let (_rest, acts) = crate::hvm::read_statements(code);
+  let (_rest, acts) = crate::hvm::read_statements(code).unwrap(); // TODO: handle error
   let bits = serialized_statements(&acts);
   let body = bytes_to_body(&bitvec_to_bytes(&bits));
   return body;
