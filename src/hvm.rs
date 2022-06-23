@@ -498,8 +498,14 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 // demand 64 GB RAM, increasing by an additional 64 GB RAM every year. Note that most of this is
 // empty space, so, future optimizations should reduce this to closer to the actual 8 GB per year
 // that the network actually uses.
+
+#[cfg(not(debug_assertions))]
 const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
 const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
+
+// Use smaller heaps for debug/development builds
+#[cfg(debug_assertions)]
+const HEAP_SIZE: u128 = 64 * U128_PER_MB; // total size per heap, in 128-bit words
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
