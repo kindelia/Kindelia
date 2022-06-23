@@ -502,6 +502,7 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 #[cfg(not(debug_assertions))]
 const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
 const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
+const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapshots
 
 // Use smaller heaps for debug/development builds
 #[cfg(debug_assertions)]
@@ -2041,7 +2042,7 @@ impl Runtime {
 // - deleted  : Option<Box<u64>> = the index of the dropped heap (if any)
 // - rollback : Rollback         = the updated rollback object
 pub fn rollback_push(elem: u64, back: Arc<Rollback>, depth: u64) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
-  if depth >= MAX_HEAPS {
+  if depth >= MAX_ROLLBACK {
     return (false, None, Some(elem), Arc::new(Rollback::Nil));
   } else {
     match &*back {
