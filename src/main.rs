@@ -9,8 +9,10 @@ mod bits;
 mod crypto;
 mod hvm;
 mod node;
-mod test;
 mod util;
+
+#[cfg(test)]
+mod test;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -18,28 +20,35 @@ use std::thread;
 
 pub use clap::{Parser, Subcommand};
 
-use crate::api::*;
+use crate::api::api_loop;
 use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
-use crate::test::*;
 use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  //return run_cli();
-  start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
-  //hvm::test_statements_from_file("./example/block_4.kdl");
-  return Ok(());
+  //let name = name_to_u128("Hello.Foo.Bar.ball");
+  //let ns = name;
+  //let ns = hvm::get_namespace(ns).unwrap();
+  //let ns = hvm::get_namespace(ns).unwrap();
+  //let ns = hvm::get_namespace(ns).unwrap();
+  //println!("{:?}", hvm::u128_to_name(ns));
+  //return Ok(());
+  //hvm::print_io_consts();
+  return run_cli();
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
+  // hvm::test_statements_from_file("./example/block_4.kdl");
+  //return Ok(());
 }
 
-// Environment variable where Kindelia path is stored
+/// Environment variable where Kindelia path should be passed.
 const KINDELIA_PATH_ENV_VAR: &str = "KINDELIA_PATH";
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
-  /// Path where blockchain data is stored
+  /// Path where Kindelia files are stored
   #[clap(long)]
   path: Option<String>,
   #[clap(subcommand)]
@@ -50,6 +59,7 @@ pub struct Cli {
 pub enum CliCmd {
   /// Starts a Kindelia node
   Start {
+    /// Source of code that will be executed on mined blocks
     //#[clap(short, long)]
     file: Option<String>,
   },
@@ -60,29 +70,41 @@ pub enum CliCmd {
     // #[clap(short, long)]
     // debug: bool,
   },
-  /// Signs an HVM term
+  /// Signs the last statement in a file
   Sign {
-    /// File containing the term to be signed
+    /// File containing the statement to be signed
     term_file: String,
     /// File containing the 256-bit secret key, as a hex string
     skey_file: String,
-  }
+  },
+  /// Prints the address and subject of a secret key
+  Subject {
+    /// File containing the 256-bit secret key, as a hex string
+    skey_file: String,
+  },
 }
 
-// Returns the path where Kindelia files are saved
+/// Gets the path where Kindelia files should be saved.
+///
+/// Priority is:
+/// 1. CLI argument
+/// 2. Environment variable
+/// 3. Default path (`$HOME/.kindelia`)
 fn get_kindelia_path(dir_cli: Option<String>) -> Result<PathBuf, String> {
+  let default = || dirs::home_dir().unwrap().join(".kindelia");
+  if let Some(dir_cli) = dir_cli {
+    return Ok(PathBuf::from(dir_cli));
+  }
   match std::env::var(KINDELIA_PATH_ENV_VAR) {
-    Ok(dir) => {
-      return Ok(PathBuf::from(dir));
-    }
+    Ok(dir) => Ok(PathBuf::from(dir)),
     Err(err) => {
       if let std::env::VarError::NotPresent = err {
-        return Ok(dirs::home_dir().unwrap().join(".kindelia"));
+        Ok(default())
       } else {
-        return Err(format!("{} environment variable is not valid: '{}'", KINDELIA_PATH_ENV_VAR, err));
+        Err(format!("{} environment variable is not valid: '{}'", KINDELIA_PATH_ENV_VAR, err))
       }
     }
-  };
+  }
 }
 
 fn run_cli() -> Result<(), String> {
@@ -91,7 +113,6 @@ fn run_cli() -> Result<(), String> {
   let kindelia_path = get_kindelia_path(arguments.path)?;
 
   match arguments.command {
-
     // Starts the node process
     CliCmd::Start { file } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
@@ -114,21 +135,42 @@ fn run_cli() -> Result<(), String> {
 
     // Signs a run statement
     CliCmd::Sign { term_file, skey_file } => {
+      fn format_sign(sign: &crypto::Signature) -> String {
+        let hex = sign.to_hex();
+        let mut text = String::new();
+        for i in 0 .. 5 {
+          text.push_str(&hex[i * 26 .. (i+1) * 26]);
+          text.push_str("\n");
+        }
+        return text;
+      }
       if let (Ok(code), Ok(skey)) = (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file)) {
         let statements = hvm::read_statements(&code).1;
-        if let Some(hvm::Statement::Run { expr, sign: None }) = &statements.last() {
+        if let Some(last_statement) = &statements.last() {
           let skey = hex::decode(&skey[0..64]).expect("hex string");
           let user = crypto::Account::from_private_key(&skey);
-          let hash = hvm::hash_term(&expr);
+          let hash = hvm::hash_statement(&last_statement);
           let sign = user.sign(&hash);
           //println!("expr: {}", hvm::view_term(&expr));
           //println!("hash: {}", hex::encode(&hvm::hash_term(&expr).0));
           //println!("user: {}", hex::encode(sign.signer_address(&hash).unwrap().0));
           //println!("user: {}", hex::encode(crypto::Signature::from_hex(&format!("{}",sign.to_hex())).unwrap().signer_address(&hash).unwrap().0));
-          println!("{}", sign.to_hex());
+          println!("{}", format_sign(&sign));
           return Ok(());
         }
-        panic!("File must end with a run statement.");
+        panic!("File must have at least one statement.");
+      } else {
+        println!("Couldn't load term and secret key files.");
+      }
+    }
+
+    // Prints the subject
+    CliCmd::Subject { skey_file } => {
+      if let Ok(skey) = std::fs::read_to_string(skey_file) {
+        let skey = hex::decode(&skey[0..64]).expect("hex string");
+        let acc  = crypto::Account::from_private_key(&skey);
+        println!("Ethereum Address: {}", acc.address.show());
+        println!("Kindelia Subject: {}", acc.name.show());
       } else {
         println!("Couldn't load term and secret key files.");
       }
@@ -171,4 +213,3 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
   miner_thread.join().unwrap();
   api_thread.join().unwrap();
 }
-

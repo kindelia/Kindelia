@@ -1,5 +1,45 @@
-// TODO
+// Subjects:
+// - Namer = #x7e5f4552091a69125d5dfcb7b8c265
+// - Alice = #x2b5ad5c4795c026514f8317c7a215e
+// - Bob   = #x6813eb9362372eef6200f3b1dbc3f8
 
+// Registers the "Foo" namespace to Alice.
+// Since this is a top-level name, this must be signed by the global Namer.
+reg Foo { 
+  #x2b5ad5c4795c026514f8317c7a215e
+} sign { 
+  0055db2c36550b962462a80acb
+  acb562aa04638674ce654a4fbc
+  2ef195591414ee3e87b8e08543
+  10818e8f46ccf15a0f2e338c4f
+  ee20fa177e4c1cf0365b4acae8
+}
+
+// Registers the "Foo.Bar" namespace to Bob.
+// Since "Foo" is owned by Alice, this must be signed by her.
+reg Foo.Bar {
+  #x6813eb9362372eef6200f3b1dbc3f8
+} sign {
+  0145ccb8ab88d3f07822a0cff7
+  85d3eb3c8183afffa7d03efa0e
+  5956dcc54e0e7007d608aff377
+  05c51d7336c05c37f1e210fbfa
+  13621c960eaadedc839b6b86fa
+}
+
+// Defines a "Foo.Bar.cats" function that always returns 42.
+// Since "Foo.Bar" is owned by Bob, this must be signed by him.
+fun (Foo.Bar.cats) {
+  (Foo.Bar.cats) = #42
+} sign {
+  007b87c77fd353a5ca9ef2da43
+  e315c4e0f08b24694c46919067
+  3e247f297e9a3a7b35d7257c5c
+  8d77b58b08633437a2f4299c51
+  3dc4d7b756156569137328520b
+}
+
+// Runs Bob's cats function!
 run {
-  !done {Tuple2 #1 #2}
+  !done (Foo.Bar.cats)
 }

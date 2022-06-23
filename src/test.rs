@@ -1,9 +1,10 @@
 use crate::crypto;
-use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name, Statement, Rule, Term};
+use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name, Term, Rule, Statement, view_statements, read_statements};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use im::HashMap;
-use proptest::{*, strategy::*, collection::*, prelude::*};
+use proptest::{proptest, prop_oneof, collection::vec, arbitrary::any, option};
+use proptest::strategy::Strategy;
 
 // Struct used to store interesting parts of runtime state
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -56,13 +57,13 @@ pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Opti
   rt.rollback(tick);
   if rt.get_tick() == 0 {
     if let Some(pre_code) = pre_code {
-      rt.run_statements_from_code(pre_code);
+      rt.run_statements_from_code(pre_code, true);
     }
   }
   let tick_diff = tick - rt.get_tick();
   for _ in 0..tick_diff {
     if let Some(code) = code {
-      rt.run_statements_from_code(code);
+      rt.run_statements_from_code(code, true);
     }
     rt.tick();
   }
@@ -75,7 +76,7 @@ pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
   let actual_tick = rt.get_tick();
   for _ in actual_tick..tick {
     if let Some(code) = code {
-      rt.run_statements_from_code(code);
+      rt.run_statements_from_code(code, true);
     }
     rt.tick();
   }
@@ -102,9 +103,9 @@ pub fn rollback_simple(
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(0, 0, 0);
-  rt.run_statements_from_code(pre_code);
+  rt.run_statements_from_code(pre_code, true);
   for _ in 0..total_tick {
-    rt.run_statements_from_code(code);
+    rt.run_statements_from_code(code, true);
     rt.tick();
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
@@ -115,12 +116,12 @@ pub fn rollback_simple(
   // Does rollback to nearest rollback_tick saved state
   rt.rollback(rollback_tick);
   if rt.get_tick() == 0 {
-    rt.run_statements_from_code(pre_code);
+    rt.run_statements_from_code(pre_code, true);
   }
   // Run until rollback_tick
   let tick_diff = rollback_tick - rt.get_tick();
   for _ in 0..tick_diff {
-    rt.run_statements_from_code(code);
+    rt.run_statements_from_code(code, true);
     rt.tick();
   }
   // Calculates new checksum, after rollback
@@ -147,7 +148,7 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
   };
 
   let mut rt = init_runtime();
-  rt.run_statements_from_code(pre_code);
+  rt.run_statements_from_code(pre_code, true);
 
   for tick in path {
     let tick = *tick;
@@ -180,11 +181,10 @@ pub fn advanced_rollback_in_random_state() {
 }
 
 #[test]
-#[ignore]
 pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
@@ -214,15 +214,16 @@ pub fn advanced_rollback_run_fail() {
 #[test]
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
-  advance(&mut rt, 1000, Some(COUNTER));
+  rt.run_statements_from_code(PRE_COUNTER, true);
+  advance(&mut rt, 1, Some(COUNTER));
 }
 
 #[test]
+#[ignore]
 pub fn persistence1() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 50, Some(COUNTER));
 
   rt.clear_current_heap();
@@ -245,10 +246,11 @@ pub fn persistence1() {
 }
 
 #[test]
+#[ignore]
 pub fn persistence2() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
   rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
   let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
@@ -363,16 +365,25 @@ pub fn rule() -> impl Strategy<Value = Rule> {
   (term(), term()).prop_map(|(lhs, rhs)| Rule{lhs, rhs})
 }
 
+pub fn sign() -> impl Strategy<Value = crypto::Signature> {
+  (vec(any::<u8>(), 65)).prop_map(|s| {
+    crypto::Signature(s.try_into().unwrap())
+  })
+}
+
 pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
-    (name(), vec(name(), 0..10), vec(rule(), 0..10), term()).prop_map(|(n, a, r, i)| {
-      Statement::Fun { name: n, args: a, func: r, init: i }
+    (name(), vec(name(), 0..10), vec(rule(), 0..10), term(), option::of(sign())).prop_map(|(n, a, r, i, s)| {
+      Statement::Fun { name: n, args: a, func: r, init: i, sign: s }
     }),
-    (name(), vec(name(), 0..10)).prop_map(|(n, a)| {
-      Statement::Ctr { name: n, args: a }
+    (name(), vec(name(), 0..10), option::of(sign())).prop_map(|(n, a, s)| {
+      Statement::Ctr { name: n, args: a, sign: s }
     }),
-    (term(), name()).prop_map(|(t, s)| {
-      Statement::Run { expr: t, sign: Some(crypto::Signature([0; 65])) }
+    (term(), option::of(sign())).prop_map(|(t, s)| {
+      Statement::Run { expr: t, sign: s }
+    }),
+    (name(), name(), option::of(sign())).prop_map(|(n, o, s)| {
+      Statement::Reg { name: n, ownr: o, sign: s }
     }),
   ]
 }
@@ -385,5 +396,12 @@ proptest!{
     let c = u128_to_name(b);
     assert_eq!(name, b);
     assert_eq!(a, c);
+  }
+
+  #[test]
+  fn parser(statements in vec(statement(), 0..10)) {
+    let str = view_statements(&statements);
+    let (.., s1) = read_statements(&str);
+    assert_eq!(statements, s1);
   }
 }

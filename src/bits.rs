@@ -327,6 +327,7 @@ pub fn deserialized_message(bits: &BitVec) -> Message {
 
 // A Term
 
+// TODO: avoid recursion here; important for checksum functionality
 pub fn serialize_term(term: &Term, bits: &mut BitVec) {
   match term {
     Term::Var { name } => {
@@ -468,32 +469,59 @@ pub fn deserialized_func(bits: &BitVec) -> Func {
   deserialize_func(bits, &mut 0)
 }
 
-// An Statement
+// A signature
+
+pub fn serialize_sign(sign: &Option<crypto::Signature>, bits: &mut BitVec) {
+  if let Some(sign) = sign {
+    serialize_fixlen(1, &u256(1), bits);
+    serialize_bytes(65, &sign.0, bits);
+  } else {
+    serialize_fixlen(1, &u256(0), bits);
+  }
+}
+
+pub fn deserialize_sign(bits: &BitVec, index: &mut u128) -> Option<crypto::Signature> {
+  match deserialize_fixlen(1, bits, index).low_u128() {
+    1 => {
+      let data : Option<[u8; 65]> = deserialize_bytes(65, bits, index).try_into().ok();
+      if let Some(data) = data {
+        Some(crypto::Signature(data))
+      } else {
+        None
+      }
+    }
+    _ => None
+  }
+}
+
+// A Statement
 
 pub fn serialize_statement(statement: &Statement, bits: &mut BitVec) {
   match statement {
-    Statement::Fun { name, args, func, init } => {
+    Statement::Fun { name, args, func, init, sign } => {
       serialize_fixlen(4, &u256(0), bits);
       serialize_name(name, bits);
       serialize_list(serialize_name, args, bits);
       serialize_func(func, bits);
       serialize_term(init, bits);
+      serialize_sign(sign, bits);
     }
-    Statement::Ctr { name, args } => {
+    Statement::Ctr { name, args, sign } => {
       serialize_fixlen(4, &u256(1), bits);
       serialize_name(name, bits);
       serialize_list(serialize_name, args, bits);
+      serialize_sign(sign, bits);
     }
     Statement::Run { expr, sign } => {
-      //serialize_fixlen(32, &u256(*mana as u128), bits);
       serialize_fixlen(4, &u256(2), bits);
       serialize_term(expr, bits);
-      if let Some(sign) = sign {
-        serialize_fixlen(1, &u256(1), bits);
-        serialize_bytes(65, &sign.0, bits);
-      } else {
-        serialize_fixlen(1, &u256(0), bits);
-      }
+      serialize_sign(sign, bits);
+    }
+    Statement::Reg { name, ownr, sign } => {
+      serialize_fixlen(4, &u256(3), bits);
+      serialize_name(name, bits);
+      serialize_fixlen(128, &u256(*ownr), bits);
+      serialize_sign(sign, bits);
     }
   }
 }
@@ -506,34 +534,25 @@ pub fn deserialize_statement(bits: &BitVec, index: &mut u128) -> Statement {
       let args = deserialize_list(deserialize_name, bits, index);
       let func = deserialize_func(bits, index);
       let init = deserialize_term(bits, index);
-      Statement::Fun { name, args, func, init }
+      let sign = deserialize_sign(bits, index);
+      Statement::Fun { name, args, func, init, sign }
     }
     1 => {
       let name = deserialize_name(bits, index);
       let args = deserialize_list(deserialize_name, bits, index);
-      Statement::Ctr { name, args }
+      let sign = deserialize_sign(bits, index);
+      Statement::Ctr { name, args, sign }
     }
     2 => {
-      //let mana = deserialize_fixlen(32, bits, index).low_u128();
       let expr = deserialize_term(bits, index);
-      let mayb = deserialize_fixlen(1, bits, index).low_u128();
-      let sign = match mayb {
-        0 => {
-          None
-        }
-        1 => {
-          let data : Option<[u8; 65]> = deserialize_bytes(65, bits, index).try_into().ok();
-          if let Some(data) = data {
-            Some(crypto::Signature(data))
-          } else {
-            None
-          }
-        }
-        _ => {
-          panic!("unexpected error");
-        }
-      };
+      let sign = deserialize_sign(bits, index);
       Statement::Run { expr, sign }
+    }
+    3 => {
+      let name = deserialize_name(bits, index);
+      let ownr = deserialize_fixlen(128, bits, index).low_u128();
+      let sign = deserialize_sign(bits, index);
+      Statement::Reg { name, ownr, sign }
     }
     _ => panic!("unknown statement tag"),
   }

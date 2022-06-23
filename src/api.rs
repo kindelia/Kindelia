@@ -4,22 +4,98 @@
 #![warn(unused_variables)]
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
+//use std::fmt::format;
 use std::sync::mpsc::SyncSender;
 
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
-use warp::reject;
+use warp::hyper::StatusCode;
+use warp::reject::{self, Rejection};
+use warp::reply::{self, Reply};
 use warp::{path, Filter};
 
 use crate::hvm::{name_to_u128, u128_to_name};
-use crate::node::Block;
-
 use crate::node::Request as NodeRequest;
+use crate::util::U256;
+
+// Util
+// ====
+
+// U256 to hexadecimal string
+pub fn u256_to_hex(value: &U256) -> String {
+  let mut be_bytes = [0u8; 32];
+  value.to_big_endian(&mut be_bytes);
+  format!("0x{}", hex::encode(be_bytes))
+}
+
+// Hexadecimal string to U256
+pub fn hex_to_u256(hex: &str) -> Result<U256, String> {
+  let bytes = hex::decode(hex);
+  let bytes = match bytes {
+    Ok(bytes) => bytes,
+    Err(_) => return Err(format!("Invalid hexadecimal string: {}", hex)),
+  };
+  if bytes.len() != 256 / 8 {
+    Err(format!("Invalid hexadecimal string: {}", hex))
+  } else {
+    let num = U256::from_big_endian(&bytes);
+    Ok(num)
+  }
+}
 
 fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
   names.iter().copied().map(u128_to_name).collect::<Vec<_>>()
+}
+
+fn ok_json<T>(data: T) -> warp::reply::Json
+where
+  T: serde::Serialize,
+{
+  let json_body = json!({ "status": "ok", "data": data });
+  warp::reply::json(&json_body)
+}
+
+fn error_json<T>(error: T) -> warp::reply::Json
+where
+  T: serde::Serialize,
+{
+  let json_body = json!({ "status": "error", "error": error });
+  warp::reply::json(&json_body)
+}
+
+// Erros
+// =====
+
+#[derive(Debug)]
+struct InvalidParameter {
+  name: Option<String>,
+  message: String,
+}
+
+impl From<String> for InvalidParameter {
+  fn from(message: String) -> Self {
+    InvalidParameter { name: None, message }
+  }
+}
+
+impl reject::Reject for InvalidParameter {}
+
+// API
+// ===
+
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+  if err.is_not_found() {
+    Ok(reply::with_status(error_json("NOT_FOUND"), StatusCode::NOT_FOUND))
+  } else if let Some(e) = err.find::<InvalidParameter>() {
+    let name = e.name.as_ref().map(|n| format!(" '{}'", n)).unwrap_or_default();
+    let msg = format!("Parameter{} is invalid: {}", name, e.message);
+    Ok(reply::with_status(error_json(msg), StatusCode::BAD_REQUEST))
+  } else {
+    eprintln!("unhandled rejection: {:?}", err);
+    Ok(reply::with_status(error_json("INTERNAL_SERVER_ERROR"), StatusCode::INTERNAL_SERVER_ERROR))
+  }
 }
 
 pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
@@ -28,17 +104,6 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
   runtime.block_on(async move {
     // // Custom rejection handler that maps rejections into responses.
     // // https://docs.rs/warp/latest/warp/reject/index.html
-    // use warp::hyper::StatusCode;
-    // use warp::reject::{self, Rejection};
-    // use warp::reply::{self, Reply};
-    // async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
-    //   if err.is_not_found() {
-    //     Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
-    //   } else {
-    //     eprintln!("unhandled rejection: {:?}", err);
-    //     Ok(reply::with_status("INTERNAL_SERVER_ERROR", StatusCode::INTERNAL_SERVER_ERROR))
-    //   }
-    // }
 
     let root = warp::path::end().map(|| "UP");
 
@@ -70,28 +135,29 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
 
     let get_block = || {
       let node_query_tx = node_query_sender.clone();
-      path!("blocks" / u128 / ..).then(move |block_height| {
+      path!("blocks" / String / ..).and_then(move |hash_hex: String| {
         let node_query_tx = node_query_tx.clone();
         async move {
           let (tx, rx) = oneshot::channel();
-          node_query_tx.send(NodeRequest::GetBlock { block_height, tx }).unwrap();
-          let block = rx.await.unwrap();
-          block
+          let hash_hex = hash_hex.strip_prefix("0x").unwrap_or(&hash_hex);
+          match hex_to_u256(hash_hex) {
+            Ok(hash) => {
+              node_query_tx.send(NodeRequest::GetBlock { hash, tx }).unwrap();
+              let block = rx.await.unwrap();
+              Ok(block)
+            }
+            Err(err) => {
+              Err(reject::custom(InvalidParameter::from(format!("Invalid block hash: {}", err))))
+            }
+          }
         }
       })
     };
 
     let get_block_go = get_block().and(path!()).map(ok_json);
 
-    let get_block_content = get_block().and(path!("content")).map(move |block: Block| {
-      let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-      let stmts = crate::bits::deserialize_statements(&bits, &mut 0);
-      ok_json(stmts)
-    });
-
     let blocks_router = get_blocks //
-      .or(get_block_go) //
-      .or(get_block_content);
+      .or(get_block_go);
 
     // == Functions ==
 
@@ -102,7 +168,9 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
         let (tx, rx) = oneshot::channel();
         node_query_tx.send(NodeRequest::GetFunctions { tx }).unwrap();
         let functions = rx.await.unwrap();
-        ok_json(u128_names_to_strings(&functions))
+        let functions: Vec<u128> = functions.into_iter().map(|x| x as u128).collect();
+        let functions = u128_names_to_strings(&functions);
+        ok_json(functions)
       }
     });
 
@@ -142,6 +210,7 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
     // ==
 
     let app = root.or(get_tick).or(blocks_router).or(functions_router);
+    let app = app.recover(handle_rejection);
 
     let listener_v4 = TcpListener::bind("127.0.0.1:8000").await.unwrap();
     let listener_v6 = TcpListener::bind("[::1]:8000").await.unwrap();
@@ -149,24 +218,78 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
       TcpListenerStream::new(listener_v4).merge(TcpListenerStream::new(listener_v6));
 
     warp::serve(app).run_incoming(incoming_connections).await;
-    // .recover(handle_rejection)
   });
 }
 
-fn ok_json<T>(data: T) -> warp::reply::Json
-where
-  T: serde::Serialize,
-{
-  let json_body = json!({ "status": "ok", "data": data });
-  warp::reply::json(&json_body)
-}
-
 mod ser {
-  use super::u128_names_to_strings;
-  use crate::hvm::u128_to_name;
-  use crate::hvm::{Rule, Statement, Term};
-  use crate::node::Block;
+  use super::{u128_names_to_strings, u256_to_hex};
+  use crate::hvm::{u128_to_name, Rule, Statement, StatementErr, StatementInfo, Term};
+  use crate::node::{Block, BlockInfo};
   use serde::ser::{SerializeStruct, SerializeStructVariant};
+  use serde::Serialize;
+
+  impl Serialize for BlockInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("BlockInfo", 5)?;
+      s.serialize_field("block", &self.block)?;
+      s.serialize_field("height", &self.height)?;
+      s.serialize_field("hash", &u256_to_hex(&self.hash))?;
+      s.serialize_field("content", &self.content)?;
+      s.serialize_field("results", &self.results)?;
+
+      s.end()
+    }
+  }
+
+  impl Serialize for StatementInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      match self {
+        StatementInfo::Ctr { name, args } => {
+          let code = 0;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Ctr", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.end()
+        }
+        StatementInfo::Fun { name, args } => {
+          let code = 1;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Fun", 2)?;
+          s.serialize_field("name", &u128_to_name(*name))?;
+          s.serialize_field("args", &u128_names_to_strings(args))?;
+          s.end()
+        }
+        StatementInfo::Run { done_term, used_mana, size_diff, end_size } => {
+          let code = 2;
+          let mut s = serializer.serialize_struct_variant("StatementInfo", code, "Run", 4)?;
+          s.serialize_field("done_term", &done_term)?;
+          s.serialize_field("used_mana", &used_mana.to_string())?;
+          s.serialize_field("size_diff", &size_diff.to_string())?;
+          s.serialize_field("end_size", &end_size.to_string())?;
+          s.end()
+        }
+        StatementInfo::Reg { .. } => {
+          panic!("TODO");
+        }
+      }
+    }
+  }
+
+  impl Serialize for StatementErr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("StatementErr", 1)?;
+      s.serialize_field("err", &self.err)?;
+      s.end()
+    }
+  }
 
   impl serde::Serialize for Block {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -177,8 +300,8 @@ mod ser {
       let body_bytes = body.into_iter().collect::<Vec<_>>();
       let mut s = serializer.serialize_struct("Block", 4)?;
       s.serialize_field("time", &self.time.to_string())?;
-      s.serialize_field("rand", &self.rand.to_string())?;
-      s.serialize_field("prev", &self.prev.to_string())?;
+      s.serialize_field("rand", &self.rand.to_string())?;  // ?? hex?
+      s.serialize_field("prev", &u256_to_hex(&self.prev))?;
       s.serialize_field("body", &body_bytes)?;
       s.end()
     }
@@ -190,25 +313,31 @@ mod ser {
       S: serde::Serializer,
     {
       match self {
-        Statement::Fun { name, args, func, init } => {
+        // TODO: serialize sign
+        Statement::Fun { name, args, func, init, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 0, "Fun", 4)?;
           s.serialize_field("name", &u128_to_name(*name))?;
           s.serialize_field("args", &u128_names_to_strings(args))?;
-          s.serialize_field("args", func)?;
+          s.serialize_field("func", func)?;
           s.serialize_field("init", init)?;
           s.end()
         }
-        Statement::Ctr { name, args } => {
+        // TODO: serialize sign
+        Statement::Ctr { name, args, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 1, "Ctr", 2)?;
           s.serialize_field("name", &u128_to_name(*name))?;
           s.serialize_field("args", &u128_names_to_strings(args))?;
           s.end()
         }
-        // TODO: serialize 'with'
+        // TODO: serialize sign
         Statement::Run { expr, sign: _ } => {
           let mut s = serializer.serialize_struct_variant("Statement", 2, "Run", 1)?;
           s.serialize_field("body", expr)?;
           s.end()
+        }
+        // TODO: serialize
+        Statement::Reg { .. } => {
+          panic!("TODO");
         }
       }
     }

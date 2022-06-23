@@ -23,21 +23,23 @@ Table of Contents
   * [Block #1: defining pure functions](#block-1-defining-pure-functions)
   * [Block #2: defining stateful functions](#block-2-defining-stateful-functions)
   * [Block #3: signing statements](#block-3-signing-statements)
-  * [Block #4: playing the game](#block-4-playing-the-game)
+  * [Block #4: registering namespaces](#block-4-registering-namespaces)
+  * [Block #5: playing a multiplayer game](#block-5-playing-a-multiplayer-game)
 * [Technical Overview](#technical-overview)
-  * [Blocks and Statements](#blocks-and-statements)
+  * [Blocks](#blocks)
+  * [Statements](#statements)
   * [Expressions](#expressions)
-  * [IO Effects](#io-effects)
-  * [Computation Rules](#computation-rules)
-  * [Memory Model](#memory-model)
-  * [Genesis Block](#genesis-block)
+  * [Effects](#effects)
+  * [Normalization](#normalization)
   * [Table of Costs](#table-of-costs)
+  * [Memory Model](#memory-model)
   * [Serialization](#serialization)
+  * [Genesis Block](#genesis-block)
 * [The High-order Virtual Machine (HVM)](#the-high-order-virtual-machine-hvm)
   * [Sequential tasks: as fast as Haskell's GHC](#1-for-normal-sequential-tasks-such-as-folds-it-holds-similar-performance)
   * [Parallel tasks: several times faster](#2-for-very-parallel-tasks-such-as-tree-based-quicksort-it-is-several-times-faster)
   * [High-order tasks: exponentially faster](#3-for-very-high-order-tasks-it-is-exponentially-faster)
-  * [Negligible compilation times](#1-it-has-negligible-compliation-times)
+  * [Negligible compilation times](#1-it-has-negligible-compilation-times)
   * [Measurable computation costs](#2-computation-costs-are-measurable-including-space-and-time)
   * [How is that possible?](how-is-that-possible)
   * [Is Kindelia a consequence of the HVM?](is-kindelia-a-consequence-of-the-hvm)
@@ -72,7 +74,7 @@ to its quick development, though, it launched with several design mistakes that
 made its base layer considerably less scalable and secure than it could be. In
 2021, the average Ethereum transaction fee rose to as much as 70 USD [citation],
 and millionaire smart-contract exploits were so common that websites reported
-their ocurrences daily [citation].
+their occurrences daily [citation].
 
 - Regarding **scalability**, layer 2 techniques are proposed as a solution, but
   these come with their own compromises. There is value in a more scalable
@@ -117,10 +119,8 @@ Block #1: defining pure functions
 The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// Declares a constructor, Leaf, with 1 field
+// Declares the constructors of a binary tree.
 ctr {Leaf value}
-
-// Declares a constructor, Branch, with 2 fields
 ctr {Branch left right}
 
 // Declares a pure function that sums a tree
@@ -147,11 +147,21 @@ You can run it offline by installing Kindelia and entering the command below:
 kindelia run block_1.kdl
 ```
 
-When a Kindelia node runs that block, the global function `Sum` will be defined
-forever inside the network. Note how it follows a functional style, closely
-resembling Haskell's equational notation. Kindelia functions aren't compiled to
-fit stack machines: they run natively as is, because beta reduction and pattern
-matching are primitive, O(1) opcodes on the HVM.
+This will output the following execution log:
+
+```c
+[ctr] Leaf
+[ctr] Branch
+[fun] Sum
+[run] #10 [26 mana | 0 size]
+```
+
+When a Kindelia node runs that block, the constructors `Leaf` and `Branch`, as
+well as the global function `Sum`, will be defined forever inside the network.
+Note how it follows a functional style, closely resembling Haskell's equational
+notation. Kindelia functions aren't compiled to fit stack machines: they run
+natively as is, because beta reduction and pattern matching are primitive, O(1)
+opcodes on the HVM.
 
 Other than defining constructors and functions, blocks can also evaluate
 side-effective actions inside `run {}` statements. These operate like Haskell's
@@ -219,6 +229,16 @@ run {
 }
 ```
 
+It outputs:
+
+```
+[ctr] Inc
+[ctr] Get
+[fun] Counter
+[run] #0 [54 mana | 0 size]
+[run] #3 [30 mana | 0 size]
+```
+
 Note that `load` and `save` aren't side-effective functions. Instead, they
 *describe* effects using a pure datatype, exactly like Haskell's IO. These
 effects can be passed as first-class expressions, and are evaluated when placed
@@ -231,7 +251,7 @@ Ethereum. If a contract requires a balance map, for example, it can simply store
 an immutable tree as its state, simply and directly.
 
 Finally, `load` and `save` themselves have no cost! But blocks must still repeat
-the heap growth and accumulated computation limites. So, for example, updating a
+the heap growth and accumulated computation limits. So, for example, updating a
 coin balance requires paying the cost of some `Map.updade` operation (which,
 usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
 is very expensive. This allows Kindelia to host highly dynamic applications such
@@ -240,29 +260,115 @@ as games and exchanges on its layer 1.
 Block #3: signing statements
 ----------------------------
 
-A `run{}` statement can also optionally include a signature:
+An statement can also optionally include a signature:
 
 ```c
 run {
-  !name x // get the signer's name
+  !subj x // gets the signer
   !done x // outputs it
 } sign {
-  0135ffd97b83f74843d93c4afb2d35d426c669f67bf3df8663de1d00768de179cd6215ccde6fe332845a5a4e72553bf9777b634b4f8ed91a1934620712e354887f
+  00c0777281fe0a814d0f1826ad
+  7f4228f7308df5c4365f8dc577
+  ed64b3e32505a143d5566b8d38
+  1f5b93988d19a82924fcef232e
+  6ccc5a0e006e5b6f946cd15372
 }
 ```
 
-That hexadecimal string represents the secp256k1 signature of the serialization
-of the `run{}` statement above. This will set the *subject* of the execution as
-the signer, changing the behavior of the `IO.name` and `IO.from` primitives,
-which return the subject's name, and the caller's name, respectively. To sign a
-statement, just place it in the end of a `.kdl` file, and, enter the command:
+It outputs:
+
+```c
+[run] #656161725219724531611238334681629285 [2 mana | 0 size]
+```
+
+That hexadecimal string inside `sign{}` represents the secp256k1 signature of
+the serialization of the `run{}` statement above. The result shown is the
+decimal for `7e5f4552091a69125d5dfcb7b8c265`, which is the first 15 bytes of the
+signer's address. Signing a statement has the effect of changing the *subject*
+of the execution to be the signer's identity, affecting the behavior of the
+`IO.subj` and `IO.from` primitives, which return the subject's name, and the
+caller's name, respectively. To sign a statement, just place it at the end of a
+`.kdl` file, and enter the command:
 
 ```
 kindelia sign block_file.kdl key_file
 ```
 
-Block #4: playing a game
-------------------------
+Block #4: registering namespaces
+--------------------------------
+ 
+Kindelia also has a simple, optional namespace system, which allows users to
+reserve blocks of names for themselves. That system is based on a name hierarchy
+that uses the special dot character (`.`). Names that have no dots aren't
+affected by this system, and can be deployed by anyone. Names that have one or
+more dots can only be deployed by the owner of its namespace. For example, a
+`Foo.Bar.cats` function can only be deployed by the owner of the `Foo.Bar`
+namespace. The owner of a namespace can register a sub-namespace for someone
+else using the `reg{}` statement. The owner of the top-level namespace, which
+we call `Namer`, is defined on the genesis block.
+
+On the block below, Namer registers `Foo` to Alice, who registers `Foo.Bar`
+to Bob, who deploys the `Foo.Bars.cats` function:
+
+```c
+// Subjects:
+// - Namer = #x7e5f4552091a69125d5dfcb7b8c265
+// - Alice = #x2b5ad5c4795c026514f8317c7a215e
+// - Bob   = #x6813eb9362372eef6200f3b1dbc3f8
+
+// Registers the "Foo" namespace to Alice.
+// Since this is a top-level name, this must be signed by the global Namer.
+reg Foo { 
+  #x2b5ad5c4795c026514f8317c7a215e
+} sign { 
+  0055db2c36550b962462a80acb
+  acb562aa04638674ce654a4fbc
+  2ef195591414ee3e87b8e08543
+  10818e8f46ccf15a0f2e338c4f
+  ee20fa177e4c1cf0365b4acae8
+}
+
+// Registers the "Foo.Bar" namespace to Bob.
+// Since "Foo" is owned by Alice, this must be signed by her.
+reg Foo.Bar {
+  #x6813eb9362372eef6200f3b1dbc3f8
+} sign {
+  0145ccb8ab88d3f07822a0cff7
+  85d3eb3c8183afffa7d03efa0e
+  5956dcc54e0e7007d608aff377
+  05c51d7336c05c37f1e210fbfa
+  13621c960eaadedc839b6b86fa
+}
+
+// Defines a "Foo.Bar.cats" function that always returns 42.
+// Since "Foo.Bar" is owned by Bob, this must be signed by him.
+fun (Foo.Bar.cats) {
+  (Foo.Bar.cats) = #42
+} sign {
+  007b87c77fd353a5ca9ef2da43
+  e315c4e0f08b24694c46919067
+  3e247f297e9a3a7b35d7257c5c
+  8d77b58b08633437a2f4299c51
+  3dc4d7b756156569137328520b
+}
+
+// Runs Bob's cats function!
+run {
+  !done (Foo.Bar.cats)
+}
+```
+
+It outputs:
+
+```c
+[reg] #x2b5ad5c4795c026514f8317c7a215e Foo
+[reg] #x6813eb9362372eef6200f3b1dbc3f8 Foo.Bar
+[fun] Foo.Bar.cats
+[run] #42 [2 mana | 0 size]
+```
+
+Block #5: playing a multiplayer game
+------------------------------------
 
 ```c
 // TODO
@@ -271,37 +377,128 @@ Block #4: playing a game
 Technical Overview
 ==================
 
-Blocks and Statements
----------------------
+Blocks
+------
 
-Kindelia's network group user-submitted blocks using simple Nakamoto Consensus
-(Proof of Work). Kindelia blocks are just groups of statements. Kindelia
-statements can be one of 3 variants:
+A block is just a list of statements. A Kindelia node is just a process that
+broadcasts timestamped blocks to a peer-to-peer network, using Nakamoto
+Consensus (Proof of Work) to give these blocks a canonical ordering. The
+statements in these blocks are then evaluated in order, causing each node to
+compute the same canonical state.
 
-- **ctr**: declares a new constructor
+Statements
+----------
 
-    ```c
-    ctr {ConstructorName field_0_name field_1_name ...}
-    ```
+Kindelia statements alter the network's state. They can be one of 4 variants:
 
+### `CTR`: defines a new constructor
 
-- **fun**: declares a new function 
+#### Syntax:
 
-    ```c
-    fun (FunctionName argument_0_name argument_1_name ...) {
-      (ConstructorName arg_0 arg_1 ...) = returned_value_0
-      (ConstructorName arg_0 arg_1 ...) = returned_value_1
-      ...
-    } with { initial_state }
-    ```
+```c
+ctr {
+  Name field_0 field_1 ...
+} sign {
+  optional_signature
+}
+```
 
-- **run**: runs an IO expression
+#### Effect:
 
-    ```c
-    run {
-      IO_expression
-    }
-    ```
+- If `Name` is already defined, abort.
+
+- If the signer can't deploy `Name`, abort.
+
+- If the constructor arity is larger than 16, abort.
+
+- Define the `Name` constructor globally.
+
+- Output the defined constructor.
+
+### `FUN`: defines a new function
+
+#### Syntax:
+
+```c
+fun (Name arg_0 arg_1 ...) {
+  (Ctr0 field_0 field_1 ...) = body_0
+  (Ctr1 field_0 field_1 ...) = body_1
+  (Ctr2 field_0 field_1 ...) = body_2
+  ...
+} with {
+  initial_state
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `Name` is already defined, abort.
+
+- If the signer can't deploy `Name`, abort.
+
+- If the function is invalid, abort.
+
+- Define the `Name` function globally.
+
+- Allocate the `initial_state` term on memory.
+
+- Point `Name`'s state to `initial_state`'s term.
+
+- Output the defined function.
+
+### `RUN`: runs an IO expression
+
+#### Syntax:
+
+```c
+run {
+  IO_expression
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `IO_expression` isn't valid, abort.
+
+- Evaluate `IO_expression`, with the signer as the subject.
+
+- If the execution failed, abort.
+
+- Normalize the result of the evaluation.
+
+- If the mana limit was exceeded, revert.
+
+- Collect the memory used by the normalized result.
+
+- If the size limit was exceeded, revert.
+
+- Output the normalized result.
+
+### `REG`: registers a namespace
+
+#### Syntax:
+
+```c
+reg Name {
+  owner_address
+} sign {
+  optional_signature
+}
+```
+
+#### Effect:
+
+- If `Name` is already defined, abort.
+
+- If the signer can't register `Name`, abort.
+
+- Register `Name` to `owner_address`.
+
+- Output the registration receipt.
 
 Expressions
 -----------
@@ -314,7 +511,7 @@ language with 8 variants. Its grammar is described below:
 Numb = Uint<120>
 
 // A name
-Name = Uint<60>
+Name = Uint<72>
 
 // A native int operation
 Oper ::=
@@ -400,8 +597,8 @@ So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
 That naming convention can be used to give Kindelia-hosted applications
 human-readable source codes.
 
-IO Effects
-----------
+Effects
+-------
 
 Finally, Kindelia has side-effective operations that allow functions to save
 states, request information from the network. These operations are performed
@@ -433,22 +630,21 @@ you don't include the state back later with `IO.save`, it will be emptied. As an
 alternative, an `IO.load` function is defined on the genesis block, which works
 exactly like `IO.take`, except it will clone the state.
 
-Computation Rules
------------------
+Normalization
+-------------
 
 Kindelia expressions are evaluated by the HVM, a functional virtual machine.
 The primitive operations in that machine are called rewrite rules, and they
 include beta reduction (lambda application), pattern-matching, numeric
-operators, and primitives for cloning and erasing data. It is important to
-stress that all these operations are constant-time, which is essential to make
-costs measurable: see the mana table in the next section. For more info on how
-that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
+operators, and primitives for cloning and erasing data. All these operations are
+constant-time, which is what allows costs to be measurable. For a simplified
+explanation on how that is possible, check HVM's [HOW.md](https://github.com/Kindelia/HVM/blob/master/HOW.md).
 
-As explained on the document above, in addition to the 8 term variants, the HVM
-also has an internal superposition construct, which is just a pair that can show
-up as a byproduct of its lazy-cloning operation. That construct will be written
-as `{a b}`. It also has an erasure construct, which may appear as a byproduct of
-erasing data. Kindelia's rewrite rules are:
+Note: in addition to the 8 term variants, the HVM also has some internal
+constructs, such as superpositions and erasure nodes, which can't be submitted
+by an user, but can appear as a byproduct of its lazy-cloning operation.
+
+Kindelia's computation rules are:
 
 ### Lambda Application
 
@@ -487,7 +683,7 @@ x <- {x0 x1}
 
 ### Superposition Duplication
 
-Superpositions and duplications hold a 60-bit integer label. If the label is
+Superpositions and duplications hold a 72-bit integer label. If the label is
 equal, this rule collapses the superposition.
 
 ```
@@ -621,266 +817,6 @@ global pattern-matching rewrite rule.
 (user-defined)
 ```
 
-Memory Model
-------------
-
-HVM's memory model is documented on `src/hvm.rs`, and trascribed below:
-
-```
-HVM's runtime memory consists of a vector of u128 pointers. That is:
-
-  Mem ::= Vec<Ptr>
-
-A pointer has 3 parts:
-
-  Ptr ::= TT AAAAAAAAAAAAAAA BBBBBBBBBBBBBBB
-
-Where:
-
-  T : u8  is the pointer tag 
-  A : u60 is the 1st value
-  B : u60 is the 2nd value
-
-There are 12 possible tags:
-
-  Tag | Val | Meaning  
-  ----| --- | -------------------------------
-  DP0 |   0 | a variable, bound to the 1st argument of a duplication
-  DP1 |   1 | a variable, bound to the 2nd argument of a duplication
-  VAR |   2 | a variable, bound to the one argument of a lambda
-  ARG |   3 | an used argument of a lambda or duplication
-  ERA |   4 | an erased argument of a lambda or duplication
-  LAM |   5 | a lambda
-  APP |   6 | an application
-  SUP |   7 | a superposition
-  CTR |   8 | a constructor
-  FUN |   9 | a function
-  OP2 |  10 | a numeric operation
-  NUM |  11 | a 120-bit number
-
-The semantics of the 1st and 2nd values depend on the pointer tag. 
-
-  Tag | 1st ptr value                | 2nd ptr value
-  --- | ---------------------------- | ---------------------------------
-  DP0 | the duplication label        | points to the duplication node
-  DP1 | the duplication label        | points to the duplication node
-  VAR | not used                     | points to the lambda node
-  ARG | not used                     | points to the variable occurrence
-  ERA | not used                     | not used
-  LAM | not used                     | points to the lambda node
-  APP | not used                     | points to the application node
-  SUP | the duplication label        | points to the superposition node
-  CTR | the constructor name         | points to the constructor node
-  FUN | the function name            | points to the function node
-  OP2 | the operation name           | points to the operation node
-  NUM | the most significant 60 bits | the least significant 60 bits
-
-Notes:
-
-  1. The duplication label is an internal value used on the DUP-SUP rule.
-  2. The operation name only uses 4 of the 60 bits, as there are only 16 ops.
-  3. NUM pointers don't point anywhere, they just store the number directly.
-
-A node is a tuple of N pointers stored on sequential memory indices.
-The meaning of each index depends on the node. There are 7 types:
-
-  Duplication Node:
-  - [0] => either an ERA or an ARG pointing to the 1st variable location
-  - [1] => either an ERA or an ARG pointing to the 2nd variable location
-  - [2] => pointer to the duplicated expression
-
-  Lambda Node:
-  - [0] => either and ERA or an ERA pointing to the variable location
-  - [1] => pointer to the lambda's body
-  
-  Application Node:
-  - [0] => pointer to the lambda
-  - [1] => pointer to the argument
-
-  Superposition Node:
-  - [0] => pointer to the 1st superposed value
-  - [1] => pointer to the 2sd superposed value
-
-  Constructor Node:
-  - [0] => pointer to the 1st field
-  - [1] => pointer to the 2nd field
-  - ... => ...
-  - [N] => pointer to the Nth field
-
-  Function Node:
-  - [0] => pointer to the 1st argument
-  - [1] => pointer to the 2nd argument
-  - ... => ...
-  - [N] => pointer to the Nth argument
-
-  Operation Node:
-  - [0] => pointer to the 1st operand
-  - [1] => pointer to the 2nd operand
-
-Notes:
-
-  1. Duplication nodes DON'T have a body. They "float" on the global scope.
-  2. Lambdas and Duplications point to their variables, and vice-versa.
-  3. ARG pointers can only show up inside Lambdas and Duplications.
-  4. Nums and vars don't require a node type, because they're unboxed.
-  5. Function and Constructor arities depends on the user-provided definition.
-
-Example 0:
-
-  Term:
-
-   {Tuple2 #7 #8}
-
-  Memory:
-
-    Root : Ptr(CTR, 0x0000007b9d30a43, 0x000000000000000)
-    0x00 | Ptr(NUM, 0x000000000000000, 0x000000000000007) // the tuple's 1st field
-    0x01 | Ptr(NUM, 0x000000000000000, 0x000000000000008) // the tuple's 2nd field
-
-  Notes:
-    
-    1. This is just a pair with two numbers.
-    2. The root pointer is not stored on memory.
-    3. The '0x0000007b9d30a43' constant encodes the 'Tuple2' name.
-    4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
-
-Example 1:
-
-  Term:
-
-    λ~ λb b
-
-  Memory:
-
-    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-    0x00 | Ptr(ERA, 0x000000000000000, 0x000000000000000) // 1st lambda's argument
-    0x01 | Ptr(LAM, 0x000000000000000, 0x000000000000002) // 1st lambda's body
-    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000003) // 2nd lambda's argument
-    0x03 | Ptr(VAR, 0x000000000000000, 0x000000000000002) // 2nd lambda's body
-
-  Notes:
-
-    1. This is a λ-term that discards the 1st argument and returns the 2nd.
-    2. The 1st lambda's argument not used, thus, an ERA pointer.
-    3. The 2nd lambda's argument points to its variable, and vice-versa.
-    4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
-    
-Example 2:
-
-  Term:
-    
-    λx dup x0 x1 = x; (* x0 x1)
-
-  Memory:
-
-    Root : Ptr(LAM, 0x000000000000000, 0x000000000000000)
-    0x00 | Ptr(ARG, 0x000000000000000, 0x000000000000004) // the lambda's argument
-    0x01 | Ptr(OP2, 0x000000000000002, 0x000000000000005) // the lambda's body
-    0x02 | Ptr(ARG, 0x000000000000000, 0x000000000000005) // the duplication's 1st argument
-    0x03 | Ptr(ARG, 0x000000000000000, 0x000000000000006) // the duplication's 2nd argument
-    0x04 | Ptr(VAR, 0x000000000000000, 0x000000000000000) // the duplicated expression
-    0x05 | Ptr(DP0, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 1st operand
-    0x06 | Ptr(DP1, 0x3e8d2b9ba31fb21, 0x000000000000002) // the operator's 2st operand
-
-  Notes:
-    
-    1. This is a lambda function that squares a number.
-    2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
-    3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
-    4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
-    5. 0x3e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
-    6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
-    7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
-    8. In-memory size is different to, and larger than, serialization size.
-```
-
-HVM's runtime is essentially a lazy graph traversal machine that finds redexes
-(expressions subject to computation rules) and rewrites them until there is no
-more work to do. It does so while automatically allocating and freeing memory of
-expressions that go out of scope. When a term's reduction is complete, HVM's
-memory will be fully emptied, leaving no leaks, which is what allows Kindelia to
-replace state trees by heap snapshots. The only exception is when an app
-explicitly asks to preserve an expression by using the `IO.save` operation,
-which will simply store a pointer to the app's state, and keep it in memory.
-That is why Kindelia's "SSTORE" has zero-cost: the operation itself is very
-cheap as it just saves a pointer. We only have to "charge" an app when it uses
-more of the available heap space.
-
-Genesis Block
--------------
-
-Kindelia starts the network by running a single block before the first mined
-block. This is called the genesis block. That block installs some utilities on
-the network, as shown below:
-
-```c
-// Tuple types
-ctr {Tuple0}
-ctr {Tuple1 x0}
-ctr {Tuple2 x0 x1}
-ctr {Tuple3 x0 x1 x2}
-ctr {Tuple4 x0 x1 x2 x3}
-ctr {Tuple5 x0 x1 x2 x3 x4}
-ctr {Tuple6 x0 x1 x2 x3 x4 x5}
-ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
-ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
-ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
-ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
-ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
-ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
-
-// Used to pretty-print names
-ctr {Name name}
-
-// Below, we declare the built-in IO operations
-
-// IO.done returns from an IO operation
-ctr {IO.DONE expr}
-fun (IO.done expr) {
-  (IO.done expr) = {IO.DONE expr}
-}
-
-// IO.take recovers an app's stored state
-ctr {IO.TAKE then}
-fun (IO.take then) {
-  (IO.take then) = {IO.TAKE then}
-}
-
-// IO.save stores the app's state
-ctr {IO.SAVE expr then}
-fun (IO.save expr then) {
-  (IO.save expr then) = {IO.SAVE expr then}
-}
-
-// IO.call calls another IO operation, assigning
-// the caller name to the current subject name
-ctr {IO.CALL name args then}
-fun (IO.call name args then) {
-  (IO.call name args then) = {IO.CALL name args then}
-}
-
-// IO.name returns the name of the current subject
-ctr {IO.NAME then}
-fun (IO.name then) {
-  (IO.name then) = {IO.NAME then}
-}
-
-// IO.from returns the name of the current caller
-ctr {IO.FROM then} 
-fun (IO.from then) {
-  (IO.from then) = {IO.FROM then}
-}
-
-// Works like IO.take, but clones the state
-fun (IO.load cont) {
-  (IO.load cont) =
-    {IO.TAKE @x
-    dup x0 x1 = x;
-    {IO.SAVE x0 @~
-    (! cont x1)}}
-}
-```
-
 Table of Costs
 --------------
 
@@ -959,6 +895,195 @@ for an average user. When that starts becoming practical, a fee market will
 emerge naturally, and users will pay miners in whatever currencies they like.
 For more on that, check the ["Why not include a currency?"](#why-not-include-a-currency) section.
 
+Memory Model
+------------
+
+HVM's memory model is documented on `src/hvm.rs`, and transcribed below:
+
+```
+Kindelia-HVM's memory model
+---------------------------
+
+The runtime memory consists of just a vector of u128 pointers. That is:
+
+  Mem ::= Vec<Ptr>
+
+A pointer has 3 parts:
+
+  Ptr ::= TT AAAAAAAAAAAAAAAAAA BBBBBBBBBBBB
+
+Where:
+
+  T : u8  is the pointer tag 
+  A : u72 is the 1st value
+  B : u48 is the 2nd value
+
+There are 12 possible tags:
+
+  Tag | Val | Meaning  
+  ----| --- | -------------------------------
+  DP0 |   0 | a variable, bound to the 1st argument of a duplication
+  DP1 |   1 | a variable, bound to the 2nd argument of a duplication
+  VAR |   2 | a variable, bound to the one argument of a lambda
+  ARG |   3 | an used argument of a lambda or duplication
+  ERA |   4 | an erased argument of a lambda or duplication
+  LAM |   5 | a lambda
+  APP |   6 | an application
+  SUP |   7 | a superposition
+  CTR |   8 | a constructor
+  FUN |   9 | a function
+  OP2 |  10 | a numeric operation
+  NUM |  11 | a 120-bit number
+
+The semantics of the 1st and 2nd values depend on the pointer tag. 
+
+  Tag | 1st ptr value                | 2nd ptr value
+  --- | ---------------------------- | ---------------------------------
+  DP0 | the duplication label        | points to the duplication node
+  DP1 | the duplication label        | points to the duplication node
+  VAR | not used                     | points to the lambda node
+  ARG | not used                     | points to the variable occurrence
+  ERA | not used                     | not used
+  LAM | not used                     | points to the lambda node
+  APP | not used                     | points to the application node
+  SUP | the duplication label        | points to the superposition node
+  CTR | the constructor name         | points to the constructor node
+  FUN | the function name            | points to the function node
+  OP2 | the operation name           | points to the operation node
+  NUM | the most significant 72 bits | the least significant 48 bits
+
+Notes:
+
+  1. The duplication label is an internal value used on the DUP-SUP rule.
+  2. The operation name only uses 4 of the 72 bits, as there are only 16 ops.
+  3. NUM pointers don't point anywhere, they just store the number directly.
+
+A node is a tuple of N pointers stored on sequential memory indices.
+The meaning of each index depends on the node. There are 7 types:
+
+  Duplication Node:
+  - [0] => either an ERA or an ARG pointing to the 1st variable location
+  - [1] => either an ERA or an ARG pointing to the 2nd variable location
+  - [2] => pointer to the duplicated expression
+
+  Lambda Node:
+  - [0] => either and ERA or an ERA pointing to the variable location
+  - [1] => pointer to the lambda's body
+  
+  Application Node:
+  - [0] => pointer to the lambda
+  - [1] => pointer to the argument
+
+  Superposition Node:
+  - [0] => pointer to the 1st superposed value
+  - [1] => pointer to the 2sd superposed value
+
+  Constructor Node:
+  - [0] => pointer to the 1st field
+  - [1] => pointer to the 2nd field
+  - ... => ...
+  - [N] => pointer to the Nth field
+
+  Function Node:
+  - [0] => pointer to the 1st argument
+  - [1] => pointer to the 2nd argument
+  - ... => ...
+  - [N] => pointer to the Nth argument
+
+  Operation Node:
+  - [0] => pointer to the 1st operand
+  - [1] => pointer to the 2nd operand
+
+Notes:
+
+  1. Duplication nodes DON'T have a body. They "float" on the global scope.
+  2. Lambdas and Duplications point to their variables, and vice-versa.
+  3. ARG pointers can only show up inside Lambdas and Duplications.
+  4. Nums and vars don't require a node type, because they're unboxed.
+  5. Function and Constructor arities depends on the user-provided definition.
+
+Example 0:
+
+  Term:
+
+   {Tuple2 #7 #8}
+
+  Memory:
+
+    Root : Ptr(CTR, 0x0000000007b9d30a43, 0x000000000000)
+    0x00 | Ptr(NUM, 0x000000000000000000, 0x000000000007) // the tuple's 1st field
+    0x01 | Ptr(NUM, 0x000000000000000000, 0x000000000008) // the tuple's 2nd field
+
+  Notes:
+    
+    1. This is just a pair with two numbers.
+    2. The root pointer is not stored on memory.
+    3. The '0x0000000007b9d30a43' constant encodes the 'Tuple2' name.
+    4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
+
+Example 1:
+
+  Term:
+
+    λ~ λb b
+
+  Memory:
+
+    Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+    0x00 | Ptr(ERA, 0x000000000000000000, 0x000000000000) // 1st lambda's argument
+    0x01 | Ptr(LAM, 0x000000000000000000, 0x000000000002) // 1st lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000003) // 2nd lambda's argument
+    0x03 | Ptr(VAR, 0x000000000000000000, 0x000000000002) // 2nd lambda's body
+
+  Notes:
+
+    1. This is a λ-term that discards the 1st argument and returns the 2nd.
+    2. The 1st lambda's argument not used, thus, an ERA pointer.
+    3. The 2nd lambda's argument points to its variable, and vice-versa.
+    4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
+    
+Example 2:
+
+  Term:
+    
+    λx dup x0 x1 = x; (* x0 x1)
+
+  Memory:
+
+    Root : Ptr(LAM, 0x000000000000000000, 0x000000000000)
+    0x00 | Ptr(ARG, 0x000000000000000000, 0x000000000004) // the lambda's argument
+    0x01 | Ptr(OP2, 0x000000000000000002, 0x000000000005) // the lambda's body
+    0x02 | Ptr(ARG, 0x000000000000000000, 0x000000000005) // the duplication's 1st argument
+    0x03 | Ptr(ARG, 0x000000000000000000, 0x000000000006) // the duplication's 2nd argument
+    0x04 | Ptr(VAR, 0x000000000000000000, 0x000000000000) // the duplicated expression
+    0x05 | Ptr(DP0, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 1st operand
+    0x06 | Ptr(DP1, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 2st operand
+
+  Notes:
+    
+    1. This is a lambda function that squares a number.
+    2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
+    3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
+    4. The lambda's body does not point to the dup node, but to the operator. Dup nodes float.
+    5. 0x7b93e8d2b9ba31fb21 is a globally unique random label assigned to the duplication node.
+    6. That duplication label is stored on the DP0/DP1 that point to the node, not on the node.
+    7. A lambda uses 2 memory slots, a duplication uses 3, an operator uses 2. Total: 112 bytes.
+    8. In-memory size is different to, and larger than, serialization size.
+```
+
+HVM's runtime is essentially a lazy graph traversal machine that finds redexes
+(expressions subject to computation rules) and rewrites them until there is no
+more work to do. It does so while automatically allocating and freeing memory of
+expressions that go out of scope. When a term's reduction is complete, HVM's
+memory will be fully emptied, leaving no leaks, which is what allows Kindelia to
+replace state trees by heap snapshots. The only exception is when an app
+explicitly asks to preserve an expression by using the `IO.save` operation,
+which will simply store a pointer to the app's state, and keep it in memory.
+That is why Kindelia's "SSTORE" has zero-cost: the operation itself is very
+cheap as it just saves a pointer. We only have to "charge" an app when it uses
+more of the available heap space.
+
+
 Serialization
 -------------
 
@@ -1003,7 +1128,7 @@ varlen(  19) = 11 10 10 10 11 0
 The number `19` is represented as `11101010110`, which is just the
 `fixlen(5,19)` representation with `1`'s before each significant bit, and `0` at
 the end. In this case, `varlen` uses `6` bits more than `fixlen`, which is the
-cost of not knowning the size statically.
+cost of not knowing the size statically.
 
 ### List
 
@@ -1070,11 +1195,8 @@ when these are used repeatedly. These optimizations aren't implemented yet, but,
 in order to make that possible in a future, we reserve a bit for this flag.
 
 Note also that, while the serialization of a name allows for an arbitrary number
-of letters, HVM constructors and functions reserve 60 bits for the name, which
-means the maximum constructor name is 10 letters long, and that it is impossible
-to call a function with a name larger than 10 letters directly. Functions with
-11-20 letters are deployable, but they can only be called with `IO.call`, which
-receives a 120-bit number.
+of letters, HVM pointers can only address function and constructor names of up
+to 72 bits, which means the maximum addressable name is 12 letters long.
 
 ### Term
 
@@ -1161,21 +1283,30 @@ serialize_rule((lhs,rhs))
   = serialize_term(lhs)
   + serialize_term(rhs)
 
-serialize_statement(Fun(name,args,func,init))
+serialize_statement(Fun(name,args,func,init,sign))
   = serialize_fixlen(4, 0)
   + serialize_name(name)
   + serialize_list(serialize_name, args)
   + serialize_list(serialize_rule, func)
   + serialize_term(init)
+  + serialize_sign(sign)
 
-serialize_statement(Ctr(name,ctrs))
+serialize_statement(Ctr(name,ctrs,sign))
   = serialize_fixlen(4, 1)
   + serialize_name(name)
   + serialize_list(serialize_name, ctrs)
+  + serialize_sign(sign)
 
-serialize_statement(Run(expr))
+serialize_statement(Run(expr,sign))
   = serialize_fixlen(4, 2)
   + serialize_term(expr)
+  + serialize_sign(sign)
+
+serialize_statement(Reg(name,ownr,sign))
+  = serialize_fixlen(4, 3)
+  + serialize_name(name)
+  + serialize_fixlen(128,ownr)
+  + serialize_sign(sign)
 ```
 
 
@@ -1186,6 +1317,111 @@ The Block encoding serializes a list of top-level statements, i.e., a block.
 ```
 serialize_block(statements) = serialize_list(serialize_statement, statements)
 ```
+
+Genesis Block
+-------------
+
+Kindelia starts the network by running a single block before the first mined
+block. This is called the genesis block. That block installs some utilities on
+the network. It may vary across different forks. Kindelia's mainnet uses the
+following genesis block:
+
+```c
+// Tuple types
+ctr {Tuple0}
+ctr {Tuple1 x0}
+ctr {Tuple2 x0 x1}
+ctr {Tuple3 x0 x1 x2}
+ctr {Tuple4 x0 x1 x2 x3}
+ctr {Tuple5 x0 x1 x2 x3 x4}
+ctr {Tuple6 x0 x1 x2 x3 x4 x5}
+ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
+ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+
+// Used to pretty-print names
+ctr {Name name}
+
+// Below, we declare the built-in IO operations
+
+// IO_DONE returns from an IO operation
+ctr {IO_DONE expr}
+fun (io_done expr) {
+  (io_done expr) = {IO_DONE expr}
+}
+
+// IO_TAKE recovers an app's stored state
+ctr {IO_TAKE then}
+fun (io_take then) {
+  (io_take then) = {IO_TAKE then}
+}
+
+// IO_SAVE stores the app's state
+ctr {IO_SAVE expr then}
+fun (io_save expr then) {
+  (io_save expr then) = {IO_SAVE expr then}
+}
+
+// IO_CALL calls another IO operation, assigning
+// the caller name to the current subject name
+ctr {IO_CALL name args then}
+fun (io_call name args then) {
+  (io_call name args then) = {IO_CALL name args then}
+}
+
+// IO_SUBJ returns the name of the current subject
+ctr {IO_SUBJ then}
+fun (io_subj then) {
+  (io_subj then) = {IO_SUBJ then}
+}
+
+// IO_FROM returns the name of the current caller
+ctr {IO_FROM then} 
+fun (io_from then) {
+  (io_from then) = {IO_FROM then}
+}
+
+// IO_LOAD works like IO_TAKE, but clones the state
+fun (io_load cont) {
+  (io_load cont) =
+    {IO_TAKE @x
+    dup x0 x1 = x;
+    {IO_SAVE x0 @~
+    (! cont x1)}}
+}
+
+// This is here for debugging. Will be removed.
+ctr {Count_Inc}
+ctr {Count_Get}
+fun (Count action) {
+  (Count {Count_Inc}) =
+    !take x
+    !save (+ x #1)
+    !done #0
+  (Count {Count_Get}) =
+    !load x
+    !done x
+}
+
+// Registers the empty namespace.
+reg {
+  #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
+}
+
+```
+
+It is important to note that, on Kindelia's mainnet, the genesis block will
+register the empty namespace to the Kindelia Foundation. This gives us the power
+to distribute top-level names, which we intend to do responsibly. This may be
+seen as a point of centralization, which we argue is minor and healthy. It
+allows us to grant names to their rightful owners, manage namespaces for core
+libraries and infrastructure, and auction disputed names, providing a clean
+source of funding. Of course, if the community is unhappy, namespaces are
+entirely optional and can be easily ignored, disabled or replaced; unlike
+premined native tokens which, once distributed, can't ever be forked away.
 
 The High-order Virtual Machine (HVM)
 ====================================
@@ -1216,10 +1452,10 @@ account the rise of parallel processors, and the discovery of new data
 structures and algorithms that take advantage of beta-optimality.
 
 When it comes to Kindelia, though, its main role is to make functional programs
-and algorithms run natively, which directly reduces costs by 100x to 1000x,
-compared to emulating them on stack machines such as the EVM. Other than raw
-performance, there are two additional characteristics that make it the ideal
-virtual machine for a functional peer-to-peer computer:
+and algorithms run natively, which directly reduces costs by ~434x compared to
+emulating them on stack machines such as the EVM. Other than raw performance,
+there are two additional characteristics that make it the ideal virtual machine
+for a functional peer-to-peer computer:
 
 ### 1. It has negligible compilation times.
 
@@ -1266,7 +1502,7 @@ simpler than it looks, and boils down to a combination of linearity, with a lazy
 duplication primitive that incrementally copies any term, including lambdas.
 Behind this simple concept, lies an elegant model of computation, the
 Interaction Net, which shares the best aspects of the Turing Machines and the
-Lambda Calculus, in a manner that looks truly foundamental, and is the main
+Lambda Calculus, in a manner that looks truly fundamental, and is the main
 reason the HVM works so well.
 
 ### Is Kindelia a consequence of the HVM?
@@ -1290,7 +1526,7 @@ the creators, as most projects do.
 Note we do intend to launch a token for our foundation as a contract *inside*
 Kindelia, but it will not be *part* of the network, nor coupled to Kindelia's
 protocol in any way, as things should be. Since Kindelia shouldn't require
-high maintainance costs, that asset that will be used mostly to fund the
+high maintenance costs, that asset that will be used mostly to fund the
 development of the HVM, and its next-gen parallel compilers and processors.
 
 Comparisons to Ethereum
@@ -1302,7 +1538,7 @@ Formal verification can be used to mathematically ensure that a program can't be
 exploited, which is invaluable for a network where programs can't be patched or
 reversed, but Ethereum's virtual machine is too inefficient for functional
 programs [citation], making it unpractical: devs must either verify the
-generated bytecode, which is extremelly hard and laborious, or compile a proof
+generated bytecode, which is extremely hard and laborious, or compile a proof
 language such as Idris, which results in expensive EVM contracts. Thanks to the
 HVM, Kindelia is able to perform beta reduction and pattern-matching natively,
 making functional programs much cheaper, which, in turn, makes formally verified
@@ -1367,7 +1603,7 @@ single statement, the actual throughput can be much higher, and it achieves that
 with a fraction of Ethereum's maximum blockchain growth.
 
 Computation-wise, Kindelia's layer-1 throughput is up to 434x higher, due to the
-HVM and stateful heaps respectivelly. Kindelia's functional opcodes allow it to
+HVM and stateful heaps respectively. Kindelia's functional opcodes allow it to
 host programs compiled from secure languages like Haskell, Idris, Agda and Kind,
 which is simply not economically viable on Ethereum. Kindelia's zero-cost reused
 SSTORE enables highly dynamic applications like layer-1 MMORPGs, which is also
@@ -1402,7 +1638,7 @@ Comparisons to Cardano
 
 Cardano uses Haskell as its scripting language, which, when it comes to security
 and efficiency, seems like a great choice, because Haskell is functional, and
-its compiler, the GHC, is extremelly efficient. In a closer inspection, though,
+its compiler, the GHC, is extremely efficient. In a closer inspection, though,
 that approach doesn't make so much sense.
 
 ### On security
@@ -1434,7 +1670,7 @@ letting users run Haskell-like languages with GHC-like efficiency.
 Finally, Cardano's extended UTXO model, derived from Bitcoin, makes it
 currency-first, computer-second. It greatly increases network complexity and
 decreases contract expressivity, under the assumption that it improves
-efficiency, which is dubious at least, since, untimately, efficiency is still
+efficiency, which is dubious at least, since, ultimately, efficiency is still
 dictated by total memory, disk and computation usage. The way programs are
 triggered is irrelevant for that analysis. These is no clarity on how much of
 these resources Cardano would use under high load, and what its opcode costs and
@@ -1599,9 +1835,9 @@ run {
 Bob wants to interact with 3 apps, but don't have the time or resources to mine
 his own block. As such, he writes a `run{}` statement, performs the desired
 transactions and, before ending, gives 42 Kold coins to the block miner. He then
-signs the statement and broadcasts it to the network. Miners will be incentived
+signs the statement and broadcasts it to the network. Miners will be incentivized
 to include it in order to collect the Kold coins, in the exact same way they're
-incentived by Ether fees, except replacing the native, hardcoded token, by any
+incentivized by Ether fees, except replacing the native, hardcoded token, by any
 user-submitted assets.
 
 If Kindelia doesn't need a native token to exist, then it won't have a native
@@ -1613,7 +1849,7 @@ than 50% of its total supply, before the network was released, and an additional
 designed the network has the right to dictate its rules, and there is nothing
 wrong with that. Furthermore, from that presale came all the funding that
 allowed Ethereum to exist, and that is a great thing. But, on the long term,
-that agressively centralized distribution isn't aligned with the decentralized
+that aggressively centralized distribution isn't aligned with the decentralized
 vision it sells, and, as such, I intend to make it differently.
 
 Kindelia Foundation, the non-profit entity, will launch a token on Kindelia,
@@ -1641,10 +1877,10 @@ these things go against the very philosophy of Kindelia, as it aims to be the
 most stable, robust, decentralized computer conceivable.
 
 Furthermore, despite the greatly increased complexity, every PoS algorithm
-designed to date is strictly weaker than PoW, providing less guarantess. For
+designed to date is strictly weaker than PoW, providing less guarantees. For
 example, in [a
 comment](https://ethresear.ch/t/explaining-the-liveness-guarantee/4228/3) about
-50/50 netsplits, Vitalik Buterin notes that such events are extremelly unlikely,
+50/50 netsplits, Vitalik Buterin notes that such events are extremely unlikely,
 and that protecting the network against them is overkill. I agree with his
 sentiment, and I believe, and hope, that humanity will never find itself in a
 situation where two sides of the world go completely out of communication for
@@ -1705,7 +1941,7 @@ For example, optimistic rollups are just a fancy way of saying that someone will
 compute the app's state outside and send it to the network, which will blindly
 trust that it is correct. If the submitter lies and someone notices, a dispute
 mechanism is triggered, halting the app until it is resolved, and punishing the
-lier. The clever bit is that the fact the dispute mechanism exists means it is
+liar. The clever bit is that the fact the dispute mechanism exists means it is
 almost never used, allowing most computations to be performed offchain.
 
 This is a great idea that works very well in practice, but it brings some nasty
@@ -1775,7 +2011,7 @@ rewriting state without growing the total size, can be massively improved. HVM
 does so it by replacing merkle trees by reversible heaps, which are just cheap
 layered buffers. An hypothetical zero knowledge network could do the same. As
 for Ethereum, its layer 1 already relies on Merkle trees, so, unless it replaces
-the entire store machinery, dynamic apps like virual game worlds will never be
+the entire store machinery, dynamic apps like virtual game worlds will never be
 viable on layer 1.
 
 ### Conclusion

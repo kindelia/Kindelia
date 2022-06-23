@@ -1,3 +1,5 @@
+// This block defines and uses a stateful function.
+
 // Creates a Counter function with 2 actions:
 ctr {Inc} // action that increments the counter
 ctr {Get} // action that returns the counter

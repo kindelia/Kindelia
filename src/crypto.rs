@@ -5,7 +5,7 @@ use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
 use tiny_keccak::Hasher;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Signature(pub [u8; 65]);
 pub struct Address(pub [u8; 20]);
 pub struct Hash(pub [u8; 32]);
@@ -43,7 +43,7 @@ impl Signature {
     let recovery_id = RecoveryId::from_i32(self.0[0] as i32).ok()?;
     let sign_data = self.0[1..65].try_into().unwrap();
     let signature = RecoverableSignature::from_compact(sign_data, recovery_id).ok()?;
-    return Some(signature.recover(&Message::from_slice(&hash.0).expect("32 bytes hash")).ok()?);
+    return signature.recover(&Message::from_slice(&hash.0).expect("32 bytes hash")).ok();
   }
 
   pub fn signer_address(&self, hash: &Hash) -> Option<Address> {
@@ -63,6 +63,10 @@ impl Address {
   pub fn from_hash(hash: &Hash) -> Self {
     return Address(hash.0[12..32].try_into().unwrap());
   }
+
+  pub fn show(&self) -> String {
+    format!("0x{}", hex::encode(self.0))
+  }
 }
 
 impl Name {
@@ -70,8 +74,14 @@ impl Name {
     return Name::from_hash(&Account::hash_public_key(pubk));
   }
 
+  // A Kindelia name is the first 120 bits of an Ethereum address
+  // This corresponds to the bytes 12-27 of the ECDSA public key.
   pub fn from_hash(hash: &Hash) -> Self {
-    return Name(u128::from_le_bytes(vec![hash.0[17..32].to_vec(), vec![0]].concat().try_into().unwrap()));
+    return Name(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
+  }
+
+  pub fn show(&self) -> String {
+    format!("#x{:0>30x}", self.0)
   }
 }
 
@@ -101,7 +111,6 @@ impl Account {
     let sign = secp.sign_ecdsa_recoverable(&Message::from_slice(&hash.0).expect("32 bytes hash"), &self.secret_key).serialize_compact();
     return Signature([vec![sign.0.to_i32() as u8], sign.1.to_vec()].concat().try_into().unwrap());
   }
-
 }
 
 fn main() {
@@ -126,6 +135,5 @@ fn main() {
   let sign = Signature::from_hex("00d0bd2749ab84ce3851b4a28dd7f3b3e5a51ba6c38f36ef6e35fd0bd01c4a9d3418af687271eff0a37ed95e6a202f5d4efdb8663b361f301d899b3e5596313245").unwrap();
   let auth = sign.signer_address(&hash).unwrap();
   println!("addr: {}", hex::encode(auth.0));
-
 
 }
