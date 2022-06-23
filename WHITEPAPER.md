@@ -525,11 +525,11 @@ Oper ::=
   ^  // bitwise xor
   << // bitwise left shift
   >> // bitwise right shift
-  <= // less than
-  <  // less than or equal
+  <= // less than or equal
+  <  // less than
   == // equal
-  >  // greater than or equal
-  >= // greater than
+  >  // greater than
+  >= // greater than or equal
   != // not equal
 
 // An expression
@@ -580,7 +580,7 @@ Kind, Haskell, Idris, Agda, Coq and Lean) that compile to it.
 
 Native numbers are 120-bit. The reason is that Kindelia's HVM uses 128-bit
 pointers with a 8-bit tag. This allows storing numbers unboxed, as long as they
-aren't larger than 120 bits. Any other size would less efficient: less than 120
+aren't larger than 120 bits. Any other size would be less efficient: less than 120
 bits would waste space, and more would require a pointer indirection. Numbers
 are written with a `#`, followed by a decimal literal. For example, `#123456789`
 is a valid number. As a syntax sugar, numbers can be also be written with single
@@ -768,8 +768,8 @@ ID | Name      | Symbol | Operation
 10 | LE        | `<=`   | unsigned integer less than or equal
 11 | LT        | `<`    | unsigned integer less than
 12 | EQ        | `==`   | unsigned integer equal
-13 | GT        | `>`    | unsigned integer greater than or equal
-14 | GE        | `>=`   | unsigned integer greater than
+13 | GT        | `>`    | unsigned integer greater than
+14 | GE        | `>=`   | unsigned integer greater than or equal
 15 | NE        | `!=`   | unsigned integer not equal
 
 Numeric operations have type `fn(u120,u120) -> u120`. Comparison operations like
