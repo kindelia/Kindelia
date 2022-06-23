@@ -252,7 +252,7 @@ pub fn stack_overflow() { // caused by compute_at function
 }
 
 #[test]
-#[ignore]
+#[ignore = "fix not done"]
 // TODO: fix drop stack overflow
 pub fn stack_overflow2() { // caused by drop of term
   let mut rt = init_runtime();
@@ -261,7 +261,7 @@ pub fn stack_overflow2() { // caused by drop of term
 }
 
 #[test]
-#[ignore]
+#[ignore = "fix not done"]
 // TODO: fix runtime persistence
 pub fn persistence1() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
@@ -289,7 +289,7 @@ pub fn persistence1() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "fix not done"]
 // TODO: fix runtime persistence
 pub fn persistence2() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
@@ -383,7 +383,7 @@ pub const COUNTER_STACKOVERFLOW: &'static str = "
 ";
 
 #[test]
-#[ignore]
+#[ignore = "used for benchmark"]
 fn one_hundred_snapshots() {
   // run this with rollback in each 4th snapshot
   // note: this test has no state
