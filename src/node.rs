@@ -67,6 +67,7 @@ pub struct Node {
   pub pool       : PriorityQueue<Transaction, u128>,// transactions to be mined
   pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,             // peer id -> peer
+  pub peer_idx   : u128,                            // peer id counter
   pub runtime    : Runtime,                         // Kindelia's runtime
   pub receiver   : Receiver<Request>,               // Receives an API request
 }
@@ -419,6 +420,7 @@ pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
     pool       : PriorityQueue::new(),
     peer_id    : HashMap::new(),
     peers      : HashMap::new(),
+    peer_idx   : 0,
     runtime    : init_runtime(),
     receiver   : query_receiver,
   };
@@ -459,15 +461,17 @@ pub fn new_miner_comm() -> SharedMinerComm {
 pub fn node_see_peer(node: &mut Node, peer: Peer) {
   match node.peer_id.get(&peer.address) {
     None => {
-      // FIXME: `index` can't be generated from length as `.peers` is a map and
-      // peers can be deleted
-      let index = node.peers.len() as u128;
+      // TODO: improve this spaghetti
+      let index = node.peer_idx;
+      node.peer_idx += 1;
       node.peers.insert(index, peer);
       node.peer_id.insert(peer.address, index);
     }
     Some(index) => {
-      let old_peer = node.peers.get_mut(&index).unwrap();
-      old_peer.seen_at = peer.seen_at;
+      let old_peer = node.peers.get_mut(&index);
+      if let Some(old_peer) = old_peer {
+        old_peer.seen_at = peer.seen_at;
+      }
     }
   }
 }

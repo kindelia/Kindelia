@@ -506,8 +506,14 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 // demand 64 GB RAM, increasing by an additional 64 GB RAM every year. Note that most of this is
 // empty space, so, future optimizations should reduce this to closer to the actual 8 GB per year
 // that the network actually uses.
+
+#[cfg(not(debug_assertions))]
 const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
 const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
+
+// Use smaller heaps for debug/development builds
+#[cfg(debug_assertions)]
+const HEAP_SIZE: u128 = 64 * U128_PER_MB; // total size per heap, in 128-bit words
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
@@ -1735,6 +1741,11 @@ impl Runtime {
   // Rollback
   // --------
 
+  // Returns a clone of a reference to the current rollback state.
+  pub fn get_back(&self) -> Arc<Rollback> {
+    return self.back.clone();
+  }
+
   // Advances the heap time counter, saving past states for rollback.
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
@@ -1753,10 +1764,10 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers.");
+          // self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
-        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
+        // self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
@@ -4207,58 +4218,96 @@ pub fn view_name(name: u128) -> String {
 }
 
 pub fn view_term(term: &Term) -> String {
-  match term {
-    Term::Var { name } => {
-      return view_name(*name);
-    }
-    Term::Dup { nam0, nam1, expr, body } => {
-      let nam0 = view_name(*nam0);
-      let nam1 = view_name(*nam1);
-      let expr = view_term(expr);
-      let body = view_term(body);
-      return format!("dup {} {} = {}; {}", nam0, nam1, expr, body);
-    }
-    Term::Lam { name, body } => {
-      let name = view_name(*name);
-      let body = view_term(body);
-      return format!("@{} {}", name, body);
-    }
-    Term::App { func, argm } => {
-      let func = view_term(func);
-      let argm = view_term(argm);
-      return format!("(! {} {})", func, argm);
-    }
-    Term::Ctr { name, args } => {
-      let name = view_name(*name);
-      // Pretty print names
-      if name == "Name" && args.len() == 1 {
-        if let Term::Num { numb } = args[0] {
-          return format!("{{Name '{}'}}", view_name(numb));
+  enum StackItem<'a> {
+    Term(&'a Term),
+    Str(String),
+  }
+
+  let mut stack = vec![StackItem::Term(term)];
+  let mut output = Vec::new();
+
+  while !stack.is_empty() {
+    let item = stack.pop().unwrap();
+
+    match item {
+      StackItem::Str(str) => {
+        output.push(str);
+      }
+      StackItem::Term(term) => {  
+        match term {
+          Term::Var { name } => {
+            output.push(view_name(*name));
+          }
+          Term::Dup { nam0, nam1, expr, body } => {
+            output.push("dup ".to_string());
+            output.push(view_name(*nam0));
+            output.push(" ".to_string());
+            output.push(view_name(*nam1));
+            output.push(" = ".to_string());
+            stack.push(StackItem::Term(&*body));
+            stack.push(StackItem::Str(";".to_string()));
+            stack.push(StackItem::Term(&*expr));
+          }
+          Term::Lam { name, body } => {
+            output.push(format!("@{} ", view_name(*name)));
+            stack.push(StackItem::Term(&*body));
+          }
+          Term::App { func, argm } => {
+            output.push("(! ".to_string());
+            stack.push(StackItem::Str(")".to_string()));
+            stack.push(StackItem::Term(&*argm));
+            stack.push(StackItem::Str(" ".to_string()));
+            stack.push(StackItem::Term(&*func));
+          }
+          Term::Ctr { name, args } => {
+            let name = view_name(*name);
+            // Pretty print names
+            if name == "Name" && args.len() == 1 {
+              if let Term::Num { numb } = args[0] {
+                output.push(format!("{{Name '{}'}}", view_name(numb)));
+              }
+            } else {
+              output.push("{".to_string());
+              output.push(name);
+              stack.push(StackItem::Str("}".to_string()));
+              for arg in args.iter().rev() {
+                stack.push(StackItem::Term(arg));
+                stack.push(StackItem::Str(" ".to_string()));
+              }
+            }
+          }
+          Term::Fun { name, args } => {
+            let name = view_name(*name);
+            output.push("(".to_string());
+            output.push(name);
+            stack.push(StackItem::Str(")".to_string()));
+            for arg in args.iter().rev() {
+              stack.push(StackItem::Term(arg));
+              stack.push(StackItem::Str(" ".to_string()));
+            }
+          }
+          Term::Num { numb } => {
+            // If it has 26-30 bits, pretty-print as a name
+            //if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
+              //return format!("@{}", view_name(*numb));
+            //} else {
+              output.push(format!("#{}", numb));
+            //}
+          }
+          Term::Op2 { oper, val0, val1 } => {
+            let oper = view_oper(oper);
+            output.push(format!("({} ", oper));
+            stack.push(StackItem::Str(")".to_string()));
+            stack.push(StackItem::Term(val1));
+            stack.push(StackItem::Str(" ".to_string()));
+            stack.push(StackItem::Term(val0));
+          }
         }
       }
-      let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("{{{}{}}}", name, args);
-    }
-    Term::Fun { name, args } => {
-      let name = view_name(*name);
-      let args = args.iter().map(|x| format!(" {}", view_term(x))).collect::<Vec<String>>().join("");
-      return format!("({}{})", name, args);
-    }
-    Term::Num { numb } => {
-      // If it has 26-30 bits, pretty-print as a name
-      //if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
-        //return format!("@{}", view_name(*numb));
-      //} else {
-        return format!("#{}", numb);
-      //}
-    }
-    Term::Op2 { oper, val0, val1 } => {
-      let oper = view_oper(oper);
-      let val0 = view_term(val0);
-      let val1 = view_term(val1);
-      return format!("({} {} {})", oper, val0, val1);
     }
   }
+  let res = output.join("");
+  res
 }
 
 pub fn view_oper(oper: &u128) -> String {
