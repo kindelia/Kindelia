@@ -211,6 +211,7 @@ pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
 
     let app = root.or(get_tick).or(blocks_router).or(functions_router);
     let app = app.recover(handle_rejection);
+    let app = app.map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
 
     let listener_v4 = TcpListener::bind("127.0.0.1:8000").await.unwrap();
     let listener_v6 = TcpListener::bind("[::1]:8000").await.unwrap();
