@@ -55,13 +55,13 @@ pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Opti
   rt.rollback(tick);
   if rt.get_tick() == 0 {
     if let Some(pre_code) = pre_code {
-      rt.run_statements_from_code(pre_code);
+      rt.run_statements_from_code(pre_code, true);
     }
   }
   let tick_diff = tick - rt.get_tick();
   for _ in 0..tick_diff {
     if let Some(code) = code {
-      rt.run_statements_from_code(code);
+      rt.run_statements_from_code(code, true);
     }
     rt.tick();
   }
@@ -74,7 +74,7 @@ pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
   let actual_tick = rt.get_tick();
   for _ in actual_tick..tick {
     if let Some(code) = code {
-      rt.run_statements_from_code(code);
+      rt.run_statements_from_code(code, true);
     }
     rt.tick();
   }
@@ -101,9 +101,9 @@ pub fn rollback_simple(
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(0, 0, 0);
-  rt.run_statements_from_code(pre_code);
+  rt.run_statements_from_code(pre_code, true);
   for _ in 0..total_tick {
-    rt.run_statements_from_code(code);
+    rt.run_statements_from_code(code, true);
     rt.tick();
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
@@ -114,12 +114,12 @@ pub fn rollback_simple(
   // Does rollback to nearest rollback_tick saved state
   rt.rollback(rollback_tick);
   if rt.get_tick() == 0 {
-    rt.run_statements_from_code(pre_code);
+    rt.run_statements_from_code(pre_code, true);
   }
   // Run until rollback_tick
   let tick_diff = rollback_tick - rt.get_tick();
   for _ in 0..tick_diff {
-    rt.run_statements_from_code(code);
+    rt.run_statements_from_code(code, true);
     rt.tick();
   }
   // Calculates new checksum, after rollback
@@ -146,7 +146,7 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
   };
 
   let mut rt = init_runtime();
-  rt.run_statements_from_code(pre_code);
+  rt.run_statements_from_code(pre_code, true);
 
   for tick in path {
     let tick = *tick;
@@ -179,11 +179,10 @@ pub fn advanced_rollback_in_random_state() {
 }
 
 #[test]
-#[ignore]
 pub fn advanced_rollback_in_saved_state() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
@@ -213,15 +212,23 @@ pub fn advanced_rollback_run_fail() {
 #[test]
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
-  advance(&mut rt, 1, Some(COUNTER));
+  rt.run_statements_from_code(PRE_COUNTER, true);
+  advance(&mut rt, 10000, Some(COUNTER));
 }
 
 #[test]
+pub fn stack_overflow2() { // caused by drop of term
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER, false);
+  rt.run_statements_from_code(COUNTER_STACKOVERFLOW , false);
+}
+
+#[test]
+#[ignore]
 pub fn persistence1() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 50, Some(COUNTER));
 
   rt.clear_current_heap();
@@ -244,10 +251,11 @@ pub fn persistence1() {
 }
 
 #[test]
+#[ignore]
 pub fn persistence2() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER);
+  rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
   rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
   let s1 = RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
@@ -273,6 +281,11 @@ pub fn persistence2() {
 pub const PRE_COUNTER: &'static str = "
   ctr {Succ p}
   ctr {Zero}
+
+  fun (ToSucc n) {
+    (ToSucc #0) = {Zero}
+    (ToSucc n) = {Succ (ToSucc (- n #1))}
+  }
 
   fun (Add n) {
     (Add n) = {Succ n}
@@ -310,21 +323,28 @@ pub const COUNTER: &'static str = "
   }
 
   run {
-    !call ~ 'Count' [{Count.Inc}]
-    !call x 'Count' [{Count.Get}]
+    !call ~ 'Count' [{Count_Inc}]
+    !call x 'Count' [{Count_Get}]
     !done x
   }
 ";
 
-pub const SIMPLE_COUNTER: &'static str = "
+pub const SIMPLE_COUNT: &'static str = "
   run {
-    !call ~ 'Count' [{Count.Inc}]
-    !call x 'Count' [{Count.Get}]
+    !call ~ 'Count' [{Count_Inc}]
+    !call x 'Count' [{Count_Get}]
     !done x
+  }
+";
+
+pub const COUNTER_STACKOVERFLOW: &'static str = "
+  run {
+    !done (ToSucc #8000)
   }
 ";
 
 #[test]
+#[ignore]
 fn one_hundred_snapshots() {
   // run this with rollback in each 4th snapshot
   // note: this test has no state

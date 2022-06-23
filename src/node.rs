@@ -636,7 +636,7 @@ pub fn node_compute_block(node: &mut Node, block: &Block) {
   let bits = BitVec::from_bytes(&block.body.value);
   let acts = deserialized_statements(&bits);
   //println!("Computing block:\n{}", view_statements(&acts));
-  let res = node.runtime.run_statements(&acts);
+  let res = node.runtime.run_statements(&acts, false);
   let bhash = hash_block(block);
   node.results.insert(bhash, res);
   node.runtime.tick();
