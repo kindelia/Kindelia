@@ -1721,6 +1721,11 @@ impl Runtime {
   // Rollback
   // --------
 
+  // Returns a clone of a reference to the current rollback state.
+  pub fn get_back(&self) -> Arc<Rollback> {
+    return self.back.clone();
+  }
+
   // Advances the heap time counter, saving past states for rollback.
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
@@ -1739,10 +1744,10 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers.");
+          // self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
-        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
+        // self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
