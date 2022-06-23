@@ -1359,39 +1359,6 @@ impl Runtime {
     return show_term(self, self.read(loc as usize), None);
   }
 
-  pub fn view_rollback_ticks(&self) -> String {
-
-    fn view_rollback_ticks_go(rt: &Runtime, back: &Arc<Rollback>, heap: &[Heap]) -> Vec<Option<u128>> {
-      match &**back {
-        Rollback::Nil => {
-          return Vec::new()
-        }
-        Rollback::Cons { keep, head, tail, life } => {
-          let mut vec = view_rollback_ticks_go(&rt, tail, heap);
-          let tick = heap[*head as usize].get_tick();
-          vec.push(Some(tick));
-          return vec;
-        }
-      }
-    }
-
-    let ticks = view_rollback_ticks_go(&self, &self.back, &self.heap);
-    let elems = 
-      ticks
-        .iter()
-        .rev()
-        .map(|x| 
-          if let Some(x) = x {
-            format!("{}", if *x != U128_NONE { *x } else { 0 }) 
-          } else { 
-            "___________".to_string()
-          }
-        )
-        .collect::<Vec<String>>()
-        .join(", ");
-    return format!("[{}]", elems);
-  }
-
   // Heaps
   // -----
 
@@ -1748,6 +1715,11 @@ impl Runtime {
   // Rollback
   // --------
 
+  // Returns a clone of a reference to the current rollback state.
+  pub fn get_back(&self) -> Arc<Rollback> {
+    return self.back.clone();
+  }
+
   // Advances the heap time counter, saving past states for rollback.
   pub fn tick(&mut self) {
     self.set_tick(self.get_tick() + 1);
@@ -1766,10 +1738,10 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers.");
+          // self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
-        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
+        // self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
