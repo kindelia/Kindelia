@@ -7,12 +7,14 @@ fun (SumPair p) {
   // Here `a` is free/unbound
   (SumPair {Pair ~ x}) = (- (+ #5 a) x)
 }
-  = #0
+
+ctr {Set x}
+ctr {Get}
 
 fun (Store x) {
   (Store {Set x}) = !save x !done x
   (Store {Get}) = !take x !done x
-} = #0
+} with { #0 }
 
 run {
   !done (SumPair {Pair #777 #3})

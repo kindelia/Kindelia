@@ -145,7 +145,8 @@ fn run_cli() -> Result<(), String> {
         return text;
       }
       if let (Ok(code), Ok(skey)) = (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file)) {
-        let statements = hvm::read_statements(&code).1;
+        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
+        let statements = statements.1;
         if let Some(last_statement) = &statements.last() {
           let skey = hex::decode(&skey[0..64]).expect("hex string");
           let user = crypto::Account::from_private_key(&skey);
