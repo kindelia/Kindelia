@@ -1605,7 +1605,7 @@ impl Runtime {
         let mana_dif = self.get_mana() - mana_ini;
         let size_dif = size_end - size_ini;
         if size_end > size_lim {
-          return error(self, "fun", format!("Size limit exceeded."));
+          return error(self, "run", format!("Size limit exceeded."));
         }
         self.draw();
         if !silent {
