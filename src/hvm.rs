@@ -375,7 +375,7 @@ pub struct Store {
 }
 
 /// A global statement that alters the state of the blockchain
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: u128, args: Vec<u128>, sign: Option<crypto::Signature> },
