@@ -1,32 +1,37 @@
-$(Cons head tail)
-$(Add x)
+ctr {Cons head tail}
+ctr {Nil}
+ctr {Add x}
+ctr {Get}
 
-!(DaList act) {
-  !(DaList $(Get))   = !(IO.load @x $(IO.done x))
-  !(DaList $(Add x)) = 
-    $(IO.take @xs
-    $(IO.save $(Cons x xs) @~
-    $(IO.done #0)
-    ))
-} 
-  = $(Cons #42 $(Nil))
+fun (DaList act) {
+  (DaList {Get})   = !load x !done x
+  (DaList {Add x}) = 
+    !take xs
+    !save {Cons x xs}
+    !done #0
+} with { {Cons #42 {Nil}} }
 
-{
-  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+run {
+  !call x 'DaList' [{Get}] 
+  !done x
 }
 
-{
-  $(IO.call 'DaList' $(Tuple1 $(Add #69)) @~ $(IO.done #0))
+run {
+  !call ~ 'DaList' [{Add #69}] 
+  !done #0
 }
 
-{
-  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+run {
+  !call x 'DaList' [{Get}]
+  !done x
 }
 
-{
-  $(IO.call 'DaList' $(Tuple1 $(Add #111)) @~ $(IO.done #0))
+run {
+  !call ~ 'DaList' [{Add #111}]
+  !done #0
 }
 
-{
-  $(IO.call 'DaList' $(Tuple1 $(Get)) @x $(IO.done x))
+run {
+  !call x 'DaList' [{Get}]
+  !done x
 }
