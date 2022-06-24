@@ -383,7 +383,7 @@ pub const COUNTER_STACKOVERFLOW: &'static str = "
 ";
 
 #[test]
-#[ignore = "used for benchmark"]
+// #[ignore = "used for benchmark"]
 fn one_hundred_snapshots() {
   // run this with rollback in each 4th snapshot
   // note: this test has no state
