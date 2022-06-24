@@ -3871,23 +3871,25 @@ pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
 /// 'a' - 'z' => 37 to 62
 /// '_'       => 63
 /// ```
+/// Panics when name length > 20.
 pub fn name_to_u128(name: &str) -> u128 {
   let mut num: u128 = 0;
   for (i, chr) in name.chars().enumerate() {
     debug_assert!(i < 20, "Name too big: `{}`.", name);
-    if chr == '.' {
-      num = num * 64 + 0;
-    } else if chr >= '0' && chr <= '9' {
-      num = num * 64 + 1 + chr as u128 - '0' as u128;
-    } else if chr >= 'A' && chr <= 'Z' {
-      num = num * 64 + 11 + chr as u128 - 'A' as u128;
-    } else if chr >= 'a' && chr <= 'z' {
-      num = num * 64 + 37 + chr as u128 - 'a' as u128;
-    } else if chr == '_' {
-      num = num * 64 + 63;
-    }
+    num = (num << 6) + char_to_u128(chr);
   }
   return num;
+}
+
+pub const fn char_to_u128(chr: char) -> u128 {
+  match chr {
+    '.'       =>  0,
+    '0'..='9' =>  1 + chr as u128 - '0' as u128,
+    'A'..='Z' => 11 + chr as u128 - 'A' as u128,
+    'a'..='z' => 37 + chr as u128 - 'a' as u128,
+    '_'       => 63,
+    _         => panic!("Invalid name character."),
+  }
 }
 
 /// Inverse of `name_to_u128`
