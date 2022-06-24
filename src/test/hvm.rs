@@ -77,8 +77,6 @@ pub fn stack_overflow2() {
 }
 
 #[test]
-#[ignore = "fix not done"]
-// TODO: fix runtime persistence
 pub fn persistence1() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
@@ -109,8 +107,6 @@ pub fn persistence1() {
 }
 
 #[test]
-#[ignore = "fix not done"]
-// TODO: fix runtime persistence
 pub fn persistence2() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
@@ -140,7 +136,6 @@ pub fn persistence2() {
 }
 
 #[test]
-// #[ignore = "used for benchmark"]
 fn one_hundred_snapshots() {
   // run this with rollback in each 4th snapshot
   // note: this test has no state

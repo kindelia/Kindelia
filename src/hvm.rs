@@ -1765,10 +1765,10 @@ impl Runtime {
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          // self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
+          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
         }
         self.clear_heap(deleted);
-        // self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
+        self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
@@ -1826,9 +1826,9 @@ impl Runtime {
     let mut keeps : Vec<u128> = vec![];
     let mut lifes : Vec<u128> = vec![];
     let mut uuids : Vec<u128> = vec![];
-    build_persistence_buffers(self, &self.back, &mut uuids, &mut lifes, &mut keeps);
-    std::fs::write(heap_dir_path().join("_keeps_"), &util::u128s_to_u8s(&uuids))?;
-    std::fs::write(heap_dir_path().join("_lifes_"), &util::u128s_to_u8s(&uuids))?;
+    build_persistence_buffers(self, &self.back,  &mut keeps, &mut lifes, &mut uuids);
+    std::fs::write(heap_dir_path().join("_keeps_"), &util::u128s_to_u8s(&keeps))?;
+    std::fs::write(heap_dir_path().join("_lifes_"), &util::u128s_to_u8s(&lifes))?;
     std::fs::write(heap_dir_path().join("_uuids_"), &util::u128s_to_u8s(&uuids))?;
     return Ok(());
   }
@@ -1849,21 +1849,25 @@ impl Runtime {
       let keep = keeps.pop();
       let life = lifes.pop();
       let uuid = uuids.pop();
-      let next = rt.nuls.pop();
-      match (keep, life, uuid, next) {
-        (Some(keep), Some(life), Some(uuid), Some(next)) => {
-          rt.heap[index as usize].load_buffers(uuid)?;
-          rt.curr = index;
-          return load_heaps(rt, keeps, lifes, uuids, next, Arc::new(Rollback::Cons { keep: keep as u64, life: life as u64, head: index, tail: back }));
+      match (keep, life, uuid) {
+        (Some(keep), Some(life), Some(uuid)) => {
+          let next = rt.nuls.pop();
+          match next {
+            Some(next) => {
+              rt.heap[index as usize].load_buffers(uuid)?;
+              rt.curr = index;
+              return load_heaps(rt, keeps, lifes, uuids, next, Arc::new(Rollback::Cons { keep: keep as u64, life: life as u64, head: index, tail: back }));
+            }
+            None => {
+              panic!("Not enough heaps.");
+            }
+          }
         }
-        (None, None, None, Some(..)) => {
+        (None, None, None) => {
           return Ok(back);
         }
-        (.., Some(..)) => {
-          panic!("Error loading saved heap files.");
-        }
-        (.., None) => {
-          panic!("Not enough heaps.");
+        _ => {
+          panic!("Corrupted persistence files.");
         }
       }
     }
