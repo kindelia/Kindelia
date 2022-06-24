@@ -1,7 +1,8 @@
 use crate::crypto;
-use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name, Term, Rule, Statement, view_statements, read_statements};
+use crate::hvm::{init_runtime, name_to_u128, show_term, Runtime, view_rollback, u128_to_name, Term, Rule, Statement, view_statements, read_statements, Rollback, U128_NONE};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use im::HashMap;
 use proptest::{proptest, prop_oneof, collection::vec, arbitrary::any, option};
 use proptest::strategy::Strategy;
@@ -32,6 +33,40 @@ pub fn are_all_elemenets_equal<E: PartialEq>(vec: &[E]) -> bool {
     }
   }
   true
+}
+
+pub fn view_rollback_ticks(rt: &Runtime) -> String {
+  fn view_rollback_ticks_go(rt: &Runtime, back: &Arc<Rollback>) -> Vec<Option<u128>> {
+    match &**back {
+      Rollback::Nil => {
+        return Vec::new()
+      }
+      Rollback::Cons { keep, head, tail, life } => {
+        let mut vec = view_rollback_ticks_go(&rt, tail);
+        let tick = rt.get_heap(*head).tick;
+        vec.push(Some(tick));
+        return vec;
+      }
+    }
+  }
+
+
+  let back = rt.get_back();
+  let ticks = view_rollback_ticks_go(rt, &back);
+  let elems = 
+    ticks
+      .iter()
+      .rev()
+      .map(|x| 
+        if let Some(x) = x {
+          format!("{}", if *x != U128_NONE { *x } else { 0 }) 
+        } else { 
+          "___________".to_string()
+        }
+      )
+      .collect::<Vec<String>>()
+      .join(", ");
+  return format!("[{}]", elems);
 }
 
 // Generate a checksum for a runtime state (for testing)
@@ -215,11 +250,21 @@ pub fn advanced_rollback_run_fail() {
 pub fn stack_overflow() { // caused by compute_at function
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
-  advance(&mut rt, 1, Some(COUNTER));
+  advance(&mut rt, 1000, Some(COUNTER));
 }
 
 #[test]
-#[ignore]
+#[ignore = "fix not done"]
+// TODO: fix drop stack overflow
+pub fn stack_overflow2() { // caused by drop of term
+  let mut rt = init_runtime();
+  rt.run_statements_from_code(PRE_COUNTER, false);
+  rt.run_statements_from_code(COUNTER_STACKOVERFLOW , false);
+}
+
+#[test]
+#[ignore = "fix not done"]
+// TODO: fix runtime persistence
 pub fn persistence1() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
@@ -246,7 +291,8 @@ pub fn persistence1() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "fix not done"]
+// TODO: fix runtime persistence
 pub fn persistence2() {
   let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
@@ -276,6 +322,11 @@ pub fn persistence2() {
 pub const PRE_COUNTER: &'static str = "
   ctr {Succ p}
   ctr {Zero}
+
+  fun (ToSucc n) {
+    (ToSucc #0) = {Zero}
+    (ToSucc n) = {Succ (ToSucc (- n #1))}
+  }
 
   fun (Add n) {
     (Add n) = {Succ n}
@@ -313,9 +364,23 @@ pub const COUNTER: &'static str = "
   }
 
   run {
-    !call ~ 'Count' [{Count.Inc}]
-    !call x 'Count' [{Count.Get}]
+    !call ~ 'Count' [{Count_Inc}]
+    !call x 'Count' [{Count_Get}]
     !done x
+  }
+";
+
+pub const SIMPLE_COUNT: &'static str = "
+  run {
+    !call ~ 'Count' [{Count_Inc}]
+    !call x 'Count' [{Count_Get}]
+    !done x
+  }
+";
+
+pub const COUNTER_STACKOVERFLOW: &'static str = "
+  run {
+    !done (ToSucc #8000)
   }
 ";
 
@@ -401,7 +466,19 @@ proptest!{
   #[test]
   fn parser(statements in vec(statement(), 0..10)) {
     let str = view_statements(&statements);
-    let (.., s1) = read_statements(&str);
+    let (.., s1) = read_statements(&str).unwrap();
     assert_eq!(statements, s1);
+  }
+}
+
+#[test]
+// #[ignore = "used for benchmark"]
+fn one_hundred_snapshots() {
+  // run this with rollback in each 4th snapshot
+  // note: this test has no state
+  let mut rt = init_runtime();
+  for i in 0..100000 {
+    rt.tick();
+    println!(" - tick: {}, - rollback: {}", rt.get_tick(), view_rollback_ticks(&rt));
   }
 }
