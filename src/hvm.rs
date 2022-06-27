@@ -1063,7 +1063,7 @@ impl Heap {
       let fnid = serial.file[i + 0];
       let size = serial.file[i + 1];
       let buff = &serial.file[i + 2 .. i + 2 + size as usize];
-      let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))),false).unwrap();
+      let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap(),false).unwrap();
       self.write_file(fnid, Arc::new(func));
       i = i + 2 + size as usize;
     }
@@ -4413,7 +4413,7 @@ pub fn print_io_consts() {
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &[Statement]) {
   let str_0 = view_statements(statements);
-  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)));
+  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)).unwrap());
 
   println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   println!("=====");

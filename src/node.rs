@@ -13,7 +13,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender, Receiver};
+
 use tokio::sync::oneshot;
+
+use std::hash::{BuildHasherDefault};
+use nohash_hasher::NoHashHasher;
 
 use crate::util::*;
 use crate::bits::*;
@@ -21,6 +25,33 @@ use crate::hvm::{self,*};
 
 // Types
 // -----
+
+// Kindelia's block format is agnostic to HVM. A Transaction is just a vector of bytes. A Body
+// groups transactions in a single combined vector of bytes, using the following format:
+//
+//   body ::= TX_COUNT | LEN_BYTE(tx_0) | tx_0 | LEN_BYTE(tx_1) | tx_1 | ...
+//
+// TX_COUNT is a single byte storing the number of transactions in this block. The length of each
+// transaction is stored using 1 byte, called LEN_BYTE. The actual number of bytes occupied by the
+// transaction is recovered through the following formula:
+//
+//   size(tx) = LEN_BYTE(tx) * 5 + 1
+//
+// For example, LEN_BYTE(tx) is 3, then it occupies 16 bytes on body (excluding the LEN_BYTE). In
+// other words, this means that transactions are stored in multiples of 40 bits, so, for example,
+// if a transaction has 42 bits, it actually uses 88 bits of the Body: 8 bits for the length and 80
+// bits for the value, of which 38 are not used. The max transaction size is 1280 bytes, and the
+// max number of transactions a block could fit is 256 (but slightly less due to lengths).
+
+// A u64 HashMap / HashSet
+pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
+pub type Set    = HashSet<u64, BuildHasherDefault<NoHashHasher<u64>>>;
+
+#[derive(Debug, Clone)]
+pub struct Transaction {
+  pub data: Vec<u8>,
+  pub hash: U256,
+}
 
 // TODO: store number of used bits
 #[derive(Debug, Clone, PartialEq)]
@@ -36,8 +67,6 @@ pub struct Block {
   pub body: Body, // block contents (1280 bytes) 
 }
 
-pub type Transaction = Vec<u8>;
-
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 // TODO: dashmap?
 //
@@ -50,6 +79,11 @@ pub type Transaction = Vec<u8>;
 //   yes            | yes             | no            | pending  : downloaded, but waiting ancestors for inclusion
 //   no             | yes             | yes           | included : fully included, as well as all its ancestors
 //
+// The was_mined field stores which transactions were mined, to avoid re-inclusion. It is NOT
+// reversible, though. As such, if a transaction is included, then there is a block reorg that
+// drops it, then this node will NOT try to mine it again. It can still be mined by other nodes, or
+// re-submitted. FIXME: `was_mined` should be removed. Instead, we just need a priority-queue with
+// fast removal of mined transactions. An immutable map should suffice.
 pub struct Node {
   pub path       : PathBuf,                          // path where files are saved
   pub socket     : UdpSocket,                        // UDP socket
@@ -63,8 +97,8 @@ pub struct Node {
   pub target     : U256Map<U256>,                    // block_hash -> this block's target
   pub height     : U256Map<u128>,                    // block_hash -> cached height
   pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
-  pub was_mined  : U256Map<HashSet<Transaction>>,    // block_hash -> set of transaction hashes that were already mined
-  pub pool       : PriorityQueue<Transaction, u128>, // transactions to be mined
+  pub was_mined  : Set,                              // transaction_hash -> was it mined?
+  pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,           // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,              // peer id -> peer
   pub peer_idx   : u128,                             // peer id counter
@@ -131,15 +165,15 @@ pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Message {
-  PutBlock {
+  NoticeThisBlock {
     block: Block,
     istip: bool,
     peers: Vec<Peer>,
   },
-  AskBlock {
+  GiveMeThatBlock {
     bhash: Hash
   },
-  MineTransaction {
+  PleaseMineThisTransaction {
     trans: Transaction
   }
 }
@@ -224,10 +258,12 @@ pub const LAST_SEEN_SIZE : u128 = 2;
 // UDP
 // ===
 
+// An IPV4 Address
 pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
   Address::IPv4 { val0, val1, val2, val3, port }
 }
 
+// Starts listening to UDP messsages on a set of ports
 pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   for port in ports {
     if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
@@ -238,6 +274,7 @@ pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   return None;
 }
 
+// Sends an UDP message
 pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
   match address {
     Address::IPv4 { val0, val1, val2, val3, port } => {
@@ -248,22 +285,25 @@ pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
   }
 }
 
-pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
+// Receives an UDP messages
+// Non-blocking, returns a vector of received messages on buffer
+pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
   let mut buffer = [0; 65536];
   let mut messages = Vec::new();
   while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
     let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
-    let msge = deserialized_message(&bits);
-    let addr = match sender_addr.ip() {
-      std::net::IpAddr::V4(v4addr) => {
-        let [val0, val1, val2, val3] = v4addr.octets();
-        Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
-      }
-      _ => {
-        panic!("TODO: IPv6")
-      }
-    };
-    messages.push((addr, msge));
+    if let Some(msge) = deserialized_message(&bits) {
+      let addr = match sender_addr.ip() {
+        std::net::IpAddr::V4(v4addr) => {
+          let [val0, val1, val2, val3] = v4addr.octets();
+          Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
+        }
+        _ => {
+          panic!("TODO: IPv6")
+        }
+      };
+      messages.push((addr, msge));
+    }
   }
   return messages;
 }
@@ -271,6 +311,7 @@ pub fn udp_receive(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
 // Stringification
 // ===============
 
+// Converts a string to an address
 pub fn read_address(code: &str) -> Address {
   let strs = code.split(':').collect::<Vec<&str>>();
   let vals = strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
@@ -284,6 +325,7 @@ pub fn read_address(code: &str) -> Address {
   }
 }
 
+// Shows an address's hostname
 pub fn show_address_hostname(address: &Address) -> String {
   match address {
     Address::IPv4{ val0, val1, val2, val3, port } => {
@@ -295,18 +337,23 @@ pub fn show_address_hostname(address: &Address) -> String {
 // Algorithms
 // ----------
 
+// Converts a target to a difficulty (see below)
 pub fn target_to_difficulty(target: U256) -> U256 {
   let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
   return p256 / (p256 - target);
 }
 
+// Converts a difficulty to a target (see below)
 pub fn difficulty_to_target(difficulty: U256) -> U256 {
   let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
   return p256 - p256 / difficulty;
 }
 
-// Computes next target by scaling the current difficulty by a `scale` factor
-// Since the factor is an integer, it is divided by 2^32 to allow integer division
+// Target is a U256 number. A hash larger than or equal to that number hits the target.
+// Difficulty is an estimation of how many hashes it takes to hit a given target.
+
+// Computes next target by scaling the current difficulty by a `scale` factor.
+// Since the factor is an integer, it is divided by 2^32 to allow integer division.
 // - compute_next_target(t, 2n**32n / 2n): difficulty halves
 // - compute_next_target(t, 2n**32n * 1n): nothing changes
 // - compute_next_target(t, 2n**32n * 2n): difficulty doubles
@@ -317,10 +364,12 @@ pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
   return difficulty_to_target(next_difficulty);
 }
 
+// Computes the next target, scaling by a floating point factor.
 pub fn compute_next_target_f64(last_target: U256, scale: f64) -> U256 {
-  return compute_next_target(last_target, u256((scale * 4294967296.0) as u128));
+  return compute_next_target(last_target, u256(scale as u128));
 }
 
+// Estimates how many hashes were necessary to get this one.
 pub fn get_hash_work(hash: U256) -> U256 {
   if hash == u256(0) {
     return u256(0);
@@ -329,10 +378,12 @@ pub fn get_hash_work(hash: U256) -> U256 {
   }
 }
 
+// Hashes a U256 value.
 pub fn hash_u256(value: U256) -> U256 {
   return hash_bytes(u256_to_bytes(value).as_slice());
 }
 
+// Hashes a byte array.
 pub fn hash_bytes(bytes: &[u8]) -> U256 {
   let mut hasher = sha3::Keccak256::new();
   hasher.update(&bytes);
@@ -340,6 +391,7 @@ pub fn hash_bytes(bytes: &[u8]) -> U256 {
   return U256::from_little_endian(&hash);
 }
 
+// Hashes a block.
 pub fn hash_block(block: &Block) -> U256 {
   if block.time == 0 {
     return hash_bytes(&[]);
@@ -353,12 +405,7 @@ pub fn hash_block(block: &Block) -> U256 {
   }
 }
 
-// Converts a string to a body, terminating with a null character.
-// Truncates if the string length is larger than BODY_SIZE-1.
-//pub fn string_to_body(text: &str) -> Body {
-  //return bytes_to_body(text.as_bytes());
-//}
-
+// Converts a byte array to a Body.
 pub fn bytes_to_body(bytes: &[u8]) -> Body {
   let mut body = Body { value: [0; BODY_SIZE] };
   let size = std::cmp::min(BODY_SIZE, bytes.len());
@@ -366,6 +413,7 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
   return body;
 }
 
+// Converts a string (with a list of statements) to a body.
 pub fn code_to_body(code: &str) -> Body {
   let (_rest, acts) = crate::hvm::read_statements(code).unwrap(); // TODO: handle error
   let bits = serialized_statements(&acts);
@@ -373,6 +421,7 @@ pub fn code_to_body(code: &str) -> Body {
   return body;
 }
 
+// Converts a Body back to a string.
 pub fn body_to_string(body: &Body) -> String {
   match std::str::from_utf8(&body.value) {
     Ok(s)  => s.to_string(),
@@ -380,26 +429,44 @@ pub fn body_to_string(body: &Body) -> String {
   }
 }
 
+// Converts a body to a vector of transactions.
+pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
+  let mut transactions = Vec::new();
+  let mut index = 1;
+  let tx_count = body.value[0];
+  for i in 0 .. tx_count {
+    if index >= BODY_SIZE { break; }
+    let len_byte = body.value[index];
+    index += 1;
+    let len_used = Transaction::len_byte_to_len(len_byte);
+    if index + len_used > BODY_SIZE { break; }
+    transactions.push(Transaction::new(body.value[index .. index + len_used].to_vec()));
+    index += len_used;
+  }
+  return transactions;
+}
+
 // Initial target of 256 hashes per block
 pub fn INITIAL_TARGET() -> U256 {
   return difficulty_to_target(u256(INITIAL_DIFFICULTY));
 }
 
+// The hash of the genesis block's parent.
 pub fn ZERO_HASH() -> U256 {
   return hash_u256(u256(0)); // why though
 }
 
+// The genesis block.
 pub fn GENESIS_BLOCK() -> Block {
   return Block {
     prev: ZERO_HASH(),
     time: 0,
     rand: 0,
-    body: Body {
-      value: [0; 1280]
-    }
+    body: Body { value: [0; 1280] }
   }
 }
 
+// Converts a block to a string.
 pub fn show_block(block: &Block) -> String {
   let hash = hash_block(block);
   return format!(
@@ -411,6 +478,43 @@ pub fn show_block(block: &Block) -> String {
     hex::encode(u256_to_bytes(hash)),
     get_hash_work(hash),
   );
+}
+
+impl Transaction {
+  pub fn new(mut data: Vec<u8>) -> Self {
+    // Transaction length is always a non-zero multiple of 5
+    while data.len() == 0 || data.len() % 5 != 0 {
+      data.push(0);
+    }
+    let hash = hash_bytes(&data);
+    return Transaction { data, hash };
+  }
+
+  pub fn len_byte(&self) -> u8 {
+    return ((self.data.len() - 1) / 5) as u8;
+  }
+
+  pub fn len_byte_to_len(len_byte: u8) -> usize {
+    return ((len_byte + 1) * 5) as usize;
+  }
+
+  pub fn to_statement(&self) -> Option<Statement> {
+    return deserialized_statement(&BitVec::from_bytes(&self.data));
+  }
+}
+
+impl PartialEq for Transaction {
+  fn eq(&self, other: &Self) -> bool {
+    self.hash == other.hash
+  }
+}
+
+impl Eq for Transaction {}
+
+impl std::hash::Hash for Transaction {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.hash.hash(state);
+  }
 }
 
 // Mining
@@ -482,7 +586,7 @@ impl Node {
       target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
       results    : HashMap::from([(ZERO_HASH(), vec![])]),
       tip        : ZERO_HASH(),
-      was_mined  : HashMap::new(),
+      was_mined  : HashSet::with_hasher(BuildHasherDefault::default()),
       pool       : PriorityQueue::new(),
       peer_id    : HashMap::new(),
       peers      : HashMap::new(),
@@ -616,6 +720,10 @@ impl Node {
           } else {
             self.target.insert(bhash, self.target[&phash]);
           }
+          // Flags this block's transactions as mined
+          for tx in extract_transactions(&block.body) {
+            self.was_mined.insert(tx.hash.low_u64());
+          }
           // Updates the tip work and block hash
           let old_tip = self.tip;
           let new_tip = bhash;
@@ -694,12 +802,18 @@ impl Node {
   }
 
   pub fn compute_block(&mut self, block: &Block) {
-    let bits = BitVec::from_bytes(&block.body.value);
-    let acts = deserialized_statements(&bits);
-    //println!("Computing block:\n{}", view_statements(&acts));
-    let res = self.runtime.run_statements(&acts, false);
-    let bhash = hash_block(block);
-    self.results.insert(bhash, res);
+    //println!("Computing block...");
+    //println!("==================");
+    let transactions = extract_transactions(&block.body);
+    let mut statements = Vec::new();
+    for transaction in transactions {
+      if let Some(statement) = transaction.to_statement() {
+        //println!("- {}", view_statement(&statement));
+        statements.push(statement);
+      }
+    }
+    let result = self.runtime.run_statements(&statements, false);
+    self.results.insert(hash_block(block), result);
     self.runtime.tick();
   }
 
@@ -723,7 +837,7 @@ impl Node {
   }
 
   pub fn receive_message(&mut self) {
-    for (addr, msg) in udp_receive(&mut self.socket) {
+    for (addr, msg) in udp_recv(&mut self.socket) {
       self.handle_message(addr, &msg);
     }
   }
@@ -734,7 +848,7 @@ impl Node {
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).expect("Missing block result.").clone();
     let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-    let content = crate::bits::deserialize_statements(&bits, &mut 0);
+    let content = crate::bits::deserialize_statements(&bits, &mut 0).unwrap_or(Vec::new());
     let info = BlockInfo {
       block: block.clone(),
       hash: *hash,
@@ -789,7 +903,7 @@ impl Node {
   // FIXME: instead of sharing random peers, share recently active peers
   pub fn send_block_to(&mut self, addr: Address, block: Block, istip: bool) {
     //println!("- sending block: {:?}", block);
-    let msg = Message::PutBlock {
+    let msg = Message::NoticeThisBlock {
       block: block,
       istip: istip,
       peers: self.get_random_peers(3),
@@ -802,7 +916,7 @@ impl Node {
       self.see_peer(Peer { address: addr, seen_at: get_time() });
       match msg {
         // Someone asked a block
-        Message::AskBlock { bhash } => {
+        Message::GiveMeThatBlock { bhash } => {
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
           let mut chunk = vec![];
@@ -815,7 +929,7 @@ impl Node {
           }
         }
         // Someone sent us a block
-        Message::PutBlock { block, istip, peers } => {
+        Message::NoticeThisBlock { block, istip, peers } => {
           // Adds the block to the database
           self.add_block(&block);
 
@@ -849,13 +963,17 @@ impl Node {
                 missing = self.waiting[&missing].prev;
               }
               println!("ask missing: {} {:x}", count, missing);
-              udp_send(&mut self.socket, addr, &Message::AskBlock { bhash: missing })
+              udp_send(&mut self.socket, addr, &Message::GiveMeThatBlock { bhash: missing })
             }
           }
         }
         // Someone sent us a transaction to mine
-        Message::MineTransaction { trans } => {
-          self.pool.push(trans.clone(), (hash_bytes(trans) >> 128).low_u128());
+        Message::PleaseMineThisTransaction { trans } => {
+          //println!("- Transaction added to pool:");
+          //println!("-- {:?}", trans.data);
+          //println!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
+          self.was_mined.remove(&trans.hash.low_u64());
+          self.pool.push(trans.clone(), trans.hash.low_u64());
         }
       }
     }
@@ -902,12 +1020,16 @@ impl Node {
     println!("Loading {} blocks from disk...", file_paths.len());
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
-      let block = deserialized_block(&bytes_to_bitvec(&buffer));
+      let block = deserialized_block(&bytes_to_bitvec(&buffer)).unwrap();
       self.add_block(&block);
     }
   }
 
   fn ask_mine(&self, miner_comm: &SharedMinerComm, body: Body) {
+    //println!("Asking miner to mine:");
+    //for transaction in extract_transactions(&body) {
+      //println!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
+    //}
     write_miner_comm(miner_comm, MinerComm::Request {
       prev: self.tip,
       body,
@@ -915,19 +1037,41 @@ impl Node {
     });
   }
 
+  // Builds the body to be mined.
+  pub fn build_body(&self) -> Body {
+    let mut body_val : [u8; BODY_SIZE] = [0; BODY_SIZE]; 
+    let mut body_len = 1;
+    let mut tx_count = 0;
+    for (transaction, score) in self.pool.iter() {
+      if !self.was_mined.contains(&transaction.hash.low_u64()) {
+        let len_real = transaction.data.len(); // how many bytes the original transaction has
+        if len_real == 0 { continue; }
+        let len_byte = transaction.len_byte(); // number we will store as the byte_len value
+        let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
+        if body_len + 1 + len_used > BODY_SIZE { break; }
+        body_val[body_len] = len_byte as u8;
+        body_len += 1;
+        body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
+        body_len += len_used;
+        tx_count += 1;
+      }
+    }
+    body_val[0] = tx_count;
+    return Body { value: body_val };
+  }
+
   pub fn main(
     mut self,
     kindelia_path: PathBuf,
     miner_comm: SharedMinerComm,
-    mine_file: Option<String>,
   ) -> ! {
     const TICKS_PER_SEC: u64 = 100;
 
     let mut tick: u64 = 0;
     let mut mined: u64 = 0;
 
-    let init_body = code_to_body("");
-    let mine_body = mine_file.map(|x| code_to_body(&x));
+    //let init_body = code_to_body("");
+    //let mine_body = mine_file.map(|x| code_to_body(&x));
 
     // Loads all stored blocks
     println!("Port: {}", self.port);
@@ -960,16 +1104,13 @@ impl Node {
         }
 
         // Receives and handles incoming network messages
-        // if tick % 1 == 0 {
-        self.receive_message();
-        // }
+        if tick % 1 == 0 {
+          self.receive_message();
+        }
 
         // Asks the miner thread to mine a block
-        if tick % 10 == 0 {
-          // This branch is here for testing purposes. FIXME: remove
-          if let Some(mine_body) = &mine_body {
-            self.ask_mine(&miner_comm, mine_body.clone()); // FIXME: avoid clone
-          }
+        if tick % (1 * TICKS_PER_SEC) == 0 {
+          self.ask_mine(&miner_comm, self.build_body());
         }
 
         // Peer timeout

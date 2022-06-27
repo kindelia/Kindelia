@@ -1,5 +1,7 @@
 run {
   !call ~ 'Count' [{Count_Inc}]
+  !call ~ 'Count' [{Count_Inc}]
+  !call ~ 'Count' [{Count_Inc}]
   !call x 'Count' [{Count_Get}]
   !done x
 }

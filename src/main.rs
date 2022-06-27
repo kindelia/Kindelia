@@ -28,16 +28,8 @@ use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  //let name = name_to_u128("Hello.Foo.Bar.ball");
-  //let ns = name;
-  //let ns = hvm::get_namespace(ns).unwrap();
-  //let ns = hvm::get_namespace(ns).unwrap();
-  //let ns = hvm::get_namespace(ns).unwrap();
-  //println!("{:?}", hvm::u128_to_name(ns));
-  //return Ok(());
-  //hvm::print_io_consts();
   return run_cli();
-  //start_node(dirs::home_dir().unwrap().join(".kindelia"), Some("example/simple.kdl".to_string()));
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"));
   // hvm::test_statements_from_file("./example/block_4.kdl");
   //return Ok(());
 }
@@ -59,9 +51,9 @@ pub struct Cli {
 pub enum CliCmd {
   /// Starts a Kindelia node
   Start {
-    /// Source of code that will be executed on mined blocks
+    // /// Source of code that will be executed on mined blocks
     //#[clap(short, long)]
-    file: Option<String>,
+    //file: Option<String>,
   },
   /// Runs a Kindelia file
   Run {
@@ -70,6 +62,11 @@ pub enum CliCmd {
     // #[clap(short, long)]
     // debug: bool,
   },
+  /// Prints the address and subject of a secret key
+  Subject {
+    /// File containing the 256-bit secret key, as a hex string
+    skey_file: String,
+  },
   /// Signs the last statement in a file
   Sign {
     /// File containing the statement to be signed
@@ -77,10 +74,12 @@ pub enum CliCmd {
     /// File containing the 256-bit secret key, as a hex string
     skey_file: String,
   },
-  /// Prints the address and subject of a secret key
-  Subject {
-    /// File containing the 256-bit secret key, as a hex string
-    skey_file: String,
+  /// Posts the last statement in a file to the network
+  Post {
+    /// File where the statement is
+    term_file: String,
+    /// IP of the node to submit it to
+    node_addr: String,
   },
 }
 
@@ -114,9 +113,9 @@ fn run_cli() -> Result<(), String> {
 
   match arguments.command {
     // Starts the node process
-    CliCmd::Start { file } => {
+    CliCmd::Start { } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
-      start_node(kindelia_path, file);
+      start_node(kindelia_path);
     }
 
     // Runs a single block, for testing
@@ -165,6 +164,30 @@ fn run_cli() -> Result<(), String> {
       }
     }
 
+    // Signs a run statement
+    CliCmd::Post { term_file, node_addr } => {
+      if let Ok(code) = std::fs::read_to_string(term_file) {
+        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
+        let statements = statements.1;
+        if let Some(last_statement) = &statements.last() {
+          let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(last_statement)));
+          let ms = Message::PleaseMineThisTransaction { trans: tx };
+          let ip = read_address(&node_addr);
+          let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
+          if let Some((mut socket, port)) = udp_init(&ports) {
+            udp_send(&mut socket, ip, &ms);
+            println!("Sent statement to {} via UDP:\n\n{}", node_addr, view_statement(last_statement));
+            return Ok(());
+          } else {
+            panic!("Couldn't open UDP socket on ports: {:?}.", ports);
+          }
+        }
+        panic!("File must have at least one statement.");
+      } else {
+        println!("Couldn't load term and secret key files.");
+      }
+    }
+
     // Prints the subject
     CliCmd::Subject { skey_file } => {
       if let Ok(skey) = std::fs::read_to_string(skey_file) {
@@ -180,9 +203,9 @@ fn run_cli() -> Result<(), String> {
   Ok(())
 }
 
-fn start_node(kindelia_path: PathBuf, file: Option<String>) {
+fn start_node(kindelia_path: PathBuf) {
   // Reads the file contents
-  let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
+  //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
   let (node_query_sender, node) = Node::new(kindelia_path.clone());
@@ -197,7 +220,7 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
     //Node::node_loop(node, kindelia_path.clone(), miner_comm_0, file);
-    node.main(kindelia_path.clone(), miner_comm_0, file);
+    node.main(kindelia_path.clone(), miner_comm_0);
   });
 
   // Spawns the miner thread

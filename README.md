@@ -28,16 +28,21 @@ cargo install --path .
 Usage
 -----
 
-1. Testing a block offline:
-
-```
-kindelia run example/example.kindelia
-```
-
-2. Starting a node:
+1. Starting a node:
 
 ```
 kindelia start
 ```
 
-Note: node communication and consensus still in development.
+
+2. Running a block (offline):
+
+```
+kindelia run example/example.kdl
+```
+
+3. Posting a transaction:
+
+```
+kindelia post example/post.kdl 127.0.0.1:42000
+```
