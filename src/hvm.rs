@@ -375,7 +375,7 @@ pub struct Store {
 }
 
 /// A global statement that alters the state of the blockchain
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement {
   Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: u128, args: Vec<u128>, sign: Option<crypto::Signature> },
@@ -484,6 +484,14 @@ pub struct StatementErr {
   pub err: String,
 }
 
+pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
+
+#[derive(Debug, Clone)]
+pub struct ParseErr {
+  pub code: String,
+  pub erro: String,
+}
+
 // Constants
 // ---------
 
@@ -502,6 +510,7 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 #[cfg(not(debug_assertions))]
 const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
 const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
+const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapshots
 
 // Use smaller heaps for debug/development builds
 #[cfg(debug_assertions)]
@@ -1317,7 +1326,13 @@ impl Runtime {
   }
 
   pub fn alloc_term_from_code(&mut self, code: &str) -> u128 {
-    self.alloc_term(&read_term(code).1)
+    let term = read_term(code);
+    match term {
+      Ok((.., term)) => {
+        return self.alloc_term(&term);
+      }
+      Err(err) => 0 // TODO: what should we do here?
+    }
   }
 
   pub fn collect(&mut self, term: Ptr) {
@@ -1343,7 +1358,13 @@ impl Runtime {
   }
 
   pub fn run_statements_from_code(&mut self, code: &str, silent: bool) -> Vec<StatementResult> {
-    return self.run_statements(&read_statements(code).1, silent);
+    let stataments = read_statements(code);
+    match stataments {
+      Ok((.., statements)) => self.run_statements(&statements, silent),
+      Err(ParseErr { erro , .. }) => {
+        return vec![Err(StatementErr { err: erro })];
+      }
+    }
   }
 
   pub fn compute_at(&mut self, loc: u128, mana: u128) -> Option<Ptr> {
@@ -1611,7 +1632,7 @@ impl Runtime {
         let mana_dif = self.get_mana() - mana_ini;
         let size_dif = size_end - size_ini;
         if size_end > size_lim {
-          return error(self, "fun", format!("Size limit exceeded."));
+          return error(self, "run", format!("Size limit exceeded."));
         }
         self.draw();
         if !silent {
@@ -2041,7 +2062,7 @@ impl Runtime {
 // - deleted  : Option<Box<u64>> = the index of the dropped heap (if any)
 // - rollback : Rollback         = the updated rollback object
 pub fn rollback_push(elem: u64, back: Arc<Rollback>, depth: u64) -> (bool, Option<u64>, Option<u64>, Arc<Rollback>) {
-  if depth >= MAX_HEAPS {
+  if depth >= MAX_ROLLBACK {
     return (false, None, Some(elem), Arc::new(Rollback::Nil));
   } else {
     match &*back {
@@ -3760,16 +3781,19 @@ fn is_name_char(chr: char) -> bool {
       || chr >= '0' && chr <= '9';
 }
 
-pub fn read_char(code: &str, chr: char) -> (&str, ()) {
+pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
   let code = skip(code);
   if head(code) == chr {
-    return (tail(code), ());
+    Ok((tail(code), ()))
   } else {
-    panic!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(256).collect::<String>());
+    Err(ParseErr {
+      erro: format!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(256).collect::<String>()),
+      code: code.to_string(),
+    })
   }
 }
 
-pub fn read_numb(code: &str) -> (&str, u128) {
+pub fn read_numb(code: &str) -> ParseResult<u128> {
   let mut code = skip(code);
   if head(code) == 'x' {
     code = tail(code);
@@ -3789,22 +3813,22 @@ pub fn read_numb(code: &str) -> (&str, u128) {
         break;
       }
     }
-    return (code, numb);
+    return Ok((code, numb));
   } else {
     let mut numb = 0;
     while head(code) >= '0' && head(code) <= '9' {
       numb = numb * 10 + head(code) as u128 - 0x30;
       code = tail(code);
     }
-    return (code, numb);
+    return Ok((code, numb));
   }
 }
 
-pub fn read_name(code: &str) -> (&str, u128) {
+pub fn read_name(code: &str) -> ParseResult<u128> {
   let code = skip(code);
   let mut name = String::new();
   if head(code) == '~' {
-    return (tail(code), VAR_NONE);
+    return Ok((tail(code), VAR_NONE));
   } else {
     let mut code = code;
     while is_name_char(head(code)) {
@@ -3812,14 +3836,23 @@ pub fn read_name(code: &str) -> (&str, u128) {
       code = tail(code);
     }
     if name.is_empty() {
-      panic!("Expected identifier, found `{}`.", head(code));
+      return Err(ParseErr {
+        code: code.to_string(),
+        erro: format!("Expected identifier, found `{}`.", head(code))
+      });
     }
     // TODO: check identifier size and propagate error
-    return (code, name_to_u128(&name));
+    if name.len() > 20 {
+      return Err(ParseErr {
+        code: code.to_string(),
+        erro: format!("Identifier too long: {}", name)
+      });
+    }
+    return Ok((code, name_to_u128(&name)));
   }
 }
 
-pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
+pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
   let mut data : Vec<u8> = Vec::new();
   let mut code = skip(code);
   while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
@@ -3827,7 +3860,7 @@ pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
     code = drop(code, 2);
     code = skip(code);
   }
-  return (code, data);
+  return Ok((code, data));
 }
 
 /// Converts a name to a number, using the following table:
@@ -3838,23 +3871,25 @@ pub fn read_hex(code: &str) -> (&str, Vec<u8>) {
 /// 'a' - 'z' => 37 to 62
 /// '_'       => 63
 /// ```
+/// Panics when name length > 20.
 pub fn name_to_u128(name: &str) -> u128 {
   let mut num: u128 = 0;
   for (i, chr) in name.chars().enumerate() {
     debug_assert!(i < 20, "Name too big: `{}`.", name);
-    if chr == '.' {
-      num = num * 64 + 0;
-    } else if chr >= '0' && chr <= '9' {
-      num = num * 64 + 1 + chr as u128 - '0' as u128;
-    } else if chr >= 'A' && chr <= 'Z' {
-      num = num * 64 + 11 + chr as u128 - 'A' as u128;
-    } else if chr >= 'a' && chr <= 'z' {
-      num = num * 64 + 37 + chr as u128 - 'a' as u128;
-    } else if chr == '_' {
-      num = num * 64 + 63;
-    }
+    num = (num << 6) + char_to_u128(chr);
   }
   return num;
+}
+
+pub const fn char_to_u128(chr: char) -> u128 {
+  match chr {
+    '.'       =>  0,
+    '0'..='9' =>  1 + chr as u128 - '0' as u128,
+    'A'..='Z' => 11 + chr as u128 - 'A' as u128,
+    'a'..='z' => 37 + chr as u128 - 'a' as u128,
+    '_'       => 63,
+    _         => panic!("Invalid name character."),
+  }
 }
 
 /// Inverse of `name_to_u128`
@@ -3878,157 +3913,160 @@ pub fn u128_to_name(num: u128) -> String {
   name.chars().rev().collect()
 }
 
-pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> (&str, A)) -> (&str, Vec<A>) {
+pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -> ParseResult<Vec<A>> {
   let mut elems = Vec::new();
   let mut code = code;
   while code.len() > 0 && head(skip(code)) != stop {
-    let (new_code, elem) = read(code);
+    let (new_code, elem) = read(code)?;
     code = new_code;
     elems.push(elem);
   }
   code = tail(skip(code));
-  return (code, elems);
+  return Ok((code, elems));
 }
 
-pub fn read_term(code: &str) -> (&str, Term) {
+pub fn read_term(code: &str) -> ParseResult<Term> {
   let code = skip(code);
   match head(code) {
     '@' => {
       let code         = tail(code);
-      let (code, name) = read_name(code);
-      let (code, body) = read_term(code);
-      return (code, Term::Lam { name, body: Box::new(body) });
+      let (code, name) = read_name(code)?;
+      let (code, body) = read_term(code)?;
+      return Ok((code, Term::Lam { name, body: Box::new(body) }));
     },
     '(' => {
       let code = tail(code);
       let (code, oper) = read_oper(code);
       if let Some(oper) = oper {
         let code = tail(code);
-        let (code, val0) = read_term(code);
-        let (code, val1) = read_term(code);
-        let (code, unit) = read_char(code, ')');
-        return (code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) });
+        let (code, val0) = read_term(code)?;
+        let (code, val1) = read_term(code)?;
+        let (code, unit) = read_char(code, ')')?;
+        return Ok((code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) }));
       } else if head(code) == '!' {
         let code = tail(code);
-        let (code, func) = read_term(code);
-        let (code, argm) = read_term(code);
-        let (code, unit) = read_char(code, ')');
-        return (code, Term::App { func: Box::new(func), argm: Box::new(argm) });
+        let (code, func) = read_term(code)?;
+        let (code, argm) = read_term(code)?;
+        let (code, unit) = read_char(code, ')')?;
+        return Ok((code, Term::App { func: Box::new(func), argm: Box::new(argm) }));
       } else {
-        let (code, name) = read_name(code);
-        let (code, args) = read_until(code, ')', read_term);
+        let (code, name) = read_name(code)?;
+        let (code, args) = read_until(code, ')', read_term)?;
         // TODO: check function name size _on direct calling_, and propagate error
-        return (code, Term::Fun { name, args });
+        return Ok((code, Term::Fun { name, args }));
       }
     },
     '{' => {
       let code = tail(code);
-      let (code, name) = read_name(code);
-      let (code, args) = read_until(code, '}', read_term);
-      return (code, Term::Ctr { name, args });
+      let (code, name) = read_name(code)?;
+      let (code, args) = read_until(code, '}', read_term)?;
+      return Ok((code, Term::Ctr { name, args }));
     },
     '[' => {
       let code = tail(code);
-      let (code, vals) = read_until(code, ']', read_term);
+      let (code, vals) = read_until(code, ']', read_term)?;
       if vals.len() <= 12 { 
-        return (code, Term::Ctr {
+        return Ok((code, Term::Ctr {
           name: name_to_u128(&format!("Tuple{}", vals.len())),
           args: vals
-        });
+        }));
       } else {
-        panic!("Tuple too long.");
+        return Err(ParseErr { code: code.to_string(), erro: "Tuple too long".to_string() });
       }
     },
     '#' => {
       let code = tail(code);
-      let (code, numb) = read_numb(code);
-      return (code, Term::Num { numb });
+      let (code, numb) = read_numb(code)?;
+      return Ok((code, Term::Num { numb }));
     },
     '\'' => {
       let code = tail(code);
-      let (code, numb) = read_name(code);
-      let (code, unit) = read_char(code, '\'');
-      return (code, Term::Num { numb });
+      let (code, numb) = read_name(code)?;
+      let (code, unit) = read_char(code, '\'')?;
+      return Ok((code, Term::Num { numb }));
     },
     '!' => {
       let code = tail(code);
-      let (code, macro_name) = read_name(code);
+      let (code, macro_name) = read_name(code)?;
       match macro_name {
         MC_DONE => {
-          let (code, expr) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, expr) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_DONE"),
             args: vec![expr],
-          });
+          }));
         }
         MC_TAKE => {
-          let (code, bind) = read_name(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, bind) = read_name(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_TAKE"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          });
+          }));
         }
         MC_LOAD => {
-          let (code, bind) = read_name(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Fun {
+          let (code, bind) = read_name(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Fun {
             name: name_to_u128("io_load"), // attention: lowercase, because it is a function call
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          });
+          }));
         }
         MC_SAVE => {
-          let (code, expr) = read_term(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, expr) = read_term(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_SAVE"),
             args: vec![expr, Term::Lam { name: VAR_NONE, body: Box::new(then) }],
-          });
+          }));
         }
         MC_CALL => {
-          let (code, bind) = read_name(code);
-          let (code, func) = read_term(code);
-          let (code, args) = read_term(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, bind) = read_name(code)?;
+          let (code, func) = read_term(code)?;
+          let (code, args) = read_term(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_CALL"),
             args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
-          });
+          }));
         }
         MC_SUBJ => {
-          let (code, bind) = read_name(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, bind) = read_name(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_SUBJ"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          });
+          }));
         }
         MC_FROM => {
-          let (code, bind) = read_name(code);
-          let (code, then) = read_term(code);
-          return (code, Term::Ctr {
+          let (code, bind) = read_name(code)?;
+          let (code, then) = read_term(code)?;
+          return Ok((code, Term::Ctr {
             name: name_to_u128("IO_FROM"),
             args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          });
+          }));
         }
         _ => {
-          panic!("Unknown macro: {}.", u128_to_name(macro_name));
+          return Err(ParseErr { 
+            code: code.to_string(), 
+            erro: format!("Unknown macro: {}", u128_to_name(macro_name))
+          });
         }
       }
     },
     _ => {
       if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,3);
-        let (code, nam0) = read_name(code);
-        let (code, nam1) = read_name(code);
-        let (code, unit) = read_char(code, '=');
-        let (code, expr) = read_term(code);
-        let (code, unit) = read_char(code, ';');
-        let (code, body) = read_term(code);
-        return (code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) });
+        let (code, nam0) = read_name(code)?;
+        let (code, nam1) = read_name(code)?;
+        let (code, unit) = read_char(code, '=')?;
+        let (code, expr) = read_term(code)?;
+        let (code, unit) = read_char(code, ';')?;
+        let (code, body) = read_term(code)?;
+        return Ok((code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) }));
       } else {
-        let (code, name) = read_name(code);
-        return (code, Term::Var { name });
+        let (code, name) = read_name(code)?;
+        return Ok((code, Term::Var { name }));
       }
     }
   }
@@ -4068,100 +4106,106 @@ pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
   }
 }
 
-pub fn read_rule(code: &str) -> (&str, Rule) {
-  let (code, lhs) = read_term(code);
-  let (code, ())  = read_char(code, '=');
-  let (code, rhs) = read_term(code);
-  return (code, Rule{lhs, rhs});
+pub fn read_rule(code: &str) -> ParseResult<Rule> {
+  let (code, lhs) = read_term(code)?;
+  let (code, ())  = read_char(code, '=')?;
+  let (code, rhs) = read_term(code)?;
+  return Ok((code, Rule{lhs, rhs}));
 }
 
-pub fn read_rules(code: &str) -> (&str, Vec<Rule>) {
-  let (code, rules) = read_until(code, '\0', read_rule);
-  return (code, rules);
+pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
+  let (code, rules) = read_until(code, '\0', read_rule)?;
+  return Ok((code, rules));
 }
 
-pub fn read_func(code: &str) -> (&str, CompFunc) {
-  let (code, rules) = read_until(code, '\0', read_rule);
+pub fn read_func(code: &str) -> ParseResult<CompFunc> {
+  let (code, rules) = read_until(code, '\0', read_rule)?;
   if let Some(func) = build_func(&rules, false) {
-    return (code, func);
+    return Ok((code, func));
   } else {
-    panic!("Couldn't parse function.");
+    return Err(ParseErr { 
+      code: code.to_string(), 
+      erro: "Couldn't parse function".to_string()
+    });
   }
 }
 
-pub fn read_sign(code: &str) -> (&str, Option<crypto::Signature>) {
+pub fn read_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
   let code = skip(code);
   if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
     let code = drop(code,4);
-    let (code, unit) = read_char(code, '{');
-    let (code, sign) = read_hex(code);
-    let (code, unit) = read_char(code, '}');
+    let (code, unit) = read_char(code, '{')?;
+    let (code, sign) = read_hex(code)?;
+    let (code, unit) = read_char(code, '}')?;
     if sign.len() == 65 {
-      return (code, Some(crypto::Signature(sign.as_slice().try_into().unwrap())));
+      return Ok((code, Some(crypto::Signature(sign.as_slice().try_into().unwrap())))); // TODO: remove unwrap
     } else {
-      panic!("Wrong signature size.");
+      return Err(ParseErr { 
+        code: code.to_string(), 
+        erro: "Wrong signature size".to_string()
+      });
     }
   }
-  return (code, None);
+  return Ok((code, None));
 }
 
-pub fn read_statement(code: &str) -> (&str, Statement) {
+pub fn read_statement(code: &str) -> ParseResult<Statement> {
   let code = skip(code);
   match (nth(code,0), nth(code,1), nth(code,2)) {
     ('f','u','n') => {
       let code = drop(code,3);
-      let (code, unit) = read_char(code, '(');
-      let (code, name) = read_name(code);
-      let (code, args) = read_until(code, ')', read_name);
-      let (code, unit) = read_char(code, '{');
-      let (code, func) = read_until(code, '}', read_rule);
+      let (code, unit) = read_char(code, '(')?;
+      let (code, name) = read_name(code)?;
+      let (code, args) = read_until(code, ')', read_name)?;
+      let (code, unit) = read_char(code, '{')?;
+      let (code, func) = read_until(code, '}', read_rule)?;
       let code = skip(code);
       let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);
-        let (code, unit) = read_char(code, '{');
-        let (code, init) = read_term(code);
-        let (code, unit) = read_char(code, '}');
+        let (code, unit) = read_char(code, '{')?;
+        let (code, init) = read_term(code)?;
+        let (code, unit) = read_char(code, '}')?;
         (code, init)
       } else {
         (code, Term::Num { numb: 0 })
       };
-      let (code, sign) = read_sign(code);
-      return (code, Statement::Fun { name, args, func, init, sign });
+      let (code, sign) = read_sign(code)?;
+      return Ok((code, Statement::Fun { name, args, func, init, sign }));
     }
     ('c','t','r') => {
       let code = drop(code,3);
-      let (code, unit) = read_char(code, '{');
-      let (code, name) = read_name(code);
-      let (code, args) = read_until(code, '}', read_name);
-      let (code, sign) = read_sign(code);
-      return (code, Statement::Ctr { name, args, sign });
+      let (code, unit) = read_char(code, '{')?;
+      let (code, name) = read_name(code)?;
+      let (code, args) = read_until(code, '}', read_name)?;
+      let (code, sign) = read_sign(code)?;
+      return Ok((code, Statement::Ctr { name, args, sign }));
     }
     ('r','u','n') => {
       let code = drop(code,3);
-      let (code, unit) = read_char(code, '{');
-      let (code, expr) = read_term(code);
-      let (code, unit) = read_char(code, '}');
-      let (code, sign) = read_sign(code);
-      return (code, Statement::Run { expr, sign  });
+      let (code, unit) = read_char(code, '{')?;
+      let (code, expr) = read_term(code)?;
+      let (code, unit) = read_char(code, '}')?;
+      let (code, sign) = read_sign(code)?;
+      return Ok((code, Statement::Run { expr, sign  }));
     }
     // reg Foo.Bar { #x123456 } sign { signature }
     ('r','e','g') => {
       let code = skip(drop(code, 3));
-      let (code, name) = if nth(code,0) == '{' { (code, 0) } else { read_name(code) };
-      let (code, unit) = read_char(code, '{');
-      let (code, unit) = read_char(code, '#');
-      let (code, ownr) = read_numb(code);
-      let (code, unit) = read_char(code, '}');
-      let (code, sign) = read_sign(code);
-      return (code, Statement::Reg { name, ownr, sign });
+      let (code, name) = if nth(code,0) == '{' { (code, 0) } else { read_name(code)? };
+      let (code, unit) = read_char(code, '{')?;
+      let (code, unit) = read_char(code, '#')?;
+      let (code, ownr) = read_numb(code)?;
+      let (code, unit) = read_char(code, '}')?;
+      let (code, sign) = read_sign(code)?;
+      return Ok((code, Statement::Reg { name, ownr, sign }));
     }
     _ => {
-      panic!("Couldn't parse statement.");
+      return Err(ParseErr { code: code.to_string(),  erro: "Expected statement.".to_string() });
     }
   }
 }
 
-pub fn read_statements(code: &str) -> (&str, Vec<Statement>) {
+pub fn read_statements(code: &str) -> ParseResult<Vec<Statement>> {
   read_until(code, '\0', read_statement)
 }
 
@@ -4373,7 +4417,7 @@ pub fn test_statements(statements: &[Statement]) {
 
   println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   println!("=====");
-  println!("");
+  println!();
 
   let mut rt = init_runtime();
   let init = Instant::now();
@@ -4382,7 +4426,7 @@ pub fn test_statements(statements: &[Statement]) {
 
   println!("Stats");
   println!("=====");
-  println!("");
+  println!();
 
   println!("[size] {}", rt.get_size());
   println!("[mana] {}", rt.get_mana());
@@ -4391,7 +4435,11 @@ pub fn test_statements(statements: &[Statement]) {
 }
 
 pub fn test_statements_from_code(code: &str) {
-  test_statements(&read_statements(code).1);
+  let statments = read_statements(code);
+  match statments {
+    Ok((.., statements)) => test_statements(&statements),
+    Err(ParseErr { code, erro }) => println!("{}", erro),
+  }
 }
 
 pub fn test_statements_from_file(file: &str) {
