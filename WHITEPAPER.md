@@ -1526,8 +1526,8 @@ the creators, as most projects do.
 Note we do intend to launch a token for our foundation as a contract *inside*
 Kindelia, but it will not be *part* of the network, nor coupled to Kindelia's
 protocol in any way, as things should be. Since Kindelia shouldn't require
-high maintenance costs, that asset that will be used mostly to fund the
-development of the HVM, and its next-gen parallel compilers and processors.
+high maintenance costs, that asset will be used mostly to fund the
+development of the HVM, its next-gen parallel compilers and processors.
 
 Comparisons to Ethereum
 =======================
@@ -1562,14 +1562,14 @@ Kindelia's block structure is refreshingly simple. There are no merkle roots,
 bloom filters, logs, receipts. Just a timestamp, the previous hash, the miner
 id, and a list of "statements" that alter the network's state, in a way that
 resembles a p2p REPL. The entire block is less than *1500 bytes* long, and fits
-in a single UDP packet, allowing fast fast propagation and short block times.
+in a single UDP packet, allowing a fast propagation and short time blocks.
 There are no monetary transactions, just statements, which can be compressed and
 unsigned, greatly reducing the size and cost of several types of transactions,
 including app deployment. Contracts aren't compiled to monolithic assembly
 codes, but are, instead, broken into pure functions that are deployed separately
 and modularly, enabling massive code reuse. Finally, there is no native
-currency, making Kindelia not a cryptocurrency, and allowing users to pay miners
-in any on-chain asset, rather than the network's "built-in token".
+currency, making Kindelia not a cryptocurrency while also allowing users to pay miners
+with any on-chain asset, rather than the network's "built-in token".
 
 ### Comparison table
 
@@ -1603,7 +1603,7 @@ single statement, the actual throughput can be much higher, and it achieves that
 with a fraction of Ethereum's maximum blockchain growth.
 
 Computation-wise, Kindelia's layer-1 throughput is up to 434x higher, due to the
-HVM and stateful heaps respectively. Kindelia's functional opcodes allow it to
+HVM and stateful heaps respectively. Kindelia's functional opcodes allows it to
 host programs compiled from secure languages like Haskell, Idris, Agda and Kind,
 which is simply not economically viable on Ethereum. Kindelia's zero-cost reused
 SSTORE enables highly dynamic applications like layer-1 MMORPGs, which is also
@@ -1661,7 +1661,7 @@ using it would raise complications, such as high compilation times, and how to
 measure execution costs. Because of that, contracts are compiled to an
 intermediate language, Plutus, and interpreted on-chain. This is much less
 efficient than compiling, and ultimately means that Cardano fees can't be much
-cheaper than Ethereum's, under the same load. Kindelia's HVM is as efficient as
+cheaper than Ethereum's under the same load. Kindelia's HVM is as efficient as
 GHC, while having negligible compilation times, and measurable execution costs,
 letting users run Haskell-like languages with GHC-like efficiency.
 
@@ -1672,10 +1672,10 @@ currency-first, computer-second. It greatly increases network complexity and
 decreases contract expressivity, under the assumption that it improves
 efficiency, which is dubious at least, since, ultimately, efficiency is still
 dictated by total memory, disk and computation usage. The way programs are
-triggered is irrelevant for that analysis. These is no clarity on how much of
+triggered is irrelevant for that analysis. There is no clarity on how much of
 these resources Cardano would use under high load, and what its opcode costs and
-limits are. Kindelia has no UTXO; it is just a functional runtime, with a global
-state, run/deploy transactions that alter it, and clear costs and limits for
+limits are. Kindelia has no UTXO; it is just a functional runtime with a global
+state which runs/deploys transactions that alter it, and clear costs and limits for
 every defined operation.
 
 ### In short
@@ -1738,13 +1738,13 @@ uptime, independent of any human action. Perhaps that problem isn't interesting
 to most people, but it is still valid problem to solve.
 
 For example, the notion of virtual worlds that can't ever be turned off is
-pretty attractive to a gaming nerd like me. I can't leave a legendary sword on
-World of Warcraft to my grandchildren. After all, who knows if Blizzard will
-even exist by then? But I surely can do so on a virtual world hosted on
-Kindelia.  The fact an item will never cease to exist makes it more valuable
-today, which results in markets where digital assets are valued just like
-physical assets, which is really cool. Kindelia's cheap states lets these
-virtual worlds exist without complicated layer 2 indirections.
+pretty attractive to a gaming nerd like me. I can't leave a Black Qiraji (mount) 
+from World of Warcraft to my grandchildren. After all, who knows if Blizzard will 
+even exist by then? But I surely can do so on a virtual world hosted on Kindelia.
+The fact that an item will never cease to exist makes it even more valuable today, which 
+results in a market where digital assets are viewed with as much value as physical assets, 
+which is really cool. Kindelia's cheap states lets these virtual worlds exist without 
+complicated layer 2 indirections.
 
 In short, Kindelia is a functional, worldwide computer, capable of hosting
 eternal applications that can't ever be altered or turned off; not by their
@@ -1766,7 +1766,7 @@ crypto computers, like Ethereum? Do they actually need a token? We don't think
 so, and, if that is the case, then including one would be as dishonest as most
 utility tokens.
 
-One may wonder how an Ethereum-like network could operate without block rewards
+One might wonder how an Ethereum-like network could operate without block rewards
 and miner fees, which are the core reasons it needs a native token, but both
 problems have a simple solution. For block rewards, user-deployed currencies and
 apps can implement a "Reward" functionality that grants tokens and assets to the
@@ -1841,7 +1841,7 @@ incentivized by Ether fees, except replacing the native, hardcoded token, by any
 user-submitted assets.
 
 If Kindelia doesn't need a native token to exist, then it won't have a native
-token, because that's how our ethics work - simple as that. But, then, how do we
+token, because that's how our ethics work - simple as that. But then, how do we
 raise funds? That is a separate question, which, we believe, must have a
 separate answer. Ethereum, for example, minted and sold, out of thin air, more
 than 50% of its total supply, before the network was released, and an additional
@@ -1859,7 +1859,7 @@ But that token will be launched as a normal app, under the same conditions as
 every other, with no privileged position on the network's code. If the token
 fails, then we'll not be able to keep working, but the network will still exist,
 independent of its creators, as long, of course, as other developers, miners and
-users decide to keep it alive. That said, we believe we're doing a superb job,
+users decide to keep it alive. That being said, we believe we're doing a superb job,
 and hope Kindelia doesn't fire us! :)
 
 ## Why Nakamoto Consensus (Proof of Work)?
@@ -1907,7 +1907,7 @@ opinion. Let's begin with a hard fact: no decentralized layer 1 computer will
 ever achieve VISA-level scalability. That is not a pessimistic projection, but a
 direct consequence of the overhead of consensus, the size of Earth and the speed
 of light. Because of that, layer 2 solutions are proposed to improve throughput,
-allowing computations to take place off-chain, in such way that that only the
+allowing computations to take place off-chain, in such way that only the
 final result, plus some proof, must be submitted to the principal network. This
 increases scalability considerably.
 
@@ -1941,16 +1941,16 @@ For example, optimistic rollups are just a fancy way of saying that someone will
 compute the app's state outside and send it to the network, which will blindly
 trust that it is correct. If the submitter lies and someone notices, a dispute
 mechanism is triggered, halting the app until it is resolved, and punishing the
-liar. The clever bit is that the fact the dispute mechanism exists means it is
+liar. The clever bit is that the fact that the dispute mechanism exists means it is
 almost never used, allowing most computations to be performed offchain.
 
 This is a great idea that works very well in practice, but it brings some nasty
-complications. The fact someone has complete write control over an app's state
-is dangerous. If a fraud goes unnoticed, that person can to do anything with the
+complications. The fact that someone has complete write control over an app's state
+is dangerous. If a fraud goes unnoticed, that person can do anything with the
 app's memory. Not even 51% attacks have that much destructive power. A network
 dominated by optimistic rollups is inherently less robust than a traditional
 layer 1, where computations are independently validated by every node. The
-question is: is it worth? Let's see the numbers.
+question is: is it worth it? Let's see the numbers.
 
 From [@corwintines's
 article](https://ethereum.org/en/developers/docs/scaling/optimistic-rollups/#:~:text=Optimistic%20rollups%20sit%20in%20parallel,or%20%22notarise%22%20the%20transaction.)
@@ -1971,10 +1971,10 @@ late to replace it.
 ### On zero knowledge proofs
 
 A different, more cutting-edge solution, is that of zero-knowledge proofs, which
-allow replacing the dispute mechanism by a cryptographic proof that the computed
+allows replacing the dispute mechanism by a cryptographic proof in which the computed
 result is correct. A layer 2 based on zk-starks would greatly increase the
 network throughput. In fact, zk-snarks could even be attached to the layer 1, so
-that a layer 2 wasn't even be needed. Users could submit the result of their
+that a layer 2 wouldn't even be needed. Users could submit the result of their
 transactions directly, and nodes would just update the network state, without
 even running the EVM. This idea is amazing and, if delivered properly, would,
 honestly, be inherently superior to running apps in a virtual machine, like the
@@ -1988,7 +1988,7 @@ computation rules are all 5-20 lines long. This makes it easy to understand, and
 promotes client diversity, allowing independent parties to implement their own
 nodes, decreasing our roles as lead developers and figureheads. Decentralized
 projects spent a lot of money trying to achieve technical decentralization, but
-not enough of them account for political decentralization, resulting in core
+doesn't account for political decentralization, resulting in core
 developers being in a privileged position of power. In that sense, a project
 based on zero knowledge proofs will never be as decentralized as a simpler
 network which anyone can audit, implement and understand.
@@ -2008,7 +2008,7 @@ isn't even the most relevant. SSTORE is, by far, the most problematic operation,
 and it is expensive because it increases the state size. Nor zero knowledge
 proofs, nor HVM, can do anything about that. Now, reused SSTOREs, i.e.,
 rewriting state without growing the total size, can be massively improved. HVM
-does so it by replacing merkle trees by reversible heaps, which are just cheap
+does it by replacing merkle trees with reversible heaps, which are just cheap
 layered buffers. An hypothetical zero knowledge network could do the same. As
 for Ethereum, its layer 1 already relies on Merkle trees, so, unless it replaces
 the entire store machinery, dynamic apps like virtual game worlds will never be
@@ -2019,7 +2019,7 @@ viable on layer 1.
 In short, while layer 2 solutions are the only way to achieve VISA-level
 scalability, they come with unavoidable complications and compromises.
 Optimistic rollups require complex dispute mechanisms with terrible worst-case
-scenarios, zero knowledge proofs rely on unproven cryptography, decrease
+scenarios, zero knowledge proofs relies on unproven cryptography, decrease
 transparency and client diversity, and don't address the other half of the
 scalability bottleneck, which is not computation, but state growth. There is
 value in an efficient, secure, simple layer 1 computation network. Kindelia aims
