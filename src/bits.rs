@@ -291,6 +291,10 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
       serialize_fixlen(4, &u256(1), bits);
       serialize_hash(bhash, bits);
     }
+    Message::MineTransaction { trans } => {
+      serialize_fixlen(4, &u256(2), bits);
+      serialize_bytes(trans.len() as u128, &trans, bits);
+    }
   }
 }
 

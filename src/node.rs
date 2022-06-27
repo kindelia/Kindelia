@@ -51,25 +51,25 @@ pub type Transaction = Vec<u8>;
 //   no             | yes             | yes           | included : fully included, as well as all its ancestors
 //
 pub struct Node {
-  pub path       : PathBuf,                         // path where files are saved
-  pub socket     : UdpSocket,                       // UDP socket
-  pub port       : u16,                             // UDP port
-  pub tip        : U256,                            // current tip
-  pub block      : U256Map<Block>,                  // block_hash -> block
-  pub waiting    : U256Map<Block>,                  // block_hash -> downloaded block, waiting for ancestors
-  pub wait_list  : U256Map<Vec<U256>>,              // block_hash -> hashes of blocks that are waiting for this one
-  pub children   : U256Map<Vec<U256>>,              // block_hash -> hashes of this block's children
-  pub work       : U256Map<U256>,                   // block_hash -> accumulated work
-  pub target     : U256Map<U256>,                   // block_hash -> this block's target
-  pub height     : U256Map<u128>,                   // block_hash -> cached height
-  pub was_mined  : U256Map<HashSet<Transaction>>,   // block_hash -> set of transaction hashes that were already mined
-  pub results    : U256Map<Vec<StatementResult>>,   // block_hash -> results of the statements in this block
-  pub pool       : PriorityQueue<Transaction, u128>,// transactions to be mined
-  pub peer_id    : HashMap<Address, u128>,          // peer address -> peer id
-  pub peers      : HashMap<u128, Peer>,             // peer id -> peer
-  pub peer_idx   : u128,                            // peer id counter
-  pub runtime    : Runtime,                         // Kindelia's runtime
-  pub receiver   : Receiver<Request>,               // Receives an API request
+  pub path       : PathBuf,                          // path where files are saved
+  pub socket     : UdpSocket,                        // UDP socket
+  pub port       : u16,                              // UDP port
+  pub tip        : U256,                             // current tip
+  pub block      : U256Map<Block>,                   // block_hash -> block
+  pub waiting    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
+  pub wait_list  : U256Map<Vec<U256>>,               // block_hash -> hashes of blocks that are waiting for this one
+  pub children   : U256Map<Vec<U256>>,               // block_hash -> hashes of this block's children
+  pub work       : U256Map<U256>,                    // block_hash -> accumulated work
+  pub target     : U256Map<U256>,                    // block_hash -> this block's target
+  pub height     : U256Map<u128>,                    // block_hash -> cached height
+  pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
+  pub was_mined  : U256Map<HashSet<Transaction>>,    // block_hash -> set of transaction hashes that were already mined
+  pub pool       : PriorityQueue<Transaction, u128>, // transactions to be mined
+  pub peer_id    : HashMap<Address, u128>,           // peer address -> peer id
+  pub peers      : HashMap<u128, Peer>,              // peer id -> peer
+  pub peer_idx   : u128,                             // peer id counter
+  pub runtime    : Runtime,                          // Kindelia's runtime
+  pub receiver   : Receiver<Request>,                // Receives an API request
 }
 
 // API
@@ -126,9 +126,7 @@ pub enum MinerComm {
   Stop
 }
 
-pub type Shared<T> = Arc<Mutex<T>>;
 pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
-pub type SharedInput = Arc<Mutex<String>>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
@@ -140,6 +138,9 @@ pub enum Message {
   },
   AskBlock {
     bhash: Hash
+  },
+  MineTransaction {
+    trans: Transaction
   }
 }
 
@@ -399,412 +400,6 @@ pub fn GENESIS_BLOCK() -> Block {
   }
 }
 
-pub fn new_node(kindelia_path: PathBuf) -> (SyncSender<Request>, Node) {
-  let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
-  let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
-  let (query_sender, query_receiver) = mpsc::sync_channel(1);
-  let mut node = Node {
-    path       : kindelia_path,
-    socket     : socket,
-    port       : port,
-    block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
-    waiting    : HashMap::new(),
-    wait_list  : HashMap::new(),
-    children   : HashMap::from([(ZERO_HASH(), vec![])]),
-    work       : HashMap::from([(ZERO_HASH(), u256(0))]),
-    height     : HashMap::from([(ZERO_HASH(), 0)]),
-    target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-    results    : HashMap::from([(ZERO_HASH(), vec![])]),
-    tip        : ZERO_HASH(),
-    was_mined  : HashMap::new(),
-    pool       : PriorityQueue::new(),
-    peer_id    : HashMap::new(),
-    peers      : HashMap::new(),
-    peer_idx   : 0,
-    runtime    : init_runtime(),
-    receiver   : query_receiver,
-  };
-
-  // TODO: move out to config file
-  let default_peers: Vec<Address> = vec![
-    "167.71.249.16:42000",
-    "167.71.254.138:42000",
-    "167.71.242.43:42000",
-    "167.71.255.151:42000",
-  ].iter().map(|x| read_address(x)).collect::<Vec<Address>>();
-
-  let seen_at = get_time();
-  default_peers.iter().for_each(|address| {
-    return node_see_peer(&mut node, Peer { address: *address, seen_at });
-  });
-
-  // TODO: For testing purposes. Remove later.
-  for &peer_port in try_ports.iter() {
-    if peer_port != port {
-      let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
-      node_see_peer(&mut node, Peer { address: address, seen_at })
-    }
-  }
-
-  (query_sender, node)
-}
-
-pub fn new_miner_comm() -> SharedMinerComm {
-  Arc::new(Mutex::new(MinerComm::Stop))
-}
-
-pub fn node_see_peer(node: &mut Node, peer: Peer) {
-  match node.peer_id.get(&peer.address) {
-    None => {
-      // TODO: improve this spaghetti
-      let index = node.peer_idx;
-      node.peer_idx += 1;
-      node.peers.insert(index, peer);
-      node.peer_id.insert(peer.address, index);
-    }
-    Some(index) => {
-      let old_peer = node.peers.get_mut(&index);
-      if let Some(old_peer) = old_peer {
-        old_peer.seen_at = peer.seen_at;
-      }
-    }
-  }
-}
-
-pub fn node_del_peer(node: &mut Node, addr: Address) {
-  if let Some(index) = node.peer_id.get(&addr) {
-    node.peers.remove(&index);
-    node.peer_id.remove(&addr);
-  }
-}
-
-pub fn get_random_peers(node: &mut Node, amount: u128) -> Vec<Peer> {
-  let amount = amount as usize;
-  let mut rng = rand::thread_rng();
-  node.peers.values().cloned().choose_multiple(&mut rng, amount)
-}
-
-// Registers a block on the node's database. This performs several actions:
-// - If this block is too far into the future, ignore it.
-// - If this block's parent isn't available:
-//   - Add this block to the parent's wait_list
-//   - When the parent is available, register this block again
-// - If this block's parent is available:
-//   - Compute the block accumulated work, target, etc.
-//   - If this block is the new tip:
-//     - In case of a reorg, rollback to the block before it
-//     - Run that block's code, updating the HVM state
-//     - Updates the longest chain saved on disk
-pub fn node_add_block(node: &mut Node, block: &Block) {
-  // Adding a block might trigger the addition of other blocks
-  // that were waiting for it. Because of that, we loop here.
-  let mut must_include = vec![block.clone()]; // blocks to be added
-  //println!("- add_block");
-  // While there is a block to add...
-  while let Some(block) = must_include.pop() {
-    let btime = block.time; // the block timestamp
-    //println!("- add block time={}", btime);
-    // If block is too far into the future, ignore it
-    if btime >= get_time() + DELAY_TOLERANCE {
-      //println!("# new block: too late");
-      continue;
-    }
-    let bhash = hash_block(&block); // hash of the block
-    // If we already registered this block, ignore it
-    if node.block.get(&bhash).is_some() {
-      //println!("# new block: already in");
-      continue;
-    }
-    let phash = block.prev; // hash of the previous block
-    // If previous block is available, add the block to the chain
-    if node.block.get(&phash).is_some() {
-      //println!("- previous available");
-      let work = get_hash_work(bhash); // block work score
-      node.block.insert(bhash, block.clone()); // inserts the block
-      node.work.insert(bhash, u256(0)); // inits the work attr
-      node.height.insert(bhash, 0); // inits the height attr
-      node.target.insert(bhash, u256(0)); // inits the target attr
-      node.children.insert(bhash, vec![]); // inits the children attrs
-      // Checks if this block PoW hits the target
-      let has_enough_work = bhash >= node.target[&phash];
-      // Checks if this block's timestamp is larger than its parent's timestamp
-      // Note: Bitcoin checks if it is larger than the median of the last 11 blocks; should we?
-      let advances_time = btime > node.block[&phash].time;
-      // If the PoW hits the target and the block's timestamp is valid...
-      if has_enough_work && advances_time {
-        //println!("# new_block: enough work & advances_time");
-        node.work.insert(bhash, node.work[&phash] + work); // sets this block accumulated work
-        node.height.insert(bhash, node.height[&phash] + 1); // sets this block accumulated height
-        // If this block starts a new period, computes the new target
-        if node.height[&bhash] > 0 && node.height[&bhash] > BLOCKS_PER_PERIOD && node.height[&bhash] % BLOCKS_PER_PERIOD == 1 {
-          // Finds the checkpoint hash (hash of the first block of the last period)
-          let mut checkpoint_hash = phash;
-          for _ in 0 .. BLOCKS_PER_PERIOD - 1 {
-            checkpoint_hash = node.block[&checkpoint_hash].prev;
-          }
-          // Computes how much time the last period took to complete
-          let period_time = btime - node.block[&checkpoint_hash].time;
-          // Computes the target of this period
-          let last_target = node.target[&phash];
-          let next_scaler = 2u128.pow(32) * TIME_PER_PERIOD / period_time;
-          let next_target = compute_next_target(last_target, u256(next_scaler));
-          // Sets the new target
-          node.target.insert(bhash, next_target);
-        // Otherwise, keep the old target
-        } else {
-          node.target.insert(bhash, node.target[&phash]);
-        }
-        // Updates the tip work and block hash
-        let old_tip = node.tip;
-        let new_tip = bhash;
-        if node.work[&new_tip] > node.work[&old_tip] {
-          node.tip = bhash;
-          //println!("- hash: {:x}", bhash);
-          //println!("- work: {}", node.work[&new_tip]);
-          if true {
-            // Block reorganization (* marks blocks for which we have runtime snapshots):
-            // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
-            // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
-            // hash: |  A |  B |  C |  D |  P |  Q |  R |  S |  T |  <- new timeline
-            //               |         '-> highest common block shared by both timelines
-            //               '-----> highest runtime snapshot before block D
-            let mut must_compute = Vec::new();
-            let mut old_bhash = old_tip;
-            let mut new_bhash = new_tip;
-            // 1. Finds the highest block with same height on both timelines
-            //    On the example above, we'd have `H, S`
-            while node.height[&new_bhash] > node.height[&old_bhash] {
-              must_compute.push(new_bhash);
-              new_bhash = node.block[&new_bhash].prev;
-            }
-            while node.height[&old_bhash] > node.height[&new_bhash] {
-              old_bhash = node.block[&old_bhash].prev;
-            }
-            // 2. Finds highest block with same value on both timelines
-            //    On the example above, we'd have `D`
-            while old_bhash != new_bhash {
-              must_compute.push(new_bhash);
-              old_bhash = node.block[&old_bhash].prev;
-              new_bhash = node.block[&new_bhash].prev;
-            }
-            // 3. Saves overwritten blocks to disk
-            for bhash in must_compute.iter().rev() {
-              let file_path = get_blocks_path(node).join(format!("{:0>32x}.kindelia_block.bin", node.height[bhash]));
-              let file_buff = bitvec_to_bytes(&serialized_block(&node.block[bhash]));
-              std::fs::write(file_path, file_buff).expect("Couldn't save block to disk.");
-            }
-            // 4. Reverts the runtime to a state older than that block
-            //    On the example above, we'd find `runtime.tick = 1`
-            let mut tick = node.height[&old_bhash];
-            //println!("- tick: old={} new={}", node.runtime.get_tick(), tick);
-            node.runtime.rollback(tick);
-            // 5. Finds the last block included on the reverted runtime state
-            //    On the example above, we'd find `new_bhash = B`
-            while tick > node.runtime.get_tick() {
-              must_compute.push(new_bhash);
-              new_bhash = node.block[&new_bhash].prev;
-              tick -= 1;
-            }
-            // 6. Computes every block after that on the new timeline
-            //    On the example above, we'd compute `C, D, P, Q, R, S, T`
-            for block in must_compute.iter().rev() {
-              node_compute_block(node, &node.block[block].clone());
-            }
-          }
-        }
-      }
-      // Registers this block as a child of its parent
-      node.children.insert(phash, vec![bhash]);
-      // If there were blocks waiting for this one, include them on the next loop
-      // This will cause the block to be moved from node.waiting to node.block
-      if let Some(wait_list) = node.wait_list.get(&bhash) {
-        for waiting in wait_list {
-          must_include.push(node.waiting.remove(waiting).expect("block"));
-        }
-        node.wait_list.remove(&bhash);
-      }
-    // Otherwise, include this block on .waiting, and on its parent's wait_list
-    } else if node.waiting.get(&bhash).is_none() {
-      node.waiting.insert(bhash, block.clone());
-      node.wait_list.insert(phash, vec![bhash]);
-    }
-  }
-}
-
-pub fn node_compute_block(node: &mut Node, block: &Block) {
-  let bits = BitVec::from_bytes(&block.body.value);
-  let acts = deserialized_statements(&bits);
-  //println!("Computing block:\n{}", view_statements(&acts));
-  let res = node.runtime.run_statements(&acts, false);
-  let bhash = hash_block(block);
-  node.results.insert(bhash, res);
-  node.runtime.tick();
-}
-
-pub fn get_longest_chain(node: &Node, num: Option<usize>) -> Vec<U256> {
-  let mut longest = Vec::new();
-  let mut bhash = node.tip;
-  let mut count = 0;
-  while node.block.contains_key(&bhash) && bhash != ZERO_HASH() {
-    let block = node.block.get(&bhash).unwrap();
-    longest.push(bhash);
-    bhash = block.prev;
-    count += 1;
-    if let Some(num) = num {
-      if count >= num {
-        break;
-      }
-    }
-  }
-  longest.reverse();
-  return longest;
-}
-
-pub fn node_receive_message(node: &mut Node) {
-  for (addr, msg) in udp_receive(&mut node.socket) {
-    node_handle_message(node, addr, &msg);
-  }
-}
-
-pub fn get_block_info(node: &Node, hash: &U256) -> Option<BlockInfo> {
-  let block = node.block.get(hash)?;
-  let height = node.height.get(hash).expect("Missing block height.");
-  let height: u64 = (*height).try_into().expect("Block height is too big.");
-  let results = node.results.get(hash).expect("Missing block result.").clone();
-  let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-  let content = crate::bits::deserialize_statements(&bits, &mut 0);
-  let info = BlockInfo {
-    block: block.clone(),
-    hash: *hash,
-    height,
-    results,
-    content,
-  };
-  Some(info)
-}
-
-pub fn node_handle_request(node: &mut Node, request: Request) {
-  // TODO: handle unwraps
-  match request {
-    Request::GetTick { tx: answer } => {
-      answer.send(node.runtime.get_tick()).unwrap();
-    }
-    Request::GetBlocks { range, tx: answer } => {
-      let (start, end) = range;
-      debug_assert!(start <= end);
-      debug_assert!(end == -1);
-      let num = (end - start + 1) as usize;
-      let hashes = get_longest_chain(node, Some(num));
-      let infos = hashes.iter()
-        .map(|h| 
-          get_block_info(node, h).expect("Missing block.")
-        ).collect();
-      answer.send(infos).unwrap();
-    },
-    Request::GetBlock { hash, tx: answer } => {
-      // TODO: actual indexing
-      let info = get_block_info(node, &hash);
-      answer.send(info).unwrap();
-    },
-    Request::GetFunctions { tx } => {
-      let mut funcs: HashSet<u64> = HashSet::new();
-      node.runtime.reduce_with(&mut funcs, |acc, heap| {
-        for func in heap.disk.links.keys() {
-          acc.insert(*func);
-        }
-      });
-      tx.send(funcs).unwrap();
-    },
-    Request::GetFunction { name, tx: answer } => todo!(),
-    Request::GetState { name, tx: answer } => {
-      let state = node.runtime.read_disk_as_term(name);
-      answer.send(state).unwrap();
-    },
-  }
-}
-
-// Sends a block to a target address; also share some random peers
-// FIXME: instead of sharing random peers, share recently active peers
-pub fn node_send_block_to(node: &mut Node, addr: Address, block: Block, istip: bool) {
-  //println!("- sending block: {:?}", block);
-  let msg = Message::PutBlock {
-    block: block,
-    istip: istip,
-    peers: get_random_peers(node, 3),
-  };
-  udp_send(&mut node.socket, addr, &msg);
-}
-
-pub fn node_handle_message(node: &mut Node, addr: Address, msg: &Message) {
-  if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: node.port }) {
-    node_see_peer(node, Peer { address: addr, seen_at: get_time() });
-    match msg {
-      // Someone asked a block
-      Message::AskBlock { bhash } => {
-        // Sends the requested block, plus some of its ancestors
-        let mut bhash = bhash;
-        let mut chunk = vec![];
-        while node.block.contains_key(&bhash) && *bhash != ZERO_HASH() && chunk.len() < SEND_BLOCK_ANCESTORS as usize {
-          chunk.push(node.block[bhash].clone());
-          bhash = &node.block[bhash].prev;
-        }
-        for block in chunk {
-          node_send_block_to(node, addr, block.clone(), false);
-        }
-      }
-      // Someone sent us a block
-      Message::PutBlock { block, istip, peers } => {
-        // Adds the block to the database
-        node_add_block(node, &block);
-
-        // Previously, we continuously requested missing blocks to neighbors. Now, we removed such
-        // functionality. Now, when we receive a tip, we find the first missing ancestor, and
-        // immediately ask it to the node that send that tip. That node, then, will send the
-        // missing block, plus a few of its ancestors. This massively improves the amount of time
-        // it will take to download all the missing blocks, and works in any situation. The only
-        // problem is that, since we're not requesting missing blocks continuously, then, if the
-        // packet where we ask the last missing ancestor is dropped, then we will never ask it
-        // again. It will be missing forever. But that does not actually happen, because nodes are
-        // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
-        // tip is received again, which will cause us to ask for that missing ancestor! In other
-        // words, the old functionality of continuously requesting missing blocks was redundant and
-        // detrimental. Note that the loop below is slightly CPU hungry, since it requires
-        // traversing the whole history every time we receive the tip. As such, we don't do it when
-        // the received tip is included on .block, which means we already have all its ancestors.
-        // FIXME: this opens up a DoS vector where an attacker creates a very long chain, and sends
-        // its tip to us, including all the ancestors, except the block #1. He then spam-sends the
-        // same tip over and over. Since we'll never get the entire chain, we'll always run this
-        // loop fully, exhausting this node's CPU resources. This isn't a very serious attack, but
-        // there are some solutions, which might be investigated in a future.
-        if *istip {
-          let bhash = hash_block(&block);
-          if !node.block.contains_key(&bhash) {
-            let mut missing = bhash;
-            // Finds the first ancestor that wasn't downloaded yet
-            let mut count = 0;
-            while node.waiting.contains_key(&missing) {
-              count += 1;
-              missing = node.waiting[&missing].prev;
-            }
-            println!("ask missing: {} {:x}", count, missing);
-            udp_send(&mut node.socket, addr, &Message::AskBlock { bhash: missing })
-          }
-        }
-      }
-    }
-  }
-}
-
-pub fn gossip(node: &mut Node, peer_count: u128, message: &Message) {
-  for peer in get_random_peers(node, peer_count) {
-    udp_send(&mut node.socket, peer.address, message);
-  }
-}
-
-pub fn get_blocks_path(node: &Node) -> PathBuf {
-  node.path.join("state").join("blocks")
-}
-
 pub fn show_block(block: &Block) -> String {
   let hash = hash_block(block);
   return format!(
@@ -819,12 +414,7 @@ pub fn show_block(block: &Block) -> String {
 }
 
 // Mining
-// ======
-
-// Get the current target
-pub fn get_tip_target(node: &Node) -> U256 {
-  node.target[&node.tip]
-}
+// ------
 
 // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
 pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Option<Block> {
@@ -832,7 +422,6 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
   let time = get_time();
   let mut block = Block { time, rand, prev, body };
   for _i in 0 .. max_attempts {
-    //println!("{} {} > {}", _i, hash_block(&block), targ);
     if hash_block(&block) >= targ {
       return Some(block);
     } else {
@@ -840,6 +429,11 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
     }
   }
   return None;
+}
+
+// Creates a shared MinerComm object
+pub fn new_miner_comm() -> SharedMinerComm {
+  Arc::new(Mutex::new(MinerComm::Stop))
 }
 
 // Writes the shared MinerComm object
@@ -868,162 +462,576 @@ pub fn miner_loop(miner_comm: SharedMinerComm) {
 }
 
 // Node
-// ====
+// ----
 
-fn node_gossip_tip_block(node: &mut Node, peer_count: u128) {
-  let random_peers = get_random_peers(node, peer_count);
-  for peer in random_peers {
-    node_send_block_to(node, peer.address, node.block[&node.tip].clone(), true);
+impl Node {
+  pub fn new(kindelia_path: PathBuf) -> (SyncSender<Request>, Self) {
+    let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
+    let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
+    let (query_sender, query_receiver) = mpsc::sync_channel(1);
+    let mut node = Node {
+      path       : kindelia_path,
+      socket     : socket,
+      port       : port,
+      block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
+      waiting    : HashMap::new(),
+      wait_list  : HashMap::new(),
+      children   : HashMap::from([(ZERO_HASH(), vec![])]),
+      work       : HashMap::from([(ZERO_HASH(), u256(0))]),
+      height     : HashMap::from([(ZERO_HASH(), 0)]),
+      target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
+      results    : HashMap::from([(ZERO_HASH(), vec![])]),
+      tip        : ZERO_HASH(),
+      was_mined  : HashMap::new(),
+      pool       : PriorityQueue::new(),
+      peer_id    : HashMap::new(),
+      peers      : HashMap::new(),
+      peer_idx   : 0,
+      runtime    : init_runtime(),
+      receiver   : query_receiver,
+    };
+
+    // TODO: move out to config file
+    let default_peers: Vec<Address> = vec![
+      "167.71.249.16:42000",
+      "167.71.254.138:42000",
+      "167.71.242.43:42000",
+      "167.71.255.151:42000",
+    ].iter().map(|x| read_address(x)).collect::<Vec<Address>>();
+
+    let seen_at = get_time();
+    default_peers.iter().for_each(|address| {
+      return node.see_peer(Peer { address: *address, seen_at });
+    });
+
+    // TODO: For testing purposes. Remove later.
+    for &peer_port in try_ports.iter() {
+      if peer_port != port {
+        let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
+        node.see_peer(Peer { address: address, seen_at })
+      }
+    }
+
+    (query_sender, node)
   }
-}
 
-fn node_peers_timeout(node: &mut Node) {
-  let mut forget = Vec::new();
-  for (id,peer) in &node.peers {
-    //println!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
-    if peer.seen_at < get_time() - PEER_TIMEOUT {
-      forget.push(peer.address);
+  pub fn see_peer(&mut self, peer: Peer) {
+    match self.peer_id.get(&peer.address) {
+      None => {
+        // TODO: improve this spaghetti
+        let index = self.peer_idx;
+        self.peer_idx += 1;
+        self.peers.insert(index, peer);
+        self.peer_id.insert(peer.address, index);
+      }
+      Some(index) => {
+        let old_peer = self.peers.get_mut(&index);
+        if let Some(old_peer) = old_peer {
+          old_peer.seen_at = peer.seen_at;
+        }
+      }
     }
   }
-  for addr in forget {
-    node_del_peer(node, addr);
-  }
-}
 
-fn node_load_blocks(node: &mut Node) {
-  let blocks_dir = get_blocks_path(&node);
-  std::fs::create_dir_all(&blocks_dir).ok();
-  let mut file_paths : Vec<PathBuf> = vec![];
-  for entry in std::fs::read_dir(&blocks_dir).unwrap() {
-    file_paths.push(entry.unwrap().path());
-  }
-  file_paths.sort();
-  println!("Loading {} blocks from disk...", file_paths.len());
-  for file_path in file_paths {
-    let buffer = std::fs::read(file_path.clone()).unwrap();
-    let block = deserialized_block(&bytes_to_bitvec(&buffer));
-    node_add_block(node, &block);
-  }
-}
-
-fn node_ask_mine(node: &Node, miner_comm: &SharedMinerComm, body: Body) {
-  write_miner_comm(miner_comm, MinerComm::Request {
-    prev: node.tip,
-    body,
-    targ: get_tip_target(node),
-  });
-}
-
-pub fn node_loop(
-  mut node: Node,
-  kindelia_path: PathBuf,
-  miner_comm: SharedMinerComm,
-  mine_file: Option<String>,
-) -> ! {
-  const TICKS_PER_SEC: u64 = 100;
-
-  let mut tick: u64 = 0;
-  let mut mined: u64 = 0;
-
-  let init_body = code_to_body("");
-  let mine_body = mine_file.map(|x| code_to_body(&x));
-
-  // Loads all stored blocks
-  println!("Port: {}", node.port);
-  if node.port == 42000 { // for debugging, won't load blocks if it isn't the main node. FIXME: remove
-    node_load_blocks(&mut node);
+  pub fn del_peer(&mut self, addr: Address) {
+    if let Some(index) = self.peer_id.get(&addr) {
+      self.peers.remove(&index);
+      self.peer_id.remove(&addr);
+    }
   }
 
-  #[allow(clippy::modulo_one)]
-  loop {
-    tick += 1;
+  pub fn get_random_peers(&mut self, amount: u128) -> Vec<Peer> {
+    let amount = amount as usize;
+    let mut rng = rand::thread_rng();
+    self.peers.values().cloned().choose_multiple(&mut rng, amount)
+  }
 
-    {
-
-      // If the miner thread mined a block, gets and registers it
-      if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
-        mined += 1;
-        node_add_block(&mut node, &block);
+  // Registers a block on the node's database. This performs several actions:
+  // - If this block is too far into the future, ignore it.
+  // - If this block's parent isn't available:
+  //   - Add this block to the parent's wait_list
+  //   - When the parent is available, register this block again
+  // - If this block's parent is available:
+  //   - Compute the block accumulated work, target, etc.
+  //   - If this block is the new tip:
+  //     - In case of a reorg, rollback to the block before it
+  //     - Run that block's code, updating the HVM state
+  //     - Updates the longest chain saved on disk
+  pub fn add_block(&mut self, block: &Block) {
+    // Adding a block might trigger the addition of other blocks
+    // that were waiting for it. Because of that, we loop here.
+    let mut must_include = vec![block.clone()]; // blocks to be added
+    //println!("- add_block");
+    // While there is a block to add...
+    while let Some(block) = must_include.pop() {
+      let btime = block.time; // the block timestamp
+      //println!("- add block time={}", btime);
+      // If block is too far into the future, ignore it
+      if btime >= get_time() + DELAY_TOLERANCE {
+        //println!("# new block: too late");
+        continue;
       }
-
-      // Spreads the tip block
-      if tick % 10 == 0 {
-        node_gossip_tip_block(&mut node, 8);
+      let bhash = hash_block(&block); // hash of the block
+      // If we already registered this block, ignore it
+      if self.block.get(&bhash).is_some() {
+        //println!("# new block: already in");
+        continue;
       }
+      let phash = block.prev; // hash of the previous block
+      // If previous block is available, add the block to the chain
+      if self.block.get(&phash).is_some() {
+        //println!("- previous available");
+        let work = get_hash_work(bhash); // block work score
+        self.block.insert(bhash, block.clone()); // inserts the block
+        self.work.insert(bhash, u256(0)); // inits the work attr
+        self.height.insert(bhash, 0); // inits the height attr
+        self.target.insert(bhash, u256(0)); // inits the target attr
+        self.children.insert(bhash, vec![]); // inits the children attrs
+        // Checks if this block PoW hits the target
+        let has_enough_work = bhash >= self.target[&phash];
+        // Checks if this block's timestamp is larger than its parent's timestamp
+        // Note: Bitcoin checks if it is larger than the median of the last 11 blocks; should we?
+        let advances_time = btime > self.block[&phash].time;
+        // If the PoW hits the target and the block's timestamp is valid...
+        if has_enough_work && advances_time {
+          //println!("# new_block: enough work & advances_time");
+          self.work.insert(bhash, self.work[&phash] + work); // sets this block accumulated work
+          self.height.insert(bhash, self.height[&phash] + 1); // sets this block accumulated height
+          // If this block starts a new period, computes the new target
+          if self.height[&bhash] > 0 && self.height[&bhash] > BLOCKS_PER_PERIOD && self.height[&bhash] % BLOCKS_PER_PERIOD == 1 {
+            // Finds the checkpoint hash (hash of the first block of the last period)
+            let mut checkpoint_hash = phash;
+            for _ in 0 .. BLOCKS_PER_PERIOD - 1 {
+              checkpoint_hash = self.block[&checkpoint_hash].prev;
+            }
+            // Computes how much time the last period took to complete
+            let period_time = btime - self.block[&checkpoint_hash].time;
+            // Computes the target of this period
+            let last_target = self.target[&phash];
+            let next_scaler = 2u128.pow(32) * TIME_PER_PERIOD / period_time;
+            let next_target = compute_next_target(last_target, u256(next_scaler));
+            // Sets the new target
+            self.target.insert(bhash, next_target);
+          // Otherwise, keep the old target
+          } else {
+            self.target.insert(bhash, self.target[&phash]);
+          }
+          // Updates the tip work and block hash
+          let old_tip = self.tip;
+          let new_tip = bhash;
+          if self.work[&new_tip] > self.work[&old_tip] {
+            self.tip = bhash;
+            //println!("- hash: {:x}", bhash);
+            //println!("- work: {}", self.work[&new_tip]);
+            if true {
+              // Block reorganization (* marks blocks for which we have runtime snapshots):
+              // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
+              // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
+              // hash: |  A |  B |  C |  D |  P |  Q |  R |  S |  T |  <- new timeline
+              //               |         '-> highest common block shared by both timelines
+              //               '-----> highest runtime snapshot before block D
+              let mut must_compute = Vec::new();
+              let mut old_bhash = old_tip;
+              let mut new_bhash = new_tip;
+              // 1. Finds the highest block with same height on both timelines
+              //    On the example above, we'd have `H, S`
+              while self.height[&new_bhash] > self.height[&old_bhash] {
+                must_compute.push(new_bhash);
+                new_bhash = self.block[&new_bhash].prev;
+              }
+              while self.height[&old_bhash] > self.height[&new_bhash] {
+                old_bhash = self.block[&old_bhash].prev;
+              }
+              // 2. Finds highest block with same value on both timelines
+              //    On the example above, we'd have `D`
+              while old_bhash != new_bhash {
+                must_compute.push(new_bhash);
+                old_bhash = self.block[&old_bhash].prev;
+                new_bhash = self.block[&new_bhash].prev;
+              }
+              // 3. Saves overwritten blocks to disk
+              for bhash in must_compute.iter().rev() {
+                let file_path = self.get_blocks_path().join(format!("{:0>32x}.kindelia_block.bin", self.height[bhash]));
+                let file_buff = bitvec_to_bytes(&serialized_block(&self.block[bhash]));
+                std::fs::write(file_path, file_buff).expect("Couldn't save block to disk.");
+              }
+              // 4. Reverts the runtime to a state older than that block
+              //    On the example above, we'd find `runtime.tick = 1`
+              let mut tick = self.height[&old_bhash];
+              //println!("- tick: old={} new={}", self.runtime.get_tick(), tick);
+              self.runtime.rollback(tick);
+              // 5. Finds the last block included on the reverted runtime state
+              //    On the example above, we'd find `new_bhash = B`
+              while tick > self.runtime.get_tick() {
+                must_compute.push(new_bhash);
+                new_bhash = self.block[&new_bhash].prev;
+                tick -= 1;
+              }
+              // 6. Computes every block after that on the new timeline
+              //    On the example above, we'd compute `C, D, P, Q, R, S, T`
+              for block in must_compute.iter().rev() {
+                self.compute_block(&self.block[block].clone());
+              }
+            }
+          }
+        }
+        // Registers this block as a child of its parent
+        self.children.insert(phash, vec![bhash]);
+        // If there were blocks waiting for this one, include them on the next loop
+        // This will cause the block to be moved from self.waiting to self.block
+        if let Some(wait_list) = self.wait_list.get(&bhash) {
+          for waiting in wait_list {
+            must_include.push(self.waiting.remove(waiting).expect("block"));
+          }
+          self.wait_list.remove(&bhash);
+        }
+      // Otherwise, include this block on .waiting, and on its parent's wait_list
+      } else if self.waiting.get(&bhash).is_none() {
+        self.waiting.insert(bhash, block.clone());
+        self.wait_list.insert(phash, vec![bhash]);
+      }
+    }
+  }
 
-      // Receives and handles incoming API requests
-      if tick % 5 == 0 {
-        if let Ok(request) = node.receiver.try_recv() {
-          node_handle_request(&mut node, request);
+  pub fn compute_block(&mut self, block: &Block) {
+    let bits = BitVec::from_bytes(&block.body.value);
+    let acts = deserialized_statements(&bits);
+    //println!("Computing block:\n{}", view_statements(&acts));
+    let res = self.runtime.run_statements(&acts, false);
+    let bhash = hash_block(block);
+    self.results.insert(bhash, res);
+    self.runtime.tick();
+  }
+
+  pub fn get_longest_chain(&self, num: Option<usize>) -> Vec<U256> {
+    let mut longest = Vec::new();
+    let mut bhash = self.tip;
+    let mut count = 0;
+    while self.block.contains_key(&bhash) && bhash != ZERO_HASH() {
+      let block = self.block.get(&bhash).unwrap();
+      longest.push(bhash);
+      bhash = block.prev;
+      count += 1;
+      if let Some(num) = num {
+        if count >= num {
+          break;
+        }
+      }
+    }
+    longest.reverse();
+    return longest;
+  }
+
+  pub fn receive_message(&mut self) {
+    for (addr, msg) in udp_receive(&mut self.socket) {
+      self.handle_message(addr, &msg);
+    }
+  }
+
+  pub fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
+    let block = self.block.get(hash)?;
+    let height = self.height.get(hash).expect("Missing block height.");
+    let height: u64 = (*height).try_into().expect("Block height is too big.");
+    let results = self.results.get(hash).expect("Missing block result.").clone();
+    let bits = crate::bits::BitVec::from_bytes(&block.body.value);
+    let content = crate::bits::deserialize_statements(&bits, &mut 0);
+    let info = BlockInfo {
+      block: block.clone(),
+      hash: *hash,
+      height,
+      results,
+      content,
+    };
+    Some(info)
+  }
+
+  pub fn handle_request(&mut self, request: Request) {
+    // TODO: handle unwraps
+    match request {
+      Request::GetTick { tx: answer } => {
+        answer.send(self.runtime.get_tick()).unwrap();
+      }
+      Request::GetBlocks { range, tx: answer } => {
+        let (start, end) = range;
+        debug_assert!(start <= end);
+        debug_assert!(end == -1);
+        let num = (end - start + 1) as usize;
+        let hashes = self.get_longest_chain(Some(num));
+        let infos = hashes.iter()
+          .map(|h| 
+            self.get_block_info(h).expect("Missing block.")
+          ).collect();
+        answer.send(infos).unwrap();
+      },
+      Request::GetBlock { hash, tx: answer } => {
+        // TODO: actual indexing
+        let info = self.get_block_info(&hash);
+        answer.send(info).unwrap();
+      },
+      Request::GetFunctions { tx } => {
+        let mut funcs: HashSet<u64> = HashSet::new();
+        self.runtime.reduce_with(&mut funcs, |acc, heap| {
+          for func in heap.disk.links.keys() {
+            acc.insert(*func);
+          }
+        });
+        tx.send(funcs).unwrap();
+      },
+      Request::GetFunction { name, tx: answer } => todo!(),
+      Request::GetState { name, tx: answer } => {
+        let state = self.runtime.read_disk_as_term(name);
+        answer.send(state).unwrap();
+      },
+    }
+  }
+
+  // Sends a block to a target address; also share some random peers
+  // FIXME: instead of sharing random peers, share recently active peers
+  pub fn send_block_to(&mut self, addr: Address, block: Block, istip: bool) {
+    //println!("- sending block: {:?}", block);
+    let msg = Message::PutBlock {
+      block: block,
+      istip: istip,
+      peers: self.get_random_peers(3),
+    };
+    udp_send(&mut self.socket, addr, &msg);
+  }
+
+  pub fn handle_message(&mut self, addr: Address, msg: &Message) {
+    if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: self.port }) {
+      self.see_peer(Peer { address: addr, seen_at: get_time() });
+      match msg {
+        // Someone asked a block
+        Message::AskBlock { bhash } => {
+          // Sends the requested block, plus some of its ancestors
+          let mut bhash = bhash;
+          let mut chunk = vec![];
+          while self.block.contains_key(&bhash) && *bhash != ZERO_HASH() && chunk.len() < SEND_BLOCK_ANCESTORS as usize {
+            chunk.push(self.block[bhash].clone());
+            bhash = &self.block[bhash].prev;
+          }
+          for block in chunk {
+            self.send_block_to(addr, block.clone(), false);
+          }
+        }
+        // Someone sent us a block
+        Message::PutBlock { block, istip, peers } => {
+          // Adds the block to the database
+          self.add_block(&block);
+
+          // Previously, we continuously requested missing blocks to neighbors. Now, we removed such
+          // functionality. Now, when we receive a tip, we find the first missing ancestor, and
+          // immediately ask it to the node that send that tip. That node, then, will send the
+          // missing block, plus a few of its ancestors. This massively improves the amount of time
+          // it will take to download all the missing blocks, and works in any situation. The only
+          // problem is that, since we're not requesting missing blocks continuously, then, if the
+          // packet where we ask the last missing ancestor is dropped, then we will never ask it
+          // again. It will be missing forever. But that does not actually happen, because nodes are
+          // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
+          // tip is received again, which will cause us to ask for that missing ancestor! In other
+          // words, the old functionality of continuously requesting missing blocks was redundant and
+          // detrimental. Note that the loop below is slightly CPU hungry, since it requires
+          // traversing the whole history every time we receive the tip. As such, we don't do it when
+          // the received tip is included on .block, which means we already have all its ancestors.
+          // FIXME: this opens up a DoS vector where an attacker creates a very long chain, and sends
+          // its tip to us, including all the ancestors, except the block #1. He then spam-sends the
+          // same tip over and over. Since we'll never get the entire chain, we'll always run this
+          // loop fully, exhausting this node's CPU resources. This isn't a very serious attack, but
+          // there are some solutions, which might be investigated in a future.
+          if *istip {
+            let bhash = hash_block(&block);
+            if !self.block.contains_key(&bhash) {
+              let mut missing = bhash;
+              // Finds the first ancestor that wasn't downloaded yet
+              let mut count = 0;
+              while self.waiting.contains_key(&missing) {
+                count += 1;
+                missing = self.waiting[&missing].prev;
+              }
+              println!("ask missing: {} {:x}", count, missing);
+              udp_send(&mut self.socket, addr, &Message::AskBlock { bhash: missing })
+            }
+          }
+        }
+        // Someone sent us a transaction to mine
+        Message::MineTransaction { trans } => {
+          self.pool.push(trans.clone(), (hash_bytes(trans) >> 128).low_u128());
+        }
+      }
+    }
+  }
+
+  pub fn gossip(&mut self, peer_count: u128, message: &Message) {
+    for peer in self.get_random_peers(peer_count) {
+      udp_send(&mut self.socket, peer.address, message);
+    }
+  }
+
+  pub fn get_blocks_path(&self) -> PathBuf {
+    self.path.join("state").join("blocks")
+  }
+
+  fn gossip_tip_block(&mut self, peer_count: u128) {
+    let random_peers = self.get_random_peers(peer_count);
+    for peer in random_peers {
+      self.send_block_to(peer.address, self.block[&self.tip].clone(), true);
+    }
+  }
+
+  fn peers_timeout(&mut self) {
+    let mut forget = Vec::new();
+    for (id,peer) in &self.peers {
+      //println!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
+      if peer.seen_at < get_time() - PEER_TIMEOUT {
+        forget.push(peer.address);
+      }
+    }
+    for addr in forget {
+      self.del_peer(addr);
+    }
+  }
+
+  fn load_blocks(&mut self) {
+    let blocks_dir = self.get_blocks_path();
+    std::fs::create_dir_all(&blocks_dir).ok();
+    let mut file_paths : Vec<PathBuf> = vec![];
+    for entry in std::fs::read_dir(&blocks_dir).unwrap() {
+      file_paths.push(entry.unwrap().path());
+    }
+    file_paths.sort();
+    println!("Loading {} blocks from disk...", file_paths.len());
+    for file_path in file_paths {
+      let buffer = std::fs::read(file_path.clone()).unwrap();
+      let block = deserialized_block(&bytes_to_bitvec(&buffer));
+      self.add_block(&block);
+    }
+  }
+
+  fn ask_mine(&self, miner_comm: &SharedMinerComm, body: Body) {
+    write_miner_comm(miner_comm, MinerComm::Request {
+      prev: self.tip,
+      body,
+      targ: self.get_tip_target(),
+    });
+  }
+
+  pub fn main(
+    mut self,
+    kindelia_path: PathBuf,
+    miner_comm: SharedMinerComm,
+    mine_file: Option<String>,
+  ) -> ! {
+    const TICKS_PER_SEC: u64 = 100;
+
+    let mut tick: u64 = 0;
+    let mut mined: u64 = 0;
+
+    let init_body = code_to_body("");
+    let mine_body = mine_file.map(|x| code_to_body(&x));
+
+    // Loads all stored blocks
+    println!("Port: {}", self.port);
+    if self.port == 42000 { // for debugging, won't load blocks if it isn't the main self. FIXME: remove
+      self.load_blocks();
+    }
+
+    #[allow(clippy::modulo_one)]
+    loop {
+      tick += 1;
+
+      {
+
+        // If the miner thread mined a block, gets and registers it
+        if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
+          mined += 1;
+          self.add_block(&block);
+        }
+
+        // Spreads the tip block
+        if tick % 10 == 0 {
+          self.gossip_tip_block(8);
+        }
+
+        // Receives and handles incoming API requests
+        if tick % 5 == 0 {
+          if let Ok(request) = self.receiver.try_recv() {
+            self.handle_request(request);
+          }
+        }
+
+        // Receives and handles incoming network messages
+        // if tick % 1 == 0 {
+        self.receive_message();
+        // }
+
+        // Asks the miner thread to mine a block
+        if tick % 10 == 0 {
+          // This branch is here for testing purposes. FIXME: remove
+          if let Some(mine_body) = &mine_body {
+            self.ask_mine(&miner_comm, mine_body.clone()); // FIXME: avoid clone
+          }
+        }
+
+        // Peer timeout
+        if tick % (10 * TICKS_PER_SEC) == 0 {
+          self.peers_timeout();
+        }
+
+        // Display self info
+        if tick % TICKS_PER_SEC == 0 {
+          self.log_heartbeat();
         }
       }
 
-      // Receives and handles incoming network messages
-      // if tick % 1 == 0 {
-      node_receive_message(&mut node);
-      // }
-
-      // Asks the miner thread to mine a block
-      if tick % 10 == 0 {
-        // This branch is here for testing purposes. FIXME: remove
-        if let Some(mine_body) = &mine_body {
-          node_ask_mine(&mut node, &miner_comm, mine_body.clone()); // FIXME: avoid clone
-        }
-      }
-
-      // Peer timeout
-      if tick % (10 * TICKS_PER_SEC) == 0 {
-        node_peers_timeout(&mut node);
-      }
-
-      // Display node info
-      if tick % TICKS_PER_SEC == 0 {
-        log_heartbeat(&node);
-      }
+      // Sleep for 1/100 seconds
+      // TODO: just sleep remaining time <- good idea
+      std::thread::sleep(std::time::Duration::from_micros(1000000 / TICKS_PER_SEC));
     }
-
-    // Sleep for 1/100 seconds
-    // TODO: just sleep remaining time <- good idea
-    std::thread::sleep(std::time::Duration::from_micros(1000000 / TICKS_PER_SEC));
-  }
-}
-
-fn log_heartbeat(node: &Node) {
-
-  let tip = node.tip;
-  let tip_height = *node.height.get(&tip).unwrap() as u64;
-
-  let tip_target = *node.target.get(&tip).unwrap();
-  let difficulty = target_to_difficulty(tip_target);
-  let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
-
-  // Counts missing, pending and included blocks
-  let included_count = node.block.keys().count();
-  let mut missing_count: u64 = 0;
-  let mut pending_count: u64 = 0;
-  for (bhash, _) in node.wait_list.iter() {
-    if node.waiting.get(bhash).is_some() {
-      pending_count += 1;
-    }
-    missing_count += 1;
   }
 
-  let log = object!{
-    event: "heartbeat",
-    peers: node.peers.len(),
-    tip: {
-      height: tip_height,
-      // target: u256_to_hex(tip_target),
-      difficulty: difficulty.low_u64(),
-      hash_rate: hash_rate.low_u64(),
-    },
-    blocks: {
-      missing: missing_count,
-      pending: pending_count,
-      included: included_count,
-    },
-    total_mana: node.runtime.get_mana() as u64,
-  };
+  fn log_heartbeat(&self) {
 
-  println!("{}", log);
+    let tip = self.tip;
+    let tip_height = *self.height.get(&tip).unwrap() as u64;
+
+    let tip_target = *self.target.get(&tip).unwrap();
+    let difficulty = target_to_difficulty(tip_target);
+    let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
+
+    // Counts missing, pending and included blocks
+    let included_count = self.block.keys().count();
+    let mut missing_count: u64 = 0;
+    let mut pending_count: u64 = 0;
+    for (bhash, _) in self.wait_list.iter() {
+      if self.waiting.get(bhash).is_some() {
+        pending_count += 1;
+      }
+      missing_count += 1;
+    }
+
+    let log = object!{
+      event: "heartbeat",
+      peers: self.peers.len(),
+      tip: {
+        height: tip_height,
+        // target: u256_to_hex(tip_target),
+        difficulty: difficulty.low_u64(),
+        hash_rate: hash_rate.low_u64(),
+      },
+      blocks: {
+        missing: missing_count,
+        pending: pending_count,
+        included: included_count,
+      },
+      total_mana: self.runtime.get_mana() as u64,
+    };
+
+    println!("{}", log);
+  }
+
+  // Get the current target
+  pub fn get_tip_target(&self) -> U256 {
+    self.target[&self.tip]
+  }
+
 }

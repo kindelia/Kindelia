@@ -1581,8 +1581,8 @@ The table below compares some attributes of each network:
 **block size**                  | ```                       1280 bytes  ``` | ```                             1 MB  ```
 **max throughput: signed tx**   | ```                         ~20 tx/s  ``` | ```                         ~30 tx/s  ```
 **max throughput: unsigned tx** | ```                        ~160 tx/s  ``` | ```                              N/A  ```
-**max growth: blockchain**      | ```                       40 GB/year  ``` | ```                    2,174 GB/year  ```
-**max growth: state heap**      | ```  56 byte/s ~           8 GB/year  ``` | ```   3,680 byte/s ~     114 GB/year  ```
+**max growth: blockchain**      | ```                       40 GB/year  ``` | ```                              N/A  ```
+**max growth: state heap**      | ```  56 byte/s ~           8 GB/year  ``` | ```                              N/A  ```
 **max growth: computation**     | ```                10,000,000 mana/s  ``` | ```                  2,300,000 gas/s  ```
 **cost: multiplication**        | ```     2 mana ~      5,000,000 op/s  ``` | ```          5 gas ~    460,000 op/s  ```
 **cost: beta reduction**        | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
@@ -1593,30 +1593,21 @@ The table below compares some attributes of each network:
 The costs in this table were defined based on HVM benchmarks, using modern
 mid-end processors.
 
-Network-wise, Kindelia's block time is shorter, because its compressed blocks
-fit in a single UDP packet. Due to block size limits, Ethereum can handle
-slightly more signed transactions per second, including monetary transfers, but
-Kindelia handles considerably more unsigned transactions per second, including
-contract deployment and other interactions that don't require authentication.
-Note that, since Kindelia's signed transactions can group multiple calls in a
-single statement, the actual throughput can be much higher, and it achieves that
-with a fraction of Ethereum's maximum blockchain growth.
+Kindelia's block time is shorter, because its compressed blocks fit in a single
+UDP packet. Due to block size limits, Ethereum can handle slightly more signed
+transactions per second, including monetary transfers, but Kindelia handles
+considerably more unsigned transactions per second, including contract
+deployment and other interactions that don't require authentication.  Note that,
+since Kindelia's signed transactions can group multiple calls in a single
+statement, the actual throughput can be much higher, and it achieves that with a
+fraction of Ethereum's maximum blockchain growth.
 
-Computation-wise, Kindelia's layer-1 throughput is up to 434x higher, due to the
-HVM and stateful heaps respectively. Kindelia's functional opcodes allow it to
-host programs compiled from secure languages like Haskell, Idris, Agda and Kind,
-which is simply not economically viable on Ethereum. Kindelia's zero-cost reused
-SSTORE enables highly dynamic applications like layer-1 MMORPGs, which is also
-not viable on Ethereum. See the complete [Table of Costs](#table-of-costs)
-below.
-
-Space-wise, Kindelia has more strict limits on the blockchain and state heap
-growth, intentionally capping the maximum growth, to keep it in check.
-Ethereum's blockchain could, in theory, grow 2 terabytes per year, and its state
-could grow 114 gigabytes per year, which would increase centralization, and make
-it difficult to store the state in-memory. Note that, on Ethereum, this
-theoretical limit isn't meant to be reached, while Kindelia is designed to
-always grow at its max rate, so these numbers aren't directly comparable.
+Kindelia's layer-1 throughput is up to 434x higher, due to the HVM and stateful
+heaps respectively. Kindelia's functional opcodes allow it to host programs
+compiled from secure languages like Haskell, Idris, Agda and Kind, which is
+simply not economically viable on Ethereum. Kindelia's zero-cost reused SSTORE
+enables highly dynamic applications like layer-1 MMORPGs, which is also not
+viable on Ethereum. See the complete [Table of Costs](#table-of-costs) below.
 
 ### In short
 

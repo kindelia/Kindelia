@@ -185,7 +185,7 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
   let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let (node_query_sender, node) = new_node(kindelia_path.clone());
+  let (node_query_sender, node) = Node::new(kindelia_path.clone());
 
   // Node to Miner communication object
   let miner_comm_0 = new_miner_comm();
@@ -196,7 +196,8 @@ fn start_node(kindelia_path: PathBuf, file: Option<String>) {
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node_loop(node, kindelia_path.clone(), miner_comm_0, file);
+    //Node::node_loop(node, kindelia_path.clone(), miner_comm_0, file);
+    node.main(kindelia_path.clone(), miner_comm_0, file);
   });
 
   // Spawns the miner thread
