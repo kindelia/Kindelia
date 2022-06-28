@@ -3942,7 +3942,6 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let code = tail(code);
       let (code, oper) = read_oper(code);
       if let Some(oper) = oper {
-        let code = tail(code);
         let (code, val0) = read_term(code)?;
         let (code, val1) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
@@ -4091,12 +4090,12 @@ pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
     '<' => match head(tail(code)) {
       '=' => (tail(tail(code)), Some(LTE)),
       '<' => (tail(tail(code)), Some(SHL)),
-      _   => (code, Some(LTN)),
+      _   => (tail(code), Some(LTN)),
     },
     '>' => match head(tail(code)) {
       '=' => (tail(tail(code)), Some(GTE)),
       '>' => (tail(tail(code)), Some(SHR)),
-      _   => (code, Some(GTN)),
+      _   => (tail(code), Some(GTN)),
     },
     '=' => match head(tail(code)) {
       '=' => (tail(tail(code)), Some(EQL)),
