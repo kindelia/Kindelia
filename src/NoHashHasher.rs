@@ -211,8 +211,7 @@ impl<T: IsEnabled> Hasher for NoHashHasher<T> {
     fn write_u16(&mut self, n: u16)     { self.0 = u64::from(n) }
     fn write_u32(&mut self, n: u32)     { self.0 = u64::from(n) }
     fn write_u64(&mut self, n: u64)     { self.0 = n }
-    fn write_u128(&mut self, n: u128)   { self.0 = (n >>  64) as u64 }
-    fn write_u256(&mut self, n: u128)   { self.0 = (n >> 192).low_u64() }
+    fn write_u128(&mut self, n: u128)   { self.0 = (n >> 64) as u64 }
     fn write_usize(&mut self, n: usize) { self.0 = n as u64 }
 
     fn write_i8(&mut self, n: i8)       { self.0 = n as u64 }
