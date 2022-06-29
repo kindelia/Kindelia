@@ -243,7 +243,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use nohash_hasher::NoHashHasher;
+use crate::NoHashHasher as NHH;
 
 use crate::bits;
 use crate::crypto;
@@ -304,7 +304,7 @@ pub enum Oper {
 }
 
 // A u64 HashMap
-pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
+pub type Map<T> = util::U128Map<T>;
 
 // A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq)]
@@ -1205,10 +1205,10 @@ fn show_buff(vec: &[u128]) -> String {
 
 impl Store {
   fn write(&mut self, fid: u128, val: Ptr) {
-    self.links.insert(fid as u64, val);
+    self.links.insert(fid, val);
   }
   fn read(&self, fid: u128) -> Option<Ptr> {
-    self.links.get(&(fid as u64)).map(|x| *x)
+    self.links.get(&fid).map(|x| *x)
   }
   fn clear(&mut self) {
     self.links.clear();
@@ -1224,10 +1224,10 @@ impl Store {
 
 impl Funcs {
   fn write(&mut self, fid: u128, val: Arc<CompFunc>) {
-    self.funcs.entry(fid as u64).or_insert(val);
+    self.funcs.entry(fid).or_insert(val);
   }
   fn read(&self, fid: u128) -> Option<Arc<CompFunc>> {
-    return self.funcs.get(&(fid as u64)).map(|x| x.clone());
+    return self.funcs.get(&fid).map(|x| x.clone());
   }
   fn clear(&mut self) {
     self.funcs.clear();
@@ -1243,10 +1243,10 @@ impl Funcs {
 
 impl Arits {
   fn write(&mut self, fid: u128, val: u128) {
-    self.arits.entry(fid as u64).or_insert(val);
+    self.arits.entry(fid).or_insert(val);
   }
   fn read(&self, fid: u128) -> Option<u128> {
-    return self.arits.get(&(fid as u64)).map(|x| *x);
+    return self.arits.get(&fid).map(|x| *x);
   }
   fn clear(&mut self) {
     self.arits.clear();
@@ -1262,10 +1262,10 @@ impl Arits {
 
 impl Ownrs {
   fn write(&mut self, fid: u128, val: u128) {
-    self.ownrs.entry(fid as u64).or_insert(val);
+    self.ownrs.entry(fid).or_insert(val);
   }
   fn read(&self, fid: u128) -> Option<u128> {
-    return self.ownrs.get(&(fid as u64)).map(|x| *x);
+    return self.ownrs.get(&fid).map(|x| *x);
   }
   fn clear(&mut self) {
     self.ownrs.clear();
@@ -2430,14 +2430,14 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
     if name == VAR_NONE {
       link(rt, loc, Era());
     } else {
-      let got = vars_data.get(&(name as u64)).map(|x| *x);
+      let got = vars_data.get(&name).map(|x| *x);
       match got {
         Some(got) => {
-          vars_data.remove(&(name as u64));
+          vars_data.remove(&name);
           link(rt, got, lnk);
         }
         None => {
-          vars_data.insert(name as u64, lnk);
+          vars_data.insert(name, lnk);
           link(rt, loc, Era());
         }
       }
@@ -2446,14 +2446,14 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", u128_to_name(*name), vars_data.len());
-      let got = vars_data.get(&(*name as u64)).map(|x| *x);
+      let got = vars_data.get(name).map(|x| *x);
       match got {
         Some(got) => {
-          vars_data.remove(&(*name as u64));
+          vars_data.remove(name);
           return got;
         }
         None => {
-          vars_data.insert(*name as u64, loc);
+          vars_data.insert(*name, loc);
           return Num(0);
         }
       }
@@ -3126,7 +3126,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
                   }
                   //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_lnk(var));
                   if !rule_var.erase {
-                    vars_data.insert(rule_var.name as u64, var);
+                    vars_data.insert(rule_var.name, var);
                   } else {
                     // Collects unused argument
                     collect(rt, var);

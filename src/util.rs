@@ -9,7 +9,13 @@ use sha3::Digest;
 
 use crate::bits::*;
 
-pub type U256Map<T> = HashMap<U256, T>;
+//use std::hash::{BuildHasherDefault, Hash, Hasher};
+use crate::NoHashHasher as NHH;
+
+pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u64 >>>;
+pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u128>>>;
+pub type U256Map<T> = HashMap<U256, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U256>>>;
+
 pub type Hash = U256;
 
 // Logs
@@ -91,6 +97,45 @@ pub fn u8s_to_u128s(u8s: &[u8]) -> Vec<u128> {
     u128s.push(u128::from_le_bytes(u8s[i * 16 .. i * 16 + 16].try_into().unwrap()));
   }
   return u128s;
+}
+
+// Maps
+// ====
+
+pub fn u64map_new<T>() -> U64Map<T> {
+  return HashMap::with_hasher(std::hash::BuildHasherDefault::default());
+}
+
+pub fn u64map_from<T, const N: usize>(a: [(u64, T); N]) -> U64Map<T> {
+  let mut map = u64map_new();
+  for (k, v) in a {
+    map.insert(k, v);
+  }
+  return map;
+}
+
+pub fn u128map_new<T>() -> U128Map<T> {
+  return HashMap::with_hasher(std::hash::BuildHasherDefault::default());
+}
+
+pub fn u128map_from<T, const N: usize>(a: [(u128, T); N]) -> U128Map<T> {
+  let mut map = u128map_new();
+  for (k, v) in a {
+    map.insert(k, v);
+  }
+  return map;
+}
+
+pub fn u256map_new<T>() -> U256Map<T> {
+  return HashMap::with_hasher(std::hash::BuildHasherDefault::default());
+}
+
+pub fn u256map_from<T, const N: usize>(a: [(U256, T); N]) -> U256Map<T> {
+  let mut map = u256map_new();
+  for (k, v) in a {
+    map.insert(k, v);
+  }
+  return map;
 }
 
 // System

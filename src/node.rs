@@ -17,7 +17,7 @@ use std::sync::mpsc::{SyncSender, Receiver};
 use tokio::sync::oneshot;
 
 use std::hash::{BuildHasherDefault};
-use nohash_hasher::NoHashHasher;
+use crate::NoHashHasher as NHH;
 
 use crate::util::*;
 use crate::bits::*;
@@ -44,8 +44,8 @@ use crate::hvm::{self,*};
 // max number of transactions a block could fit is 256 (but slightly less due to lengths).
 
 // A u64 HashMap / HashSet
-pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NoHashHasher<u64>>>;
-pub type Set    = HashSet<u64, BuildHasherDefault<NoHashHasher<u64>>>;
+pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
+pub type Set    = HashSet<u64, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -134,7 +134,7 @@ pub enum Request {
     tx: RequestAnswer<Vec<BlockInfo>>,
   },
   GetFunctions {
-    tx: RequestAnswer<HashSet<u64>>,
+    tx: RequestAnswer<HashSet<u128>>,
   },
   GetFunction {
     name: u128,
@@ -147,7 +147,7 @@ pub enum Request {
 }
 
 #[derive(Debug, Clone)]
-pub enum MinerComm {
+pub enum MinerMessage {
   Request {
     prev: U256,
     body: Body,
@@ -159,7 +159,10 @@ pub enum MinerComm {
   Stop
 }
 
-pub type SharedMinerComm = Arc<Mutex<MinerComm>>;
+#[derive(Debug, Clone)]
+pub struct MinerCommunication {
+  message: Arc<Mutex<MinerMessage>>
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
@@ -253,6 +256,38 @@ pub const SHARE_PEER_COUNT : u128 = 3;
 
 // How many peers we keep on the last_seen object?
 pub const LAST_SEEN_SIZE : u128 = 2;
+
+// Delay between handling of network messages, in ms
+pub const HANDLE_MESSAGE_DELAY : u128 = 20;
+
+// Delay between handling of API requests, in ms
+pub const HANDLE_REQUEST_DELAY : u128 = 20;
+
+// This limits how many messages we accept at once
+// FIXME:
+// With a handle_message_delay of 20ms, and the message limit of 5, we can handle up to 250
+// messages per second. This number is made up. I do not know how many messages we're able to
+// handle. We must stress test and benchmark the performance of Node::handle_message, in order to
+// come up with a constant that is aligned. Furthermore, we can also greatly optimize the
+// performance of Node::handle_message with some key changes, which would allow us to increase that
+// limit considerably.
+// 1. Cache block hashes:
+//   The `NoticeThisBlock` handler hashes the same block twice: one inside `add_block`, and another
+//   on the missing ancestor discovery logic. We should avoid that. A good idea might be to include
+//   the block hash on the Block struct, so that it is always cached, avoiding re-hashing.
+// 2. Use a faster hash function:
+//   We can replace every usage of Keccak by K12 on Kindelia, with the only exception being the
+//   hash of a public address to end up with an account's name, since Keccak is required to achieve
+//   Ethereum account compatibility.
+// 3. Receive the hash from the peer:
+//   We can *perhaps*, receive a block's hash from the peer that sends it. Obviously, this would
+//   open door for several vulnerabilities, but it might be used as a heuristic to avoid slow
+//   branches. Of course, when the hash is needed for critical purposes, we must compute it.
+// 4. Cache the "first missing ancestor":
+//   Every time the `NoticeThisBlock` handler receives a tip, it must find the first missing block
+//   on that tips ancestry. That information may be chached, avoiding that loop.
+pub const HANDLE_MESSAGE_LIMIT : u128 = 5;
+
 
 // UDP
 // ===
@@ -534,31 +569,34 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
   return None;
 }
 
-// Creates a shared MinerComm object
-pub fn new_miner_comm() -> SharedMinerComm {
-  Arc::new(Mutex::new(MinerComm::Stop))
-}
+impl MinerCommunication {
+  // Creates a shared MinerCommunication object
+  pub fn new() -> Self {
+    MinerCommunication {
+      message: Arc::new(Mutex::new(MinerMessage::Stop))
+    }
+  }
 
-// Writes the shared MinerComm object
-pub fn write_miner_comm(miner_comm: &SharedMinerComm, new_value: MinerComm) {
-  let mut value = miner_comm.lock().unwrap();
-  *value = new_value;
-}
+  // Writes the shared MinerCommunication object
+  pub fn write(&mut self, new_message: MinerMessage) {
+    let mut value = self.message.lock().unwrap();
+    *value = new_message;
+  }
 
-// Reads the shared MinerComm object
-pub fn read_miner_comm(miner_comm: &SharedMinerComm) -> MinerComm {
-  return (*miner_comm.lock().unwrap()).clone();
+  pub fn read(&self) -> MinerMessage {
+    return (*self.message.lock().unwrap()).clone();
+  }
 }
 
 // Main miner loop: if asked, attempts to mine a block
-pub fn miner_loop(miner_comm: SharedMinerComm) {
+pub fn miner_loop(mut miner_communication: MinerCommunication) {
   loop {
-    if let MinerComm::Request { prev, body, targ } = read_miner_comm(&miner_comm) {
+    if let MinerMessage::Request { prev, body, targ } = miner_communication.read() {
       //println!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
         //println!("[miner] mined a block!");
-        write_miner_comm(&miner_comm, MinerComm::Answer { block });
+        miner_communication.write(MinerMessage::Answer { block });
       }
     }
   }
@@ -576,14 +614,14 @@ impl Node {
       path       : kindelia_path,
       socket     : socket,
       port       : port,
-      block      : HashMap::from([(ZERO_HASH(), GENESIS_BLOCK())]),
-      waiting    : HashMap::new(),
-      wait_list  : HashMap::new(),
-      children   : HashMap::from([(ZERO_HASH(), vec![])]),
-      work       : HashMap::from([(ZERO_HASH(), u256(0))]),
-      height     : HashMap::from([(ZERO_HASH(), 0)]),
-      target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
-      results    : HashMap::from([(ZERO_HASH(), vec![])]),
+      block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
+      waiting    : u256map_new(),
+      wait_list  : u256map_new(),
+      children   : u256map_from([(ZERO_HASH(), vec![])]),
+      work       : u256map_from([(ZERO_HASH(), u256(0))]),
+      height     : u256map_from([(ZERO_HASH(), 0)]),
+      target     : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
+      results    : u256map_from([(ZERO_HASH(), vec![])]),
       tip        : ZERO_HASH(),
       pool       : PriorityQueue::new(),
       peer_id    : HashMap::new(),
@@ -815,6 +853,11 @@ impl Node {
     self.runtime.tick();
   }
 
+  // Get the current target
+  pub fn get_tip_target(&self) -> U256 {
+    self.target[&self.tip]
+  }
+
   pub fn get_longest_chain(&self, num: Option<usize>) -> Vec<U256> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
@@ -835,8 +878,18 @@ impl Node {
   }
 
   pub fn receive_message(&mut self) {
+    let mut count = 0;
     for (addr, msg) in udp_recv(&mut self.socket) {
-      self.handle_message(addr, &msg);
+      if count < HANDLE_MESSAGE_LIMIT {
+        self.handle_message(addr, &msg);
+        count = count + 1;
+      }
+    }
+  }
+
+  fn receive_request(&mut self) {
+    if let Ok(request) = self.receiver.try_recv() {
+      self.handle_request(request);
     }
   }
 
@@ -881,7 +934,7 @@ impl Node {
         answer.send(info).unwrap();
       },
       Request::GetFunctions { tx } => {
-        let mut funcs: HashSet<u64> = HashSet::new();
+        let mut funcs: HashSet<u128> = HashSet::new();
         self.runtime.reduce_with(&mut funcs, |acc, heap| {
           for func in heap.disk.links.keys() {
             acc.insert(*func);
@@ -952,6 +1005,12 @@ impl Node {
           // there are some solutions, which might be investigated in a future.
           if *istip {
             let bhash = hash_block(&block);
+            // If bhash is on .block, then either we already had this tip, or it was successfully
+            // included on the `add_block()` call above. In these cases, we already have all the
+            // blocks from tip to genesis downloaded. If bhash isn't on .block, that means that
+            // there is N blocks on top of it on the "waiting" state (i.e., downloaded but waiting
+            // for an ancestor), with the N+1 block being on the "missing" state (i.e., cited but
+            // not downloaded). We must find that missing block, and request it.
             if !self.block.contains_key(&bhash) {
               let mut missing = bhash;
               // Finds the first ancestor that wasn't downloaded yet
@@ -1022,16 +1081,22 @@ impl Node {
     }
   }
 
-  fn ask_mine(&self, miner_comm: &SharedMinerComm, body: Body) {
+  fn ask_mine(&self, miner_communication: &mut MinerCommunication, body: Body) {
     //println!("Asking miner to mine:");
     //for transaction in extract_transactions(&body) {
       //println!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
     //}
-    write_miner_comm(miner_comm, MinerComm::Request {
+    miner_communication.write(MinerMessage::Request {
       prev: self.tip,
       body,
       targ: self.get_tip_target(),
     });
+  }
+
+  fn add_mined_block(&mut self, miner_communication: &MinerCommunication) {
+    if let MinerMessage::Answer { block } = miner_communication.read() {
+      self.add_block(&block);
+    }
   }
 
   // Builds the body to be mined.
@@ -1055,78 +1120,7 @@ impl Node {
     return Body { value: body_val };
   }
 
-  pub fn main(
-    mut self,
-    kindelia_path: PathBuf,
-    miner_comm: SharedMinerComm,
-  ) -> ! {
-    const TICKS_PER_SEC: u64 = 100;
-
-    let mut tick: u64 = 0;
-    let mut mined: u64 = 0;
-
-    //let init_body = code_to_body("");
-    //let mine_body = mine_file.map(|x| code_to_body(&x));
-
-    // Loads all stored blocks
-    println!("Port: {}", self.port);
-    if self.port == 42000 { // for debugging, won't load blocks if it isn't the main self. FIXME: remove
-      self.load_blocks();
-    }
-
-    #[allow(clippy::modulo_one)]
-    loop {
-      tick += 1;
-
-      {
-
-        // If the miner thread mined a block, gets and registers it
-        if let MinerComm::Answer { block } = read_miner_comm(&miner_comm) {
-          mined += 1;
-          self.add_block(&block);
-        }
-
-        // Spreads the tip block
-        if tick % 10 == 0 {
-          self.gossip_tip_block(8);
-        }
-
-        // Receives and handles incoming API requests
-        if tick % 5 == 0 {
-          if let Ok(request) = self.receiver.try_recv() {
-            self.handle_request(request);
-          }
-        }
-
-        // Receives and handles incoming network messages
-        if tick % 1 == 0 {
-          self.receive_message();
-        }
-
-        // Asks the miner thread to mine a block
-        if tick % (1 * TICKS_PER_SEC) == 0 {
-          self.ask_mine(&miner_comm, self.build_body());
-        }
-
-        // Peer timeout
-        if tick % (10 * TICKS_PER_SEC) == 0 {
-          self.peers_timeout();
-        }
-
-        // Display self info
-        if tick % TICKS_PER_SEC == 0 {
-          self.log_heartbeat();
-        }
-      }
-
-      // Sleep for 1/100 seconds
-      // TODO: just sleep remaining time <- good idea
-      std::thread::sleep(std::time::Duration::from_micros(1000000 / TICKS_PER_SEC));
-    }
-  }
-
   fn log_heartbeat(&self) {
-
     let tip = self.tip;
     let tip_height = *self.height.get(&tip).unwrap() as u64;
 
@@ -1165,9 +1159,71 @@ impl Node {
     println!("{}", log);
   }
 
-  // Get the current target
-  pub fn get_tip_target(&self) -> U256 {
-    self.target[&self.tip]
+  pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication) -> ! {
+
+    // Loads all stored blocks. FIXME: remove the if (used for debugging)
+    println!("Port: {}", self.port);
+    if self.port == 42000 {
+      self.load_blocks();
+    }
+
+  // A task that is executed continuously on the main loop
+    struct Task {
+      pub delay : u128,
+      pub action : fn (&mut Node, &mut MinerCommunication) -> (),
+    }
+
+    // The vector of tasks
+    let tasks = vec![
+      // Asks the miner thread to mine a block
+      Task {
+        delay: 1000,
+        action: |node, mc| { node.ask_mine(mc, node.build_body()); },
+      },
+      // If the miner mined a block, adds it
+      Task {
+        delay: 5,
+        action: |node, mc| { node.add_mined_block(mc); },
+      },
+      // Gossips the tip block
+      Task {
+        delay: 20,
+        action: |node, mc| { node.gossip_tip_block(8); },
+      },
+      // Receives and handles incoming network messages
+      Task {
+        delay: HANDLE_MESSAGE_DELAY,
+        action: |node, mc| { node.receive_message(); },
+      },
+      // Receives and handles incoming API requests
+      Task {
+        delay: HANDLE_REQUEST_DELAY,
+        action: |node, mc| { node.receive_request(); },
+      },
+      // Forgets inactive peers
+      Task {
+        delay: 5_000,
+        action: |node, mc| { node.peers_timeout(); },
+      },
+      // Prints stats
+      Task {
+        delay: 1_000,
+        action: |node, mc| { node.log_heartbeat(); },
+      },
+    ];
+
+    // Last time a task was executed
+    let mut last_tick_time: Vec<u128> = vec![0; tasks.len()];
+
+    loop {
+      let time = get_time();
+      for (i, task) in tasks.iter().enumerate() {
+        if last_tick_time[i] + task.delay <= time {
+          (task.action)(&mut self, &mut miner_communication);
+          last_tick_time[i] = time;
+        }
+      }
+    }
   }
 
 }

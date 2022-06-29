@@ -10,6 +10,7 @@ mod crypto;
 mod hvm;
 mod node;
 mod util;
+mod NoHashHasher;
 
 #[cfg(test)]
 mod test;
@@ -211,7 +212,7 @@ fn start_node(kindelia_path: PathBuf) {
   let (node_query_sender, node) = Node::new(kindelia_path.clone());
 
   // Node to Miner communication object
-  let miner_comm_0 = new_miner_comm();
+  let miner_comm_0 = MinerCommunication::new();
   let miner_comm_1 = miner_comm_0.clone();
 
   // API thread channel
