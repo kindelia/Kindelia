@@ -97,7 +97,6 @@ pub struct Node {
   pub target     : U256Map<U256>,                    // block_hash -> this block's target
   pub height     : U256Map<u128>,                    // block_hash -> cached height
   pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
-  pub was_mined  : Set,                              // transaction_hash -> was it mined?
   pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
   pub peer_id    : HashMap<Address, u128>,           // peer address -> peer id
   pub peers      : HashMap<u128, Peer>,              // peer id -> peer
@@ -586,7 +585,6 @@ impl Node {
       target     : HashMap::from([(ZERO_HASH(), INITIAL_TARGET())]),
       results    : HashMap::from([(ZERO_HASH(), vec![])]),
       tip        : ZERO_HASH(),
-      was_mined  : HashSet::with_hasher(BuildHasherDefault::default()),
       pool       : PriorityQueue::new(),
       peer_id    : HashMap::new(),
       peers      : HashMap::new(),
@@ -722,7 +720,7 @@ impl Node {
           }
           // Flags this block's transactions as mined
           for tx in extract_transactions(&block.body) {
-            self.was_mined.insert(tx.hash.low_u64());
+            self.pool.remove(&tx);
           }
           // Updates the tip work and block hash
           let old_tip = self.tip;
@@ -972,7 +970,6 @@ impl Node {
           //println!("- Transaction added to pool:");
           //println!("-- {:?}", trans.data);
           //println!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
-          self.was_mined.remove(&trans.hash.low_u64());
           self.pool.push(trans.clone(), trans.hash.low_u64());
         }
       }
@@ -1043,18 +1040,16 @@ impl Node {
     let mut body_len = 1;
     let mut tx_count = 0;
     for (transaction, score) in self.pool.iter() {
-      if !self.was_mined.contains(&transaction.hash.low_u64()) {
-        let len_real = transaction.data.len(); // how many bytes the original transaction has
-        if len_real == 0 { continue; }
-        let len_byte = transaction.len_byte(); // number we will store as the byte_len value
-        let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
-        if body_len + 1 + len_used > BODY_SIZE { break; }
-        body_val[body_len] = len_byte as u8;
-        body_len += 1;
-        body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
-        body_len += len_used;
-        tx_count += 1;
-      }
+      let len_real = transaction.data.len(); // how many bytes the original transaction has
+      if len_real == 0 { continue; }
+      let len_byte = transaction.len_byte(); // number we will store as the byte_len value
+      let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
+      if body_len + 1 + len_used > BODY_SIZE { break; }
+      body_val[body_len] = len_byte as u8;
+      body_len += 1;
+      body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
+      body_len += len_used;
+      tx_count += 1;
     }
     body_val[0] = tx_count;
     return Body { value: body_val };
