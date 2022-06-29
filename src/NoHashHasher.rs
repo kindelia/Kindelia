@@ -108,44 +108,53 @@ pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;
 /// assert_eq!(Some(&'b'), m.get(&1));
 /// ```
 #[cfg(debug_assertions)]
-pub struct NoHashHasher<T>(u64, bool, PhantomData<T>);
+pub struct NoHashHasher<T> {
+    val: u64,
+    idx: u8,
+    flag: bool,
+    ph: PhantomData<T>,
+}
 
 #[cfg(not(debug_assertions))]
-pub struct NoHashHasher<T>(u64, PhantomData<T>);
+pub struct NoHashHasher<T> {
+    val: u64,
+    idx: u8,
+    ph: PhantomData<T>,
+}
 
 impl<T> fmt::Debug for NoHashHasher<T> {
     #[cfg(debug_assertions)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("NoHashHasher").field(&self.0).field(&self.1).finish()
+        f.debug_tuple("NoHashHasher").field(&self.val).field(&self.idx).field(&self.flag).finish()
     }
 
     #[cfg(not(debug_assertions))]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("NoHashHasher").field(&self.0).finish()
+        f.debug_tuple("NoHashHasher").field(&self.val).field(&self.idx).finish()
     }
 }
 
 impl<T> Default for NoHashHasher<T> {
     #[cfg(debug_assertions)]
     fn default() -> Self {
-        NoHashHasher(0, false, PhantomData)
+        NoHashHasher { val: 0, idx: 0, flag: false, ph: PhantomData }
     }
 
     #[cfg(not(debug_assertions))]
     fn default() -> Self {
-        NoHashHasher(0, PhantomData)
+        NoHashHasher { val: 0, idx: 0, ph: PhantomData }
     }
 }
 
 impl<T> Clone for NoHashHasher<T> {
     #[cfg(debug_assertions)]
     fn clone(&self) -> Self {
-        NoHashHasher(self.0, self.1, self.2)
+        NoHashHasher { val: self.val, idx: self.idx, flag: self.flag, ph: self.ph }
     }
 
     #[cfg(not(debug_assertions))]
     fn clone(&self) -> Self {
-        NoHashHasher(self.0, self.1)
+        NoHashHasher { val: self.val, idx: self.idx, ph: self.ph }
     }
 }
 
@@ -205,123 +214,120 @@ impl IsEnabled for isize {}
 impl<T: IsEnabled> Hasher for NoHashHasher<T> {
     fn write(&mut self, n: &[u8]) {
         // TODO: see comment for this function on below `impl`
-        if self.0 == 0 {
-            let size = std::cmp::min(n.len(), 8); // TODO: benchmark / profile
-            let lo: [u8; 8] = [0u8; 8];
-            for i in 0..size {
-                self.0 = self.0 | u64::from(n[i]) << (i * 8);
+        for byte in n {
+            if self.idx >= 8 {
+                break;
             }
-            self.0 = u64::from_le_bytes(lo);
+            self.val = self.val ^ u64::from(*byte) << ((self.idx % 8) * 8);
+            self.idx += 1;
         }
     }
 
-    fn write_u8(&mut self, n: u8)       { self.0 = u64::from(n) }
-    fn write_u16(&mut self, n: u16)     { self.0 = u64::from(n) }
-    fn write_u32(&mut self, n: u32)     { self.0 = u64::from(n) }
-    fn write_u64(&mut self, n: u64)     { self.0 = n }
-    fn write_u128(&mut self, n: u128)   { self.0 = n  as u64 }
-    fn write_u128(&mut self, n: u128)   { self.0 = n as u64 }
-    fn write_usize(&mut self, n: usize) { self.0 = n as u64 }
+    fn write_u8(&mut self, n: u8)       { self.val = u64::from(n) }
+    fn write_u16(&mut self, n: u16)     { self.val = u64::from(n) }
+    fn write_u32(&mut self, n: u32)     { self.val = u64::from(n) }
+    fn write_u64(&mut self, n: u64)     { self.val = n }
+    fn write_u128(&mut self, n: u128)   { self.val = n as u64 }
+    fn write_usize(&mut self, n: usize) { self.val = n as u64 }
 
-    fn write_i8(&mut self, n: i8)       { self.0 = n as u64 }
-    fn write_i16(&mut self, n: i16)     { self.0 = n as u64 }
-    fn write_i32(&mut self, n: i32)     { self.0 = n as u64 }
-    fn write_i64(&mut self, n: i64)     { self.0 = n as u64 }
-    fn write_isize(&mut self, n: isize) { self.0 = n as u64 }
+    fn write_i8(&mut self, n: i8)       { self.val = n as u64 }
+    fn write_i16(&mut self, n: i16)     { self.val = n as u64 }
+    fn write_i32(&mut self, n: i32)     { self.val = n as u64 }
+    fn write_i64(&mut self, n: i64)     { self.val = n as u64 }
+    fn write_isize(&mut self, n: isize) { self.val = n as u64 }
 
-    fn finish(&self) -> u64 { self.0 }
+    fn finish(&self) -> u64 { self.val }
 }
 
 #[cfg(debug_assertions)]
 impl<T: IsEnabled> Hasher for NoHashHasher<T> {
     fn write(&mut self, n: &[u8]) {
+        // TODO: tests
         // TODO:
         // This behavior is different from all the other functions below.
-        // It allows the `write()` function to be called more than once, and it
-        // just ignores the subsequent calls.
-        // I'm not sure how to make it consistent.
+        // It allows the `write()` function to be called for 8 bytes, then just
+        // ignores the subsequent calls.
+        // I'm not sure how to make it consistent. Maybe replicate the
+        // ignore-subsequent-calls behavior on the other functions.
 
-        // assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        // self.1 = true;
-
-        if self.0 == 0 {
-            let size = std::cmp::min(n.len(), 8); // TODO: benchmark / profile
-            let lo: [u8; 8] = [0u8; 8];
-            for i in 0..size {
-                self.0 = self.0 | u64::from(n[i]) << (i * 8);
+        // TODO: benchmark / profile / optimize?
+        for byte in n {
+            if self.idx >= 8 {
+                break;
             }
-            self.0 = u64::from_le_bytes(lo);
+            self.val = self.val ^ u64::from(*byte) << ((self.idx % 8) * 8);
+            self.idx += 1;
         }
     }
 
     fn write_u8(&mut self, n: u8) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = u64::from(n);
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = u64::from(n);
+        self.flag = true
     }
 
     fn write_u16(&mut self, n: u16) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = u64::from(n);
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = u64::from(n);
+        self.flag = true
     }
 
     fn write_u32(&mut self, n: u32) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = u64::from(n);
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = u64::from(n);
+        self.flag = true
     }
 
     fn write_u64(&mut self, n: u64) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n;
+        self.flag = true
     }
 
     fn write_u128(&mut self, n: u128) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64; // ??
-        self.1 = true;
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64; // ??
+        self.flag = true;
     }
 
     fn write_usize(&mut self, n: usize) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn write_i8(&mut self, n: i8) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn write_i16(&mut self, n: i16) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn write_i32(&mut self, n: i32) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn write_i64(&mut self, n: i64) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn write_isize(&mut self, n: isize) {
-        assert!(!self.1, "NoHashHasher: second write attempt detected.");
-        self.0 = n as u64;
-        self.1 = true
+        assert!(!self.flag, "NoHashHasher: second write attempt detected.");
+        self.val = n as u64;
+        self.flag = true
     }
 
     fn finish(&self) -> u64 {
-        self.0
+        self.val
     }
 }
 
