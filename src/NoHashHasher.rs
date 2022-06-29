@@ -203,15 +203,24 @@ impl IsEnabled for isize {}
 
 #[cfg(not(debug_assertions))]
 impl<T: IsEnabled> Hasher for NoHashHasher<T> {
-    fn write(&mut self, _: &[u8]) {
-        panic!("Invalid use of NoHashHasher")
+    fn write(&mut self, n: &[u8]) {
+        // TODO: see comment for this function on below `impl`
+        if self.0 == 0 {
+            let size = std::cmp::min(n.len(), 8); // TODO: benchmark / profile
+            let lo: [u8; 8] = [0u8; 8];
+            for i in 0..size {
+                self.0 = self.0 | u64::from(n[i]) << (i * 8);
+            }
+            self.0 = u64::from_le_bytes(lo);
+        }
     }
 
     fn write_u8(&mut self, n: u8)       { self.0 = u64::from(n) }
     fn write_u16(&mut self, n: u16)     { self.0 = u64::from(n) }
     fn write_u32(&mut self, n: u32)     { self.0 = u64::from(n) }
     fn write_u64(&mut self, n: u64)     { self.0 = n }
-    fn write_u128(&mut self, n: u128)   { self.0 = (n >> 64) as u64 }
+    fn write_u128(&mut self, n: u128)   { self.0 = n  as u64 }
+    fn write_u128(&mut self, n: u128)   { self.0 = n as u64 }
     fn write_usize(&mut self, n: usize) { self.0 = n as u64 }
 
     fn write_i8(&mut self, n: i8)       { self.0 = n as u64 }
@@ -225,8 +234,24 @@ impl<T: IsEnabled> Hasher for NoHashHasher<T> {
 
 #[cfg(debug_assertions)]
 impl<T: IsEnabled> Hasher for NoHashHasher<T> {
-    fn write(&mut self, _: &[u8]) {
-        panic!("Invalid use of NoHashHasher")
+    fn write(&mut self, n: &[u8]) {
+        // TODO:
+        // This behavior is different from all the other functions below.
+        // It allows the `write()` function to be called more than once, and it
+        // just ignores the subsequent calls.
+        // I'm not sure how to make it consistent.
+
+        // assert!(!self.1, "NoHashHasher: second write attempt detected.");
+        // self.1 = true;
+
+        if self.0 == 0 {
+            let size = std::cmp::min(n.len(), 8); // TODO: benchmark / profile
+            let lo: [u8; 8] = [0u8; 8];
+            for i in 0..size {
+                self.0 = self.0 | u64::from(n[i]) << (i * 8);
+            }
+            self.0 = u64::from_le_bytes(lo);
+        }
     }
 
     fn write_u8(&mut self, n: u8) {
@@ -251,6 +276,12 @@ impl<T: IsEnabled> Hasher for NoHashHasher<T> {
         assert!(!self.1, "NoHashHasher: second write attempt detected.");
         self.0 = n;
         self.1 = true
+    }
+
+    fn write_u128(&mut self, n: u128) {
+        assert!(!self.1, "NoHashHasher: second write attempt detected.");
+        self.0 = n as u64; // ??
+        self.1 = true;
     }
 
     fn write_usize(&mut self, n: usize) {
