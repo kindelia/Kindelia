@@ -252,7 +252,7 @@ an immutable tree as its state, simply and directly.
 
 Finally, `load` and `save` themselves have no cost! But blocks must still repeat
 the heap growth and accumulated computation limits. So, for example, updating a
-coin balance requires paying the cost of some `Map.updade` operation (which,
+coin balance requires paying the cost of some `Map.update` operation (which,
 usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
 is very expensive. This allows Kindelia to host highly dynamic applications such
 as games and exchanges on its layer 1.
