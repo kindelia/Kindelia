@@ -213,11 +213,15 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     });
 
   let query_tx = node_query_sender.clone();
-  let _get_function = get_function_base.and(path!()).then(move |name: u128| {
+  let get_function = get_function_base.and(path!()).and_then(move |name: u128| {
     let query_tx = query_tx.clone();
     async move {
       let function = ask(query_tx, |tx| NodeRequest::GetFunction { name, tx }).await;
-      ok_json(function)
+      if let Some(function) = function {
+        Ok(ok_json(function))
+      } else {
+        Err(reject::not_found())
+      }
     }
   });
 
@@ -235,7 +239,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   });
 
   let functions_router = get_functions //
-    // .or(get_function) //
+    .or(get_function) //
     .or(get_function_state);
 
   // ==
@@ -246,16 +250,15 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
   let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();
-  let listener =
-    TcpListenerStream::new(listener_v4).merge(TcpListenerStream::new(listener_v6));
+  let listener = TcpListenerStream::new(listener_v4).merge(TcpListenerStream::new(listener_v6));
 
   warp::serve(app).run_incoming(listener).await;
 }
 
 mod ser {
   use super::{u128_names_to_strings, u256_to_hex};
-  use crate::hvm::{u128_to_name, Rule, Statement, StatementErr, StatementInfo, Term};
-  use crate::node::{Block, BlockInfo};
+  use crate::hvm::{u128_to_name, Func, Rule, Statement, StatementErr, StatementInfo, Term};
+  use crate::node::{Block, BlockInfo, FuncInfo};
   use serde::ser::{SerializeStruct, SerializeStructVariant};
   use serde::Serialize;
 
@@ -322,6 +325,17 @@ mod ser {
     }
   }
 
+  impl Serialize for FuncInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("FuncInfo", 1)?;
+      s.serialize_field("func", &self.func)?;
+      s.end()
+    }
+  }
+
   impl serde::Serialize for Block {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -371,6 +385,17 @@ mod ser {
           panic!("TODO");
         }
       }
+    }
+  }
+
+  impl serde::Serialize for Func {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: serde::Serializer,
+    {
+      let mut s = serializer.serialize_struct("Func", 2)?;
+      s.serialize_field("rules", &self.rules)?;
+      s.end()
     }
   }
 

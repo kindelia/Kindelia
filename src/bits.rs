@@ -470,11 +470,12 @@ pub fn deserialize_rule(bits: &BitVec, index: &mut u128) -> Option<Rule> {
 // A Func
 
 pub fn serialize_func(func: &Func, bits: &mut BitVec) {
-  serialize_list(serialize_rule, func, bits);
+  serialize_list(serialize_rule, &func.rules, bits);
 }
 
 pub fn deserialize_func(bits: &BitVec, index: &mut u128) -> Option<Func> {
-  deserialize_list(deserialize_rule, bits, index)
+  let rules = deserialize_list(deserialize_rule, bits, index)?;
+  Some(Func { rules })
 }
 
 pub fn serialized_func(func: &Func) -> BitVec {

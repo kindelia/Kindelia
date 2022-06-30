@@ -118,6 +118,11 @@ pub struct BlockInfo {
   pub content: Vec<hvm::Statement>,
 }
 
+#[derive(Debug)]
+pub struct FuncInfo {
+  pub func: Func,
+}
+
 type RequestAnswer<T> = oneshot::Sender<T>;
 
 // TODO: store and serve tick where stuff where last changed
@@ -139,7 +144,7 @@ pub enum Request {
   },
   GetFunction {
     name: u128,
-    tx: RequestAnswer<u128>,
+    tx: RequestAnswer<Option<FuncInfo>>,
   },
   GetState {
     name: u128,
@@ -893,7 +898,7 @@ impl Node {
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).expect("Missing block result.").clone();
     let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-    let content = crate::bits::deserialize_statements(&bits, &mut 0).unwrap_or(Vec::new());
+    let content = crate::bits::deserialize_statements(&bits, &mut 0).unwrap_or_else(|| Vec::new());
     let info = BlockInfo {
       block: block.clone(),
       hash: *hash,
@@ -902,6 +907,12 @@ impl Node {
       content,
     };
     Some(info)
+  }
+
+  pub fn get_func_info(&self, fid: u128) -> Option<FuncInfo> {
+    let comp_func = self.runtime.read_file(fid)?;
+    let func = comp_func.func;
+    Some(FuncInfo { func })
   }
 
   pub fn handle_request(&mut self, request: Request) {
@@ -936,7 +947,10 @@ impl Node {
         });
         tx.send(funcs).unwrap();
       },
-      Request::GetFunction { name, tx: answer } => todo!(),
+      Request::GetFunction { name, tx: answer } =>  {
+        let info = self.get_func_info(name);
+        answer.send(info).unwrap();
+      },
       Request::GetState { name, tx: answer } => {
         let state = self.runtime.read_disk_as_term(name);
         answer.send(state).unwrap();
