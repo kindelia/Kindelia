@@ -244,8 +244,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
 
-  let listener_v4 = TcpListener::bind("127.0.0.1:8000").await.unwrap();
-  let listener_v6 = TcpListener::bind("[::1]:8000").await.unwrap();
+  let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
+  let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();
   let listener =
     TcpListenerStream::new(listener_v4).merge(TcpListenerStream::new(listener_v6));
 
