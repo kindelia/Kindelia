@@ -1554,6 +1554,7 @@ impl Runtime {
     }
   }
 
+  #[allow(clippy::useless_format)]
   pub fn run_statement(&mut self, statement: &Statement, silent: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo();

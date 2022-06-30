@@ -69,7 +69,7 @@ pub fn name_to_u128_safe(name: &str) -> Option<u128> {
     debug_assert!(i < 20, "Name too big: `{}`.", name);
     num = (num << 6) + char_to_u128_safe(chr)?;
   }
-  return Some(num);
+  Some(num)
 }
 
 pub const fn char_to_u128_safe(chr: char) -> Option<u128> {
