@@ -926,7 +926,7 @@ impl Heap {
   fn get_rwts(&self) -> u128 {
     return self.rwts;
   }
-  fn set_mana(&mut self, mana: u128) {
+  fn set_mana(&mut self, mana: u128) { // TODO: do these counters need to be u128? would u64 suffice?
     self.mana = mana;
   }
   fn get_mana(&self) -> u128 {

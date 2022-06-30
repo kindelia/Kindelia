@@ -977,6 +977,11 @@ impl Node {
         }
         // Someone sent us a block
         Message::NoticeThisBlock { block, istip, peers } => {
+          // Notice received peers
+          for peer in peers {
+            self.see_peer(*peer);
+          }
+
           // Adds the block to the database
           self.add_block(&block);
 
@@ -1135,21 +1140,43 @@ impl Node {
       missing_count += 1;
     }
 
+    let mana_cur = self.runtime.get_mana() as i64;
+    let mana_lim = self.runtime.get_mana_limit() as i64;
+    let size_cur = self.runtime.get_size() as i64;
+    let size_lim = self.runtime.get_size_limit() as i64;
+    let mana_avail = mana_lim - mana_cur;
+    let size_avail = size_lim - size_cur;
+    debug_assert!(size_avail >= 0);
+    debug_assert!(mana_avail >= 0);
+
+    let peers_num = self.peers.len();
+
     let log = object!{
       event: "heartbeat",
-      peers: self.peers.len(),
+      peers: { num: peers_num },
       tip: {
         height: tip_height,
         // target: u256_to_hex(tip_target),
         difficulty: difficulty.low_u64(),
-        hash_rate: hash_rate.low_u64(),
+        hashrate: hash_rate.low_u64(),
       },
       blocks: {
         missing: missing_count,
         pending: pending_count,
         included: included_count,
       },
-      total_mana: self.runtime.get_mana() as u64,
+      runtime: {
+        mana: {
+          current: mana_cur.to_string(),
+          limit: mana_lim.to_string(),
+          available: mana_avail.to_string(),
+        },
+        size: {
+          current: size_cur,
+          limit: size_lim,
+          available: size_avail,
+        }
+      }
     };
 
     println!("{}", log);
