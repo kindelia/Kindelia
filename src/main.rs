@@ -55,6 +55,8 @@ pub enum CliCmd {
     // /// Source of code that will be executed on mined blocks
     //#[clap(short, long)]
     //file: Option<String>,
+    #[clap(long)]
+    testnet: bool,
   },
   /// Runs a Kindelia file
   Run {
@@ -114,9 +116,9 @@ fn run_cli() -> Result<(), String> {
 
   match arguments.command {
     // Starts the node process
-    CliCmd::Start { } => {
+    CliCmd::Start { testnet } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
-      start_node(kindelia_path);
+      start_node(kindelia_path, testnet);
     }
 
     // Runs a single block, for testing
@@ -204,12 +206,22 @@ fn run_cli() -> Result<(), String> {
   Ok(())
 }
 
-fn start_node(kindelia_path: PathBuf) {
+fn start_node(kindelia_path: PathBuf, testnet: bool) {
+  // TODO: move out to config file
+  let testnet_peers: Vec<Address> = vec![
+    "143.244.179.61:42000",
+    "164.92.214.78:42000",
+    "159.223.39.129:42000",
+    "159.65.148.6:42000",
+  ].into_iter().map(node::read_address).collect();
+
+  let init_peers = if testnet { Some(testnet_peers) } else { None };
+
   // Reads the file contents
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let (node_query_sender, node) = Node::new(kindelia_path.clone());
+  let (node_query_sender, node) = Node::new(kindelia_path.clone(), &init_peers);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();

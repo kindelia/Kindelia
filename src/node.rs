@@ -602,7 +602,10 @@ pub fn miner_loop(mut miner_communication: MinerCommunication) {
 // ----
 
 impl Node {
-  pub fn new(kindelia_path: PathBuf) -> (SyncSender<Request>, Self) {
+  pub fn new(
+    kindelia_path: PathBuf,
+    init_peers: &Option<Vec<Address>>,
+  ) -> (SyncSender<Request>, Self) {
     let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2];
     let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -627,24 +630,19 @@ impl Node {
       receiver   : query_receiver,
     };
 
-    // TODO: move out to config file
-    let default_peers: Vec<Address> = vec![
-      "167.71.249.16:42000",
-      "167.71.254.138:42000",
-      "167.71.242.43:42000",
-      "167.71.255.151:42000",
-    ].iter().map(|x| read_address(x)).collect::<Vec<Address>>();
+    let now = get_time();
 
-    let seen_at = get_time();
-    default_peers.iter().for_each(|address| {
-      return node.see_peer(Peer { address: *address, seen_at });
-    });
+    if let Some(init_peers) = init_peers {
+      init_peers.iter().for_each(|address| {
+        return node.see_peer(Peer { address: *address, seen_at: now });
+      });
+    }
 
     // TODO: For testing purposes. Remove later.
     for &peer_port in try_ports.iter() {
       if peer_port != port {
         let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
-        node.see_peer(Peer { address: address, seen_at })
+        node.see_peer(Peer { address: address, seen_at: now })
       }
     }
 
@@ -1184,13 +1182,18 @@ impl Node {
 
   pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication) -> ! {
 
+    eprintln!("Port: {}", self.port);
+    eprintln!("Initial peers: ");
+    for peer in self.peers.values() {
+      eprintln!("- {}", peer.address);
+    }
+
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
-    println!("Port: {}", self.port);
     if self.port == 42000 {
       self.load_blocks();
     }
 
-  // A task that is executed continuously on the main loop
+   // A task that is executed continuously on the main loop
     struct Task {
       pub delay : u128,
       pub action : fn (&mut Node, &mut MinerCommunication) -> (),
@@ -1248,5 +1251,14 @@ impl Node {
       }
     }
   }
+}
 
+impl std::fmt::Display for Address {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Address::IPv4 { val0, val1, val2, val3, port } => {
+        f.write_fmt(format_args!("{}.{}.{}.{}:{}", val0, val1, val2, val3, port))
+      },
+    }
+  }
 }
