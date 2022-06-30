@@ -236,7 +236,7 @@ pub fn deserialize_block(bits: &BitVec, index: &mut u128) -> Option<Block> {
   let body = deserialize_bytes(BODY_SIZE as u128, bits, index)?;
   let mut value : [u8; BODY_SIZE] = [0; BODY_SIZE];
   value[..BODY_SIZE].copy_from_slice(&body[..BODY_SIZE]);
-  return Some(Block { prev, time, rand, body: Body { value } });
+  return Some(new_block(prev, time, rand, Body { value }));
 }
 
 pub fn serialized_block(block: &Block) -> BitVec {

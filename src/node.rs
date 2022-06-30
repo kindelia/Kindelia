@@ -65,6 +65,7 @@ pub struct Block {
   pub rand: u128, // block nonce
   pub prev: U256, // previous block (32 bytes)
   pub body: Body, // block contents (1280 bytes) 
+  pub hash: U256, // cached block hash
 }
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
@@ -425,18 +426,19 @@ pub fn hash_bytes(bytes: &[u8]) -> U256 {
   return U256::from_little_endian(&hash);
 }
 
-// Hashes a block.
-pub fn hash_block(block: &Block) -> U256 {
-  if block.time == 0 {
-    return hash_bytes(&[]);
+// Creates a new block.
+pub fn new_block(prev: U256, time: u128, rand: u128, body: Body) -> Block {
+  let hash = if time == 0 {
+    hash_bytes(&[])
   } else {
     let mut bytes : Vec<u8> = Vec::new();
-    bytes.extend_from_slice(&u256_to_bytes(block.prev));
-    bytes.extend_from_slice(&u128_to_bytes(block.time));
-    bytes.extend_from_slice(&u128_to_bytes(block.rand));
-    bytes.extend_from_slice(&block.body.value);
-    return hash_bytes(&bytes);
-  }
+    bytes.extend_from_slice(&u256_to_bytes(prev));
+    bytes.extend_from_slice(&u128_to_bytes(time));
+    bytes.extend_from_slice(&u128_to_bytes(rand));
+    bytes.extend_from_slice(&body.value);
+    hash_bytes(&bytes)
+  };
+  return Block { prev, time, rand, body, hash };
 }
 
 // Converts a byte array to a Body.
@@ -492,25 +494,19 @@ pub fn ZERO_HASH() -> U256 {
 
 // The genesis block.
 pub fn GENESIS_BLOCK() -> Block {
-  return Block {
-    prev: ZERO_HASH(),
-    time: 0,
-    rand: 0,
-    body: Body { value: [0; 1280] }
-  }
+  return new_block(ZERO_HASH(), 0, 0, Body { value: [0; 1280] });
 }
 
 // Converts a block to a string.
 pub fn show_block(block: &Block) -> String {
-  let hash = hash_block(block);
   return format!(
     "time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
     block.time,
     block.rand,
     body_to_string(&block.body),
     block.prev,
-    hex::encode(u256_to_bytes(hash)),
-    get_hash_work(hash),
+    hex::encode(u256_to_bytes(block.hash)),
+    get_hash_work(block.hash),
   );
 }
 
@@ -558,9 +554,9 @@ impl std::hash::Hash for Transaction {
 pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Option<Block> {
   let rand = rand::random::<u128>();
   let time = get_time();
-  let mut block = Block { time, rand, prev, body };
+  let mut block = new_block(prev, time, rand, body);
   for _i in 0 .. max_attempts {
-    if hash_block(&block) >= targ {
+    if block.hash >= targ {
       return Some(block);
     } else {
       block.rand = block.rand.wrapping_add(1);
@@ -711,7 +707,7 @@ impl Node {
         //println!("# new block: too late");
         continue;
       }
-      let bhash = hash_block(&block); // hash of the block
+      let bhash = block.hash; // hash of the block
       // If we already registered this block, ignore it
       if self.block.get(&bhash).is_some() {
         //println!("# new block: already in");
@@ -849,7 +845,7 @@ impl Node {
       }
     }
     let result = self.runtime.run_statements(&statements, false);
-    self.results.insert(hash_block(block), result);
+    self.results.insert(block.hash, result);
     self.runtime.tick();
   }
 
@@ -1004,7 +1000,7 @@ impl Node {
           // loop fully, exhausting this node's CPU resources. This isn't a very serious attack, but
           // there are some solutions, which might be investigated in a future.
           if *istip {
-            let bhash = hash_block(&block);
+            let bhash = block.hash;
             // If bhash is on .block, then either we already had this tip, or it was successfully
             // included on the `add_block()` call above. In these cases, we already have all the
             // blocks from tip to genesis downloaded. If bhash isn't on .block, that means that
