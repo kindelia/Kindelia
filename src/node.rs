@@ -981,6 +981,11 @@ impl Node {
         }
         // Someone sent us a block
         Message::NoticeThisBlock { block, istip, peers } => {
+          // Notice received peers
+          for peer in peers {
+            self.see_peer(*peer);
+          }
+
           // Adds the block to the database
           self.add_block(&block);
 
