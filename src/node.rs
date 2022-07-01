@@ -68,17 +68,22 @@ pub struct Block {
   pub hash: U256, // cached block hash
 }
 
-// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
-// TODO: dashmap?
-//
+
 // Blocks have 4 states of inclusion:
 //
-//   has wait_list? | is on .waiting? | is on .block? | meaning
+//   has wait_list? | is on .pending? | is on .block? | meaning
 //   -------------- | --------------- | ------------- | ------------------------------------------------------
 //   no             | no              | no            | unseen   : never seen, may not exist
 //   yes            | no              | no            | missing  : some block cited it, but it wasn't downloaded
 //   yes            | yes             | no            | pending  : downloaded, but waiting ancestors for inclusion
-//   no             | yes             | yes           | included : fully included, as well as all its ancestors
+//   no             | no              | yes           | included : fully included, as well as all its ancestors
+#[derive(Debug, Clone, PartialEq)]
+pub enum InclusionState {
+  UNSEEN, MISSING, PENDING, INCLUDED
+}
+
+// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
+// TODO: dashmap?
 //
 // The was_mined field stores which transactions were mined, to avoid re-inclusion. It is NOT
 // reversible, though. As such, if a transaction is included, then there is a block reorg that
@@ -91,7 +96,8 @@ pub struct Node {
   pub port       : u16,                              // UDP port
   pub tip        : U256,                             // current tip
   pub block      : U256Map<Block>,                   // block_hash -> block
-  pub waiting    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
+  pub pending    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
+  pub ancestor   : U256Map<U256>,                    // block_hash -> hash of its most recent missing ancestor (shortcut jump table)
   pub wait_list  : U256Map<Vec<U256>>,               // block_hash -> hashes of blocks that are waiting for this one
   pub children   : U256Map<Vec<U256>>,               // block_hash -> hashes of this block's children
   pub work       : U256Map<U256>,                    // block_hash -> accumulated work
@@ -170,7 +176,7 @@ pub struct MinerCommunication {
 pub enum Message {
   NoticeThisBlock {
     block: Block,
-    istip: bool,
+    older: bool, // is this the oldest block on its chunk?
     peers: Vec<Peer>,
   },
   GiveMeThatBlock {
@@ -611,7 +617,8 @@ impl Node {
       socket     : socket,
       port       : port,
       block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
-      waiting    : u256map_new(),
+      pending    : u256map_new(),
+      ancestor   : u256map_new(),
       wait_list  : u256map_new(),
       children   : u256map_from([(ZERO_HASH(), vec![])]),
       work       : u256map_from([(ZERO_HASH(), u256(0))]),
@@ -723,6 +730,7 @@ impl Node {
         self.height.insert(bhash, 0); // inits the height attr
         self.target.insert(bhash, u256(0)); // inits the target attr
         self.children.insert(bhash, vec![]); // inits the children attrs
+        self.ancestor.remove(&bhash); // remove it from the ancestor jump table
         // Checks if this block PoW hits the target
         let has_enough_work = bhash >= self.target[&phash];
         // Checks if this block's timestamp is larger than its parent's timestamp
@@ -752,7 +760,7 @@ impl Node {
           } else {
             self.target.insert(bhash, self.target[&phash]);
           }
-          // Flags this block's transactions as mined
+          // Removes this block's transactions from mempool
           for tx in extract_transactions(&block.body) {
             self.pool.remove(&tx);
           }
@@ -818,16 +826,17 @@ impl Node {
         // Registers this block as a child of its parent
         self.children.insert(phash, vec![bhash]);
         // If there were blocks waiting for this one, include them on the next loop
-        // This will cause the block to be moved from self.waiting to self.block
+        // This will cause the block to be moved from self.pending to self.block
         if let Some(wait_list) = self.wait_list.get(&bhash) {
-          for waiting in wait_list {
-            must_include.push(self.waiting.remove(waiting).expect("block"));
+          for waiting_for_me in wait_list {
+            must_include.push(self.pending.remove(waiting_for_me).expect("block"));
           }
           self.wait_list.remove(&bhash);
         }
-      // Otherwise, include this block on .waiting, and on its parent's wait_list
-      } else if self.waiting.get(&bhash).is_none() {
-        self.waiting.insert(bhash, block.clone());
+      // Otherwise, if the previous block isn't available,
+      // include this block on .pending, and on its parent's wait_list
+      } else if self.pending.get(&bhash).is_none() {
+        self.pending.insert(bhash, block.clone());
         self.wait_list.insert(phash, vec![bhash]);
       }
     }
@@ -948,14 +957,59 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_block_to(&mut self, addr: Address, block: Block, istip: bool) {
+  pub fn send_block_to(&mut self, addr: Address, block: Block, older: bool) {
     //println!("- sending block: {:?}", block);
     let msg = Message::NoticeThisBlock {
       block: block,
-      istip: istip,
+      older: older,
       peers: self.get_random_peers(3),
     };
     udp_send(&mut self.socket, addr, &msg);
+  }
+
+  // Returns the block inclusion state
+  pub fn inclusion_state(&self, bhash: &U256) -> InclusionState {
+    if self.block.contains_key(bhash) {
+      return InclusionState::INCLUDED;
+    }
+    if self.pending.contains_key(bhash) {
+      return InclusionState::PENDING;
+    }
+    if self.wait_list.contains_key(bhash) {
+      return InclusionState::MISSING;
+    }
+    return InclusionState::UNSEEN;
+  }
+
+  // Finds the most recent missing ancestor of a pending block
+  pub fn find_missing_ancestor(&mut self, bhash: &U256) -> Option<U256> {
+    if self.inclusion_state(bhash) == InclusionState::PENDING {
+      let ancestor = {
+        let mut ancestor = bhash;
+        while self.inclusion_state(ancestor) == InclusionState::PENDING {
+          if let Some(jump_to) = self.ancestor.get(&ancestor) {
+            ancestor = jump_to;
+          }
+          if let Some(ancestor_block) = self.pending.get(&ancestor) {
+            ancestor = &ancestor_block.prev;
+          }
+        }
+        ancestor.clone()
+      };
+      self.ancestor.insert(*bhash, ancestor);
+      return Some(ancestor);
+    }
+    // This should NOT happen, since we only call find_missing_ancestor after add_block.
+    debug_assert!(self.inclusion_state(bhash) != InclusionState::MISSING);
+    debug_assert!(self.inclusion_state(bhash) != InclusionState::UNSEEN);
+    return None;
+  }
+
+  // Requests the most recent missing ancestor
+  pub fn request_missing_ancestor(&mut self, addr: Address, bhash: &U256) {
+    if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
+      udp_send(&mut self.socket, addr, &Message::GiveMeThatBlock { bhash: missing_ancestor })
+    }
   }
 
   pub fn handle_message(&mut self, addr: Address, msg: &Message) {
@@ -971,12 +1025,12 @@ impl Node {
             chunk.push(self.block[bhash].clone());
             bhash = &self.block[bhash].prev;
           }
-          for block in chunk {
-            self.send_block_to(addr, block.clone(), false);
+          for (i, block) in chunk.iter().enumerate() {
+            self.send_block_to(addr, block.clone(), i == chunk.len() - 1);
           }
         }
         // Someone sent us a block
-        Message::NoticeThisBlock { block, istip, peers } => {
+        Message::NoticeThisBlock { block, older, peers } => {
           // Notice received peers
           for peer in peers {
             self.see_peer(*peer);
@@ -985,44 +1039,9 @@ impl Node {
           // Adds the block to the database
           self.add_block(&block);
 
-          // Previously, we continuously requested missing blocks to neighbors. Now, we removed such
-          // functionality. Now, when we receive a tip, we find the first missing ancestor, and
-          // immediately ask it to the node that send that tip. That node, then, will send the
-          // missing block, plus a few of its ancestors. This massively improves the amount of time
-          // it will take to download all the missing blocks, and works in any situation. The only
-          // problem is that, since we're not requesting missing blocks continuously, then, if the
-          // packet where we ask the last missing ancestor is dropped, then we will never ask it
-          // again. It will be missing forever. But that does not actually happen, because nodes are
-          // constantly broadcasting their tips. So, if this packet is lost, we just wait until the
-          // tip is received again, which will cause us to ask for that missing ancestor! In other
-          // words, the old functionality of continuously requesting missing blocks was redundant and
-          // detrimental. Note that the loop below is slightly CPU hungry, since it requires
-          // traversing the whole history every time we receive the tip. As such, we don't do it when
-          // the received tip is included on .block, which means we already have all its ancestors.
-          // FIXME: this opens up a DoS vector where an attacker creates a very long chain, and sends
-          // its tip to us, including all the ancestors, except the block #1. He then spam-sends the
-          // same tip over and over. Since we'll never get the entire chain, we'll always run this
-          // loop fully, exhausting this node's CPU resources. This isn't a very serious attack, but
-          // there are some solutions, which might be investigated in a future.
-          if *istip {
-            let bhash = block.hash;
-            // If bhash is on .block, then either we already had this tip, or it was successfully
-            // included on the `add_block()` call above. In these cases, we already have all the
-            // blocks from tip to genesis downloaded. If bhash isn't on .block, that means that
-            // there is N blocks on top of it on the "waiting" state (i.e., downloaded but waiting
-            // for an ancestor), with the N+1 block being on the "missing" state (i.e., cited but
-            // not downloaded). We must find that missing block, and request it.
-            if !self.block.contains_key(&bhash) {
-              let mut missing = bhash;
-              // Finds the first ancestor that wasn't downloaded yet
-              let mut count = 0;
-              while self.waiting.contains_key(&missing) {
-                count += 1;
-                missing = self.waiting[&missing].prev;
-              }
-              println!("ask missing: {} {:x}", count, missing);
-              udp_send(&mut self.socket, addr, &Message::GiveMeThatBlock { bhash: missing })
-            }
+          // Requests the first missing ancestor
+          if *older {
+            self.request_missing_ancestor(addr, &block.hash);
           }
         }
         // Someone sent us a transaction to mine
@@ -1134,7 +1153,7 @@ impl Node {
     let mut missing_count: u64 = 0;
     let mut pending_count: u64 = 0;
     for (bhash, _) in self.wait_list.iter() {
-      if self.waiting.get(bhash).is_some() {
+      if self.pending.get(bhash).is_some() {
         pending_count += 1;
       }
       missing_count += 1;

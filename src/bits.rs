@@ -282,15 +282,15 @@ pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128) -> Option<
 
 pub fn serialize_message(message: &Message, bits: &mut BitVec) {
   match message {
-    Message::NoticeThisBlock { block, istip, peers } => {
+    Message::NoticeThisBlock { block, older, peers } => {
       // tag   : 4 bits
       // block : (256 + 128 + 128 + 10240) bits
-      // istip : 1 bit
+      // older : 1 bit
       // peers : (1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * len) bits
       // total : (4 + 256 + 128 + 128 + 10240 + 1 + 1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * len) bits
       serialize_fixlen(4, &u256(0), bits);
       serialize_block(block, bits);
-      serialize_fixlen(1, &(if *istip { u256(1) } else { u256(0) }), bits);
+      serialize_fixlen(1, &(if *older { u256(1) } else { u256(0) }), bits);
       serialize_list(serialize_peer, peers, bits);
     }
     Message::GiveMeThatBlock { bhash } => {
@@ -314,9 +314,9 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128) -> Option<Message> {
   match code {
     0 => {
       let block = deserialize_block(bits, index)?;
-      let istip = deserialize_fixlen(1, bits, index)?.low_u128() != 0;
+      let older = deserialize_fixlen(1, bits, index)?.low_u128() != 0;
       let peers = deserialize_list(deserialize_peer, bits, index)?;
-      Some(Message::NoticeThisBlock { block, istip, peers })
+      Some(Message::NoticeThisBlock { block, older, peers })
     }
     1 => {
       let bhash = deserialize_hash(bits, index)?;
