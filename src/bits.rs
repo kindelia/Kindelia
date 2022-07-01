@@ -282,15 +282,14 @@ pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128) -> Option<
 
 pub fn serialize_message(message: &Message, bits: &mut BitVec) {
   match message {
-    Message::NoticeThisBlock { block, older, peers } => {
-      // tag   : 4 bits
-      // block : (256 + 128 + 128 + 10240) bits
-      // older : 1 bit
-      // peers : (1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * len) bits
-      // total : (4 + 256 + 128 + 128 + 10240 + 1 + 1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * len) bits
+    Message::NoticeTheseBlocks { blocks, peers } => {
+      // tag    : 4 bits
+      // blocks : 1 + (1 + 256 + 128 + 128 + 10240) * blocks bits
+      // peers  : (1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * peers) bits
+      // total  : (4 + 1 + (1 + 256 + 128 + 128 + 10240) * blocks + 1 + 1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * peers) bits
+      // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
       serialize_fixlen(4, &u256(0), bits);
-      serialize_block(block, bits);
-      serialize_fixlen(1, &(if *older { u256(1) } else { u256(0) }), bits);
+      serialize_list(serialize_block, &blocks, bits);
       serialize_list(serialize_peer, peers, bits);
     }
     Message::GiveMeThatBlock { bhash } => {
@@ -313,10 +312,9 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128) -> Option<Message> {
   let code = deserialize_fixlen(4, bits, index)?.low_u128();
   match code {
     0 => {
-      let block = deserialize_block(bits, index)?;
-      let older = deserialize_fixlen(1, bits, index)?.low_u128() != 0;
+      let blocks = deserialize_list(deserialize_block, bits, index)?;
       let peers = deserialize_list(deserialize_peer, bits, index)?;
-      Some(Message::NoticeThisBlock { block, older, peers })
+      Some(Message::NoticeTheseBlocks { blocks, peers })
     }
     1 => {
       let bhash = deserialize_hash(bits, index)?;

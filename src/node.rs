@@ -179,9 +179,8 @@ pub struct MinerCommunication {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Message {
-  NoticeThisBlock {
-    block: Block,
-    older: bool, // is this the oldest block on its chunk?
+  NoticeTheseBlocks {
+    blocks: Vec<Block>,
     peers: Vec<Peer>,
   },
   GiveMeThatBlock {
@@ -249,7 +248,7 @@ pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
 pub const BLOCKS_PER_PERIOD : u128 = 20;
 
 // How many ancestors do we send together with the requested missing block
-pub const SEND_BLOCK_ANCESTORS : u128 = 64; // FIXME: not working properly; crashing the receiver node when big
+pub const SEND_BLOCK_ANCESTORS : u128 = 20;
 
 // Readjusts difficulty every N seconds
 pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
@@ -888,10 +887,10 @@ impl Node {
   pub fn receive_message(&mut self) {
     let mut count = 0;
     for (addr, msg) in udp_recv(&mut self.socket) {
-      if count < HANDLE_MESSAGE_LIMIT {
-        self.handle_message(addr, &msg);
-        count = count + 1;
-      }
+      //if count < HANDLE_MESSAGE_LIMIT {
+      self.handle_message(addr, &msg);
+      count = count + 1;
+      //}
     }
   }
 
@@ -969,11 +968,10 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_block_to(&mut self, addr: Address, block: Block, older: bool) {
+  pub fn send_blocks_to(&mut self, addr: Address, blocks: Vec<Block>) {
     //println!("- sending block: {:?}", block);
-    let msg = Message::NoticeThisBlock {
-      block: block,
-      older: older,
+    let msg = Message::NoticeTheseBlocks {
+      blocks: blocks,
       peers: self.get_random_peers(3),
     };
     udp_send(&mut self.socket, addr, &msg);
@@ -1037,23 +1035,25 @@ impl Node {
             chunk.push(self.block[bhash].clone());
             bhash = &self.block[bhash].prev;
           }
-          for (i, block) in chunk.iter().enumerate() {
-            self.send_block_to(addr, block.clone(), i == chunk.len() - 1);
-          }
+          self.send_blocks_to(addr, chunk);
         }
         // Someone sent us a block
-        Message::NoticeThisBlock { block, older, peers } => {
+        Message::NoticeTheseBlocks { blocks, peers } => {
+          // TODO: validate if blocks are sorted by age?
+
           // Notice received peers
           for peer in peers {
             self.see_peer(*peer);
           }
 
           // Adds the block to the database
-          self.add_block(&block);
+          for block in blocks {
+            self.add_block(block);
+          }
 
-          // Requests the first missing ancestor
-          if *older {
-            self.request_missing_ancestor(addr, &block.hash);
+          // Requests the first missing ancestor of the oldest block received
+          if let Some(oldest_block) = blocks.last() {
+            self.request_missing_ancestor(addr, &oldest_block.hash);
           }
         }
         // Someone sent us a transaction to mine
@@ -1080,7 +1080,7 @@ impl Node {
   fn gossip_tip_block(&mut self, peer_count: u128) {
     let random_peers = self.get_random_peers(peer_count);
     for peer in random_peers {
-      self.send_block_to(peer.address, self.block[&self.tip].clone(), true);
+      self.send_blocks_to(peer.address, vec![self.block[&self.tip].clone()]);
     }
   }
 
