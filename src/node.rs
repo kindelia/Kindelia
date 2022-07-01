@@ -839,7 +839,7 @@ impl Node {
       // include this block on .pending, and on its parent's wait_list
       } else if self.pending.get(&bhash).is_none() {
         self.pending.insert(bhash, block.clone());
-        self.wait_list.insert(phash, vec![bhash]);
+        self.wait_list.entry(phash).or_insert_with(|| Vec::new()).push(bhash);
       }
     }
   }
