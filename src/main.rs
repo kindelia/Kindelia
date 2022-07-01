@@ -29,10 +29,10 @@ use crate::util::*;
 
 // Starts the node process
 fn main() -> Result<(), String> {
-  //return run_cli();
-  start_node(dirs::home_dir().unwrap().join(".kindelia"));
+  return run_cli();
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"), false);
   // hvm::test_statements_from_file("./example/block_4.kdl");
-  return Ok(());
+  //return Ok(());
 }
 
 /// Environment variable where Kindelia path should be passed.
