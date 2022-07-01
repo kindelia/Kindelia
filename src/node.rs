@@ -1213,7 +1213,7 @@ impl Node {
     println!("{}", log);
   }
 
-  pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication) -> ! {
+  pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication, mine: bool) -> ! {
 
     eprintln!("Port: {}", self.port);
     eprintln!("Initial peers: ");
@@ -1233,17 +1233,7 @@ impl Node {
     }
 
     // The vector of tasks
-    let tasks = vec![
-      // Asks the miner thread to mine a block
-      Task {
-        delay: 1000,
-        action: |node, mc| { node.ask_mine(mc, node.build_body()); },
-      },
-      // If the miner mined a block, adds it
-      Task {
-        delay: 5,
-        action: |node, mc| { node.add_mined_block(mc); },
-      },
+    let mut tasks = vec![
       // Gossips the tip block
       Task {
         delay: 20,
@@ -1270,6 +1260,22 @@ impl Node {
         action: |node, mc| { node.log_heartbeat(); },
       },
     ];
+
+    if mine {
+      let miner_tasks = vec![
+        // Asks the miner thread to mine a block
+        Task {
+          delay: 1000,
+          action: |node, mc| { node.ask_mine(mc, node.build_body()); },
+        },
+        // If the miner mined a block, adds it
+        Task {
+          delay: 5,
+          action: |node, mc| { node.add_mined_block(mc); },
+        },
+      ];
+      tasks.extend(miner_tasks);
+    }
 
     // Last time a task was executed
     let mut last_tick_time: Vec<u128> = vec![0; tasks.len()];
