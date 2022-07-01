@@ -1,6 +1,6 @@
 use crate::{
   crypto,
-  hvm::{name_to_u128, Rule, Statement, Term},
+  hvm::{name_to_u128, Func, Rule, Statement, Term},
 };
 use proptest::{arbitrary::any, collection::vec, option, prop_oneof, strategy::Strategy};
 
@@ -43,6 +43,10 @@ pub fn rule() -> impl Strategy<Value = Rule> {
   (term(), term()).prop_map(|(lhs, rhs)| Rule { lhs, rhs })
 }
 
+pub fn func() -> impl Strategy<Value = Func> {
+  vec(rule(), 0..10).prop_map(|rules| Func { rules })
+}
+
 // generate signatures
 pub fn sign() -> impl Strategy<Value = crypto::Signature> {
   (vec(any::<u8>(), 65)).prop_map(|s| crypto::Signature(s.try_into().unwrap()))
@@ -51,13 +55,13 @@ pub fn sign() -> impl Strategy<Value = crypto::Signature> {
 // generate statements
 pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
-    (name(), vec(name(), 0..10), vec(rule(), 0..10), term(), option::of(sign())).prop_map(
-      |(n, a, r, i, s)| { Statement::Fun { name: n, args: a, func: r, init: i, sign: s } }
+    (name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
+      |(name, args, func, init, sign)| { Statement::Fun { name, args, func, init, sign } }
     ),
     (name(), vec(name(), 0..10), option::of(sign()))
-      .prop_map(|(n, a, s)| { Statement::Ctr { name: n, args: a, sign: s } }),
+      .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
     (term(), option::of(sign())).prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
     (name(), name(), option::of(sign()))
-      .prop_map(|(n, o, s)| { Statement::Reg { name: n, ownr: o, sign: s } }),
+      .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
 }

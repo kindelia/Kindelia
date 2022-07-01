@@ -306,15 +306,18 @@ pub enum Oper {
 // A u64 HashMap
 pub type Map<T> = util::U128Map<T>;
 
-// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
+/// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule {
   pub lhs: Term,
   pub rhs: Term,
 }
 
-// A function, which is just a vector of rewrite rules.
-pub type Func = Vec<Rule>;
+/// A function, which is just a vector of rewrite rules.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Func {
+  pub rules: Vec<Rule>,
+}
 
 // The types below are used by the runtime to evaluate rewrite rules. They store the same data as
 // the type aboves, except in a semi-compiled, digested form, allowing faster computation.
@@ -340,10 +343,10 @@ pub struct CompRule {
 // Compiled information about a function.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
-  func: Func,           // the original function
-  arity: u128,          // number of arguments
-  redux: Vec<u128>,     // index of strict arguments
-  rules: Vec<CompRule>, // vector of rules
+  pub func: Func,           // the original function
+  pub arity: u128,          // number of arguments
+  pub redux: Vec<u128>,     // index of strict arguments
+  pub rules: Vec<CompRule>, // vector of rules
 }
 
 // A file, which is just a map of `FuncID -> CompFunc`
@@ -377,7 +380,7 @@ pub struct Store {
 /// A global statement that alters the state of the blockchain
 #[derive(Debug, PartialEq)]
 pub enum Statement {
-  Fun { name: u128, args: Vec<u128>, func: Vec<Rule>, init: Term, sign: Option<crypto::Signature> },
+  Fun { name: u128, args: Vec<u128>, func: Func, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: u128, args: Vec<u128>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
   Reg { name: u128, ownr: u128, sign: Option<crypto::Signature> },
@@ -1063,7 +1066,8 @@ impl Heap {
       let fnid = serial.file[i + 0];
       let size = serial.file[i + 1];
       let buff = &serial.file[i + 2 .. i + 2 + size as usize];
-      let func = build_func(&bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap(),false).unwrap();
+      let func = &bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
+      let func = compile_func(func, false).unwrap();
       self.write_file(fnid, Arc::new(func));
       i = i + 2 + size as usize;
     }
@@ -1554,6 +1558,7 @@ impl Runtime {
     }
   }
 
+  #[allow(clippy::useless_format)]
   pub fn run_statement(&mut self, statement: &Statement, silent: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo();
@@ -1573,7 +1578,7 @@ impl Runtime {
         if !self.check_func(&func) {
           return error(self, "fun", format!("Invalid function {}.", u128_to_name(*name)));
         }
-        let func = build_func(func, true);
+        let func = compile_func(func, true);
         if func.is_none() {
           return error(self, "fun", format!("Invalid function {}.", u128_to_name(*name)));
         }
@@ -1671,7 +1676,7 @@ impl Runtime {
   }
 
   pub fn check_func(&self, func: &Func) -> bool {
-    for rule in func {
+    for rule in &func.rules {
       if !self.check_term(&rule.lhs) || !self.check_term(&rule.rhs) {
         return false;
       }
@@ -1964,7 +1969,7 @@ impl Runtime {
     return self.get_heap_mut(self.draw).write_disk(fid, val);
   }
 
-  pub fn read_disk(&mut self, fid: u128) -> Option<Ptr> {
+  pub fn read_disk(&self, fid: u128) -> Option<Ptr> {
     return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
   }
 
@@ -1972,6 +1977,10 @@ impl Runtime {
     let host = self.read_disk(fid)?;
     let term = readback(self, host);
     Some(term)
+  }
+
+  pub fn read_file(&self, fid: u128) -> Option<CompFunc> {
+    self.get_with(None, None, |heap| heap.read_file(fid)).map(|func| (*func).clone())
   }
 
   pub fn get_arity(&self, fid: u128) -> u128 {
@@ -2524,10 +2533,12 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   }
 }
 
-// Given a vector of rules (lhs/rhs pairs), builds the Func object
-pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
+/// Given a Func (a vector of rules, lhs/rhs pairs), builds the CompFunc object
+pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
+  let rules = &func.rules;
+
   // If there are no rules, return none
-  if func.len() == 0 {
+  if rules.len() == 0 {
     if debug {
       println!("  - failed to build function: no rules");
     }
@@ -2536,7 +2547,7 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
 
   // Find the function arity
   let arity;
-  if let Term::Fun { args, .. } = &func[0].lhs {
+  if let Term::Fun { args, .. } = &rules[0].lhs {
     arity = args.len() as u128;
   } else {
     if debug {
@@ -2552,8 +2563,8 @@ pub fn build_func(func: &Vec<Rule>, debug: bool) -> Option<CompFunc> {
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for rule_index in 0 .. func.len() {
-    let rule = &func[rule_index];
+  for rule_index in 0 .. rules.len() {
+    let rule = &func.rules[rule_index];
 
     // Validates that:
     // - the same lhs variable names aren't defined twice or more
@@ -4123,7 +4134,8 @@ pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
 
 pub fn read_func(code: &str) -> ParseResult<CompFunc> {
   let (code, rules) = read_until(code, '\0', read_rule)?;
-  if let Some(func) = build_func(&rules, false) {
+  let func = Func { rules };
+  if let Some(func) = compile_func(&func, false) {
     return Ok((code, func));
   } else {
     return Err(ParseErr { 
@@ -4161,7 +4173,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
       let (code, name) = read_name(code)?;
       let (code, args) = read_until(code, ')', read_name)?;
       let (code, unit) = read_char(code, '{')?;
-      let (code, func) = read_until(code, '}', read_rule)?;
+      let (code, ruls) = read_until(code, '}', read_rule)?;
       let code = skip(code);
       let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);
@@ -4173,6 +4185,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         (code, Term::Num { numb: 0 })
       };
       let (code, sign) = read_sign(code)?;
+      let func = Func { rules: ruls };
       return Ok((code, Statement::Fun { name, args, func, init, sign }));
     }
     ('c','t','r') => {
@@ -4348,7 +4361,8 @@ pub fn view_statement(statement: &Statement) -> String {
   match statement {
     Statement::Fun { name, args, func, init, sign } => {
       let name = u128_to_name(*name);
-      let func = func.iter().map(|x| format!("  {} = {}", view_term(&x.lhs), view_term(&x.rhs))).collect::<Vec<String>>().join("\n");
+      let func = func.rules.iter().map(|x| format!("  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
+      let func = func.collect::<Vec<String>>().join("\n");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
       let init = format!(" with {{ {} }}", init);
