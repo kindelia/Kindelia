@@ -56,6 +56,7 @@ pub struct Transaction {
 // TODO: store number of used bits
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
+  // TODO: optimize size
   pub value: [u8; BODY_SIZE],
 }
 
@@ -65,7 +66,7 @@ pub struct Block {
   pub rand: u128, // block nonce
   pub prev: U256, // previous block (32 bytes)
   pub body: Body, // block contents (1280 bytes) 
-  pub hash: U256, // cached block hash
+  pub hash: U256, // cached block hash // TODO: refactor out
 }
 
 
@@ -120,8 +121,8 @@ pub struct BlockInfo {
   pub block: Block,
   pub hash: U256,
   pub height: u64,
-  pub results: Vec<hvm::StatementResult>,
   pub content: Vec<hvm::Statement>,
+  pub results: Option<Vec<hvm::StatementResult>>,
 }
 
 #[derive(Debug)]
@@ -672,6 +673,7 @@ impl Node {
       Some(index) => {
         let old_peer = self.peers.get_mut(&index);
         if let Some(old_peer) = old_peer {
+          // TODO: max
           old_peer.seen_at = peer.seen_at;
         }
       }
@@ -904,15 +906,15 @@ impl Node {
     let block = self.block.get(hash)?;
     let height = self.height.get(hash).expect("Missing block height.");
     let height: u64 = (*height).try_into().expect("Block height is too big.");
-    let results = self.results.get(hash).expect("Missing block result.").clone();
+    let results = self.results.get(hash).map(|r| r.clone());
     let bits = crate::bits::BitVec::from_bytes(&block.body.value);
     let content = crate::bits::deserialize_statements(&bits, &mut 0).unwrap_or_else(|| Vec::new());
     let info = BlockInfo {
       block: block.clone(),
       hash: *hash,
       height,
-      results,
       content,
+      results,
     };
     Some(info)
   }
