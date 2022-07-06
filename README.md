@@ -15,7 +15,9 @@ A peer-to-peer functional computer capable of hosting decentralized apps that st
 
 - It is so minimalist and elegant you could call it a massively multiplayer λ-calculus REPL.
 
-For more information, check the [whitepaper](WHITEPAPER.md).
+For a quick summary, check [whitepaper](WHITEPAPER.md).
+
+For an deep overview, check [whitebook](WHITEBOOK.md).
 
 Installation
 ------------
@@ -23,6 +25,13 @@ Installation
 ```bash
 # in this directory:
 cargo install --path .
+```
+
+For dev/debug purposes, with debug assertions etc, also useful for machines
+without enough memory to allocate the full memory requirement:
+
+```bash
+cargo install --path=. --profile=dev_fast
 ```
 
 Usage
