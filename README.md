@@ -25,6 +25,13 @@ Installation
 cargo install --path .
 ```
 
+For dev/debug purposes, with debug assertions etc, also useful for machines
+without enough memory to allocate the full memory requirement:
+
+```bash
+cargo install --path=. --profile=dev_fast
+```
+
 Usage
 -----
 

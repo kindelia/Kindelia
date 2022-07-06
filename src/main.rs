@@ -74,17 +74,17 @@ pub enum CliCmd {
   },
   /// Signs the last statement in a file
   Sign {
-    /// File containing the statement to be signed
-    term_file: String,
     /// File containing the 256-bit secret key, as a hex string
     skey_file: String,
+    /// File containing the statement to be signed
+    term_file: String,
   },
   /// Posts the last statement in a file to the network
   Post {
-    /// File where the statement is
-    term_file: String,
     /// IP of the node to submit it to
     node_addr: String,
+    /// File where the statement is
+    term_file: String,
   },
 }
 
