@@ -9,7 +9,7 @@ use std::sync::mpsc::SyncSender;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
+use tokio_stream::wrappers::TcpListenerStream;
 use warp::hyper::StatusCode;
 use warp::reject::{self, Rejection};
 use warp::reply::{self, Reply};

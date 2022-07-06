@@ -297,19 +297,19 @@ pub const HANDLE_REQUEST_DELAY : u128 = 20;
 //   branches. Of course, when the hash is needed for critical purposes, we must compute it.
 // 4. Cache the "first missing ancestor":
 //   Every time the `NoticeThisBlock` handler receives a tip, it must find the first missing block
-//   on that tips ancestry. That information may be chached, avoiding that loop.
+//   on that tips ancestry. That information may be cached, avoiding that loop.
 pub const HANDLE_MESSAGE_LIMIT : u128 = 5;
 
 
 // UDP
 // ===
 
-// An IPV4 Address
+/// Builds an IPV4 Address. TODO: refactor into `impl Address`
 pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
   Address::IPv4 { val0, val1, val2, val3, port }
 }
 
-// Starts listening to UDP messsages on a set of ports
+/// Starts listening to UDP messages on one port of a set of ports
 pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   for port in ports {
     if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
@@ -320,7 +320,7 @@ pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   return None;
 }
 
-// Sends an UDP message
+/// Sends an UDP message
 pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
   match address {
     Address::IPv4 { val0, val1, val2, val3, port } => {
@@ -1006,7 +1006,7 @@ impl Node {
             ancestor = &ancestor_block.prev;
           }
         }
-        ancestor.clone()
+        *ancestor
       };
       self.ancestor.insert(*bhash, ancestor);
       return Some(ancestor);
