@@ -2,7 +2,7 @@ Kindelia: a peer-to-peer functional computer
 ============================================
 
 Kindelia is a peer-to-peer functional computer capable of hosting applications
-that stay up forever. It uses the HVM, a blazingly fast functional virtual
+that stay up forever. It uses the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
 machine, to run formally verified apps natively, making it as secure as
 mathematically possible. It also replaces expensive Merkle tree insertions by
 reversible heaps snapshots, greatly reducing the cost of persistent state,
@@ -45,26 +45,17 @@ simply not viable on Ethereum.
 
 In short, for these familiar with functional languages, Kindelia can be seen as
 a worldwide functional REPL (like Haskell's GHCI) where anyone can input
-commands that deploy functions and run monadic actions forever.
-
-And for these familiar with decentralized computers, Kindelia can be seen as a
-polishment of Ethereum, under the following recipe:
+commands that deploy functions and run monadic actions forever. And for these
+familiar with decentralized computers, Kindelia can be seen as a polishment of
+Ethereum, under the following recipe:
 
 ```
-How to make Kindelia
-
 1. Start from Ethereum
-
 2. Remove Ether (and the associated pre-mine)
-
 3. Replace the slow EVM by the fast HVM
-
 4. Replace slow Merkle trees by fast reversible heaps
-
 5. Aggressively optimize and simplify everything you find
-
 6. Cook without hype
-
 7. Serve with a fair release
 ```
 
@@ -76,9 +67,7 @@ algorithm to agree on a canonical ordering of blocks, which group user-generated
 transactions, which have the effect of sending money from an address to another.
 On Ethereum, these transactions can also call execute computations that change a
 contract's state. On Bitcoin, the network state is just a global map of
-balances. On Ethereum, each contract has its own state, which is a map of
-256-bit integers.
-
+balances. On Ethereum, each contract has its own state, which is a map of uints.
 On Kindelia, blocks don't group *transactions*, but *statements* with no
 monetary information attached; that is, statements don't have "to" or "amount"
 fields. Instead, they are just code blocks that affect the network state. Since
@@ -105,8 +94,8 @@ There are 4 kinds of statements:
 
 - **REG**: registers a namespace
 
-Kindelia functions are defined by equations, resembling languages like Haskell
-and OCaml. For example, the function below sums an immutable tree:
+Kindelia functions are defined by equations, as in Haskell. For example, the
+function below sums an immutable tree:
 
 ```c
 fun (Sum tree) {
@@ -115,13 +104,11 @@ fun (Sum tree) {
 }
 ```
 
-That function can be posted to the network by saving it as `sum.kdl` and using
-the `kindelia post sum.kdl` command. This will prompt a miner to include the
-statement in a block, which will cause `Sum` to be defined globally. Kindelia
-functions can call each-other, and are pure, thus, side-effect free. The `RUN`
-statement offers a scape hatch where side-effects can occur and alter the
-network's state, just like Haskell's IO. For example, the statement below adds
-`3` to the state stored by the global 'Calculator' contract:
+Once deployed and mined, this statement will cause `Sum` to be defined globally.
+Kindelia functions can call each-other, and are pure, thus, side-effect free.
+The `RUN` statement offers a scape hatch where side-effects can occur and alter
+the network's state, just like Haskell's IO. For example, the statement below
+adds `3` to the state stored by the global 'Calculator' contract:
 
 ```c
 run {
@@ -265,7 +252,6 @@ they require cheap 3 to 5 gas instructions; applications and pattern matches are
 expensive, because they require a several instructions, which amount to about
 200 gas; loads and stores are expensive, because the SSTORE/SLOAD instructions
 demand costly Merkle tree manipulations, and range from 100 to 20000 gas.
-
 Kindelia also has considerably shorter transaction sizes. The table below
 compares the size of deploying, and calling, a simple incrementer contract:
 
