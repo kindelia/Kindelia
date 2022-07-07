@@ -907,8 +907,8 @@ impl Node {
     let height = self.height.get(hash).expect("Missing block height.");
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).map(|r| r.clone());
-    let bits = crate::bits::BitVec::from_bytes(&block.body.value);
-    let content = crate::bits::deserialize_statements(&bits, &mut 0).unwrap_or_else(|| Vec::new());
+    let transactions = extract_transactions(&block.body);
+    let content = transactions.iter().filter_map(Transaction::to_statement).collect();
     let info = BlockInfo {
       block: block.clone(),
       hash: *hash,
