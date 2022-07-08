@@ -1,5 +1,5 @@
-Kindelia: a peer-to-peer functional computer
-============================================
+Kindelia: a minimal peer-to-peer computer that isn't a cryptocurrency
+---------------------------------------------------------------------
 
 Kindelia is a peer-to-peer functional computer capable of hosting applications
 that stay up forever. It uses the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
