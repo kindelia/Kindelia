@@ -244,44 +244,54 @@ Benchmarks
 
 Ethereum and Kindelia are architecturally different in some aspects,
 so it is not always straightforward to draw direct comparisons between them,
-but we can make approximations. The table below compares both networks
-computationally:
+but we can make approximations. The table below compares network parameters:
 
 ```
-Operation              |      Ethereum |       Kindelia |       ratio
----------------------- | ------------- | -------------- | -----------
-Numeric addition       |  769,230 op/s | 5,000,000 op/s |       650 %
-Numeric multiplication |  461,538 op/s | 5,000,000 op/s |     1,080 %
-Lambda application     |   11,538 op/s | 5,000,000 op/s |    43,330 %
-Pattern match          |   11,538 op/s | 5,000,000 op/s |    43,330 %
-Uint load              |   23,076 op/s | 5,000,000 op/s |     4,333 %
-Uint store             |      461 op/s | 5,000,000 op/s |   216,900 %
+Parameter          | Ethereum           | Kindelia
+------------------ | ------------------ | ----------------
+Avg. Block Time    |         13 seconds |         1 second
+Avg. Block Size    |     95,441 bytes   |     1,280 bytes
+State Growth Limit |        ??? bytes   |       256 bytes
+Computation Limit  | 21,000,000 gas     | 4,000,000 mana
 ```
 
-All the HVM opcodes have about the same performance (5 million operations per
-second) because they require exactly one 2-mana HVM graph rewrite, with no other
-significant costs. On Ethereum, additions and multiplications are cheap, because
-they require cheap 3 to 5 gas instructions; applications and pattern matches are
-expensive, because they require several instructions, which amount to about
-200 gas; loads and stores are expensive, because the SSTORE/SLOAD instructions
-demand costly Merkle tree manipulations, and range from 100 to 20000 gas.
-Kindelia also has considerably shorter transaction sizes. The table below
-compares the size of deploying, and calling, a simple incrementer contract:
+Kindelia blocks are shorter, which allows them to fit in a single UDP packet,
+enabling its ultra-fast 1 second block time. Despite that, Kindelia can sustain
+the same throughput as Ethereum, since its space is used more efficiently. For
+example, the table below compares common transaction sizes:
 
 ```
-Operation           | Ethereum  | Kindelia | ratio
-------------------- | --------- | -------- | -----
-Deploy Foo contract | 550 bytes | 66 bytes |  12 %
-Call inc() method   | 113 bytes | 32 bytes |  28 %
+Transaction             | Ethereum  | Kindelia | ratio
+----------------------- | --------- | -------- | -----
+Deploy a small contract | 550 bytes | 66 bytes |  12 %
+Call a simple method    | 113 bytes | 32 bytes |  28 %
 ```
 
-The difference is expressive, especially because these transactions don't require
-signatures. Even if they did, Kindelia would still come shorter. This allows
-Kindelia to have much smaller blocks without affecting its throughput, which, in
-turn, allows it to fit a full block in a single 1500-byte UDP packet, which
-makes block propagation as fast as the internet allows, decreasing the block
-time to just 1 second, without impacting uncle rates significantly. The source
-for these numbers is available on [this Gist](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c).
+These numbers were obtained by deploying and calling a simple [counter
+contract](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c)
+on both networks. A contract deployment on Kindelia can use up to 8x less space
+than on Ethereum. In average, both networks should sustain the same number of
+transactions per second, but a single Kindelia transaction can do much more.
+The table below compares both networks in raw operations per second:
+
+```
+Operation              |      Ethereum |       Kindelia |    ratio
+---------------------- | ------------- | -------------- | --------
+Numeric addition       |  769,230 op/s | 2,000,000 op/s |    260 %
+Numeric multiplication |  461,538 op/s | 2,000,000 op/s |    432 %
+Lambda application     |   11,538 op/s | 2,000,000 op/s | 17,332 %
+Pattern match          |   11,538 op/s | 2,000,000 op/s | 17,332 %
+Uint load              |   23,076 op/s | 2,000,000 op/s |  1,733 %
+Uint store             |      461 op/s | 2,000,000 op/s | 86,760 %
+```
+
+On Kindelia, all the opcodes above cost exactly 2 mana. On Ethereum, numeric
+opcodes are cheap (3-5 gas), but functional operations are expensive (about
+[~200 gas](https://medium.com/@maiavictor/compiling-formality-to-the-evm-99aec75677dd)
+per beta-reduction) due to emulation overhead, and storage opcodes are
+prohibitive (100-20000 gas), due to costly Merkle tree insertions. Kindelia can
+sustain from 2x to 867x more operations per second than Ethereum, which is what
+makes it able to host functional and real-time applications on layer 1.
 
 Conclusion
 ----------

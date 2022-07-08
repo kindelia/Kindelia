@@ -31,7 +31,7 @@ use crate::util::*;
 fn main() -> Result<(), String> {
   return run_cli();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), false);
-  // hvm::test_statements_from_file("./example/block_4.kdl");
+  //hvm::test_statements_from_file("./example/block_1.kdl");
   //return Ok(());
 }
 

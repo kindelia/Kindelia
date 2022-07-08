@@ -28,5 +28,5 @@ fun (Gen depth) {
 
 // Sums a huge tree, with 2^21 copies of the number #1
 run {
-  !done (Sum (Gen #21))
+  !done (Sum (Gen #20))
 }

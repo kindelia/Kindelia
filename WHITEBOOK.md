@@ -47,7 +47,10 @@ Table of Contents
   * [Functional opcodes, formally verified apps](#hvm-makes-functional-and-formally-verified-dapps-much-cheaper)
   * [Zero-cost SSTOREs, highly dynamic apps](#reversible-heaps-make-dynamic-dapps-much-cheaper)
   * [Massive layer-1 optimizations](#optimizations-and-simplifications-everywhere)
-  * [Comparison table](#comparison-table)
+  * [Comparison tables](#comparison-tables)
+    * [Network parameters](#network-parameters)
+    * [Transaction sizes](#transaction-sizes)
+    * [Operations per second](#operations-per-second)
   * [Summary](#in-short)
 * [Comparisons to Cardano](#comparisons-to-cardano)
   * [On security](#on-security)
@@ -853,7 +856,7 @@ order to limit computations, nodes impose a hard ceiling on the amount of
 computation performed, as a function of the block number:
 
 ```
-mana_limit = 10000000 * (block_number + 1)
+mana_limit = 4000000 * (block_number + 1)
 ```
 
 If a block passes that limit, it is rejected by nodes. Note that this limit
@@ -1571,24 +1574,47 @@ and modularly, enabling massive code reuse. Finally, there is no native
 currency, making Kindelia not a cryptocurrency while also allowing users to pay miners
 with any on-chain asset, rather than the network's "built-in token".
 
-### Comparison table
+### Comparison tables
 
-The table below compares some attributes of each network:
+The tables below compares some attributes of each network.
 
-.                               |                                  Kindelia |                              Ethereum
-------------------------------- | ----------------------------------------: | ------------------------------------:
-**block time**                  | ```                         1 second  ``` | ```                       13 seconds  ```
-**block size**                  | ```                       1280 bytes  ``` | ```                             1 MB  ```
-**max throughput: signed tx**   | ```                         ~20 tx/s  ``` | ```                         ~30 tx/s  ```
-**max throughput: unsigned tx** | ```                        ~160 tx/s  ``` | ```                              N/A  ```
-**max growth: blockchain**      | ```                       40 GB/year  ``` | ```                              N/A  ```
-**max growth: state heap**      | ```  56 byte/s ~           8 GB/year  ``` | ```                              N/A  ```
-**max growth: computation**     | ```                10,000,000 mana/s  ``` | ```                  2,300,000 gas/s  ```
-**cost: multiplication**        | ```     2 mana ~      5,000,000 op/s  ``` | ```          5 gas ~    460,000 op/s  ```
-**cost: beta reduction**        | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
-**cost: pattern matching**      | ```     2 mana ~      5,000,000 op/s  ``` | ```       ~200 gas ~     11,500 op/s  ```
-**cost: SSTORE (reuse)**        | ```     0 bits ~      5,000,000 op/s  ``` | ```      5,000 gas ~        460 op/s  ```
-**cost: SSTORE (alloc)**        | ```   128 bits ~             16 op/s  ``` | ```     20,000 gas ~        115 op/s  ```
+#### Network parameters
+
+```
+Parameter          | Ethereum           | Kindelia
+------------------ | ------------------ | ----------------
+Avg. Block Time    |         13 seconds |         1 second
+Avg. Block Size    |     95,441 bytes   |     1,280 bytes
+State Growth Limit |        ??? bytes   |       256 bytes
+Computation Limit  | 21,000,000 gas     | 4,000,000 mana
+```
+
+#### Transaction sizes
+
+```
+Transaction             | Ethereum  | Kindelia | ratio
+----------------------- | --------- | -------- | -----
+Deploy a small contract | 550 bytes | 66 bytes |  12 %
+Call a simple method    | 113 bytes | 32 bytes |  28 %
+```
+
+These numbers were obtained by deploying and calling a simple [counter
+contract](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c)
+on both networks.
+
+#### Operations per Second
+
+```
+Operation              |      Ethereum |       Kindelia |       ratio
+---------------------- | ------------- | -------------- | -----------
+Numeric addition       |  769,230 op/s | 2,000,000 op/s |       260 %
+Numeric multiplication |  461,538 op/s | 2,000,000 op/s |       432 %
+Lambda application     |   11,538 op/s | 2,000,000 op/s |    17,332 %
+Pattern match          |   11,538 op/s | 2,000,000 op/s |    17,332 %
+Uint load              |   23,076 op/s | 2,000,000 op/s |     1,733 %
+Uint store             |      461 op/s | 2,000,000 op/s |    86,760 %
+```
+
 
 The costs in this table were defined based on HVM benchmarks, using modern
 mid-end processors.
@@ -1597,12 +1623,12 @@ Kindelia's block time is shorter, because its compressed blocks fit in a single
 UDP packet. Due to block size limits, Ethereum can handle slightly more signed
 transactions per second, including monetary transfers, but Kindelia handles
 considerably more unsigned transactions per second, including contract
-deployment and other interactions that don't require authentication.  Note that,
+deployment and other interactions that don't require authentication. Note that,
 since Kindelia's signed transactions can group multiple calls in a single
 statement, the actual throughput can be much higher, and it achieves that with a
 fraction of Ethereum's maximum blockchain growth.
 
-Kindelia's layer-1 throughput is up to 434x higher, due to the HVM and stateful
+Kindelia's layer-1 throughput is up to 867x higher, due to the HVM and stateful
 heaps respectively. Kindelia's functional opcodes allow it to host programs
 compiled from secure languages like Haskell, Idris, Agda and Kind, which is
 simply not economically viable on Ethereum. Kindelia's zero-cost reused SSTORE
