@@ -57,6 +57,8 @@ Evangelion: mainnet history
 
 - The network will be considered stable and no more patches should be expected.
 
+- Users will be able to host and use apps with maximal security, minimal fees and infinite uptime.
+
 - The Kindelia Foundation will no longer maintain the network. It will focus on:
 
   - Improving the HVM
