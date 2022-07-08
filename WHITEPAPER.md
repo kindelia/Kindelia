@@ -264,7 +264,6 @@ rewards that only the block miner can collect. For example, Kindelia's Genesis T
 a no-premine currency which will be deployed by the Kindelia Foundation on the first
 block, will include a method that mints coins once per block, following Bitcoin's
 emission curve. This serves as an incentive for miners that keep the network secure.
-
 In other words, Kindelia doesn't need a built-in token to have block rewards and miner
 fees. Instead, it flexibly allows users to pay fees in whatever tokens they want, and
 miners to collect block rewards from a constellation of user-deployed tokens, rather
