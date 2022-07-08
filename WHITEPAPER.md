@@ -119,7 +119,7 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on action-expressions, which work exactly like
+the network's state, based on effect-expressions, which work exactly like
 Haskell's IO. For example, the statement below adds `3` to the state stored by
 the global 'Calculator' contract:
 
@@ -130,7 +130,7 @@ run {
 }
 ```
 
-When that statement is included in a block, its actions are evaluated inside the
+When that statement is included in a block, its effects are evaluated inside the
 [HVM](https://github.com/kindelia/hvm), which offers all the features required
 for a great decentralized runtime: instant compilation, no garbage accumulation,
 great performance, and a well-defined cost table. Among alternatives, only
@@ -169,7 +169,7 @@ role similar to Ethereum's gas.
 Note that the table above has only computational opcodes; there is no equivalent
 to "SSTORE" or "SLOAD". That's because space is treated separately from
 computation. In order to persist states, functions can invoke the `save` and
-`load` actions. For example, the function below stores a state that can only be
+`load` effects. For example, the function below stores a state that can only be
 incremented:
 
 ```c
@@ -286,8 +286,8 @@ for these numbers is available on [this Gist](https://gist.github.com/VictorTael
 Conclusion
 ----------
 
-With pure functions, stateful actions and signed transactions, Kindelia can host
-any conceivable application, from tokens, to exchanges, to complete virtual
+With pure functions, effect expressions and signed transactions, Kindelia can
+host any conceivable application, from tokens, to exchanges, to complete virtual
 worlds. Thanks to HVM's native functional opcodes, applications hosted on it can
 be made as secure as mathematically possible, by programming them on well-typed
 languages, or even proof assistants. Moreover, thanks to reversible heap
