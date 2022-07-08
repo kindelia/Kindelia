@@ -75,9 +75,9 @@ How it works?
 -------------
 
 On conventional cryptocurrencies such as Bitcoin, network peers use a consensus
-algorithm to agree on a canonical ordering of blocks, that groups user-generated
-transactions, which has the effect of sending money from an address to another.
-On Ethereum, these transactions can also call execute computations that change a
+algorithm to agree on a canonical ordering of blocks. These blocks group user-generated
+transactions, which have the effect of sending money from an address to another.
+On Ethereum, these transactions can also execute computations that change a
 contract's state. On Bitcoin, the network state is just a global map of
 balances. On Ethereum, each contract has its own state, which is a map of uints.
 On Kindelia, blocks don't group *transactions*, but *statements* with no
