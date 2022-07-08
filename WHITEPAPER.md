@@ -103,7 +103,7 @@ There are 4 kinds of statements:
 
 - **FUN**: installs a new global function
 
-- **RUN**: runs a side-effective script
+- **RUN**: runs a side-effective expression
 
 - **REG**: registers a namespace
 
