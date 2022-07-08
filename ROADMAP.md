@@ -34,7 +34,7 @@ Genesis: mainnet release
 
 - Kindelia's Genesis Block (block #0) will be mined. On it:
 
-    - Primitive utilies like tuples will be deployed.
+    - Primitive utilities like tuples will be deployed.
 
     - Kindelia's empty namespace will be registered by the Kindelia Foundation.
 
