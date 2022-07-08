@@ -44,8 +44,8 @@ allows Kindelia to host highly dynamic layer 1 apps, such as games, which are
 simply not viable on Ethereum.
 
 In short, for these familiar with functional languages, Kindelia can be seen as
-a worldwide functional REPL (like Haskell's GHCI) where anyone can input
-commands that deploy functions and run monadic actions forever. And for these
+a worldwide, permanent functional REPL (like Haskell's GHCI) where anyone can
+input commands to deploy and run functions that stay up forever. And for these
 familiar with decentralized computers, Kindelia can be seen as a polishment of
 Ethereum, under the following recipe:
 
