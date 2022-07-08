@@ -231,7 +231,7 @@ Kindelia addresses consist of the first 15 bytes of the respective Ethereum
 address. As such, both account systems are compatible, and Ethereum users can
 use their existing accounts to sign Kindelia statements.
 
-Finally, Kindelia has a built-in namespace system based on a hierarchy of names.
+Kindelia also has a built-in namespace system based on a hierarchy of names.
 Kindelia functions are addressed by 72-bit names, a limit imposed by the size of
 HVM's pointers. These names contain up to 12 6-bit chars, including letters,
 numbers, underscore and periods. Names without periods can be deployed by
@@ -239,6 +239,36 @@ anyone. Names with periods are namespaced, and can only be deployed by the
 namespace owner. So, for example, `Foo.Bar.app` can only be deployed by the
 owner of the `Foo.Bar` namespace. The owner of a namespace can grant
 sub-namespaces to other users.
+
+Finally, the lack of a native currency may cause one to wonder how block rewards
+and transaction fees could possibly work. Initially, when the network isn't fully
+used, miners will just include statements altruistically, sorted by their hashes.
+That means that, on the beginning, anyone will be able to deploy and using functions
+for free. When blocks get full in either space, state or computation, a fee market
+will emerge, where users will add miner payments to prioritize their transactions:
+
+```
+// Statement signed by Bob to send 1000 CAT to Alice
+run {
+  !call miner (BlockMiner {Get})            // Gets the block miner
+  !call ~     (CatCoin {Send miner 50})     // Pays 50 CAT as miner fees
+  !call ~     (CatCoin {Send 'Alice' 1000}) // Sends 1000 CAT to Alice
+  !done #0
+} sign {
+  ... signature ...
+}
+```
+
+As for block rewards, the same principle holds. Tokens and applications can leave
+rewards that only the block miner can collect. For example, Kindelia's Genesis Token,
+a no-premine currency which will be deployed by the Kindelia Foundation on the first
+block, will include a method that mints coins once per block, following Bitcoin's
+emission curve. This serves as an incentive for miners that keep the network secure.
+
+In other words, Kindelia doesn't need a built-in token to have block rewards and miner
+fees. Instead, it flexibly allows users to pay fees in whatever tokens they want, and
+miners to collect block rewards from a constellation of built-in tokens, rather than a
+single official one.
 
 Benchmarks
 ----------
