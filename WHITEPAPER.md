@@ -187,7 +187,7 @@ fun (Increment) {
 That `Increment` function can be called inside `run` statements. For example,
 the statement below increments its state `3` times:
 
-```
+```c
 run {
   !call ~ 'Increment' []
   !call ~ 'Increment' []
@@ -248,7 +248,7 @@ on the beginning, anyone will be able to deploy and using functions for free.
 When blocks get full in either space, state or computation, a fee market will
 naturally emerge, and users will pay miners to prioritize their statements:
 
-```
+```c
 // Statement signed by Bob to send 1000 CAT to Alice
 run {
   !call miner (BlockMiner {Get})            // Gets the block miner
