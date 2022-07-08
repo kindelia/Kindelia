@@ -3318,7 +3318,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   s
 }
 
-// TODO: this should be renamed to "readback", and should return a term instead of a string. 
+// TODO: should this be removed? should use readback instead?
 pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   enum StackItem {
     Term(Ptr),
@@ -3391,7 +3391,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)));
+      writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
   }
