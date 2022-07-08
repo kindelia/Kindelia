@@ -304,7 +304,7 @@ contract](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c)
 on both networks. A contract deployment on Kindelia can use up to 8x less space
 than on Ethereum. In average, both networks should sustain the same number of
 transactions per second, but a single Kindelia transaction can do much more.
-The table below compares both networks in raw operations per second:
+The table below compares both networks in actual operations per second:
 
 ```
 Operation              |      Ethereum |       Kindelia |    ratio
@@ -320,8 +320,8 @@ Uint store             |      461 op/s | 2,000,000 op/s | 86,760 %
 On Kindelia, all the opcodes above cost exactly 2 mana. On Ethereum, numeric
 opcodes are cheap (3-5 gas), but functional operations are expensive (about
 [~200 gas](https://medium.com/@maiavictor/compiling-formality-to-the-evm-99aec75677dd)
-per beta-reduction) due to emulation overhead, and storage opcodes are
-prohibitive (100-20000 gas), due to costly Merkle tree insertions. Kindelia can
+per beta-reduction, due to emulation overhead), and storage opcodes are
+prohibitive (100-20000 gas, due to costly Merkle tree insertions). Kindelia can
 sustain from 2x to 867x more operations per second than Ethereum, which is what
 makes it able to host functional and real-time applications on layer 1.
 
