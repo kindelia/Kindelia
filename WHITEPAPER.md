@@ -263,7 +263,7 @@ Call inc() method   | 113 bytes | 32 bytes |  28 %
 ```
 
 The difference is expressive, especially because these transactions don't require
-signatures. Even if it did, Kindelia would still come shorter. This allows
+signatures. Even if they did, Kindelia would still come shorter. This allows
 Kindelia to have much smaller blocks without affecting its throughput, which, in
 turn, allows it to fit a full block in a single 1500-byte UDP packet, which
 makes block propagation as fast as the internet allows, decreasing the block
