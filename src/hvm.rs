@@ -238,6 +238,7 @@
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};
+use std::fmt::Write;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1201,7 +1202,7 @@ fn show_buff(vec: &[u128]) -> String {
     if *x == U128_NONE {
       result.push_str("_ ");
     } else {
-      result.push_str(&format!("{:x} ", *x));
+      write!(result, "{:x} ", *x).unwrap();
     }
   }
   return result;
@@ -3310,7 +3311,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   let mut s: String = String::new();
   for i in 0..32 {
     // pushes to the string
-    s.push_str(&format!("{:x} | ", i));
+    write!(s, "{:x} | ", i).unwrap();
     s.push_str(&show_lnk(rt.read(i)));
     s.push('\n');
   }
