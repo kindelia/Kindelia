@@ -242,10 +242,11 @@ sub-namespaces to other users.
 
 Finally, the lack of a native currency may cause one to wonder how block rewards
 and transaction fees could possibly work. Initially, when the network isn't fully
-used, miners will just include statements altruistically, sorted by their hashes.
-That means that, on the beginning, anyone will be able to deploy and using functions
-for free. When blocks get full in either space, state or computation, a fee market
-will emerge, where users will pay miners to prioritize their statements:
+used, miners will just include statements altruistically, sorted by their hashes,
+i.e., using a portable Proof-of-Work in order to prevent spam. That means that,
+on the beginning, anyone will be able to deploy and using functions for free.
+When blocks get full in either space, state or computation, a fee market will
+naturally emerge, and users will pay miners to prioritize their statements:
 
 ```
 // Statement signed by Bob to send 1000 CAT to Alice
