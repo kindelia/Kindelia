@@ -2,13 +2,15 @@ Kindelia: a peer-to-peer functional computer
 ============================================
 
 Kindelia is a peer-to-peer functional computer capable of hosting applications
-that stay up forever. It uses the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
+that stay up forever. It has no native coin, which means it isn't a
+cryptocurrency, but a cryptocomputer. It uses the
+[HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
 machine, to run formally verified apps natively, making it as secure as
 mathematically possible. It also replaces expensive Merkle tree insertions by
-reversible heaps snapshots, greatly reducing the cost of SSTORE/SLOAD opcodes,
-making highly dynamic apps economically viable. In short, Kindelia can be seen
-as a massive simplification of Ethereum, with no native currency, greatly
-increased security, and greatly reduced layer 1 transaction costs.
+reversible heaps snapshots, greatly reducing the cost of SSTORE/SLOAD, making
+highly dynamic apps economically viable. It, unlike similar projects, addresses
+political and economical centralization. Finally, is very minimal: its full node
+requires orders of magnitude less lines of code than alternatives.
 
 Introduction
 ------------
