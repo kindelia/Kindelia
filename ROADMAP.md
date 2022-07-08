@@ -57,7 +57,7 @@ Evangelion: mainnet history
 
 - The network will be considered stable and no more patches should be expected.
 
-- Kindelia will be host a constellation of hack-proof apps with minimal fees and infinite uptime.
+- Kindelia will host a constellation of hack-proof apps with minimal fees and infinite uptime.
 
 - The Kindelia Foundation will no longer maintain the network. It will focus on:
 
