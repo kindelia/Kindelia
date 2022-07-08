@@ -1,19 +1,26 @@
-Kindelia: a p2p computer that is NOT a cryptocurrency
-=====================================================
+Kindelia: a p2p computer that isn't a cryptocurrency
+----------------------------------------------------
 
-Kindelia is a peer-to-peer minimal functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
+Kindelia is a peer-to-peer minimal functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Differences include:
 
-- There is **no native coin**. It is **not a cryptocurrency**. It is a **cryptocomputer**.
+- There is **no native coin**. It is not a cryptocurrency. It is a cryptocomputer.
 
-- It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its **functional opcodes**.
+- It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its functional opcodes.
 
-- It can host **highly dynamic apps** cheaply, thanks to **reversible heap snapshots** and **zero-cost SSTOREs**.
+- It can host **highly dynamic apps** cheaply, thanks to reversible heap snapshots and zero-cost SSTOREs.
 
 - It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC for Go Ethereum.
 
-- **Maximally decentralized**, not just technologically. **Political** and **economical** decentralization are addressed.
+- It is **maximally decentralized**, not just technologically. Political and economical decentralization are addressed.
 
-For a quick summary, check the [whitepaper](WHITEPAPER.md). For an deep overview, check the [whitebook](WHITEBOOK.md).
+Resources
+---------
+
+- For a quick summary, check the [whitepaper](WHITEPAPER.md).
+
+- For an in-depth overview, check the [whitebook](WHITEBOOK.md).
+
+- For a roadmap, check the [roadmap](ROADMAP.md).
 
 Installation
 ------------
