@@ -5,7 +5,7 @@ Kindelia is a peer-to-peer functional computer capable of hosting applications
 that stay up forever. It uses the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
 machine, to run formally verified apps natively, making it as secure as
 mathematically possible. It also replaces expensive Merkle tree insertions by
-reversible heaps snapshots, greatly reducing the cost of persistent state,
+reversible heaps snapshots, greatly reducing the cost of SSTORE/SLOAD opcodes,
 making highly dynamic apps economically viable. In short, Kindelia can be seen
 as a massive simplification of Ethereum, with no native currency, greatly
 increased security, and greatly reduced layer 1 transaction costs.
@@ -29,7 +29,8 @@ mathematical guarantee that they can not have any bug or exploit, at all.  This
 is extremely valuable for DApps, because they hold money, yet can't be patched
 or reversed, which is a recipe for disaster. Deploying formally verified apps
 written on these languages to Ethereum or Cardano is not economically viable,
-but Kindelia can handle these natively and cheaply.
+but, thanks to HVM's functional opcodes, including constant-cost beta-reduction
+and pattern matching, Kindelia can handle these natively and cheaply.
 
 ### 2. Dynamic Stateful apps
 
@@ -75,15 +76,16 @@ How it works?
 -------------
 
 On conventional cryptocurrencies such as Bitcoin, network peers use a consensus
-algorithm to agree on a canonical ordering of blocks, that groups user-generated
-transactions, which has the effect of sending money from an address to another.
-On Ethereum, these transactions can also call execute computations that change a
+algorithm to agree on a canonical ordering of blocks. These blocks group user-generated
+transactions, which have the effect of sending money from an address to another.
+On Ethereum, these transactions can also execute computations that change a
 contract's state. On Bitcoin, the network state is just a global map of
 balances. On Ethereum, each contract has its own state, which is a map of uints.
 On Kindelia, blocks don't group *transactions*, but *statements* with no
 monetary information attached; that is, statements don't have "to" or "amount"
-fields. Instead, they are just code blocks that affect the network state. Since
-there is no native currency, nodes use Proof-of-Work consensus to order blocks.
+fields. Instead, they are just code blocks that affect the network state. Kindelia
+nodes use Proof-of-Work consensus to order blocks canonically. Proof-of-State isn't
+indended, nor possible, since there is no native currency to stake.
 
      Block #0                  Block #1                  Block #2
     .---------------.         .---------------.         .---------------.
@@ -100,9 +102,9 @@ There are 4 kinds of statements:
 
 - **CTR**: declares a new type (constructor)
 
-- **FUN**: install a new global function
+- **FUN**: installs a new global function
 
-- **RUN**: runs a side-effective script
+- **RUN**: runs a side-effective expression
 
 - **REG**: registers a namespace
 
@@ -119,7 +121,7 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on effects, which work exactly like Haskell's IO. For
+the network's state, based on `!-effects`, which work exactly like Haskell's IO. For
 example, the statement below adds `3` to the state stored by the global
 'Calculator' contract:
 
@@ -162,7 +164,7 @@ Haskell's GHC.
 The elegant cost table above exhibit the 12 opcodes of HVM, including lambda
 application, pattern-matching, integer operations and primitives for erasing and
 duplicating data. These opcodes are expression-based, rather than stack-based.
-For example, an `OP2-NUM` is counted on the `(+ 2 3) ~> 5` computation. Kindelia
+For example, an `OP2-NUM` is computed on the `(+ 2 3) ~> 5` reduction. Kindelia
 nodes impose a maximum "mana" limit per block, which combats spam, fulfilling a
 role similar to Ethereum's gas.
 
@@ -183,10 +185,10 @@ fun (Increment) {
 }
 ```
 
-As usual, it can be called inside `run` statement. For example, the statement
-below increments the state of the `'Increment'` function `3` times:
+That `Increment` function can be called inside `run` statements. For example,
+the statement below increments its state `3` times:
 
-```
+```c
 run {
   !call ~ 'Increment' []
   !call ~ 'Increment' []
@@ -199,9 +201,9 @@ Internally, all that `!save` does is store a pointer to the saved expression,
 preventing it from being garbage-collected on HVM's runtime heap, which causes
 it to persist across blocks. In other words, Kindelia's `!save` is extremely
 cheaper than Ethereum's `SSTORE`, which involves an expensive Merkle tree
-insertion. Not only that, apps can save and load entire structures such as
-lists, trees, JSONs in a single call, instead of having to serialize and
-deserialize them into 256-bit integers.
+insertion. It is also more convenient, since apps can save and load entire
+structures such as lists, maps and JSONs at once, instead of having to serialize
+and deserialize them into maps of u256 words.
 
 Of course, since `!save` has no cost, this would expose the network to a trivial
 spam attack, where a function persists an obscene amount of data. To prevent
@@ -230,7 +232,7 @@ Kindelia addresses consist of the first 15 bytes of the respective Ethereum
 address. As such, both account systems are compatible, and Ethereum users can
 use their existing accounts to sign Kindelia statements.
 
-Finally, Kindelia has a built-in namespace system based on a hierarchy of names.
+Kindelia also has a built-in namespace system based on a hierarchy of names.
 Kindelia functions are addressed by 72-bit names, a limit imposed by the size of
 HVM's pointers. These names contain up to 12 6-bit chars, including letters,
 numbers, underscore and periods. Names without periods can be deployed by
@@ -238,6 +240,36 @@ anyone. Names with periods are namespaced, and can only be deployed by the
 namespace owner. So, for example, `Foo.Bar.app` can only be deployed by the
 owner of the `Foo.Bar` namespace. The owner of a namespace can grant
 sub-namespaces to other users.
+
+Finally, the lack of a native currency may cause one to wonder how block rewards
+and transaction fees could possibly work. Initially, when the network isn't fully
+used, miners will just include statements altruistically, sorted by their hashes,
+i.e., using a portable Proof-of-Work in order to prevent spam. That means that,
+on the beginning, anyone will be able to deploy and using functions for free.
+When blocks get full in either space, state or computation, a fee market will
+naturally emerge, and users will pay miners to prioritize their statements:
+
+```c
+// Statement signed by Bob to send 1000 CAT to Alice
+run {
+  !call miner (BlockMiner {Get})            // Gets the block miner
+  !call ~     (CatCoin {Send miner 50})     // Pays 50 CAT as miner fees
+  !call ~     (CatCoin {Send 'Alice' 1000}) // Sends 1000 CAT to Alice
+  !done #0
+} sign {
+  ... signature ...
+}
+```
+
+As for block rewards, the same principle holds. Tokens and applications can leave
+rewards that only the block miner can collect. For example, Kindelia's Genesis Token,
+a no-premine currency which will be deployed by the Kindelia Foundation on the first
+block, will include a method that mints coins once per block, following Bitcoin's
+emission curve. This serves as an incentive for miners that keep the network secure.
+In other words, Kindelia doesn't need a built-in token to have block rewards and miner
+fees. Instead, it flexibly allows users to pay fees in whatever tokens they want, and
+miners to collect block rewards from a constellation of user-deployed tokens, rather
+than a single official one.
 
 Benchmarks
 ----------

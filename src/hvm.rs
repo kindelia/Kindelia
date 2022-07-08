@@ -238,6 +238,7 @@
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};
+use std::fmt::Write;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1176,6 +1177,7 @@ impl Nodes {
         self.nodes.insert(idx, ownr);
       }
     }
+    other.clear();
   }
 }
 
@@ -3304,7 +3306,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   let mut s: String = String::new();
   for i in 0..32 {
     // pushes to the string
-    s.push_str(&format!("{:x} | ", i));
+    write!(s, "{:x} | ", i).unwrap();
     s.push_str(&show_lnk(rt.read(i)));
     s.push('\n');
   }
@@ -3392,7 +3394,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)));
+      writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
   }
