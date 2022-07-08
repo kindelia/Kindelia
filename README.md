@@ -1,23 +1,19 @@
 Kindelia
 ========
 
-A peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
+A peer-to-peer minimal functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
 
 - There is no native coin. It is not a cryptocurrency, it is a cryptocomputer.
 
-- The [EVM](https://ethereum.org/en/developers/docs/evm/) is replaced by the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional runtime.
+- It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its **functional opcodes**.
 
-- It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind) natively.
+- It can host **highly dynamic apps** cheaply, thanks to **reversible heap snapshots** and **zero-cost SSTOREs**.
 
-- Zero-cost SSTOREs, allowing dynamic games and virtual worlds to run on layer 1.
+- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC for Go Ethereum.
 
-- Truly decentralized, not just in code. **Political** and **economical** decentralization were addressed.
+- **Maximally decentralized**, not just technologically. **Political** and **economical** decentralization are addressed.
 
-- It is so minimalist and elegant you could call it a massively multiplayer λ-calculus REPL.
-
-For a quick summary, check [whitepaper](WHITEPAPER.md).
-
-For an deep overview, check [whitebook](WHITEBOOK.md).
+For a quick summary, check the [whitepaper](WHITEPAPER.md). For an deep overview, check the [whitebook](WHITEBOOK.md).
 
 Installation
 ------------
