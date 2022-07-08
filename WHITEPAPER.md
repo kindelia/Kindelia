@@ -5,7 +5,7 @@ Kindelia is a peer-to-peer functional computer capable of hosting applications
 that stay up forever. It uses the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
 machine, to run formally verified apps natively, making it as secure as
 mathematically possible. It also replaces expensive Merkle tree insertions by
-reversible heaps snapshots, greatly reducing the cost of persistent state,
+reversible heaps snapshots, greatly reducing the cost of SSTORE/SLOAD opcodes,
 making highly dynamic apps economically viable. In short, Kindelia can be seen
 as a massive simplification of Ethereum, with no native currency, greatly
 increased security, and greatly reduced layer 1 transaction costs.
