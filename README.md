@@ -9,7 +9,7 @@ Kindelia is a peer-to-peer functional computer capable of hosting decentralized 
 
 - It can host **real-time apps** cheaply, thanks to 1s blocks, reversible heaps and zero-cost SSTOREs.
 
-- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC for Go Ethereum.
+- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC used by Go Ethereum.
 
 - It is **maximally decentralized**, not just tech-wise. Political and economical centralization are addressed.
 
