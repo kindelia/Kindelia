@@ -184,8 +184,8 @@ fun (Increment) {
 }
 ```
 
-As usual, it can be called inside `run` statement. For example, the statement
-below increments the state of the `'Increment'` function `3` times:
+That `Increment` function can be called inside `run` statements. For example,
+the statement below increments its state `3` times:
 
 ```
 run {
@@ -200,9 +200,9 @@ Internally, all that `!save` does is store a pointer to the saved expression,
 preventing it from being garbage-collected on HVM's runtime heap, which causes
 it to persist across blocks. In other words, Kindelia's `!save` is extremely
 cheaper than Ethereum's `SSTORE`, which involves an expensive Merkle tree
-insertion. Not only that, apps can save and load entire structures such as
-lists, trees, JSONs in a single call, instead of having to serialize and
-deserialize them into 256-bit integers.
+insertion. It is also more convenient, since apps can save and load entire
+structures such as lists, maps and JSONs at once, instead of having to serialize
+and deserialize them into maps of u256 words.
 
 Of course, since `!save` has no cost, this would expose the network to a trivial
 spam attack, where a function persists an obscene amount of data. To prevent
