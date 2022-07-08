@@ -59,6 +59,18 @@ Ethereum, under the following recipe:
 7. Serve with a fair release
 ```
 
+Note we do not claim that Kindelia is *better* than Ethereum. Ethereum is a
+monolithic framework with tons of features, opcodes, precompiles, a [complex
+blockchain](https://i.stack.imgur.com/afWDt.jpg), and an ambitious roadmap to
+upgrade the protocol with complex systems such as PoS and shards. Kindelia
+doesn't offer all these features. Instead, it focuses on being the simplest p2p
+computer possible, offering just the minimal set of features required to host
+secure apps in a decentralized network. It follows the Unix philosophy of doing
+one thing, and doing it well. Ethereum's Go client has 680k lines of code and is
+growing, while Kindelia has about 10k and intends to keep that count low. In
+short, Kindelia aims to be as simple, boring, robust and fair as Bitcoin, while
+still retaining the Turing completeness that makes Ethereum so powerful.
+
 How it works?
 -------------
 
