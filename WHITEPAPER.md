@@ -83,8 +83,8 @@ balances. On Ethereum, each contract has its own state, which is a map of uints.
 On Kindelia, blocks don't group *transactions*, but *statements* with no
 monetary information attached; that is, statements don't have "to" or "amount"
 fields. Instead, they are just code blocks that affect the network state. Kindelia
-nodes use Proof-of-Work consensus to order blocks. Proof-of-State isn't indended,
-nor possible, since there is no native currency to stake.
+nodes use Proof-of-Work consensus to order blocks canonically. Proof-of-State isn't
+indended, nor possible, since there is no native currency to stake.
 
      Block #0                  Block #1                  Block #2
     .---------------.         .---------------.         .---------------.
