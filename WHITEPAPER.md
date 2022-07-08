@@ -29,7 +29,8 @@ mathematical guarantee that they can not have any bug or exploit, at all.  This
 is extremely valuable for DApps, because they hold money, yet can't be patched
 or reversed, which is a recipe for disaster. Deploying formally verified apps
 written on these languages to Ethereum or Cardano is not economically viable,
-but Kindelia can handle these natively and cheaply.
+but, thanks to HVM's functional opcodes, including constant-cost beta-reduction
+and pattern matching, Kindelia can handle these natively and cheaply.
 
 ### 2. Dynamic Stateful apps
 
