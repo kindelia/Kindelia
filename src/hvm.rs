@@ -2157,7 +2157,7 @@ pub fn Op2(ope: u128, pos: u128) -> Ptr {
 
 pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG) | val
+  (NUM * TAG) | (val & NUM_MASK)
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
