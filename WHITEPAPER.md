@@ -1,27 +1,25 @@
 Kindelia: a peer-to-peer functional computer
-============================================
+--------------------------------------------
 
 Kindelia is a peer-to-peer functional computer capable of hosting applications
 that stay up forever. It has no native coin, which means it isn't a
 cryptocurrency, but a cryptocomputer. It uses the
 [HVM](https://github.com/kindelia/hvm), a blazingly fast functional virtual
 machine, to run formally verified apps natively, making it as secure as
-mathematically possible. It also replaces expensive Merkle tree insertions by
-reversible heaps snapshots, greatly reducing the cost of SSTORE/SLOAD, making
-highly dynamic apps economically viable. It, unlike similar projects, addresses
-political and economical centralization. Finally, is very minimal: its full node
-requires orders of magnitude less lines of code than alternatives.
+mathematically possible. It replaces expensive Merkle tree insertions by
+reversible heaps snapshots, greatly reducing the cost of SSTORE and SLOAD, which
+makes real-time apps economically viable. Unlike similar projects, it addresses
+political and economical centralization. Finally, is extremelly minimal: a full
+node requires drastically less lines of code than alternatives.
 
 Introduction
 ------------
 
-Kindelia is a pure decentralized computer. It aggressively purges redundant
-features, resulting in a minimal 10K-LOC implementation, promoting client
-diversity and addressing political centralization. It has no built-in token,
-making it a non-cryptocurrency and addressing economical centralization. It
-replaces the EVM, a slow stack machine, by the HVM, a fast graph reduction
-machine, and slow Merkle trees by fast heap snapshots. These allow it to
-host 2 kinds of apps that, previously, were economically unviable:
+Kindelia is a pure decentralized computer that aggressively purges redundant
+features and bloat, removes the built-in token, replaces the EVM, a slow stack
+machine, by the HVM, a fast graph reduction machine, and replaces slow Merkle
+trees by fast heap snapshots. That allows it to host 2 kinds of apps that,
+previously, were not economically viable:
 
 ### 1. Formally Verified apps
 
@@ -34,7 +32,7 @@ written on these languages to Ethereum or Cardano is not economically viable,
 but, thanks to HVM's functional opcodes, including constant-cost beta-reduction
 and pattern matching, Kindelia can handle these natively and cheaply.
 
-### 2. Dynamic Stateful apps
+### 2. Real-Time apps
 
 Apps that involve huge amounts of state changes, such as games and exchanges, are
 too expensive on Ethereum, due to the high cost of the SSTORE opcode. Moreover,
@@ -47,7 +45,7 @@ allows Kindelia to host highly dynamic layer 1 apps, such as games, which are
 simply not viable on Ethereum.
 
 In short, for these familiar with functional languages, Kindelia can be seen as
-a worldwide, permanent functional REPL (like Haskell's GHCI) where anyone can
+a worldwide, permanent functional REPL - like Haskell's GHCI - where anyone can
 input commands to deploy and run functions that stay up forever. And for these
 familiar with decentralized computers, Kindelia can be seen as a polishment of
 Ethereum, under the following recipe:
@@ -57,20 +55,20 @@ Ethereum, under the following recipe:
 2. Remove Ether (and the associated pre-mine)
 3. Replace the slow EVM by the fast HVM
 4. Replace slow Merkle trees by fast reversible heaps
-5. Aggressively optimize and simplify everything you find
+5. Aggressively optimize and simplify everything
 6. Cook without hype
 7. Serve with a fair release
 ```
 
 Note we do not claim that Kindelia is *better* than Ethereum. Ethereum is a
-monolithic framework with tons of features, opcodes, precompiles, a [complex
-blockchain](https://i.stack.imgur.com/afWDt.jpg), and an ambitious roadmap to
-upgrade the protocol with complex systems such as PoS and shards. Kindelia
-doesn't offer all these features. Instead, it focuses on being the simplest p2p
-computer possible, offering just the minimal set of features required to host
-secure apps in a decentralized network. It follows the Unix philosophy of doing
-one thing, and doing it well. Ethereum's Go client has 680k lines of code and is
-growing, while Kindelia has about 10k and intends to keep that count low. In
+monolithic protocol with tons of features, opcodes, precompiles, a [complex
+block structure](https://i.stack.imgur.com/afWDt.jpg), and an ambitious roadmap
+to add grandiose systems such as PoS and shards. Kindelia doesn't offer all
+these features. Instead, it focuses on being the simplest p2p computer possible,
+offering just the minimal set of features required to host secure apps in a
+decentralized network. It follows the Unix philosophy of doing one thing, and
+doing it well. For a comparison, Ethereum's Go client has 680k lines of code and
+is growing, while Kindelia has about 10k and intends to keep that count low. In
 short, Kindelia aims to be as simple, boring, robust and fair as Bitcoin, while
 still retaining the Turing completeness that makes Ethereum so powerful.
 
@@ -78,16 +76,13 @@ How it works?
 -------------
 
 On conventional cryptocurrencies such as Bitcoin, network peers use a consensus
-algorithm to agree on a canonical ordering of blocks. These blocks group user-generated
-transactions, which have the effect of sending money from an address to another.
-On Ethereum, these transactions can also execute computations that change a
-contract's state. On Bitcoin, the network state is just a global map of
-balances. On Ethereum, each contract has its own state, which is a map of uints.
-On Kindelia, blocks don't group *transactions*, but *statements* with no
-monetary information attached; that is, statements don't have "to" or "amount"
-fields. Instead, they are just code blocks that affect the network state. Kindelia
-nodes use Proof-of-Work consensus to order blocks canonically. Proof-of-State isn't
-indended, nor possible, since there is no native currency to stake.
+algorithm to agree on a canonical ordering of blocks. These blocks group
+user-generated transactions, which have the effect of sending money from an
+address to another. On Ethereum, these transactions can also execute
+computations that change a contract's state. On Kindelia, blocks don't group
+*transactions*, but *statements* with no monetary content; that is, they don't
+have `.to` or `.amount` fields. Instead, they are just scripts that affect the
+network state.
 
      Block #0                  Block #1                  Block #2
     .---------------.         .---------------.         .---------------.
@@ -100,9 +95,11 @@ indended, nor possible, since there is no native currency to stake.
     | - Statement_N |         | - Statement_N |         | - Statement_N |
     '---------------'         '---------------'         '---------------'
 
-There are 4 kinds of statements:
+Kindelia nodes use Proof-of-Work consensus to order blocks canonically.
+Proof-of-State isn't indended, nor possible, since there is no native currency
+to stake. Blocks merely group statements, of which there are 4 kinds:
 
-- **CTR**: declares a new type (constructor)
+- **CTR**: declares a new constructor
 
 - **FUN**: installs a new global function
 
@@ -123,9 +120,9 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on `!-effects`, which work exactly like Haskell's IO. For
-example, the statement below adds `3` to the state stored by the global
-'Calculator' contract:
+the network's state, based on `!-effects`, which work exactly like Haskell's IO.
+For example, the statement below adds `3` to the state stored by some
+hypothetical 'Calculator' function:
 
 ```c
 run {
@@ -172,8 +169,8 @@ role similar to Ethereum's gas.
 
 Note that the table above has only computational opcodes; there is no equivalent
 to "SSTORE" or "SLOAD". That's because space is treated separately from
-computation. In order to persist states, functions can invoke the `save` and
-`load` effects. For example, the function below stores a state that can only be
+computation. In order to persist data, functions can invoke the `save` and
+`load` effects. For example, the function below stores a number that can only be
 incremented:
 
 ```c
@@ -201,7 +198,7 @@ run {
 
 Internally, all that `!save` does is store a pointer to the saved expression,
 preventing it from being garbage-collected on HVM's runtime heap, which causes
-it to persist across blocks. In other words, Kindelia's `!save` is extremely
+it to persist across blocks. In other words, Kindelia's `!save` is drastically
 cheaper than Ethereum's `SSTORE`, which involves an expensive Merkle tree
 insertion. It is also more convenient, since apps can save and load entire
 structures such as lists, maps and JSONs at once, instead of having to serialize
@@ -227,12 +224,12 @@ run {
 }
 ```
 
-A signed statement works as usual, except that called functions can track the
-caller's address, allowing it to operate like a contract. For example, a
-`CatCoin` function can store an `Address -> Balance` to operate like a token.
-Kindelia addresses consist of the first 15 bytes of the respective Ethereum
-address. As such, both account systems are compatible, and Ethereum users can
-use their existing accounts to sign Kindelia statements.
+A signed statement works as usual, except that, when it calls a function, that
+function can query the signer's address, allowing it to operate like a contract.
+For example, a `CatCoin` function can store an `Address -> Balance` to operate
+like a token.  Kindelia addresses consist of the first 15 bytes of the
+respective Ethereum address. As such, both account systems are compatible, and
+Ethereum users can use their existing accounts to sign Kindelia statements.
 
 Kindelia also has a built-in namespace system based on a hierarchy of names.
 Kindelia functions are addressed by 72-bit names, a limit imposed by the size of
@@ -244,12 +241,13 @@ owner of the `Foo.Bar` namespace. The owner of a namespace can grant
 sub-namespaces to other users.
 
 Finally, the lack of a native currency may cause one to wonder how block rewards
-and transaction fees could possibly work. Initially, when the network isn't fully
-used, miners will just include statements altruistically, sorted by their hashes,
-i.e., using a portable Proof-of-Work in order to prevent spam. That means that,
-on the beginning, anyone will be able to deploy and using functions for free.
-When blocks get full in either space, state or computation, a fee market will
-naturally emerge, and users will pay miners to prioritize their statements:
+and transaction fees could possibly work. Initially, when the network isn't
+fully used, miners will just include statements altruistically, sorted by their
+hashes, i.e., using a portable Proof-of-Work in order to prevent spam. That
+means that, on the beginning, anyone will be able to deploy and use functions
+for free.  When blocks reach any of the 3 imposed limits (space, state growth or
+computation), a fee market will naturally emerge, and users will pay miners to
+prioritize their statements:
 
 ```c
 // Statement signed by Bob to send 1000 CAT to Alice
@@ -276,17 +274,17 @@ than a single official one.
 Benchmarks
 ----------
 
-Ethereum and Kindelia are architecturally different in some aspects,
+Ethereum and Kindelia are architecturally different in many aspects,
 so it is not always straightforward to draw direct comparisons between them,
 but we can make approximations. The table below compares network parameters:
 
 ```
-Parameter          | Ethereum           | Kindelia
------------------- | ------------------ | ----------------
-Avg. Block Time    |         13 seconds |         1 second
-Avg. Block Size    |     95,441 bytes   |     1,280 bytes
-State Growth Limit |        ??? bytes   |       256 bytes
-Computation Limit  | 21,000,000 gas     | 4,000,000 mana
+Parameter          |       Ethereum |       Kindelia
+------------------ | -------------- | --------------
+Avg. Block Time    |     13 seconds |       1 second
+Avg. Block Size    |   95,441 bytes |    1,280 bytes
+State Growth Limit |      ??? bytes |      256 bytes
+Computation Limit  | 21,000,000 gas | 4,000,000 mana
 ```
 
 Kindelia blocks are shorter, which allows them to fit in a single UDP packet,
@@ -325,7 +323,8 @@ opcodes are cheap (3-5 gas), but functional operations are expensive (about
 per beta-reduction, due to emulation overhead), and storage opcodes are
 prohibitive (100-20000 gas, due to costly Merkle tree insertions). Kindelia can
 sustain from 2x to 867x more operations per second than Ethereum, which is what
-makes it able to host functional and real-time applications on layer 1.
+makes it able to host functional and real-time applications without complex
+layer 2 indirections.
 
 Conclusion
 ----------
