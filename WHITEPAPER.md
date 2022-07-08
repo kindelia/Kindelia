@@ -33,7 +33,7 @@ but Kindelia can handle these natively and cheaply.
 
 ### 2. Dynamic Stateful apps
 
-Apps that involve huge amouts of state changes, such as games and exchanges, are
+Apps that involve huge amounts of state changes, such as games and exchanges, are
 too expensive on Ethereum, due to the high cost of the SSTORE opcode. Moreover,
 persisting state on Ethereum is complex and error-prone, due to the need of
 serializing structures into a map of 256-bit integers. Kindelia replaces the
@@ -63,8 +63,8 @@ How it works?
 -------------
 
 On conventional cryptocurrencies such as Bitcoin, network peers use a consensus
-algorithm to agree on a canonical ordering of blocks, which group user-generated
-transactions, which have the effect of sending money from an address to another.
+algorithm to agree on a canonical ordering of blocks, that groups user-generated
+transactions, which has the effect of sending money from an address to another.
 On Ethereum, these transactions can also call execute computations that change a
 contract's state. On Bitcoin, the network state is just a global map of
 balances. On Ethereum, each contract has its own state, which is a map of uints.
@@ -106,7 +106,7 @@ fun (Sum tree) {
 
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
-The `RUN` statement offers a scape hatch where side-effects can occur and alter
+The `RUN` statement offers a escape hatch where side-effects can occur and alter
 the network's state, just like Haskell's IO. For example, the statement below
 adds `3` to the state stored by the global 'Calculator' contract:
 
@@ -229,7 +229,7 @@ sub-namespaces to other users.
 Benchmarks
 ----------
 
-Ethereum and Kindelia are have some architecturally different in some aspects,
+Ethereum and Kindelia are architecturally different in some aspects,
 so it is not always straightforward to draw direct comparisons between them,
 but we can make approximations. The table below compares both networks
 computationally:
@@ -249,7 +249,7 @@ All the HVM opcodes have about the same performance (5 million operations per
 second) because they require exactly one 2-mana HVM graph rewrite, with no other
 significant costs. On Ethereum, additions and multiplications are cheap, because
 they require cheap 3 to 5 gas instructions; applications and pattern matches are
-expensive, because they require a several instructions, which amount to about
+expensive, because they require several instructions, which amount to about
 200 gas; loads and stores are expensive, because the SSTORE/SLOAD instructions
 demand costly Merkle tree manipulations, and range from 100 to 20000 gas.
 Kindelia also has considerably shorter transaction sizes. The table below
@@ -262,13 +262,13 @@ Deploy Foo contract | 550 bytes | 66 bytes |  12 %
 Call inc() method   | 113 bytes | 32 bytes |  28 %
 ```
 
-The difference is expressive, specially because these transactions don't require
+The difference is expressive, especially because these transactions don't require
 signatures. Even if it did, Kindelia would still come shorter. This allows
 Kindelia to have much smaller blocks without affecting its throughput, which, in
 turn, allows it to fit a full block in a single 1500-byte UDP packet, which
 makes block propagation as fast as the internet allows, decreasing the block
 time to just 1 second, without impacting uncle rates significantly. The source
-for these numbers is availble on [this Gist](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c).
+for these numbers is available on [this Gist](https://gist.github.com/VictorTaelin/bb0f8fb30b61bf0c216675791b72500c).
 
 Conclusion
 ----------
