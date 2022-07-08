@@ -163,7 +163,7 @@ Haskell's GHC.
 The elegant cost table above exhibit the 12 opcodes of HVM, including lambda
 application, pattern-matching, integer operations and primitives for erasing and
 duplicating data. These opcodes are expression-based, rather than stack-based.
-For example, an `OP2-NUM` is counted on the `(+ 2 3) ~> 5` computation. Kindelia
+For example, an `OP2-NUM` is computed on the `(+ 2 3) ~> 5` reduction. Kindelia
 nodes impose a maximum "mana" limit per block, which combats spam, fulfilling a
 role similar to Ethereum's gas.
 
