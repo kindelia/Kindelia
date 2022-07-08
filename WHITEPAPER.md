@@ -120,7 +120,7 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on effects, which work exactly like Haskell's IO. For
+the network's state, based on `!-effects`, which work exactly like Haskell's IO. For
 example, the statement below adds `3` to the state stored by the global
 'Calculator' contract:
 
