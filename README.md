@@ -13,7 +13,7 @@ A peer-to-peer minimal functional computer capable of hosting decentralized apps
 
 - **Maximally decentralized**, not just technologically. **Political** and **economical** decentralization are addressed.
 
-For a quick summary, check the [whitepaper](WHITEPAPER.md). For an deep overview, checkt the [whitebook](WHITEBOOK.md).
+For a quick summary, check the [whitepaper](WHITEPAPER.md). For an deep overview, check the [whitebook](WHITEBOOK.md).
 
 Installation
 ------------
