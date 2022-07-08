@@ -101,7 +101,7 @@ There are 4 kinds of statements:
 
 - **CTR**: declares a new type (constructor)
 
-- **FUN**: install a new global function
+- **FUN**: installs a new global function
 
 - **RUN**: runs a side-effective script
 
