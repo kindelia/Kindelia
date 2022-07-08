@@ -55,7 +55,7 @@ Evangelion: mainnet history
 
 ### Jan 2024 - Heat Death of the Universe
 
-- The network will be considered stable and no more patches will be expected.
+- The network will be considered stable and no more patches should be expected.
 
 - The Kindelia Foundation will no longer maintain the network. It will focus on:
 
@@ -68,3 +68,5 @@ Evangelion: mainnet history
   - Developing ecosystem applications
 
   - Giving community grants
+
+- Community-driven forks to adjust parameters (like the mana limit) may still occur.
