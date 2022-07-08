@@ -1,9 +1,9 @@
-Kindelia
-========
+Kindelia: a p2p computer that is NOT a cryptocurrency
+=====================================================
 
-A peer-to-peer minimal functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
+Kindelia is a peer-to-peer minimal functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
 
-- There is no native coin. It is not a cryptocurrency, it is a cryptocomputer.
+- There is **no native coin**. It is **not a cryptocurrency**. It is a **cryptocomputer**.
 
 - It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its **functional opcodes**.
 
