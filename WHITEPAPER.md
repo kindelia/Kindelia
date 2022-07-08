@@ -245,7 +245,7 @@ and transaction fees could possibly work. Initially, when the network isn't full
 used, miners will just include statements altruistically, sorted by their hashes.
 That means that, on the beginning, anyone will be able to deploy and using functions
 for free. When blocks get full in either space, state or computation, a fee market
-will emerge, where users will add miner payments to prioritize their transactions:
+will emerge, where users will pay miners to prioritize their statements:
 
 ```
 // Statement signed by Bob to send 1000 CAT to Alice
@@ -267,8 +267,8 @@ emission curve. This serves as an incentive for miners that keep the network sec
 
 In other words, Kindelia doesn't need a built-in token to have block rewards and miner
 fees. Instead, it flexibly allows users to pay fees in whatever tokens they want, and
-miners to collect block rewards from a constellation of built-in tokens, rather than a
-single official one.
+miners to collect block rewards from a constellation of user-deployed tokens, rather
+than a single official one.
 
 Benchmarks
 ----------
