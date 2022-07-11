@@ -238,6 +238,7 @@
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};
+use std::fmt::Write;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -392,15 +393,14 @@ pub type Ptr = u128;
 // A mergeable vector of u128 values
 #[derive(Debug, Clone)]
 pub struct Nodes {
-  data: Vec<u128>,
-  used: Vec<usize>,
+  nodes: Map<u128>,
 }
 
 // HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug)]
 pub struct Heap {
   pub uuid: u128,  // unique identifier
-  pub blob: Nodes, // memory block holding HVM nodes
+  pub memo: Nodes, // memory block holding HVM nodes
   pub disk: Store, // points to stored function states
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
@@ -411,13 +411,14 @@ pub struct Heap {
   pub rwts: u128,  // total graph rewrites
   pub mana: u128,  // total mana cost
   pub size: i128,  // total used memory (in 64-bit words)
+  pub mcap: u128,  // memory capacity (in 64-bit words)
   pub next: u128,  // memory index that *may* be empty
 }
 
 // A serialized Heap
 pub struct SerializedHeap {
   pub uuid: u128,
-  pub blob: Vec<u128>,
+  pub memo: Vec<u128>,
   pub disk: Vec<u128>,
   pub file: Vec<u128>,
   pub arit: Vec<u128>,
@@ -510,14 +511,14 @@ const U128_PER_GB: u128 = U128_PER_MB << 10;
 // empty space, so, future optimizations should reduce this to closer to the actual 8 GB per year
 // that the network actually uses.
 
-#[cfg(not(debug_assertions))]
-const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
+//#[cfg(not(debug_assertions))]
+//const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
 const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
 const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapshots
 
 // Use smaller heaps for debug/development builds
-#[cfg(debug_assertions)]
-const HEAP_SIZE: u128 = 64 * U128_PER_MB; // total size per heap, in 128-bit words
+//#[cfg(debug_assertions)]
+//const HEAP_SIZE: u128 = 64 * U128_PER_MB; // total size per heap, in 128-bit words
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
@@ -544,6 +545,7 @@ pub const CTR: u128 = 0x8;
 pub const FUN: u128 = 0x9;
 pub const OP2: u128 = 0xA;
 pub const NUM: u128 = 0xB;
+pub const NIL: u128 = 0xF;
 
 pub const ADD : u128 = 0x0;
 pub const SUB : u128 = 0x1;
@@ -589,7 +591,7 @@ const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
 const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u128 = 10_000_000_000;
+pub const BLOCK_MANA_LIMIT : u128 = 4_000_000_000;
 
 // Maximum state growth per block, in bits
 pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per year
@@ -875,11 +877,11 @@ fn heap_dir_path() -> PathBuf {
 }
 
 impl Heap {
-  fn write(&mut self, idx: usize, val: u128) {
-    return self.blob.write(idx, val);
+  fn write(&mut self, idx: u128, val: u128) {
+    return self.memo.write(idx, val);
   }
-  fn read(&self, idx: usize) -> u128 {
-    return self.blob.read(idx);
+  fn read(&self, idx: u128) -> u128 {
+    return self.memo.read(idx);
   }
   fn write_disk(&mut self, fid: u128, val: Ptr) {
     return self.disk.write(fid, val);
@@ -941,6 +943,12 @@ impl Heap {
   fn get_size(&self) -> i128 {
     return self.size;
   }
+  fn set_mcap(&mut self, mcap: u128) {
+    self.mcap = mcap;
+  }
+  fn get_mcap(&self) -> u128 {
+    return self.mcap;
+  }
   fn set_next(&mut self, next: u128) {
     self.next = next;
   }
@@ -948,7 +956,7 @@ impl Heap {
     return self.next;
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
-    self.blob.absorb(&mut other.blob, overwrite);
+    self.memo.absorb(&mut other.memo, overwrite);
     self.disk.absorb(&mut other.disk, overwrite);
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
@@ -958,11 +966,12 @@ impl Heap {
     self.rwts = absorb_u128(self.rwts, other.rwts, overwrite);
     self.mana = absorb_u128(self.mana, other.mana, overwrite);
     self.size = absorb_i128(self.size, other.size, overwrite);
+    self.mcap = absorb_u128(self.mcap, other.mcap, overwrite);
     self.next = absorb_u128(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
     self.uuid = fastrand::u128(..);
-    self.blob.clear();
+    self.memo.clear();
     self.disk.clear();
     self.file.clear();
     self.arit.clear();
@@ -972,18 +981,18 @@ impl Heap {
     self.rwts = U128_NONE;
     self.mana = U128_NONE;
     self.size = I128_NONE;
+    self.mcap = U128_NONE;
     self.next = U128_NONE;
   }
   fn serialize(&self) -> SerializedHeap {
     // Serializes stat and size
     let size = self.size as u128;
-    let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.next];
-
-    // Serializes Blob
-    let mut blob_buff : Vec<u128> = vec![];
-    for used_index in &self.blob.used {
-      blob_buff.push(*used_index as u128);
-      blob_buff.push(self.blob.data[*used_index]);
+    let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
+    // Serializes Nodes
+    let mut memo_buff : Vec<u128> = vec![];
+    for (idx, val) in &self.memo.nodes {
+      memo_buff.push(*idx as u128);
+      memo_buff.push(*val as u128);
     }
     // Serializes Store
     let mut disk_buff : Vec<u128> = vec![];
@@ -1019,13 +1028,13 @@ impl Heap {
       self.rwts,
       self.mana,
       self.size as u128,
+      self.mcap,
       self.next
     ];
-    
     // Returns the serialized heap
     return SerializedHeap {
       uuid: self.uuid,
-      blob: blob_buff,
+      memo: memo_buff,
       disk: disk_buff,
       file: file_buff,
       arit: arit_buff,
@@ -1042,14 +1051,15 @@ impl Heap {
     self.rwts = serial.nums[3];
     self.mana = serial.nums[4];
     self.size = serial.nums[5] as i128;
-    self.next = serial.nums[6];
+    self.mcap = serial.nums[6];
+    self.next = serial.nums[7];
 
     // Deserializes Nodes
     let mut i = 0;
-    while i < serial.blob.len() {
-      let idx = serial.blob[i + 0];
-      let val = serial.blob[i + 1];
-      self.write(idx as usize, val);
+    while i < serial.memo.len() {
+      let idx = serial.memo[i + 0];
+      let val = serial.memo[i + 1];
+      self.write(idx, val);
       i += 2;
     }
     // Deserializes Store
@@ -1106,7 +1116,7 @@ impl Heap {
   }
   fn append_buffers(&self, uuid: u128) -> std::io::Result<()> {
     let serial = self.serialize();
-    self.write_buffer(serial.uuid, "blob", &serial.blob, true)?;
+    self.write_buffer(serial.uuid, "memo", &serial.memo, true)?;
     self.write_buffer(serial.uuid, "disk", &serial.disk, true)?;
     self.write_buffer(serial.uuid, "file", &serial.file, true)?;
     self.write_buffer(serial.uuid, "arit", &serial.arit, true)?;
@@ -1116,14 +1126,14 @@ impl Heap {
     return Ok(());
   }
   pub fn load_buffers(&mut self, uuid: u128) -> std::io::Result<()> {
-    let blob = self.read_buffer(uuid, "blob")?;
+    let memo = self.read_buffer(uuid, "memo")?;
     let disk = self.read_buffer(uuid, "disk")?;
     let file = self.read_buffer(uuid, "file")?;
     let arit = self.read_buffer(uuid, "arit")?;
     let ownr = self.read_buffer(uuid, "ownr")?;
     let nums = self.read_buffer(uuid, "nums")?;
     let stat = self.read_buffer(uuid, "stat")?;
-    self.deserialize(&SerializedHeap { uuid, blob, disk, file, arit, ownr, nums, stat });
+    self.deserialize(&SerializedHeap { uuid, memo, disk, file, arit, ownr, nums, stat });
     return Ok(());
   }
   fn delete_buffers(&mut self) -> std::io::Result<()> {
@@ -1135,7 +1145,7 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
-    blob: init_heap_data(U128_NONE),
+    memo: Nodes { nodes: init_map() },
     disk: Store { links: init_map() },
     file: Funcs { funcs: init_map() },
     arit: Arits { arits: init_map() },
@@ -1146,65 +1156,29 @@ pub fn init_heap() -> Heap {
     rwts: U128_NONE,
     mana: U128_NONE,
     size: I128_NONE,
+    mcap: U128_NONE,
     next: U128_NONE,
   }
 }
 
-pub fn init_heap_data(zero: u128) -> Nodes {
-  return Nodes {
-    data: vec![zero; HEAP_SIZE as usize],
-    used: vec![],
-  };
-}
-
 impl Nodes {
-  fn write(&mut self, idx: usize, val: u128) {
-    unsafe {
-      let got = self.data.get_unchecked_mut(idx);
-      if *got == U128_NONE {
-        self.used.push(idx);
-      }
-      *got = val;
-    }
+  fn write(&mut self, idx: u128, val: u128) {
+    self.nodes.insert(idx, val);
   }
-  fn read(&self, idx: usize) -> u128 {
-    unsafe {
-      return *self.data.get_unchecked(idx);
-    }
+  fn read(&self, idx: u128) -> u128 {
+    return self.nodes.get(&idx).map(|x| *x).unwrap_or(U128_NONE);
   }
   fn clear(&mut self) {
-    for idx in &self.used {
-      unsafe {
-        let val = self.data.get_unchecked_mut(*idx);
-        *val = U128_NONE;
-      }
-    }
-    self.used.clear();
+    self.nodes.clear();
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
-    for idx in &other.used {
-      unsafe {
-        let other_val = other.data.get_unchecked_mut(*idx);
-        let self_val = self.data.get_unchecked_mut(*idx);
-        if overwrite || *self_val == U128_NONE {
-          self.write(*idx, *other_val);
-        }
+    for (idx, ownr) in other.nodes.drain() {
+      if overwrite || !self.nodes.contains_key(&idx) {
+        self.nodes.insert(idx, ownr);
       }
     }
     other.clear();
   }
-}
-
-fn show_buff(vec: &[u128]) -> String {
-  let mut result = String::new();
-  for x in vec {
-    if *x == U128_NONE {
-      result.push_str("_ ");
-    } else {
-      result.push_str(&format!("{:x} ", *x));
-    }
-  }
-  return result;
 }
 
 impl Store {
@@ -1325,7 +1299,7 @@ impl Runtime {
   pub fn alloc_term(&mut self, term: &Term) -> u128 {
     let loc = alloc(self, 1);
     let lnk = create_term(self, term, loc, &mut init_map());
-    self.write(loc as usize, lnk);
+    self.write(loc, lnk);
     return loc;
   }
 
@@ -1344,7 +1318,7 @@ impl Runtime {
   }
 
   pub fn collect_at(&mut self, loc: u128) {
-    collect(self, self.read(loc as usize))
+    collect(self, self.read(loc))
   }
 
   //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Ptr> {
@@ -1387,7 +1361,7 @@ impl Runtime {
   }
 
   pub fn show_term_at(&self, loc: u128) -> String {
-    return show_term(self, self.read(loc as usize), None);
+    return show_term(self, self.read(loc), None);
   }
 
   // Heaps
@@ -1778,7 +1752,7 @@ impl Runtime {
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
       } else {
-        println!("- {} {} {:?} {}", self.draw, self.curr, self.nuls, view_rollback(&self.back));
+        //println!("- {} {} {:?} {}", self.draw, self.curr, self.nuls, view_rollback(&self.back));
         panic!("Not enough heaps.");
       }
     }
@@ -1788,7 +1762,7 @@ impl Runtime {
   pub fn rollback(&mut self, tick: u128) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      println!("- rolling back from {} to {}", self.get_tick(), tick);
+      //println!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       let mut cuts = 0;
@@ -1957,11 +1931,11 @@ impl Runtime {
     }
   }
 
-  pub fn write(&mut self, idx: usize, val: u128) {
+  pub fn write(&mut self, idx: u128, val: u128) {
     return self.get_heap_mut(self.draw).write(idx, val);
   }
 
-  pub fn read(&self, idx: usize) -> u128 {
+  pub fn read(&self, idx: u128) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
@@ -2051,6 +2025,14 @@ impl Runtime {
 
   pub fn get_size(&self) -> i128 {
     return self.get_with(0, I128_NONE, |heap| heap.size);
+  }
+
+  pub fn set_mcap(&mut self, mcap: u128) {
+    self.get_heap_mut(self.draw).mcap = mcap;
+  }
+
+  pub fn get_mcap(&self) -> u128 {
+    return self.get_with(32, U128_NONE, |heap| heap.mcap);
   }
 
   pub fn set_next(&mut self, next: u128) {
@@ -2157,7 +2139,7 @@ pub fn Op2(ope: u128, pos: u128) -> Ptr {
 
 pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG) | val
+  (NUM * TAG) | (val & NUM_MASK)
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
@@ -2201,7 +2183,7 @@ pub fn get_loc(lnk: Ptr, arg: u128) -> u128 {
 // ------
 
 pub fn ask_lnk(rt: &Runtime, loc: u128) -> Ptr {
-  rt.read(loc as usize)
+  rt.read(loc)
   //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
@@ -2210,47 +2192,60 @@ pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
 }
 
 pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
-  rt.write(loc as usize, lnk);
+  rt.write(loc, lnk);
   if get_tag(lnk) <= VAR {
     let pos = get_loc(lnk, get_tag(lnk) & 0x01);
-    rt.write(pos as usize, Arg(loc));
+    rt.write(pos, Arg(loc));
   }
   lnk
 }
 
-pub fn alloc(rt: &mut Runtime, size: u128) -> u128 {
-  if size == 0 {
+pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
+  if arity == 0 {
     return 0;
   } else {
     loop {
+      // Attempts to allocate enough space, starting from the last index
+      // where we previously found free space, and moving rightwards
+      let mcap = rt.get_mcap();
       let index = rt.get_next();
-      if index <= HEAP_SIZE - size {
-        let mut empty = true;
-        for i in 0 .. size {
-          if rt.read((index + i) as usize) != 0 {
-            empty = false;
+      if index <= mcap - arity {
+        let mut has_space = true;
+        for i in 0 .. arity {
+          if rt.read(index + i) != 0 {
+            has_space = false;
             break;
           }
         }
-        if empty {
-          rt.set_next(rt.get_next() + size);
-          rt.set_size(rt.get_size() + size as i128);
+        // If we managed to find enough free space somewhere, return that index
+        if has_space {
+          rt.set_next(rt.get_next() + arity);
+          rt.set_size(rt.get_size() + arity as i128);
+          //println!("{}", show_memo(rt));
+          for i in 0 .. arity {
+            rt.write(index + i, NIL); // millions perished for forgetting this line
+          }
           return index;
         }
       }
-      rt.set_next((fastrand::u64(..) % HEAP_SIZE as u64) as u128);
+      // If we couldn't allocate space...
+      // - If less than 50% of the memory is used, jump to a random index and try again
+      // - If more than 50% of the memory is used, double the maximum cap and try again
+      if rt.get_size() * 2 < (mcap as i128) {
+        rt.set_next((fastrand::u64(..) % mcap as u64) as u128);
+      } else {
+        rt.set_mcap(mcap * 2);
+      }
     }
   }
 }
 
 pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
-  //println!("- clear {} {}", loc, size);
   for i in 0 .. size {
-    if rt.read((loc + i) as usize) == 0 {
-      eprintln!("- clear again {}", loc);
-      panic!("clear happened twice");
+    if rt.read(loc + i) == 0 {
+      panic!("Cleared twice: {}", loc);
     }
-    rt.write((loc + i) as usize, 0);
+    rt.write(loc + i, 0);
   }
   rt.set_size(rt.get_size() - size as i128);
   //rt.free[size as usize].push(loc);
@@ -2744,8 +2739,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
     }
 
     //if true {
-      // println!("------------------------");
-      // println!("{}", show_term(rt, ask_lnk(rt, root), Some(term)));
+      //println!("----------------------");
+      //println!("{}", show_term(rt, ask_lnk(rt, root), Some(term)));
     //}
 
     if init == 1 {
@@ -2763,7 +2758,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
         }
         OP2 => {
           stack.push(host);
-          stack.push(get_loc(term, 1) | 0x80000000);
+          stack.push(get_loc(term, 1) | 0x1_0000_0000_0000);
           host = get_loc(term, 0);
           continue;
         }
@@ -2778,7 +2773,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
                 stack.push(host);
                 for (i, redux) in func.redux.iter().enumerate() {
                   if i < func.redux.len() - 1 {
-                    stack.push(get_loc(term, *redux) | 0x80000000);
+                    stack.push(get_loc(term, *redux) | 0x1_0000_0000_0000);
                   } else {
                     host = get_loc(term, *redux);
                   }
@@ -2982,7 +2977,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
           // --------- OP2-NUM
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
-            // eprintln!("op2-num");
+            //eprintln!("op2-num");
+            rt.set_mana(rt.get_mana() + Op2NumMana());
             let op  = get_ext(term);
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
@@ -3182,8 +3178,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Option<Ptr> {
     }
 
     if let Some(item) = stack.pop() {
-      init = item >> 31;
-      host = item & 0x7FFFFFFF;
+      init = item >> 48;
+      host = item & 0x0_FFFF_FFFF_FFFF;
       continue;
     }
 
@@ -3310,11 +3306,19 @@ pub fn show_rt(rt: &Runtime) -> String {
   let mut s: String = String::new();
   for i in 0..32 {
     // pushes to the string
-    s.push_str(&format!("{:x} | ", i));
+    write!(s, "{:x} | ", i).unwrap();
     s.push_str(&show_lnk(rt.read(i)));
     s.push('\n');
   }
   s
+}
+
+fn show_memo(rt: &Runtime) -> String {
+  let mut txt = String::new();
+  for i in 0 .. rt.get_mcap() {
+    txt.push(if rt.read(i) == 0 { '_' } else { 'X' });
+  }
+  return txt;
 }
 
 // TODO: this should be renamed to "readback", and should return a term instead of a string. 
@@ -3390,7 +3394,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      text.push_str(&format!("dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)));
+      writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
   }
@@ -3461,7 +3465,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
                 NEQ => "!=",
                 _        => "?",
               };
-              output.push(format!("({}", symb));
+              output.push(format!("({} ", symb));
               stack.push(StackItem::Str(")".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Str(" ".to_string()));
@@ -3508,8 +3512,8 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
             _ => output.push(format!("?g({})", get_tag(term))),
           }
         }
-        }
       }
+    }
 
     let res = output.join("");
     return res;
@@ -3802,7 +3806,7 @@ pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
     Ok((tail(code), ()))
   } else {
     Err(ParseErr {
-      erro: format!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(256).collect::<String>()),
+      erro: format!("Expected '{}', found '{}'. Context:\n\x1b[2m{}\x1b[0m", chr, head(code), code.chars().take(64).collect::<String>()),
       code: code.to_string(),
     })
   }

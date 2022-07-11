@@ -1,27 +1,33 @@
-Kindelia
-========
+Kindelia: a minimal peer-to-peer computer that isn't a cryptocurrency
+---------------------------------------------------------------------
 
-A peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a complete redesign of Ethereum's idea, built upon type theoretic foundations. Main differences include:
+Kindelia is a peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a minimalist redesign of Ethereum's idea, built upon type theoretic foundations. Differences include:
 
-- There is no native coin. It is not a cryptocurrency, it is a cryptocomputer.
+- There is **no native coin**. It is not a cryptocurrency. It is a cryptocomputer.
 
-- The [EVM](https://ethereum.org/en/developers/docs/evm/) is replaced by the [HVM](https://github.com/kindelia/hvm), a blazingly fast functional runtime.
+- It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its functional opcodes.
 
-- It can run formally verified programs from languages like [Idris](https://github.com/idris-lang/Idris2) and [Kind](https://github.com/kindelia/kind) natively.
+- It can host **real-time apps** cheaply, thanks to 1s blocks, reversible heaps and zero-cost SSTOREs.
 
-- Zero-cost SSTOREs, allowing dynamic games and virtual worlds to run on layer 1.
+- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC used by Go Ethereum.
 
-- Truly decentralized, not just in code. **Political** and **economical** decentralization were addressed.
+- It is **maximally decentralized**, not just tech-wise. Political and economical centralization are addressed.
 
-- It is so minimalist and elegant you could call it a massively multiplayer λ-calculus REPL.
+Resources
+---------
 
-For more information, check the [whitepaper](WHITEPAPER.md).
+- For a quick summary, check the [whitepaper](WHITEPAPER.md).
+
+- For an in-depth overview, check the [whitebook](WHITEBOOK.md).
+
+- For a roadmap, check the [roadmap](ROADMAP.md).
 
 Installation
 ------------
 
+Clone this repository, navigate to its root directory, and enter:
+
 ```bash
-# in this directory:
 cargo install --path .
 ```
 

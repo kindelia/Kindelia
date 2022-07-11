@@ -1,7 +1,10 @@
 name: Cargo
+
 on:
   workflow_call:
+
 jobs:
+
   cargo_check:
     name: 👁️‍🗨️ Cargo Check
     runs-on: ${{ matrix.os }}
@@ -38,23 +41,6 @@ jobs:
         with:
           command: test
 
-  cargo_fmt:
-    name: 💅 Cargo Fmt
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
   cargo_clippy:
     name: 👃 Cargo Clippy
     runs-on: ubuntu-latest
@@ -71,3 +57,20 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
+
+  # cargo_fmt:
+  #   name: 💅 Cargo Fmt
+  #   continue-on-error: true
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: stable
+  #         override: true
+  #     - run: rustup component add rustfmt
+  #     - uses: actions-rs/cargo@v1
+  #       with:
+  #         command: fmt
+  #         args: --all -- --check

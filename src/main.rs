@@ -30,8 +30,8 @@ use crate::util::*;
 // Starts the node process
 fn main() -> Result<(), String> {
   return run_cli();
-  //start_node(dirs::home_dir().unwrap().join(".kindelia"));
-  // hvm::test_statements_from_file("./example/block_4.kdl");
+  //start_node(dirs::home_dir().unwrap().join(".kindelia"), false);
+  //hvm::test_statements_from_file("./example/block_1.kdl");
   //return Ok(());
 }
 
@@ -57,6 +57,8 @@ pub enum CliCmd {
     //file: Option<String>,
     #[clap(long)]
     testnet: bool,
+    #[clap(long)]
+    mine: bool,
   },
   /// Runs a Kindelia file
   Run {
@@ -72,17 +74,17 @@ pub enum CliCmd {
   },
   /// Signs the last statement in a file
   Sign {
-    /// File containing the statement to be signed
-    term_file: String,
     /// File containing the 256-bit secret key, as a hex string
     skey_file: String,
+    /// File containing the statement to be signed
+    term_file: String,
   },
   /// Posts the last statement in a file to the network
   Post {
-    /// File where the statement is
-    term_file: String,
     /// IP of the node to submit it to
     node_addr: String,
+    /// File where the statement is
+    term_file: String,
   },
 }
 
@@ -116,9 +118,9 @@ fn run_cli() -> Result<(), String> {
 
   match arguments.command {
     // Starts the node process
-    CliCmd::Start { testnet } => {
+    CliCmd::Start { testnet, mine } => {
       eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
-      start_node(kindelia_path, testnet);
+      start_node(kindelia_path, testnet, mine);
     }
 
     // Runs a single block, for testing
@@ -206,7 +208,7 @@ fn run_cli() -> Result<(), String> {
   Ok(())
 }
 
-fn start_node(kindelia_path: PathBuf, testnet: bool) {
+fn start_node(kindelia_path: PathBuf, testnet: bool, mine: bool) {
   // TODO: move out to config file
   let testnet_peers: Vec<Address> = vec![
     "143.244.179.61:42000",
@@ -230,24 +232,31 @@ fn start_node(kindelia_path: PathBuf, testnet: bool) {
   // API thread channel
   //let (api_send, api_recv) = mpsc::channel();
 
+  // Threads
+  let mut threads = vec![];
+
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    //Node::node_loop(node, kindelia_path.clone(), miner_comm_0, file);
-    node.main(kindelia_path.clone(), miner_comm_0);
+    node.main(kindelia_path.clone(), miner_comm_0, mine);
   });
+  threads.push(node_thread);
 
   // Spawns the miner thread
-  let miner_thread = thread::spawn(move || {
-    miner_loop(miner_comm_1);
-  });
+  if mine {
+    let miner_thread = thread::spawn(move || {
+      miner_loop(miner_comm_1);
+    });
+    threads.push(miner_thread);
+  }
 
   // Spawns the API thread
   let api_thread = thread::spawn(move || {
     api_loop(node_query_sender);
   });
+  threads.push(api_thread);
 
   // Joins all threads
-  node_thread.join().unwrap();
-  miner_thread.join().unwrap();
-  api_thread.join().unwrap();
+  for thread in threads {
+    thread.join().unwrap();
+  }
 }
