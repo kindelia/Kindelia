@@ -1,7 +1,9 @@
 use crate::hvm::{init_runtime, name_to_u128, show_term, Rollback, Runtime, U128_NONE};
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
+  env::temp_dir,
   hash::{Hash, Hasher},
+  path::PathBuf,
   sync::Arc,
 };
 
@@ -61,8 +63,12 @@ pub struct RuntimeStateTest {
   size: i128,
 }
 impl RuntimeStateTest {
-  pub fn new(checksum: u64, mana: u128, size: i128) -> RuntimeStateTest {
-    RuntimeStateTest { checksum, mana, size }
+  pub fn new(fn_names: &[&str], rt: &mut Runtime) -> RuntimeStateTest {
+    RuntimeStateTest {
+      checksum: test_heap_checksum(&fn_names, rt),
+      mana: rt.get_mana(),
+      size: rt.get_size(),
+    }
   }
 }
 
@@ -136,15 +142,14 @@ pub fn rollback_simple(
   let mut rt = init_runtime();
 
   // Calculate all total_tick states and saves old checksum
-  let mut old_state = RuntimeStateTest::new(0, 0, 0);
+  let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
   rt.run_statements_from_code(pre_code, true);
   for _ in 0..total_tick {
     rt.run_statements_from_code(code, true);
     rt.tick();
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
-      old_state =
-        RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+      old_state = RuntimeStateTest::new(fn_names, &mut rt);
     }
   }
   // Does rollback to nearest rollback_tick saved state
@@ -159,8 +164,7 @@ pub fn rollback_simple(
     rt.tick();
   }
   // Calculates new checksum, after rollback
-  let new_state =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  let new_state = RuntimeStateTest::new(fn_names, &mut rt);
   // dbg!(old_state.clone(), new_state.clone());
   // Returns if checksums are equal
   old_state == new_state
@@ -171,8 +175,7 @@ pub fn rollback_simple(
 pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -> bool {
   let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
   let mut insert_state = |rt: &mut Runtime| {
-    let state =
-      RuntimeStateTest::new(test_heap_checksum(&fn_names, rt), rt.get_mana(), rt.get_size());
+    let state = RuntimeStateTest::new(fn_names, rt);
     let vec = states_store.get_mut(&rt.get_tick());
     if let Some(vec) = vec {
       vec.push(state);
@@ -197,4 +200,27 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
   // dbg!(states_store.clone());
   // Verify if all values from all vectors from all ticks of interest are equal
   states_store.values().all(|vec| are_all_elemenets_equal(vec))
+}
+
+// ===========================================================
+// BEFORE EACH
+
+pub struct TempDir(pub PathBuf);
+
+impl Drop for TempDir {
+  fn drop(&mut self) {
+    if let Err(e) = std::fs::remove_dir_all(&self.0) {
+      eprintln!("Error removing temp dir: {:?}", e);
+    } else {
+      println!("Removed temp dir: {:?}", self.0);
+    }
+  }
+}
+
+#[fixture]
+pub fn temp_dir_path() -> TempDir {
+  let rand_id = fastrand::u128(..);
+  let path = temp_dir().join(format!("{:0>32x}", rand_id));
+  std::fs::create_dir_all(&path).unwrap();
+  TempDir(path)
 }

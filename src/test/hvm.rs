@@ -1,51 +1,51 @@
 use crate::{
-  hvm::{init_runtime, name_to_u128, read_statements, u128_to_name, view_statements},
+  bits::{deserialized_func, serialized_func},
+  hvm::{init_map, init_runtime, name_to_u128, read_statements, u128_to_name, view_statements},
   test::{
-    strategies::{name, statement},
+    strategies::{func, heap, name, statement},
     util::{
       advance, rollback, rollback_path, rollback_simple, test_heap_checksum, view_rollback_ticks,
-      RuntimeStateTest,
+      RuntimeStateTest, TempDir,
     },
   },
 };
 use proptest::collection::vec;
 use proptest::proptest;
 
+use super::util::temp_dir_path;
+
 #[test]
 pub fn simple_rollback() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   assert!(rollback_simple(PRE_COUNTER, COUNTER, &fn_names, 1000, 1));
 }
 
 #[test]
 pub fn advanced_rollback_in_random_state() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let path = [1000, 12, 1000, 24, 1000, 36];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
 #[test]
 pub fn advanced_rollback_in_saved_state() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s1 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s2 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s3 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   assert_eq!(s1, s2);
   assert_eq!(s2, s3);
@@ -53,7 +53,7 @@ pub fn advanced_rollback_in_saved_state() {
 
 #[test]
 pub fn advanced_rollback_run_fail() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let path = [2, 1, 2, 1, 2, 1];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
@@ -76,63 +76,31 @@ pub fn stack_overflow2() {
   rt.run_statements_from_code(COUNTER_STACKOVERFLOW, false);
 }
 
-#[test]
-pub fn persistence1() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+pub fn persistence1(temp_dir_path: TempDir) {
+  println!("{}", temp_dir_path.0.as_path().display());
+
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
-  advance(&mut rt, 50, Some(COUNTER));
 
-  rt.clear_current_heap();
-  let s1 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  advance(&mut rt, 1000, Some(COUNTER));
+  let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  rt.snapshot();
-  rt.persist_state().expect("Could not persist state");
+  rt.rollback(999); // rollback for the latest rollback saved
+  let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, 55, Some(COUNTER));
-  let s2 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  advance(&mut rt, 1000, Some(COUNTER));
+  let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  rt.restore_state().expect("Could not restore state");
-  let s3 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  rt.restore_state().expect("Could not restore state"); // restore last rollback, must be equal to s2
+  let s4 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, 55, Some(COUNTER));
-  let s4 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
+  advance(&mut rt, 1000, Some(COUNTER));
+  let s5 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   assert_eq!(s1, s3);
   assert_eq!(s2, s4);
-}
-
-#[test]
-pub fn persistence2() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
-  let mut rt = init_runtime();
-  rt.run_statements_from_code(PRE_COUNTER, true);
-  advance(&mut rt, 1000, Some(COUNTER));
-  rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
-  let s1 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  rt.persist_state().expect("Could not persist state");
-  rt.clear_current_heap();
-  let s2 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  advance(&mut rt, 1000, Some(COUNTER));
-  rt.restore_state().expect("Could not restore state");
-  let s3 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  advance(&mut rt, 1000, Some(COUNTER));
-  rollback(&mut rt, 900, Some(PRE_COUNTER), Some(COUNTER));
-  let s4 =
-    RuntimeStateTest::new(test_heap_checksum(&fn_names, &mut rt), rt.get_mana(), rt.get_size());
-
-  assert_eq!(s1, s4);
-  assert_eq!(s2, s3);
+  assert_eq!(s3, s5);
 }
 
 #[test]
@@ -161,6 +129,18 @@ proptest! {
     let str = view_statements(&statements);
     let (.., s1) = read_statements(&str).unwrap();
     assert_eq!(statements, s1);
+  }
+
+  #[test]
+  #[ignore = "slow"]
+  fn serialize_deserialize_heap(heap in heap()) {
+    let mut h1 = heap;
+    let s1 = format!("{:?}", h1);
+    println!("{}", s1);
+    let a = h1.serialize();
+    h1.deserialize(&a);
+    let s2 = format!("{:?}", h1);
+    assert_eq!(s1, s2);
   }
 }
 

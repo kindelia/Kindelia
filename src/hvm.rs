@@ -393,11 +393,11 @@ pub type Ptr = u128;
 // A mergeable vector of u128 values
 #[derive(Debug, Clone)]
 pub struct Nodes {
-  nodes: Map<u128>,
+  pub nodes: Map<u128>,
 }
 
 // HVM's memory state (nodes, functions, metadata, statistics)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Heap {
   pub uuid: u128,  // unique identifier
   pub memo: Nodes, // memory block holding HVM nodes
@@ -415,6 +415,7 @@ pub struct Heap {
   pub next: u128,  // memory index that *may* be empty
 }
 
+#[derive(Debug, Clone)]
 // A serialized Heap
 pub struct SerializedHeap {
   pub uuid: u128,
@@ -429,7 +430,7 @@ pub struct SerializedHeap {
 
 // A list of past heap states, for block-reorg rollback
 // FIXME: this should be replaced by a much simpler index array
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Rollback {
   Cons {
     keep: u64,
@@ -803,7 +804,7 @@ reg {
 // Utils
 // -----
 
-fn init_map<A>() -> Map<A> {
+pub fn init_map<A>() -> Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
@@ -984,7 +985,7 @@ impl Heap {
     self.mcap = U128_NONE;
     self.next = U128_NONE;
   }
-  fn serialize(&self) -> SerializedHeap {
+  pub fn serialize(&self) -> SerializedHeap {
     // Serializes stat and size
     let size = self.size as u128;
     let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
@@ -1043,7 +1044,7 @@ impl Heap {
       stat,
     };
   }
-  fn deserialize(&mut self, serial: &SerializedHeap) {
+  pub fn deserialize(&mut self, serial: &SerializedHeap) {
     // Deserializes stat and size
     self.tick = serial.nums[0];
     self.funs = serial.nums[1];
@@ -1111,6 +1112,9 @@ impl Heap {
   fn read_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<Vec<u128>> {
     std::fs::read(self.buffer_file_path(uuid, buffer_name)).map(|x| util::u8s_to_u128s(&x))
   }
+  fn delete_buffer(&self, uuid: u128, buffer_name: &str) -> std::io::Result<()> {
+    std::fs::remove_file(self.buffer_file_path(uuid, buffer_name))
+  }
   pub fn save_buffers(&self) -> std::io::Result<()> {
     self.append_buffers(self.uuid)
   }
@@ -1137,7 +1141,13 @@ impl Heap {
     return Ok(());
   }
   fn delete_buffers(&mut self) -> std::io::Result<()> {
-    // TODO
+    self.delete_buffer(self.uuid, "memo")?;
+    self.delete_buffer(self.uuid, "disk")?;
+    self.delete_buffer(self.uuid, "file")?;
+    self.delete_buffer(self.uuid, "arit")?;
+    self.delete_buffer(self.uuid, "ownr")?;
+    self.delete_buffer(self.uuid, "nums")?;
+    self.delete_buffer(self.uuid, "stat")?;
     return Ok(());
   }
 }
@@ -1270,6 +1280,7 @@ pub fn init_runtime() -> Runtime {
     back: Arc::new(Rollback::Nil),
   };
   rt.run_statements_from_code(GENESIS, true);
+  
   rt.snapshot();
   return rt;
 }
@@ -1740,14 +1751,15 @@ impl Runtime {
     self.back = rollback;
     // println!(" - back {}", view_rollback(&self.back));
     if included {
+      self.save_state_metadata().expect("Error saving state metadata.");
       self.heap[self.curr as usize].save_buffers().expect("Error saving buffers."); // TODO: persistence-WIP
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
           self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid).expect("Couldn't append buffers."); // TODO: persistence-WIP
         }
-        self.clear_heap(deleted);
         self.heap[deleted as usize].delete_buffers().expect("Couldn't delete buffers.");
+        self.clear_heap(deleted);
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
         self.curr = empty;
@@ -1769,6 +1781,7 @@ impl Runtime {
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
         if let Rollback::Cons { keep, life, head, tail } = &*self.back.clone() {
+          self.heap[*head as usize].delete_buffers().expect("Couldn't delete buffers.");
           self.clear_heap(*head);
           self.nuls.push(*head);
           self.back = tail.clone();
@@ -1790,7 +1803,8 @@ impl Runtime {
   // their uuids. Note that this will NOT save the current heap, nor anything after the last heap
   // included on the Rollback list. In other words, it forgets up to ~16 recent blocks. This
   // function is used to avoid re-processing the entire block history on node startup.
-  pub fn persist_state(&self) -> std::io::Result<()> {
+  pub fn save_state_metadata(&self) -> std::io::Result<()> {
+    std::fs::create_dir_all(&heap_dir_path())?;
     fn build_persistence_buffers(rt: &Runtime, rollback: &Rollback, keeps: &mut Vec<u128>, lifes: &mut Vec<u128>, uuids: &mut Vec<u128>) {
       match rollback {
         Rollback::Cons { keep, life, head, tail } => {
