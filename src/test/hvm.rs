@@ -12,8 +12,6 @@ use crate::{
 use proptest::collection::vec;
 use proptest::proptest;
 
-use super::util::temp_dir_path;
-
 #[test]
 pub fn simple_rollback() {
   let fn_names = ["Count", "Store", "Sub", "Add"];
