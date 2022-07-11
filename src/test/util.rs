@@ -216,11 +216,3 @@ impl Drop for TempDir {
     }
   }
 }
-
-#[fixture]
-pub fn temp_dir_path() -> TempDir {
-  let rand_id = fastrand::u128(..);
-  let path = temp_dir().join(format!("{:0>32x}", rand_id));
-  std::fs::create_dir_all(&path).unwrap();
-  TempDir(path)
-}
