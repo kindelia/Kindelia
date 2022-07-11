@@ -4,7 +4,7 @@ use crate::{
 };
 use primitive_types::U256;
 use proptest::{arbitrary::any, array, proptest};
-use std::{collections::HashMap, hash::Hasher};
+use std::{collections::HashMap, hash::{Hasher, Hash}};
 
 fn get_insertion_elapsed<K, H>(map: &mut HashMap<K, u32, H>, n_items: u32) -> u128
 where
@@ -67,33 +67,33 @@ fn test_u256map_insertion_bench() {
 }
 
 proptest! {
-    // useless
-    #[test]
-    fn test_map_insert_u128(key in any::<u128>(), value in any::<u32>()) {
-      let mut map = u128map_new();
-      map.insert(key, value);
-      assert_eq!(map.get(&key), Some(&value));
-    }
+    // // useless
+    // #[test]
+    // fn test_map_insert_u128(key in any::<u128>(), value in any::<u32>()) {
+    //   let mut map = u128map_new();
+    //   map.insert(key, value);
+    //   assert_eq!(map.get(&key), Some(&value));
+    // }
 
-    // useless
-    #[test]
-    fn test_map_insert_u64(key in any::<u64>(), value in any::<u32>()) {
-      let mut map = u64map_new();
-      map.insert(key, value);
-      assert_eq!(map.get(&key), Some(&value));
-    }
+    // // useless
+    // #[test]
+    // fn test_map_insert_u64(key in any::<u64>(), value in any::<u32>()) {
+    //   let mut map = u64map_new();
+    //   map.insert(key, value);
+    //   assert_eq!(map.get(&key), Some(&value));
+    // }
 
-    // useless
-    #[test]
-    fn test_map_insert_u256(key in array::uniform32(any::<u8>()), value in any::<u32>()) {
-      let mut map = u256map_new();
-      let key = key.into(); // from [u8; 32] to U256
-      map.insert(key, value);
-      assert_eq!(map.get(&key), Some(&value));
-    }
+    // // useless
+    // #[test]
+    // fn test_map_insert_u256(key in array::uniform32(any::<u8>()), value in any::<u32>()) {
+    //   let mut map = u256map_new();
+    //   let key = key.into(); // from [u8; 32] to U256
+    //   map.insert(key, value);
+    //   assert_eq!(map.get(&key), Some(&value));
+    // }
 
     #[test]
-    fn test_hasher_write(key in array::uniform32(any::<u8>())) {
+    fn test_hasher_write_256(key in array::uniform32(any::<u8>())) {
       let mut hasher = NoHashHasher::<U256>::default();
       hasher.write(&key);
       let hash = hasher.finish();
@@ -101,6 +101,16 @@ proptest! {
       let expected = &key[0..8];
       let expected = u64::from_le_bytes(expected.try_into().unwrap());
 
+      assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn test_hasher_write_128(key in any::<u128>()) {
+      let mut hasher = NoHashHasher::<u128>::default();
+      key.hash(&mut hasher);
+      let hash = hasher.finish();
+
+      let expected = key as u64; // TODO?
       assert_eq!(hash, expected);
     }
 }
