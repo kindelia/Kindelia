@@ -1,7 +1,8 @@
+use rstest::fixture;
+
 use crate::hvm::{init_runtime, name_to_u128, show_term, Rollback, Runtime, U128_NONE};
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
-  env::temp_dir,
   hash::{Hash, Hasher},
   path::PathBuf,
   sync::Arc,
@@ -138,8 +139,9 @@ pub fn rollback_simple(
   fn_names: &[&str],
   total_tick: u128,
   rollback_tick: u128,
+  dir_path: &PathBuf,
 ) -> bool {
-  let mut rt = init_runtime();
+  let mut rt = init_runtime(Some(&dir_path));
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -172,7 +174,13 @@ pub fn rollback_simple(
 
 // Does basically the same of rollback_simple, but with a path
 // This path tells kindelia where to go
-pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128]) -> bool {
+pub fn rollback_path(
+  pre_code: &str,
+  code: &str,
+  fn_names: &[&str],
+  path: &[u128],
+  dir_path: &PathBuf,
+) -> bool {
   let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
   let mut insert_state = |rt: &mut Runtime| {
     let state = RuntimeStateTest::new(fn_names, rt);
@@ -184,7 +192,7 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
     }
   };
 
-  let mut rt = init_runtime();
+  let mut rt = init_runtime(Some(dir_path));
   rt.run_statements_from_code(pre_code, true);
 
   for tick in path {
@@ -205,14 +213,29 @@ pub fn rollback_path(pre_code: &str, code: &str, fn_names: &[&str], path: &[u128
 // ===========================================================
 // BEFORE EACH
 
-pub struct TempDir(pub PathBuf);
+// This struct is created just to wrap Pathbuf and
+// be able to remove the dir when it is dropped
+pub struct TempDir{
+  pub path: PathBuf
+}
 
 impl Drop for TempDir {
   fn drop(&mut self) {
-    if let Err(e) = std::fs::remove_dir_all(&self.0) {
+    if let Err(e) = std::fs::remove_dir_all(&self.path) {
       eprintln!("Error removing temp dir: {:?}", e);
     } else {
-      println!("Removed temp dir: {:?}", self.0);
+      println!("Removed temp dir: {:?}", self.path);
     }
   }
+}
+
+// fixture from rstest library
+// Creates a temporary dir and returns a TempDir struct
+// before each test that uses it as a parameter
+#[fixture]
+pub fn temp_dir() -> TempDir {
+  let path = tempdir::TempDir::new("kindelia").unwrap().into_path();
+  let temp_dir = TempDir{ path };
+  println!("Temp dir: {:?}", temp_dir.path);
+  temp_dir
 }
