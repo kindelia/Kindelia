@@ -34,17 +34,20 @@ pub fn advanced_rollback_in_saved_state(temp_dir: TempDir) {
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
+  let s1 =
+    RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
+  let s2 =
+    RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
+  let s3 =
+    RuntimeStateTest::new(&fn_names, &mut rt);
 
   assert_eq!(s1, s2);
   assert_eq!(s2, s3);
