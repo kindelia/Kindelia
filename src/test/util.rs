@@ -215,8 +215,8 @@ pub fn rollback_path(
 
 // This struct is created just to wrap Pathbuf and
 // be able to remove the dir when it is dropped
-pub struct TempDir{
-  pub path: PathBuf
+pub struct TempDir {
+  pub path: PathBuf,
 }
 
 impl Drop for TempDir {
@@ -234,8 +234,8 @@ impl Drop for TempDir {
 // before each test that uses it as a parameter
 #[fixture]
 pub fn temp_dir() -> TempDir {
-  let path = tempdir::TempDir::new("kindelia").unwrap().into_path();
-  let temp_dir = TempDir{ path };
+  let path = std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
+  let temp_dir = TempDir { path };
   println!("Temp dir: {:?}", temp_dir.path);
   temp_dir
 }

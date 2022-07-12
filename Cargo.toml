@@ -50,5 +50,4 @@ warp = "0.3"
 # [dev-dependencies]
 # == TESTS == #
 proptest = "1.0.0"
-tempdir = "0.3.7"
 rstest = "0.15.0"
