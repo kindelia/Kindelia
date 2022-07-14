@@ -13,20 +13,20 @@ use proptest::proptest;
 
 #[test]
 pub fn simple_rollback() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   assert!(rollback_simple(PRE_COUNTER, COUNTER, &fn_names, 1000, 1));
 }
 
 #[test]
 pub fn advanced_rollback_in_random_state() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "io_load", "Store", "Sub", "Add"];
   let path = [1000, 12, 1000, 24, 1000, 36];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
 
 #[test]
 pub fn advanced_rollback_in_saved_state() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));
@@ -53,7 +53,7 @@ pub fn advanced_rollback_in_saved_state() {
 
 #[test]
 pub fn advanced_rollback_run_fail() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let path = [2, 1, 2, 1, 2, 1];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
@@ -78,7 +78,7 @@ pub fn stack_overflow2() {
 
 #[test]
 pub fn persistence1() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 50, Some(COUNTER));
@@ -108,7 +108,7 @@ pub fn persistence1() {
 
 #[test]
 pub fn persistence2() {
-  let fn_names = ["Count", "IO.load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let mut rt = init_runtime();
   rt.run_statements_from_code(PRE_COUNTER, true);
   advance(&mut rt, 1000, Some(COUNTER));

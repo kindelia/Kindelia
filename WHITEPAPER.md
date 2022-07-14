@@ -56,8 +56,8 @@ Ethereum, under the following recipe:
 3. Replace the slow EVM by the fast HVM
 4. Replace slow Merkle trees by fast reversible heaps
 5. Aggressively optimize and simplify everything
-6. Cook without hype
-7. Serve with a fair release
+6. Actually build it all before raising any money
+7. Deliver a working network with a fair release
 ```
 
 Note we do not claim that Kindelia is *better* than Ethereum. Ethereum is a

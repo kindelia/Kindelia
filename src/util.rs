@@ -141,7 +141,7 @@ pub fn u256map_from<T, const N: usize>(a: [(U256, T); N]) -> U256Map<T> {
 // System
 // ======
 
-// Gets current timestamp in milliseconds
+/// Gets current timestamp in milliseconds
 pub fn get_time() -> u128 {
   return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u128;
 }

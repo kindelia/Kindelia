@@ -1287,12 +1287,19 @@ impl Node {
     let mut last_tick_time: Vec<u128> = vec![0; tasks.len()];
 
     loop {
-      let time = get_time();
+      let now = std::time::Instant::now();
+      let system_time = get_time(); // Measured in milliseconds
       for (i, task) in tasks.iter().enumerate() {
-        if last_tick_time[i] + task.delay <= time {
+        if last_tick_time[i] + task.delay <= system_time {
           (task.action)(&mut self, &mut miner_communication);
-          last_tick_time[i] = time;
+          last_tick_time[i] = system_time;
         }
+      }
+      let elapsed = now.elapsed();
+      let extra = std::time::Duration::from_millis(1).checked_sub(elapsed);
+      // If the elapsed time is less than 1ms, sleep for the remaining time
+      if let Some(extra) = extra {
+        std::thread::sleep(extra);
       }
     }
   }
