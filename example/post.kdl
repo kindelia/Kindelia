@@ -2,6 +2,7 @@ run {
   ask (Call 'Count' [{Inc}]);
   ask (Call 'Count' [{Inc}]);
   ask (Call 'Count' [{Inc}]);
-  ask count = (Call 'Count' [{Get}]);
-  (Done count)
+  ask (Call 'Count' [{Inc}]);
+  ask x = (Call 'Count' [{Get}]);
+  {DONE x}
 }

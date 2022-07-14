@@ -52,11 +52,10 @@ pub struct Cli {
 pub enum CliCmd {
   /// Starts a Kindelia node
   Start {
-    // /// Source of code that will be executed on mined blocks
-    //#[clap(short, long)]
-    //file: Option<String>,
+    /// Adds testnet nodes as initial peers
     #[clap(long)]
     testnet: bool,
+    /// Mine blocks
     #[clap(long)]
     mine: bool,
   },
@@ -82,7 +81,7 @@ pub enum CliCmd {
   /// Posts the last statement in a file to the network
   Post {
     /// IP of the node to submit it to
-    node_addr: String,
+    node_addr: String, // TODO: parse address on clap
     /// File where the statement is
     term_file: String,
   },
