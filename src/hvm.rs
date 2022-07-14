@@ -109,7 +109,7 @@
 // 
 //   Term:
 //
-//    {Tuple2 #7 #8}
+//    {T2 #7 #8}
 //
 //   Memory:
 //
@@ -121,7 +121,7 @@
 //     
 //     1. This is just a pair with two numbers.
 //     2. The root pointer is not stored on memory.
-//     3. The '0x0000000007b9d30a43' constant encodes the 'Tuple2' name.
+//     3. The '0x0000000007b9d30a43' constant encodes the 'T2' name.
 //     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
 //
 // Example 1:
@@ -261,7 +261,7 @@ use crate::util;
 // - Var: variable. Note an u128 is used instead of a string. It stores up to 20 6-bit letters.
 // - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
 // - Lam: an affine lambda. Written as: `λvar body`.
-// - App: a lambda application. Written as: `(! f x)`.
+// - App: a lambda application. Written as: `(f x)`.
 // - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
 // - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
 // - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
@@ -405,7 +405,11 @@ pub struct Heap {
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
   pub ownr: Ownrs, // namespace owners
-  pub tick: u128,  // time counter
+  pub tick: u128,  // tick counter
+  pub time: u128,  // block timestamp
+  pub meta: u128,  // block metadata
+  pub hax0: u128,  // block hash, part 0
+  pub hax1: u128,  // block hash, part 1
   pub funs: u128,  // total function count
   pub dups: u128,  // total dups count
   pub rwts: u128,  // total graph rewrites
@@ -569,26 +573,26 @@ pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
 // (IO r:Type) : Type
-//   (io_done expr)           : (IO r)
-//   (io_take           then) : (IO r)
-//   (io_save expr      then) : (IO r)
-//   (io_call expr args then) : (IO r)
-//   (io_subj           then) : (IO r)
-//   (io_from           then) : (IO r)
-const IO_DONE : u128 = 0x1367f39960f; // name_to_u128("IO_DONE")
-const IO_TAKE : u128 = 0x1367f78b54f; // name_to_u128("IO_TAKE")
-const IO_SAVE : u128 = 0x1367f74b80f; // name_to_u128("IO_SAVE")
-const IO_CALL : u128 = 0x1367f34b596; // name_to_u128("IO_CALL")
-const IO_SUBJ : u128 = 0x1367f75f314; // name_to_u128("IO_SUBJ")
-const IO_FROM : u128 = 0x1367f41c657; // name_to_u128("IO_FROM")
-const IO_LOAD : u128 = 0x1367f5992ce; // name_to_u128("IO_LOAD")
-const MC_DONE : u128 = 0xa33ca9; // name_to_u128("done")
-const MC_TAKE : u128 = 0xe25be9; // name_to_u128("take")
-const MC_SAVE : u128 = 0xde5ea9; // name_to_u128("save")
-const MC_CALL : u128 = 0x9e5c30; // name_to_u128("call")
-const MC_SUBJ : u128 = 0xdf99ae; // name_to_u128("subj")
-const MC_FROM : u128 = 0xab6cf1; // name_to_u128("from")
-const MC_LOAD : u128 = 0xc33968; // name_to_u128("load")
+//   (DONE expr)           : (IO r)
+//   (TAKE           then) : (IO r)
+//   (SAVE expr      then) : (IO r)
+//   (CALL expr args then) : (IO r)
+//   (SUBJ           then) : (IO r)
+//   (FROM           then) : (IO r)
+//   (TICK           then) : (IO r)
+//   (TIME           then) : (IO r)
+const IO_DONE : u128 = 0x39960f; // name_to_u128("DONE")
+const IO_TAKE : u128 = 0x78b54f; // name_to_u128("TAKE")
+const IO_SAVE : u128 = 0x74b80f; // name_to_u128("SAVE")
+const IO_CALL : u128 = 0x34b596; // name_to_u128("CALL")
+const IO_SUBJ : u128 = 0x75f314; // name_to_u128("SUBJ")
+const IO_FROM : u128 = 0x41c657; // name_to_u128("FROM")
+const IO_LOAD : u128 = 0x5992ce; // name_to_u128("LOAD")
+const IO_TICK : u128 = 0x793355; // name_to_u128("TICK")
+const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
+const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
+const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
+const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 4_000_000_000;
@@ -715,83 +719,108 @@ fn count_allocs(body: &Term) -> u128 {
 }
 
 const GENESIS : &str = "
-// Tuple types
-ctr {Tuple0}
-ctr {Tuple1 x0}
-ctr {Tuple2 x0 x1}
-ctr {Tuple3 x0 x1 x2}
-ctr {Tuple4 x0 x1 x2 x3}
-ctr {Tuple5 x0 x1 x2 x3 x4}
-ctr {Tuple6 x0 x1 x2 x3 x4 x5}
-ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
-ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
-ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
-ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
-ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
-ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+// T types
+ctr {T0}
+ctr {T1 x0}
+ctr {T2 x0 x1}
+ctr {T3 x0 x1 x2}
+ctr {T4 x0 x1 x2 x3}
+ctr {T5 x0 x1 x2 x3 x4}
+ctr {T6 x0 x1 x2 x3 x4 x5}
+ctr {T7 x0 x1 x2 x3 x4 x5 x6}
+ctr {T8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {T9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {TA x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {TB x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {TC x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+ctr {TD x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12}
+ctr {TE x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13}
+ctr {TF x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14}
+ctr {TG x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15}
 
 // Used to pretty-print names
 ctr {Name name}
 
 // Below, we declare the built-in IO operations
 
-// IO_DONE returns from an IO operation
-ctr {IO_DONE expr}
-fun (io_done expr) {
-  (io_done expr) = {IO_DONE expr}
+// DONE returns from an IO operation
+ctr {DONE expr}
+fun (Done expr) {
+  (Done expr) = {DONE expr}
 }
 
-// IO_TAKE recovers an app's stored state
-ctr {IO_TAKE then}
-fun (io_take then) {
-  (io_take then) = {IO_TAKE then}
+// TAKE recovers an app's stored state
+ctr {TAKE cont}
+fun (Take) {
+  (Take) = @cont {TAKE cont}
 }
 
-// IO_SAVE stores the app's state
-ctr {IO_SAVE expr then}
-fun (io_save expr then) {
-  (io_save expr then) = {IO_SAVE expr then}
+// SAVE stores the app's state
+ctr {SAVE expr cont}
+fun (Save expr) {
+  (Save expr) = @cont {SAVE expr cont}
 }
 
-// IO_CALL calls another IO operation, assigning
+// CALL calls another IO operation, assigning
 // the caller name to the current subject name
-ctr {IO_CALL name args then}
-fun (io_call name args then) {
-  (io_call name args then) = {IO_CALL name args then}
+ctr {CALL name args cont}
+fun (Call name args) {
+  (Call name args) = @cont {CALL name args cont}
 }
 
-// IO_SUBJ returns the name of the current subject
-ctr {IO_SUBJ then}
-fun (io_subj then) {
-  (io_subj then) = {IO_SUBJ then}
+// SUBJ returns the name of the current subject
+ctr {SUBJ cont}
+fun (Subj) {
+  (Subj) = @cont {SUBJ cont}
 }
 
-// IO_FROM returns the name of the current caller
-ctr {IO_FROM then} 
-fun (io_from then) {
-  (io_from then) = {IO_FROM then}
+// FROM returns the name of the current caller
+ctr {FROM cont} 
+fun (From) {
+  (From) = @cont {FROM cont}
 }
 
-// IO_LOAD works like IO_TAKE, but clones the state
-fun (io_load cont) {
-  (io_load cont) =
-    {IO_TAKE @x
-    dup x0 x1 = x;
-    {IO_SAVE x0 @~
-    (! cont x1)}}
+// TICK returns the current block number
+ctr {TICK cont}
+fun (Tick) {
+  (Tick) = @cont {TICK cont}
+}
+
+// TIME returns the current block timestamp
+ctr {TIME cont}
+fun (Time) {
+  (Time) = @cont {TIME cont}
+}
+
+// META returns the current block metadata
+ctr {META cont}
+fun (Meta) {
+  (Meta) = @cont {META cont}
+}
+
+// HAX0 returns the current block metadata
+ctr {HAX0 cont}
+fun (Hax0) {
+  (Hax0) = @cont {HAX0 cont}
+}
+
+// HAX1 returns the current block metadata
+ctr {HAX1 cont}
+fun (Hax1) {
+  (Hax1) = @cont {HAX1 cont}
+}
+
+// LOAD works like TAKE, but clones the state
+fun (Load) {
+  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (cont x1)}}
 }
 
 // This is here for debugging. Will be removed.
-ctr {Count_Inc}
-ctr {Count_Get}
+ctr {Inc}
+ctr {Get}
 fun (Count action) {
-  (Count {Count_Inc}) =
-    !take x
-    !save (+ x #1)
-    !done #0
-  (Count {Count_Get}) =
-    !load x
-    !done x
+  (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
+  (Count {Get}) = ((Load) @x {DONE x})
 }
 
 // Registers the empty namespace.
@@ -913,6 +942,30 @@ impl Heap {
   fn get_tick(&self) -> u128 {
     return self.tick;
   }
+  fn set_time(&mut self, time: u128) {
+    self.time = time;
+  }
+  fn get_time(&self) -> u128 {
+    return self.time;
+  }
+  fn set_meta(&mut self, meta: u128) {
+    self.meta = meta;
+  }
+  fn get_meta(&self) -> u128 {
+    return self.meta;
+  }
+  fn set_hax0(&mut self, meta: u128) {
+    self.hax0 = meta;
+  }
+  fn get_hax0(&self) -> u128 {
+    return self.hax0;
+  }
+  fn set_hax1(&mut self, meta: u128) {
+    self.hax1 = meta;
+  }
+  fn get_hax1(&self) -> u128 {
+    return self.hax1;
+  }
   fn set_funs(&mut self, funs: u128) {
     self.funs = funs;
   }
@@ -961,6 +1014,10 @@ impl Heap {
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
     self.tick = absorb_u128(self.tick, other.tick, overwrite);
+    self.time = absorb_u128(self.time, other.time, overwrite);
+    self.meta = absorb_u128(self.meta, other.meta, overwrite);
+    self.hax0 = absorb_u128(self.hax0, other.hax0, overwrite);
+    self.hax1 = absorb_u128(self.hax1, other.hax1, overwrite);
     self.funs = absorb_u128(self.funs, other.funs, overwrite);
     self.dups = absorb_u128(self.dups, other.dups, overwrite);
     self.rwts = absorb_u128(self.rwts, other.rwts, overwrite);
@@ -976,6 +1033,10 @@ impl Heap {
     self.file.clear();
     self.arit.clear();
     self.tick = U128_NONE;
+    self.time = U128_NONE;
+    self.meta = U128_NONE;
+    self.hax0 = U128_NONE;
+    self.hax1 = U128_NONE;
     self.funs = U128_NONE;
     self.dups = U128_NONE;
     self.rwts = U128_NONE;
@@ -987,7 +1048,7 @@ impl Heap {
   fn serialize(&self) -> SerializedHeap {
     // Serializes stat and size
     let size = self.size as u128;
-    let stat = vec![self.tick, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
+    let stat = vec![self.tick, self.time, self.meta, self.hax0, self.hax1, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
     // Serializes Nodes
     let mut memo_buff : Vec<u128> = vec![];
     for (idx, val) in &self.memo.nodes {
@@ -1023,6 +1084,10 @@ impl Heap {
     // Serializes Nums
     let nums_buff : Vec<u128> = vec![
       self.tick,
+      self.time,
+      self.meta,
+      self.hax0,
+      self.hax1,
       self.funs,
       self.dups,
       self.rwts,
@@ -1046,13 +1111,17 @@ impl Heap {
   fn deserialize(&mut self, serial: &SerializedHeap) {
     // Deserializes stat and size
     self.tick = serial.nums[0];
-    self.funs = serial.nums[1];
-    self.dups = serial.nums[2];
-    self.rwts = serial.nums[3];
-    self.mana = serial.nums[4];
-    self.size = serial.nums[5] as i128;
-    self.mcap = serial.nums[6];
-    self.next = serial.nums[7];
+    self.time = serial.nums[1];
+    self.meta = serial.nums[2];
+    self.hax0 = serial.nums[3];
+    self.hax1 = serial.nums[4];
+    self.funs = serial.nums[5];
+    self.dups = serial.nums[6];
+    self.rwts = serial.nums[7];
+    self.mana = serial.nums[8];
+    self.size = serial.nums[9] as i128;
+    self.mcap = serial.nums[10];
+    self.next = serial.nums[11];
 
     // Deserializes Nodes
     let mut i = 0;
@@ -1151,6 +1220,10 @@ pub fn init_heap() -> Heap {
     arit: Arits { arits: init_map() },
     ownr: Ownrs { ownrs: init_map() },
     tick: U128_NONE,
+    time: U128_NONE,
+    meta: U128_NONE,
+    hax0: U128_NONE,
+    hax1: U128_NONE,
     funs: U128_NONE,
     dups: U128_NONE,
     rwts: U128_NONE,
@@ -1478,6 +1551,46 @@ impl Runtime {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(subject));
             let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
+          IO_TICK => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, self.get_tick(), cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
+          IO_TIME => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, self.get_time(), cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
+          IO_META => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, self.get_meta(), cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
+          IO_HAX0 => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, self.get_hax0(), cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 1);
+            return done;
+          }
+          IO_HAX1 => {
+            let cont = ask_arg(self, term, 0);
+            let cont = alloc_app(self, cont, Num(subject));
+            let done = self.run_io(subject, self.get_hax1(), cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
             return done;
@@ -2017,6 +2130,38 @@ impl Runtime {
 
   pub fn get_tick(&self) -> u128 {
     return self.get_with(0, U128_NONE, |heap| heap.tick);
+  }
+
+  pub fn set_time(&mut self, time: u128) {
+    self.get_heap_mut(self.draw).set_time(time);
+  }
+
+  pub fn get_time(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.time);
+  }
+
+  pub fn set_meta(&mut self, meta: u128) {
+    self.get_heap_mut(self.draw).set_meta(meta);
+  }
+
+  pub fn get_meta(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.meta);
+  }
+
+  pub fn set_hax0(&mut self, hax0: u128) {
+    self.get_heap_mut(self.draw).set_hax0(hax0);
+  }
+
+  pub fn get_hax0(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.hax0);
+  }
+
+  pub fn set_hax1(&mut self, hax1: u128) {
+    self.get_heap_mut(self.draw).set_hax1(hax1);
+  }
+
+  pub fn get_hax1(&self) -> u128 {
+    return self.get_with(0, U128_NONE, |heap| heap.hax1);
   }
 
   pub fn set_size(&mut self, size: i128) {
@@ -3867,6 +4012,15 @@ pub fn read_name(code: &str) -> ParseResult<u128> {
         erro: format!("Identifier too long: {}", name)
       });
     }
+    if ('0'..='9').contains(&name.chars().nth(0).unwrap_or(' ')) {
+      // In most cases, an user writing 0-9 probably wants to make a number, not a name, so, to
+      // avoid mistakes, we disable this syntax by default. But since names CAN start with 0-9 on
+      // Kindelia, we must create an alternative, explicit way to parse "numeric names".
+      return Err(ParseErr {
+        code: code.to_string(),
+        erro: format!("Number must start with #, but '{}' doesn't.", name),
+      });
+    }
     return Ok((code, name_to_u128(&name)));
   }
 }
@@ -3954,7 +4108,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       return Ok((code, Term::Lam { name, body: Box::new(body) }));
     },
     '(' => {
-      let code = tail(code);
+      let code = skip(tail(code));
       let (code, oper) = read_oper(code);
       if let Some(oper) = oper {
         let (code, val0) = read_term(code)?;
@@ -3967,11 +4121,16 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, argm) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
         return Ok((code, Term::App { func: Box::new(func), argm: Box::new(argm) }));
-      } else {
+      } else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
         // TODO: check function name size _on direct calling_, and propagate error
         return Ok((code, Term::Fun { name, args }));
+      } else {
+        let (code, func) = read_term(code)?;
+        let (code, argm) = read_term(code)?;
+        let (code, unit) = read_char(code, ')')?;
+        return Ok((code, Term::App { func: Box::new(func), argm: Box::new(argm) }));
       }
     },
     '{' => {
@@ -3985,7 +4144,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let (code, vals) = read_until(code, ']', read_term)?;
       if vals.len() <= 12 { 
         return Ok((code, Term::Ctr {
-          name: name_to_u128(&format!("Tuple{}", vals.len())),
+          name: name_to_u128(&format!("T{}", vals.len())),
           args: vals
         }));
       } else {
@@ -4003,75 +4162,6 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let (code, unit) = read_char(code, '\'')?;
       return Ok((code, Term::Num { numb }));
     },
-    '!' => {
-      let code = tail(code);
-      let (code, macro_name) = read_name(code)?;
-      match macro_name {
-        MC_DONE => {
-          let (code, expr) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_DONE"),
-            args: vec![expr],
-          }));
-        }
-        MC_TAKE => {
-          let (code, bind) = read_name(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_TAKE"),
-            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          }));
-        }
-        MC_LOAD => {
-          let (code, bind) = read_name(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Fun {
-            name: name_to_u128("io_load"), // attention: lowercase, because it is a function call
-            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          }));
-        }
-        MC_SAVE => {
-          let (code, expr) = read_term(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_SAVE"),
-            args: vec![expr, Term::Lam { name: VAR_NONE, body: Box::new(then) }],
-          }));
-        }
-        MC_CALL => {
-          let (code, bind) = read_name(code)?;
-          let (code, func) = read_term(code)?;
-          let (code, args) = read_term(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_CALL"),
-            args: vec![func, args, Term::Lam { name: bind, body: Box::new(then) }],
-          }));
-        }
-        MC_SUBJ => {
-          let (code, bind) = read_name(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_SUBJ"),
-            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          }));
-        }
-        MC_FROM => {
-          let (code, bind) = read_name(code)?;
-          let (code, then) = read_term(code)?;
-          return Ok((code, Term::Ctr {
-            name: name_to_u128("IO_FROM"),
-            args: vec![Term::Lam { name: bind, body: Box::new(then) }],
-          }));
-        }
-        _ => {
-          return Err(ParseErr { 
-            code: code.to_string(), 
-            erro: format!("Unknown macro: {}", u128_to_name(macro_name))
-          });
-        }
-      }
-    },
     _ => {
       if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,3);
@@ -4082,6 +4172,44 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, unit) = read_char(code, ';')?;
         let (code, body) = read_term(code)?;
         return Ok((code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) }));
+      // let x = y; z
+      // ------------
+      // (@x z y)
+      } else if let ('l','e','t',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = drop(code,3);
+        let (code, name) = read_name(code)?;
+        let (code, unit) = read_char(code, '=')?;
+        let (code, expr) = read_term(code)?;
+        let (code, unit) = read_char(code, ';')?;
+        let (code, body) = read_term(code)?;
+        return Ok((code, Term::App {
+          func: Box::new(Term::Lam { name, body: Box::new(body) }),
+          argm: Box::new(expr),
+        }));
+      // ask x = y; z
+      // ------------
+      // (y @x z)
+      } else if let ('a','s','k',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
+        let code = skip(drop(code,3));
+        if nth(code,0) == '(' {
+          let (code, expr) = read_term(code)?;
+          let (code, unit) = read_char(code, ';')?;
+          let (code, body) = read_term(code)?;
+          return Ok((code, Term::App {
+            func: Box::new(expr),
+            argm: Box::new(Term::Lam { name: VAR_NONE, body: Box::new(body) }),
+          }));
+        } else {
+          let (code, name) = read_name(code)?;
+          let (code, unit) = read_char(code, '=')?;
+          let (code, expr) = read_term(code)?;
+          let (code, unit) = read_char(code, ';')?;
+          let (code, body) = read_term(code)?;
+          return Ok((code, Term::App {
+            func: Box::new(expr),
+            argm: Box::new(Term::Lam { name, body: Box::new(body) }),
+          }));
+        }
       } else {
         let (code, name) = read_name(code)?;
         return Ok((code, Term::Var { name }));
@@ -4276,7 +4404,7 @@ pub fn view_term(term: &Term) -> String {
             stack.push(StackItem::Term(&*body));
           }
           Term::App { func, argm } => {
-            output.push("(! ".to_string());
+            output.push("(".to_string());
             stack.push(StackItem::Str(")".to_string()));
             stack.push(StackItem::Term(&*argm));
             stack.push(StackItem::Str(" ".to_string()));

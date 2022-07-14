@@ -120,14 +120,16 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on `!-effects`, which work exactly like Haskell's IO.
-For example, the statement below adds `3` to the state stored by some
-hypothetical 'Calculator' function:
+the network's state, based on effects, which work exactly like Haskell's IO.
+For example, the statement below uses the `ask` syntax (similar to Haskell's
+`do`) to increment the state of a global `Count` function, and then returns its
+current state:
 
 ```c
 run {
-  !call ~ 'Calculator' [{Add 3}]
-  !done #0
+  ask (Call 'Count' [{Inc}]);
+  ask num = (Call 'Count' [{Get}]);
+  (Done state)
 }
 ```
 
@@ -170,30 +172,23 @@ role similar to Ethereum's gas.
 Note that the table above has only computational opcodes; there is no equivalent
 to "SSTORE" or "SLOAD". That's because space is treated separately from
 computation. In order to persist data, functions can invoke the `save` and
-`load` effects. For example, the function below stores a number that can only be
-incremented:
+`load` effects. For example, below we implement the `Count` function:
 
 ```c
-fun (Increment) {
-  (Increment) =
-    !load num       // loads the stored number
-    !save (+ num 1) // stores the number + 1
-    !done #0        // returns 0
-} with {
-  #0 // initial state  
-}
-```
+fun (Count action) {
 
-That `Increment` function can be called inside `run` statements. For example,
-the statement below increments its state `3` times:
+  // Increments the counter
+  (Count {Inc}) =
+    ask num = (Load);
+    ask (Save (+ num #1));
+    (Done #0)
 
-```c
-run {
-  !call ~ 'Increment' []
-  !call ~ 'Increment' []
-  !call ~ 'Increment' []
-  !done #0
-}
+  // Returns the counter
+  (Count {Get}) =
+    ask num = (Load);
+    (Done num)
+
+} with { #0 }
 ```
 
 Internally, all that `!save` does is store a pointer to the saved expression,
@@ -213,8 +208,8 @@ Statements can also be signed:
 
 ```c
 run {
-  !call ~ 'CatCoin' [{Send 'Alice' 100}]
-  !done #0
+  ask (Call 'CatCoin' [{Send 'Alice' 100}]);
+  (Done #0)
 } sign {
   00c0777281fe0a814d0f1826ad
   7f4228f7308df5c4365f8dc577
@@ -252,12 +247,12 @@ prioritize their statements:
 ```c
 // Statement signed by Bob to send 1000 CAT to Alice
 run {
-  !call miner (BlockMiner {Get})            // Gets the block miner
-  !call ~     (CatCoin {Send miner 50})     // Pays 50 CAT as miner fees
-  !call ~     (CatCoin {Send 'Alice' 1000}) // Sends 1000 CAT to Alice
-  !done #0
+  ask miner = (call 'BlockMiner' [{Get}]);    // gets the miner name
+  ask (call 'CatCoin' [{Send 'Alice' 1000}]); // Alice gets: 1000 CAT
+  ask (call 'CatCoin' [{Send miner     50}]); // Miner fees:   50 CAT
+  (Done #0)
 } sign {
-  ... signature ...
+  ...signature...
 }
 ```
 
