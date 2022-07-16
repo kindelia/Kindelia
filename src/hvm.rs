@@ -1718,7 +1718,7 @@ impl Runtime {
           return error(self, "run", format!("Mana limit exceeded."));
         }
         let done = done.unwrap();
-        let term = readback(self, done);
+        let term = readback_linear_term(self, done);
         self.collect(done);
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
@@ -2062,7 +2062,7 @@ impl Runtime {
 
   pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
     let host = self.read_disk(fid)?;
-    let term = readback(self, host);
+    let term = readback_linear_term(self, host);
     Some(term)
   }
 
@@ -3670,7 +3670,13 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   text
 }
 
-pub fn readback(rt: &Runtime, term: Ptr) -> Term {
+// FIXME: This is NOT the readback function. I didn't notice it before. This is just the debug
+// stringification function, converted to return a term instead. There is a crucial difference: the
+// proper readback function does NOT return dups, i.e., it resolves pending dups, returning a
+// conventional lambda term. Seems like we removed the proper readback function! We must restore
+// it, and optimize it to use stacks instead of recursion. The original readback function can be
+// found on the HVM repository. 
+pub fn readback_linear_term(rt: &Runtime, term: Ptr) -> Term {
   enum StackItem {
     Term(Ptr),
     Resolver(Ptr),
