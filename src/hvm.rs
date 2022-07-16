@@ -3466,7 +3466,7 @@ fn show_memo(rt: &Runtime) -> String {
   return txt;
 }
 
-// TODO: this should be renamed to "readback", and should return a term instead of a string. 
+// TODO: this should be replaced by readback + view_term
 pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   enum StackItem {
     Term(Ptr),
@@ -3780,25 +3780,6 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
             }
             OP2 => {
               let oper = get_ext(term);
-              let symb = match oper {
-                ADD => "+",
-                SUB => "-",
-                MUL => "*",
-                DIV => "/",
-                MOD => "%",
-                AND => "&",
-                OR  => "|",
-                XOR => "^",
-                SHL => "<<",
-                SHR => ">>",
-                LTN => "<",
-                LTE => "<=",
-                EQL => "=",
-                GTE => ">=",
-                GTN => ">",
-                NEQ => "!=",
-                _   => "?",
-              };
               let val1 = Box::new(output.pop().unwrap());
               let val0 = Box::new(output.pop().unwrap());
               output.push(Term::Op2 { oper, val0, val1 })
@@ -3830,7 +3811,6 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
               output.push(Term::Var { name: name_to_u128(&name) });
             }
             LAM => {
-              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
               stack.push(StackItem::Resolver(term));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
             }
