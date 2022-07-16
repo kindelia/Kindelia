@@ -1,7 +1,8 @@
 run {
-  !call ~ 'Count' [{Count_Inc}]
-  !call ~ 'Count' [{Count_Inc}]
-  !call ~ 'Count' [{Count_Inc}]
-  !call x 'Count' [{Count_Get}]
-  !done x
+  ask (Call 'Count' [{Inc}]);
+  ask (Call 'Count' [{Inc}]);
+  ask (Call 'Count' [{Inc}]);
+  ask (Call 'Count' [{Inc}]);
+  ask x = (Call 'Count' [{Get}]);
+  {DONE x}
 }

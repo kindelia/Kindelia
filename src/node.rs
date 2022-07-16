@@ -361,7 +361,7 @@ pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
 pub fn read_address(code: &str) -> Address {
   let strs = code.split(':').collect::<Vec<&str>>();
   let vals = strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
-  let port = strs[1].parse::<u16>().unwrap();
+  let port = strs.get(1).map(|s| s.parse::<u16>().unwrap()).unwrap_or(UDP_PORT);
   Address::IPv4 {
     val0: vals[0],
     val1: vals[1],
@@ -1228,7 +1228,7 @@ impl Node {
     }
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
-    if self.port == 42000 {
+    if self.port == UDP_PORT {
       self.load_blocks();
     }
 
