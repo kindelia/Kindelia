@@ -3675,12 +3675,8 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
     Term(Ptr),
     Resolver(Ptr),
   }
-  let mut names: HashMap<u128, String> = HashMap::new();
-  fn dups(
-    rt: &Runtime,
-    term: Ptr,
-    names: &mut HashMap<u128, String>,
-  ) -> Term {
+
+  fn dups(rt: &Runtime, term: Ptr, names: &mut HashMap<u128, String>) -> Term {
     let mut lets: HashMap<u128, u128> = HashMap::new();
     let mut kinds: HashMap<u128, u128> = HashMap::new();
     let mut count: u128 = 0;
@@ -3741,12 +3737,10 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
       for (i, (_key, pos)) in lets.iter().enumerate() {
         // todo: reverse
         let what = String::from("?h");
-        //let kind = kinds.get(&key).unwrap_or(&0);
         let name = names.get(&pos).unwrap_or(&what);
         let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
         let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
         let expr = expr(rt, ask_lnk(rt, pos + 2), &names);
-
         if i == 0 {
           output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(cont.clone()) };
         } else {
@@ -3821,7 +3815,7 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
             _ => panic!("Term not valid in readback"),
           }
         },
-        StackItem::Term(term) =>
+        StackItem::Term(term) => {
           match get_tag(term) {
             DP0 => {
               let name = format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")));
@@ -3876,12 +3870,11 @@ pub fn readback(rt: &Runtime, term: Ptr) -> Term {
           }
         }
       }
-
-    let res = output.pop().unwrap();
-    return res;
-
+    }
+    output.pop().unwrap()
   }
 
+  let mut names: HashMap<u128, String> = HashMap::new();
   dups(rt, term, &mut names)
 }
 
