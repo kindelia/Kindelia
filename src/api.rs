@@ -11,9 +11,9 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::hyper::StatusCode;
-use warp::reject::{self, Rejection};
 use warp::reply::{self, Reply};
-use warp::{path, Filter};
+use warp::{body, path, post, Filter};
+use warp::{reject, Rejection};
 
 use crate::hvm;
 use crate::node::Request as NodeRequest;
@@ -242,9 +242,49 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     .or(get_function) //
     .or(get_function_state);
 
+  // == Interact ==
+  let interact_base = path!("code" / ..);
+
+  let query_tx = node_query_sender.clone();
+  let interact_test = post().and(interact_base).and(path!("test")).and(body::bytes()).and_then(
+    move |code: warp::hyper::body::Bytes| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code = String::from_utf8(code.to_vec());
+        if let Ok(code) = code {
+          let res = ask(query_tx, |tx| NodeRequest::TestCode { code: code.clone(), tx }).await;
+          Ok(ok_json(res))
+        } else {
+          Err(reject::custom(InvalidParameter::from("Invalid code".to_string())))
+        }
+      }
+    },
+  );
+
+  let query_tx = node_query_sender.clone();
+  let interact_send = post().and(interact_base).and(path!("send")).and(body::bytes()).and_then(
+    move |code: warp::hyper::body::Bytes| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code = String::from_utf8(code.to_vec());
+        if let Ok(code) = code {
+          let res = ask(query_tx, |tx| NodeRequest::PostCode { code: code.clone(), tx }).await;
+          match res {
+            Ok(res) => Ok(ok_json(res)),
+            Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
+          }
+        } else {
+          Err(reject::custom(InvalidParameter::from("Invalid code".to_string())))
+        }
+      }
+    },
+  );
+
+  let interact_router = interact_test.or(interact_send);
+
   // ==
 
-  let app = root.or(get_tick).or(blocks_router).or(functions_router);
+  let app = root.or(get_tick).or(blocks_router).or(functions_router).or(interact_router);
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
 
