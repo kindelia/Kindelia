@@ -1,36 +1,29 @@
-// This block defines and uses a stateful function.
+// Deploys a simple Counter function
+// ---------------------------------
 
-// Creates a Counter function with 2 actions:
-ctr {Inc} // action that increments the counter
-ctr {Get} // action that returns the counter
+ctr {Inc} // Inc: action that incs the counter
+ctr {Get} // Get: action that gets the counter
+
 fun (Counter action) {
 
-  // increments the counter
   (Counter {Inc}) =
-    !take x        // loads the state and assigns it to 'x'
-    !save (+ x #1) // overwrites the state as 'x + 1'
-    !done #0       // returns 0
+    ask x = (Take);
+    ask (Save (+ x #1));
+    (Done #0)
 
-  // returns the counter
   (Counter {Get}) =
-    !load x // loads the state
-    !done x // returns it
+    ask x = (Load);
+    (Done x)
 
-// initial state is 0
-} with {
-  #0
-}
+} with { #0 }
 
-// Increments the Counter's state 3 times
+// Increments the Counter's state 3 times, and prints
+// --------------------------------------------------
+
 run {
-  !call ~ 'Counter' [{Inc}]
-  !call ~ 'Counter' [{Inc}]
-  !call ~ 'Counter' [{Inc}]
-  !done #0
-}
-
-// Prints the Counter's state
-run {
-  !call x 'Counter' [{Get}]
-  !done x
+  ask (Call 'Counter' [{Inc}]);
+  ask (Call 'Counter' [{Inc}]);
+  ask (Call 'Counter' [{Inc}]);
+  ask count = (Call 'Counter' [{Get}]);
+  (Done count)
 }

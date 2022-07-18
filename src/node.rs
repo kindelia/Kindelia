@@ -63,7 +63,7 @@ pub struct Body {
 #[derive(Debug, Clone)]
 pub struct Block {
   pub time: u128, // block timestamp
-  pub rand: u128, // block nonce
+  pub meta: u128, // block metadata
   pub prev: U256, // previous block (32 bytes)
   pub body: Body, // block contents (1280 bytes) 
   pub hash: U256, // cached block hash // TODO: refactor out
@@ -369,7 +369,7 @@ pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
 pub fn read_address(code: &str) -> Address {
   let strs = code.split(':').collect::<Vec<&str>>();
   let vals = strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
-  let port = strs[1].parse::<u16>().unwrap();
+  let port = strs.get(1).map(|s| s.parse::<u16>().unwrap()).unwrap_or(UDP_PORT);
   Address::IPv4 {
     val0: vals[0],
     val1: vals[1],
@@ -446,18 +446,18 @@ pub fn hash_bytes(bytes: &[u8]) -> U256 {
 }
 
 // Creates a new block.
-pub fn new_block(prev: U256, time: u128, rand: u128, body: Body) -> Block {
+pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
   let hash = if time == 0 {
     hash_bytes(&[])
   } else {
     let mut bytes : Vec<u8> = Vec::new();
     bytes.extend_from_slice(&u256_to_bytes(prev));
     bytes.extend_from_slice(&u128_to_bytes(time));
-    bytes.extend_from_slice(&u128_to_bytes(rand));
+    bytes.extend_from_slice(&u128_to_bytes(meta));
     bytes.extend_from_slice(&body.value);
     hash_bytes(&bytes)
   };
-  return Block { prev, time, rand, body, hash };
+  return Block { prev, time, meta, body, hash };
 }
 
 // Converts a byte array to a Body.
@@ -521,7 +521,7 @@ pub fn show_block(block: &Block) -> String {
   return format!(
     "time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
     block.time,
-    block.rand,
+    block.meta,
     body_to_string(&block.body),
     block.prev,
     hex::encode(u256_to_bytes(block.hash)),
@@ -578,7 +578,7 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
     if block.hash >= targ {
       return Some(block);
     } else {
-      block.rand = block.rand.wrapping_add(1);
+      block.meta = block.meta.wrapping_add(1);
     }
   }
   return None;
@@ -865,6 +865,10 @@ impl Node {
         statements.push(statement);
       }
     }
+    self.runtime.set_time(block.time >> 8);
+    self.runtime.set_meta(block.meta >> 8);
+    self.runtime.set_hax0((block.hash >>   0).low_u128() >> 8);
+    self.runtime.set_hax1((block.hash >> 120).low_u128() >> 8);
     let result = self.runtime.run_statements(&statements, false);
     self.results.insert(block.hash, result);
     self.runtime.tick();
@@ -1264,7 +1268,7 @@ impl Node {
     }
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
-    if self.port == 42000 {
+    if self.port == UDP_PORT {
       self.load_blocks();
     }
 
