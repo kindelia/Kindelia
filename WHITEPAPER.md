@@ -211,21 +211,23 @@ purposes. Instead, they should use a higher level language such as Idris, Agda,
 Coq, Lean or Kind2. Below is the same program, in Kind:
 
 ```c
-Count (action: Count.Action) : Contract {
-  match action {
-    // Increments the counter
-    Inc => do {
-      num = Load;
-      Save (+ num #1);
-      return #0;
+Count : Contract {
+  init: #0
+  call: @action
+    match action {
+      // Increments the counter
+      Inc => do {
+        num = Load;
+        Save (+ num #1);
+        return #0;
+      }
+      // Returns the counter
+      Get => do {
+        ask num = Load;
+        return num;
+      }
     }
-    // Returns the counter
-    Get => do {
-      ask num = Load;
-      return num;
-    }
-  }
-} with { #0 }
+}
 ```
 
 With Kind's dependent type system, devs can prove theorems about their contracts,
