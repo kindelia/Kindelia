@@ -120,7 +120,7 @@ fun (Sum tree) {
 Once deployed and mined, this statement will cause `Sum` to be defined globally.
 Kindelia functions can call each-other, and are pure, thus, side-effect free.
 The `RUN` statement offers a escape hatch where side-effects can occur and alter
-the network's state, based on effects, which work exactly like Haskell's IO.
+the network's state,in a way that works exactly like Haskell's IO.
 For example, the statement below uses the `ask` syntax (similar to Haskell's
 `do`) to increment the state of a global `Count` function, and then returns its
 current state:
@@ -203,6 +203,38 @@ Of course, since `!save` has no cost, this would expose the network to a trivial
 spam attack, where a function persists an obscene amount of data. To prevent
 that, nodes also impose a limit on how much the HVM's heap can grow on each
 block. That limit is called `bits`, and is separated from the `mana` limit. 
+
+Note the syntax used so far is a low-level representation of HVM's inner terms,
+so, while it looks somewhat high-level, it is actually equivalent to our assembly,
+and developers aren't meant to write on it directly, other than for debugging
+purposes. Instead, they should use a higher level language such as Idris, Agda,
+Coq, Lean or Kind2. Below is the same program, in Kind:
+
+```c
+Count (action: Count.Action) : Contract {
+  match action {
+    // Increments the counter
+    Inc => do {
+      num = Load;
+      Save (+ num #1);
+      return #0;
+    }
+    // Returns the counter
+    Get => do {
+      ask num = Load;
+      return num;
+    }
+  }
+} with { #0 }
+```
+
+With Kind's dependent type system, devs can prove theorems about their contracts,
+ensuring that they're mathematically unbreakable, which, while not an absolute
+guarantee (after all, someone could forget to prove an important invariant!), is
+as good as it gets in terms of security, and is on an entire new league compared
+to former alternatives. Developers could also use Idris, Coq, Lean, Agda and even
+Haskell. Compiling functional languages to Kindelia is viable, because of its
+functional opcodes.
 
 Statements can also be signed:
 
