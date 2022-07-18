@@ -1,23 +1,27 @@
-// This block defines and uses some pure functions.
+// Deploys a tree-summing function
+// -------------------------------
 
-// Declares the constructors of a binary tree.
-ctr {Leaf value}
-ctr {Branch left right}
+ctr {Leaf value}        // Tree element
+ctr {Branch left right} // Tree branch
 
-// Declares a pure function that sums a tree
 fun (Sum tree) {
   (Sum {Leaf x})     = x
   (Sum {Branch a b}) = (+ (Sum a) (Sum b))
 }
 
+
 // Sums a tree with 4 numbers
+// --------------------------
+
 run {
-  !done (Sum {Branch
+  (Done (Sum {Branch
     {Branch {Leaf #1} {Leaf #2}}
-    {Branch {Leaf #3} {Leaf #4}}})
+    {Branch {Leaf #3} {Leaf #4}}}))
 }
 
-// Generates a tree with 2^n copies of the number #1
+// Deploys a tree-generator function
+// ---------------------------------
+
 fun (Gen depth) {
   (Gen #0) =
     {Leaf #1}
@@ -26,7 +30,9 @@ fun (Gen depth) {
     {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
 }
 
-// Sums a huge tree, with 2^21 copies of the number #1
+// Sums a tree with 2^20 numbers
+// -----------------------------
+
 run {
-  !done (Sum (Gen #20))
+  (Done (Sum (Gen #20)))
 }

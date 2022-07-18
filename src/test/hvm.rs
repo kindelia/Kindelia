@@ -34,20 +34,17 @@ pub fn advanced_rollback_in_saved_state(temp_dir: TempDir) {
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s1 =
-    RuntimeStateTest::new(&fn_names, &mut rt);
+  let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s2 =
-    RuntimeStateTest::new(&fn_names, &mut rt);
+  let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   advance(&mut rt, 1000, Some(COUNTER));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
-  let s3 =
-    RuntimeStateTest::new(&fn_names, &mut rt);
+  let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   assert_eq!(s1, s2);
   assert_eq!(s2, s3);
@@ -139,7 +136,6 @@ proptest! {
   fn serialize_deserialize_heap(heap in heap()) {
     let mut h1 = heap;
     let s1 = format!("{:?}", h1);
-    println!("{}", s1);
     let a = h1.serialize();
     h1.deserialize(&a);
     let s2 = format!("{:?}", h1);
@@ -173,43 +169,43 @@ pub const PRE_COUNTER: &'static str = "
 
   fun (Store action) {
     (Store {StoreAdd}) =
-      !take l
-      !save (Add l)
-      !done #0
+      ask l = (Take);
+      ask (Save (Add l));
+      (Done #0)
     (Store {StoreSub}) =
-      !take l
-      !save (Sub l)
-      !done #0
+      ask l = (Take);
+      ask (Save (Sub l));
+      (Done #0)
     (Store {StoreGet}) = 
-      !load l
-      !done l
+      ask l = (Load);
+      (Done l)
   } with { {Zero} }
 ";
 
 pub const COUNTER: &'static str = "
   run {
-    !call ~ 'Store' [{StoreAdd}]
-    !call x 'Store' [{StoreGet}]
-    !done x
+    ask (Call 'Store' [{StoreAdd}]);
+    ask count = (Call 'Store' [{StoreGet}]);
+    (Done count)
   }
 
   run {
-    !call ~ 'Count' [{Count_Inc}]
-    !call x 'Count' [{Count_Get}]
-    !done x
+    ask (Call 'Count' [{Inc}]);
+    ask count = (Call 'Count' [{Get}]);
+    (Done count)
   }
 ";
 
 pub const SIMPLE_COUNT: &'static str = "
   run {
-    !call ~ 'Count' [{Count_Inc}]
-    !call x 'Count' [{Count_Get}]
-    !done x
+    ask (Call 'Count' [{Inc}]);
+    ask count = (Call 'Count' [{Get}]);
+    (Done count)
   }
 ";
 
 pub const COUNTER_STACKOVERFLOW: &'static str = "
   run {
-    !done (ToSucc #8000)
+    (Done (ToSucc #8000))
   }
 ";

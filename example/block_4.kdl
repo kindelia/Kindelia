@@ -41,5 +41,5 @@ fun (Foo.Bar.cats) {
 
 // Runs Bob's cats function!
 run {
-  !done (Foo.Bar.cats)
+  (Done (Foo.Bar.cats))
 }

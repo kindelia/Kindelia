@@ -122,21 +122,25 @@ Block #1: defining pure functions
 The **block** below defines and uses some global functions that operate on immutable trees:
 
 ```c
-// Declares the constructors of a binary tree.
-ctr {Leaf value}
-ctr {Branch left right}
+// Deploys a tree-summing function
+// -------------------------------
 
-// Declares a pure function that sums a tree
+ctr {Leaf value}        // Tree element
+ctr {Branch left right} // Tree branch
+
 fun (Sum tree) {
   (Sum {Leaf x})     = x
   (Sum {Branch a b}) = (+ (Sum a) (Sum b))
 }
 
+
 // Sums a tree with 4 numbers
+// --------------------------
+
 run {
-  !done (Sum {Branch
+  (Done (Sum {Branch
     {Branch {Leaf #1} {Leaf #2}}
-    {Branch {Leaf #3} {Leaf #4}}})
+    {Branch {Leaf #3} {Leaf #4}}}))
 }
 ```
 
@@ -196,39 +200,34 @@ that increments the counter 3 times, and other that just outputs the current
 counter, i.e., 3.
 
 ```c
-// Creates a Counter function with 2 actions:
-ctr {Inc} // action that increments the counter
-ctr {Get} // action that returns the counter
+// Deploys a simple Counter function
+// ---------------------------------
+
+ctr {Inc} // Inc: action that incs the counter
+ctr {Get} // Get: action that gets the counter
+
 fun (Counter action) {
 
-  // increments the counter
   (Counter {Inc}) =
-    !take x        // loads the state and assigns it to 'x'
-    !save (+ x #1) // overwrites the state as 'x + 1'
-    !done #0       // returns 0
+    ask x = (Take);
+    ask (Save (+ x #1));
+    (Done #0)
 
-  // returns the counter
   (Counter {Get}) =
-    !load x // loads the state
-    !done x // returns it
+    ask x = (Load);
+    (Done x)
 
-// initial state is 0
-} with {
-  #0
-}
+} with { #0 }
 
-// Increments the Counter's state 3 times
+// Increments the Counter's state 3 times, and prints
+// --------------------------------------------------
+
 run {
-  !call ~ 'Counter' [{Inc}]
-  !call ~ 'Counter' [{Inc}]
-  !call ~ 'Counter' [{Inc}]
-  !done #0
-}
-
-// Prints the Counter's state
-run {
-  !call x 'Counter' [{Get}]
-  !done x
+  ask (Call 'Counter' [{Inc}]);
+  ask (Call 'Counter' [{Inc}]);
+  ask (Call 'Counter' [{Inc}]);
+  ask count = (Call 'Counter' [{Get}]);
+  (Done count)
 }
 ```
 
@@ -267,8 +266,8 @@ An statement can also optionally include a signature:
 
 ```c
 run {
-  !subj x // gets the signer
-  !done x // outputs it
+  ask x = (Subj);
+  (Done x)
 } sign {
   00c0777281fe0a814d0f1826ad
   7f4228f7308df5c4365f8dc577
@@ -357,7 +356,7 @@ fun (Foo.Bar.cats) {
 
 // Runs Bob's cats function!
 run {
-  !done (Foo.Bar.cats)
+  (Done (Foo.Bar.cats))
 }
 ```
 
@@ -542,7 +541,7 @@ Term ::=
   @<var0: Name> <body: Term>
   
   // A lambda application
-  (! <func: Term> <argm: Term>)
+  (<func: Term> <argm: Term>)
   
   // A constructor
   {<name: Name> <arg0: Term> <arg1: Term> ... <argN: Term>}
@@ -1009,7 +1008,7 @@ Example 0:
 
   Term:
 
-   {Tuple2 #7 #8}
+   {T2 #7 #8}
 
   Memory:
 
@@ -1021,7 +1020,7 @@ Example 0:
     
     1. This is just a pair with two numbers.
     2. The root pointer is not stored on memory.
-    3. The '0x0000000007b9d30a43' constant encodes the 'Tuple2' name.
+    3. The '0x0000000007b9d30a43' constant encodes the 'T2' name.
     4. Since nums are unboxed, a 2-tuple uses 2 memory slots, or 32 bytes.
 
 Example 1:
@@ -1330,90 +1329,114 @@ the network. It may vary across different forks. Kindelia's mainnet uses the
 following genesis block:
 
 ```c
-// Tuple types
-ctr {Tuple0}
-ctr {Tuple1 x0}
-ctr {Tuple2 x0 x1}
-ctr {Tuple3 x0 x1 x2}
-ctr {Tuple4 x0 x1 x2 x3}
-ctr {Tuple5 x0 x1 x2 x3 x4}
-ctr {Tuple6 x0 x1 x2 x3 x4 x5}
-ctr {Tuple7 x0 x1 x2 x3 x4 x5 x6}
-ctr {Tuple8 x0 x1 x2 x3 x4 x5 x6 x7}
-ctr {Tuple9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
-ctr {Tuple10 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
-ctr {Tuple11 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
-ctr {Tuple12 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+// T types
+ctr {T0}
+ctr {T1 x0}
+ctr {T2 x0 x1}
+ctr {T3 x0 x1 x2}
+ctr {T4 x0 x1 x2 x3}
+ctr {T5 x0 x1 x2 x3 x4}
+ctr {T6 x0 x1 x2 x3 x4 x5}
+ctr {T7 x0 x1 x2 x3 x4 x5 x6}
+ctr {T8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {T9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {TA x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {TB x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {TC x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+ctr {TD x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12}
+ctr {TE x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13}
+ctr {TF x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14}
+ctr {TG x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15}
 
 // Used to pretty-print names
 ctr {Name name}
 
 // Below, we declare the built-in IO operations
 
-// IO_DONE returns from an IO operation
-ctr {IO_DONE expr}
-fun (io_done expr) {
-  (io_done expr) = {IO_DONE expr}
+// DONE returns from an IO operation
+ctr {DONE expr}
+fun (Done expr) {
+  (Done expr) = {DONE expr}
 }
 
-// IO_TAKE recovers an app's stored state
-ctr {IO_TAKE then}
-fun (io_take then) {
-  (io_take then) = {IO_TAKE then}
+// TAKE recovers an app's stored state
+ctr {TAKE cont}
+fun (Take) {
+  (Take) = @cont {TAKE cont}
 }
 
-// IO_SAVE stores the app's state
-ctr {IO_SAVE expr then}
-fun (io_save expr then) {
-  (io_save expr then) = {IO_SAVE expr then}
+// SAVE stores the app's state
+ctr {SAVE expr cont}
+fun (Save expr) {
+  (Save expr) = @cont {SAVE expr cont}
 }
 
-// IO_CALL calls another IO operation, assigning
+// CALL calls another IO operation, assigning
 // the caller name to the current subject name
-ctr {IO_CALL name args then}
-fun (io_call name args then) {
-  (io_call name args then) = {IO_CALL name args then}
+ctr {CALL name args cont}
+fun (Call name args) {
+  (Call name args) = @cont {CALL name args cont}
 }
 
-// IO_SUBJ returns the name of the current subject
-ctr {IO_SUBJ then}
-fun (io_subj then) {
-  (io_subj then) = {IO_SUBJ then}
+// SUBJ returns the name of the current subject
+ctr {SUBJ cont}
+fun (Subj) {
+  (Subj) = @cont {SUBJ cont}
 }
 
-// IO_FROM returns the name of the current caller
-ctr {IO_FROM then} 
-fun (io_from then) {
-  (io_from then) = {IO_FROM then}
+// FROM returns the name of the current caller
+ctr {FROM cont} 
+fun (From) {
+  (From) = @cont {FROM cont}
 }
 
-// IO_LOAD works like IO_TAKE, but clones the state
-fun (io_load cont) {
-  (io_load cont) =
-    {IO_TAKE @x
-    dup x0 x1 = x;
-    {IO_SAVE x0 @~
-    (! cont x1)}}
+// TICK returns the current block number
+ctr {TICK cont}
+fun (Tick) {
+  (Tick) = @cont {TICK cont}
+}
+
+// TIME returns the current block timestamp
+ctr {TIME cont}
+fun (Time) {
+  (Time) = @cont {TIME cont}
+}
+
+// META returns the current block metadata
+ctr {META cont}
+fun (Meta) {
+  (Meta) = @cont {META cont}
+}
+
+// HAX0 returns the current block metadata
+ctr {HAX0 cont}
+fun (Hax0) {
+  (Hax0) = @cont {HAX0 cont}
+}
+
+// HAX1 returns the current block metadata
+ctr {HAX1 cont}
+fun (Hax1) {
+  (Hax1) = @cont {HAX1 cont}
+}
+
+// LOAD works like TAKE, but clones the state
+fun (Load) {
+  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (cont x1)}}
 }
 
 // This is here for debugging. Will be removed.
-ctr {Count_Inc}
-ctr {Count_Get}
+ctr {Inc}
+ctr {Get}
 fun (Count action) {
-  (Count {Count_Inc}) =
-    !take x
-    !save (+ x #1)
-    !done #0
-  (Count {Count_Get}) =
-    !load x
-    !done x
+  (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
+  (Count {Get}) = ((Load) @x {DONE x})
 }
 
 // Registers the empty namespace.
 reg {
   #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
 }
-
 ```
 
 It is important to note that, on Kindelia's mainnet, the genesis block will

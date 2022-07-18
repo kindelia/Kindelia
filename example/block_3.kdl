@@ -16,8 +16,8 @@
 // It will output the subject's name, which is:
 //   #x7e5f4552091a69125d5dfcb7b8c265 (note: it will be printed in decimal)
 run {
-  !subj x // get the signer
-  !done x // outputs it
+  ask x = (Subj);
+  (Done x)
 } sign {
   00c0777281fe0a814d0f1826ad
   7f4228f7308df5c4365f8dc577
