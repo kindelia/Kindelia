@@ -30,9 +30,9 @@ fun (Gen depth) {
     {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
 }
 
-// Sums a tree with 2^20 numbers
+// Sums a tree with 2^16 numbers
 // -----------------------------
 
 run {
-  (Done (Sum (Gen #20)))
+  (Done (Sum (Gen #16)))
 }
