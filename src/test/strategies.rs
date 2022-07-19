@@ -6,7 +6,14 @@ use proptest::{arbitrary::any, collection::vec, option, prop_oneof, strategy::St
 
 // generate valid names
 pub fn name() -> impl Strategy<Value = u128> {
-  "[a-zA-Z0-9_][a-zA-Z0-9_]{1,19}".prop_map(|s| name_to_u128(&s))
+  // TODO: temporary fix to new limitation due
+  // to the fact that is not possible make a name
+  // that start with a number anymore
+  "[a-z][a-zA-Z0-9_]{1,19}".prop_map(|s| name_to_u128(&s))
+}
+
+pub fn fun_name() -> impl Strategy<Value = u128> {
+  "[A-Z][a-zA-Z0-9_]{1,19}".prop_map(|s| name_to_u128(&s))
 }
 
 // generate valid terms
@@ -28,8 +35,10 @@ pub fn term() -> impl Strategy<Value = Term> {
         (name(), inner.clone()).prop_map(|(n, e)| { Term::Lam { name: n, body: Box::new(e) } }),
         (inner.clone(), inner.clone())
           .prop_map(|(f, a)| { Term::App { func: Box::new(f), argm: Box::new(a) } }),
-        (name(), vec(inner.clone(), 0..10)).prop_map(|(n, v)| { Term::Ctr { name: n, args: v } }),
-        (name(), vec(inner.clone(), 0..10)).prop_map(|(n, v)| { Term::Fun { name: n, args: v } }),
+        (fun_name(), vec(inner.clone(), 0..10))
+          .prop_map(|(n, v)| { Term::Ctr { name: n, args: v } }),
+        (fun_name(), vec(inner.clone(), 0..10))
+          .prop_map(|(n, v)| { Term::Fun { name: n, args: v } }),
         (0..15_u128, inner.clone(), inner).prop_map(|(o, v0, v1)| {
           Term::Op2 { oper: o, val0: Box::new(v0), val1: Box::new(v1) }
         }),
@@ -55,10 +64,10 @@ pub fn sign() -> impl Strategy<Value = crypto::Signature> {
 // generate statements
 pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
-    (name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
+    (fun_name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
       |(name, args, func, init, sign)| { Statement::Fun { name, args, func, init, sign } }
     ),
-    (name(), vec(name(), 0..10), option::of(sign()))
+    (fun_name(), vec(name(), 0..10), option::of(sign()))
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
     (term(), option::of(sign())).prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
     (name(), name(), option::of(sign()))

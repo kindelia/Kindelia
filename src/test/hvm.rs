@@ -1,5 +1,7 @@
 use crate::{
-  hvm::{init_runtime, name_to_u128, read_statements, u128_to_name, view_statements},
+  hvm::{
+    init_runtime, name_to_u128, read_statements, u128_to_name, view_statements, Statement, Term::*,
+  },
   test::{
     strategies::{name, statement},
     util::{
@@ -19,7 +21,7 @@ pub fn simple_rollback() {
 
 #[test]
 pub fn advanced_rollback_in_random_state() {
-  let fn_names = ["Count", "io_load", "Store", "Sub", "Add"];
+  let fn_names = ["Count", "Store", "Sub", "Add"];
   let path = [1000, 12, 1000, 24, 1000, 36];
   assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path));
 }
@@ -190,43 +192,43 @@ pub const PRE_COUNTER: &'static str = "
 
   fun (Store action) {
     (Store {StoreAdd}) =
-      !take l
-      !save (Add l)
-      !done #0
+      ask l = (Take);
+      ask (Save (Add l));
+      (Done #0)
     (Store {StoreSub}) =
-      !take l
-      !save (Sub l)
-      !done #0
+      ask l = (Take);
+      ask (Save (Sub l));
+      (Done #0)
     (Store {StoreGet}) = 
-      !load l
-      !done l
+      ask l = (Load);
+      (Done l)
   } with { {Zero} }
 ";
 
 pub const COUNTER: &'static str = "
   run {
-    !call ~ 'Store' [{StoreAdd}]
-    !call x 'Store' [{StoreGet}]
-    !done x
+    ask (Call 'Store' [{StoreAdd}]);
+    ask count = (Call 'Store' [{StoreGet}]);
+    (Done count)
   }
 
   run {
-    !call ~ 'Count' [{Count_Inc}]
-    !call x 'Count' [{Count_Get}]
-    !done x
+    ask (Call 'Count' [{Inc}]);
+    ask count = (Call 'Count' [{Get}]);
+    (Done count)
   }
 ";
 
 pub const SIMPLE_COUNT: &'static str = "
   run {
-    !call ~ 'Count' [{Count_Inc}]
-    !call x 'Count' [{Count_Get}]
-    !done x
+    ask (Call 'Count' [{Inc}]);
+    ask count = (Call 'Count' [{Get}]);
+    (Done count)
   }
 ";
 
 pub const COUNTER_STACKOVERFLOW: &'static str = "
   run {
-    !done (ToSucc #8000)
+    (Done (ToSucc #8000))
   }
 ";
