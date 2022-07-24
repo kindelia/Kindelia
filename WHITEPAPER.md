@@ -96,7 +96,7 @@ network state.
     '---------------'         '---------------'         '---------------'
 
 Kindelia nodes use Proof-of-Work consensus to order blocks canonically.
-Proof-of-State isn't indended, nor possible, since there is no native currency
+Proof-of-State isn't intended, nor possible, since there is no native currency
 to stake. Blocks merely group statements, of which there are 4 kinds:
 
 - **CTR**: declares a new constructor
