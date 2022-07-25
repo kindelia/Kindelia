@@ -171,24 +171,7 @@ fn run_cli() -> Result<(), String> {
     // Signs a run statement
     CliCmd::Post { term_file, node_addr } => {
       if let Ok(code) = std::fs::read_to_string(term_file) {
-        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
-        let statements = statements.1;
-        if let Some(last_statement) = &statements.last() {
-          let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(last_statement)));
-          let ms = Message::PleaseMineThisTransaction { trans: tx };
-          let ip = read_address(&node_addr);
-          let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
-          if let Some((mut socket, port)) = udp_init(&ports) {
-            udp_send(&mut socket, ip, &ms);
-            println!("Sent statement to {} via UDP:\n\n{}", node_addr, view_statement(last_statement));
-            return Ok(());
-          } else {
-            panic!("Couldn't open UDP socket on ports: {:?}.", ports);
-          }
-        }
-        panic!("File must have at least one statement.");
-      } else {
-        println!("Couldn't load term and secret key files.");
+        post_from_code(&code, &node_addr)?;
       }
     }
 
@@ -257,5 +240,31 @@ fn start_node(kindelia_path: PathBuf, testnet: bool, mine: bool) {
   // Joins all threads
   for thread in threads {
     thread.join().unwrap();
+  }
+}
+
+// Post
+// ----
+
+// TODO: move out to client.rs?
+type PostResult = Result<(), String>;
+
+pub fn post_from_code(code: &str, address: &str) -> PostResult {
+  let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
+  let statements = statements.1;
+  if let Some(last_statement) = &statements.last() {
+    let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(last_statement)));
+    let ms = Message::PleaseMineThisTransaction { trans: tx };
+    let ip = read_address(&address);
+    let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
+    if let Some((mut socket, port)) = udp_init(&ports) {
+      udp_send(&mut socket, ip, &ms);
+      println!("Sent statement to {} via UDP:\n\n{}", address, view_statement(last_statement));
+      Ok(())
+    } else {
+      Err(format!("Couldn't open UDP socket on ports: {:?}.", ports))
+    }
+  } else {
+    return Err("No statement found in code.".to_string());
   }
 }

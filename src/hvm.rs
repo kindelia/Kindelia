@@ -1425,13 +1425,49 @@ impl Runtime {
   //}
 
   pub fn run_statements(&mut self, statements: &[Statement], silent: bool) -> Vec<StatementResult> {
-    statements.iter().map(|s| self.run_statement(s, silent)).collect()
+    statements.iter().map(
+      |s| { 
+        let res = self.run_statement(s, silent);
+        if let Ok(..) = res {
+          self.draw();
+        }
+        res
+      }
+    ).collect()
   }
 
   pub fn run_statements_from_code(&mut self, code: &str, silent: bool) -> Vec<StatementResult> {
     let stataments = read_statements(code);
     match stataments {
       Ok((.., statements)) => self.run_statements(&statements, silent),
+      Err(ParseErr { erro , .. }) => {
+        return vec![Err(StatementErr { err: erro })];
+      }
+    }
+  }
+
+  pub fn test_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
+    let mut results = vec![];
+    for (idx, statement) in statements.iter().enumerate() {
+      let res = self.run_statement(statement, true);
+      match res {
+        Ok(..) => {
+          results.push(res);
+        }
+        Err(..) => {
+          results.push(res);
+          break
+        }
+      }
+    }
+    self.undo();
+    results
+  }
+
+  pub fn test_statements_from_code(&mut self, code: &str) -> Vec<StatementResult> {
+    let stataments = read_statements(code);
+    match stataments {
+      Ok((.., statements)) => self.test_statements(&statements),
       Err(ParseErr { erro , .. }) => {
         return vec![Err(StatementErr { err: erro })];
       }
@@ -1662,6 +1698,9 @@ impl Runtime {
     }
   }
 
+  /// Run statement in the `draw` heap.
+  /// 
+  /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
   pub fn run_statement(&mut self, statement: &Statement, silent: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
@@ -1694,8 +1733,7 @@ impl Runtime {
         self.define_function(*name, func);
         let state = self.create_term(init, 0, &mut init_map());
         self.write_disk(*name, state);
-        self.draw();
-        return Ok(StatementInfo::Fun { name: *name, args: args.clone() });
+        Ok(StatementInfo::Fun { name: *name, args: args.clone() })
       }
       Statement::Ctr { name, args, sign } => {
         if self.exists(*name) {
@@ -1712,8 +1750,7 @@ impl Runtime {
           println!("[ctr] {}", u128_to_name(*name));
         }
         self.set_arity(*name, args.len() as u128);
-        self.draw();
-        return Ok(StatementInfo::Ctr { name: *name, args: args.clone() });
+        Ok(StatementInfo::Ctr { name: *name, args: args.clone() })
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -1743,16 +1780,15 @@ impl Runtime {
         if size_end > size_lim {
           return error(self, "run", format!("Not enough space."));
         }
-        self.draw();
         if !silent {
           println!("[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&term), mana_dif, size_dif);
         }
-        return Ok(StatementInfo::Run {
+        Ok(StatementInfo::Run {
           done_term: term,
           used_mana: mana_dif,
           size_diff: size_dif,
           end_size: size_end as u128, // TODO: rename to done_size for consistency?
-        });
+        })
       }
       Statement::Reg { name, ownr, sign } => {
         if self.exists(*name) {
@@ -1763,14 +1799,13 @@ impl Runtime {
           return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, u128_to_name(*name)));
         }
         self.set_owner(*name, *ownr);
-        self.draw();
         if !silent {
           println!("[reg] #x{:0>30x} {}", ownr, u128_to_name(*name));
         }
-        return Ok(StatementInfo::Reg {
+        Ok(StatementInfo::Reg {
           name: *name,
           ownr: *ownr,
-        });
+        })
       }
     }
   }

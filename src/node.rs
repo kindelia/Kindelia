@@ -156,6 +156,14 @@ pub enum Request {
     name: u128,
     tx: RequestAnswer<Option<Term>>,
   },
+  TestCode {
+    code: String,
+    tx: RequestAnswer<Vec<StatementResult>>,
+  },
+  PostCode {
+    code: String,
+    tx: RequestAnswer<Result<(), String>>,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -963,6 +971,38 @@ impl Node {
         let state = self.runtime.read_disk_as_term(name);
         answer.send(state).unwrap();
       },
+      Request::TestCode { code, tx: answer } => {
+        let result = self.runtime.test_statements_from_code(&code);
+        answer.send(result).unwrap();
+      },
+      Request::PostCode { code, tx: answer } => {
+        let statements = 
+          hvm::read_statements(&code)
+            .map_err(|err| err.erro)
+            .map(|(_, s)| s);
+      
+        let res = match statements {
+          Err(err) => {
+            Err(err)
+          }
+          Ok(statements) => {
+            statements
+              .iter()
+              .map(
+                |s| 
+                  Transaction::new(bitvec_to_bytes(&serialized_statement(s)))
+              )
+              .into_iter()
+              .for_each(|t| {
+                let hash = t.hash.low_u64();
+                self.pool.push(t, hash);
+              });
+            Ok(())
+          }
+        };
+      
+        answer.send(res).unwrap();
+      }
     }
   }
 
