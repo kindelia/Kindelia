@@ -57,7 +57,7 @@ pub struct Transaction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
   // TODO: optimize size
-  pub value: [u8; BODY_SIZE],
+  pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,6 @@ pub struct Block {
   pub body: Body, // block contents (1280 bytes) 
   pub hash: U256, // cached block hash // TODO: refactor out
 }
-
 
 // Blocks have 4 states of inclusion:
 //
@@ -219,10 +218,16 @@ pub const UDP_PORT : u16 = 42000;
 pub const HASH_SIZE : usize = 32;
 
 // Size of a block's body, in bytes
-pub const BODY_SIZE : usize = 1280;
+pub const MAX_BODY_SIZE : usize = 1280;
+
+// Max size of a big UDP packet, in bytes
+pub const MAX_UDP_SIZE_SLOW : usize = 8000;
+
+// Max size of a fast UDP packet, in bytes
+pub const MAX_UDP_SIZE_FAST : usize = 1500;
 
 // Size of a block, in bytes
-pub const BLOCK_SIZE : usize = HASH_SIZE + (U128_SIZE * 4) + BODY_SIZE;
+//pub const BLOCK_SIZE : usize = HASH_SIZE + (U128_SIZE * 4) + BODY_SIZE;
 
 // Size of an IPv4 address, in bytes
 pub const IPV4_SIZE : usize = 4;
@@ -247,9 +252,6 @@ pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
   
 // Readjust difficulty every N blocks
 pub const BLOCKS_PER_PERIOD : u128 = 20;
-
-// How many ancestors do we send together with the requested missing block
-pub const SEND_BLOCK_ANCESTORS : u128 = 20;
 
 // Readjusts difficulty every N seconds
 pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
@@ -446,7 +448,7 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
     bytes.extend_from_slice(&u256_to_bytes(prev));
     bytes.extend_from_slice(&u128_to_bytes(time));
     bytes.extend_from_slice(&u128_to_bytes(meta));
-    bytes.extend_from_slice(&body.value);
+    bytes.extend_from_slice(&body.data);
     hash_bytes(&bytes)
   };
   return Block { prev, time, meta, body, hash };
@@ -454,10 +456,7 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
 
 // Converts a byte array to a Body.
 pub fn bytes_to_body(bytes: &[u8]) -> Body {
-  let mut body = Body { value: [0; BODY_SIZE] };
-  let size = std::cmp::min(BODY_SIZE, bytes.len());
-  body.value[..size].copy_from_slice(&bytes[..size]);
-  return body;
+  Body { data: bytes.to_vec() }
 }
 
 // Converts a string (with a list of statements) to a body.
@@ -468,26 +467,18 @@ pub fn code_to_body(code: &str) -> Body {
   return body;
 }
 
-// Converts a Body back to a string.
-pub fn body_to_string(body: &Body) -> String {
-  match std::str::from_utf8(&body.value) {
-    Ok(s)  => s.to_string(),
-    Err(e) => "\n".repeat(BODY_SIZE),
-  }
-}
-
 // Converts a body to a vector of transactions.
 pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
   let mut index = 1;
-  let tx_count = body.value[0];
+  let tx_count = body.data[0];
   for i in 0 .. tx_count {
-    if index >= BODY_SIZE { break; }
-    let len_byte = body.value[index];
+    if index >= body.data.len() { break; }
+    let len_byte = body.data[index];
     index += 1;
     let len_used = Transaction::len_byte_to_len(len_byte);
-    if index + len_used > BODY_SIZE { break; }
-    transactions.push(Transaction::new(body.value[index .. index + len_used].to_vec()));
+    if index + len_used > body.data.len() { break; }
+    transactions.push(Transaction::new(body.data[index .. index + len_used].to_vec()));
     index += len_used;
   }
   return transactions;
@@ -505,21 +496,24 @@ pub fn ZERO_HASH() -> U256 {
 
 // The genesis block.
 pub fn GENESIS_BLOCK() -> Block {
-  return new_block(ZERO_HASH(), 0, 0, Body { value: [0; 1280] });
+  return new_block(ZERO_HASH(), 0, 0, Body { data: vec![0] });
 }
 
 // Converts a block to a string.
-pub fn show_block(block: &Block) -> String {
-  return format!(
-    "time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
-    block.time,
-    block.meta,
-    body_to_string(&block.body),
-    block.prev,
-    hex::encode(u256_to_bytes(block.hash)),
-    get_hash_work(block.hash),
-  );
-}
+// FIXME: is this still used?
+//pub fn show_block(block: &Block) -> String {
+  //return format!(
+    //"time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
+    //block.time,
+    //block.meta,
+    //body_to_string(&block.body),
+    //block.prev,
+    //hex::encode(u256_to_bytes(block.hash)),
+    //get_hash_work(block.hash),
+  //);
+//}
+
+
 
 impl Transaction {
   pub fn new(mut data: Vec<u8>) -> Self {
@@ -974,12 +968,10 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(&mut self, addr: Address, blocks: Vec<Block>) {
+  pub fn send_blocks_to(&mut self, addr: Address, blocks: Vec<Block>, share_peers: u128) {
     //println!("- sending block: {:?}", block);
-    let msg = Message::NoticeTheseBlocks {
-      blocks: blocks,
-      peers: self.get_random_peers(3),
-    };
+    let peers = self.get_random_peers(share_peers);
+    let msg = Message::NoticeTheseBlocks { blocks, peers };
     udp_send(&mut self.socket, addr, &msg);
   }
 
@@ -1037,11 +1029,18 @@ impl Node {
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
           let mut chunk = vec![];
-          while self.block.contains_key(&bhash) && *bhash != ZERO_HASH() && chunk.len() < SEND_BLOCK_ANCESTORS as usize {
-            chunk.push(self.block[bhash].clone());
-            bhash = &self.block[bhash].prev;
+          let mut tsize = 0; // total size of the corresponding "NoticeTheseBlocks" message
+          loop {
+            if !self.block.contains_key(&bhash) { break; }
+            if *bhash == ZERO_HASH() { break; }
+            let block = &self.block[bhash];
+            let bsize = serialized_block_size(block) as usize;
+            if tsize + bsize > MAX_UDP_SIZE_SLOW { break }
+            chunk.push(block.clone());
+            tsize += bsize;
+            bhash = &block.prev;
           }
-          self.send_blocks_to(addr, chunk);
+          self.send_blocks_to(addr, chunk, 0);
         }
         // Someone sent us a block
         Message::NoticeTheseBlocks { blocks, peers } => {
@@ -1086,7 +1085,7 @@ impl Node {
   fn gossip_tip_block(&mut self, peer_count: u128) {
     let random_peers = self.get_random_peers(peer_count);
     for peer in random_peers {
-      self.send_blocks_to(peer.address, vec![self.block[&self.tip].clone()]);
+      self.send_blocks_to(peer.address, vec![self.block[&self.tip].clone()], 3);
     }
   }
 
@@ -1139,23 +1138,25 @@ impl Node {
 
   // Builds the body to be mined.
   pub fn build_body(&self) -> Body {
-    let mut body_val : [u8; BODY_SIZE] = [0; BODY_SIZE]; 
-    let mut body_len = 1;
+    let mut body_vec = vec![0]; 
     let mut tx_count = 0;
     for (transaction, score) in self.pool.iter() {
       let len_real = transaction.data.len(); // how many bytes the original transaction has
       if len_real == 0 { continue; }
       let len_byte = transaction.len_byte(); // number we will store as the byte_len value
       let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
-      if body_len + 1 + len_used > BODY_SIZE { break; }
-      body_val[body_len] = len_byte as u8;
-      body_len += 1;
-      body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
-      body_len += len_used;
+      if body_vec.len() + 1 + len_used > MAX_BODY_SIZE { break; }
+      if tx_count + 1 > 255 { break; }
+      body_vec.push(len_byte as u8);
+      body_vec.extend_from_slice(&transaction.data);
       tx_count += 1;
+      //body_val[body_len] = len_byte as u8;
+      //body_len += 1;
+      //body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
+      //body_len += len_used;
     }
-    body_val[0] = tx_count;
-    return Body { value: body_val };
+    body_vec[0] = tx_count as u8;
+    return Body { data: body_vec };
   }
 
   fn log_heartbeat(&self) {

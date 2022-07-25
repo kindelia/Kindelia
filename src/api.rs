@@ -343,7 +343,7 @@ mod ser {
     where
       S: serde::Serializer,
     {
-      let body = self.body.value;
+      let body = &self.body.data;
       let body_bytes = body.into_iter().collect::<Vec<_>>();
       let mut s = serializer.serialize_struct("Block", 4)?;
       s.serialize_field("time", &self.time.to_string())?;
