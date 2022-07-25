@@ -72,3 +72,17 @@ Evangelion: mainnet history
   - Giving community grants
 
 - Community-driven forks to adjust parameters (like the mana limit) may still occur.
+
+---
+
+### What this means?
+
+Kindelia is made to last, without needing maintenance. That is by design, because getting
+rid of the privileged class of "core developers" or "owning foundation", which are inevitably
+in a position of power, is the only way to achieve truly decentralization. In that sense, the
+Kindelia Foundation aims to fulfill a supportive role, promoting the growth of the network and
+applications that live inside it, as well as research of the related technologies. Note that
+this does not mean the Kindelia Foundation will deliberately stop working on Kindelia. Quite
+the opposite: it, its founders and developers, are and will be forever fully committed to keeping
+the network healthy and functional, including myself (Taelin). All that this means is that, if
+all goes as planned, this role won't even be necessary.
