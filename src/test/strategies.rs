@@ -1,8 +1,18 @@
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
+
 use crate::{
   crypto,
-  hvm::{name_to_u128, Func, Rule, Statement, Term},
+  hvm::{
+    init_map, name_to_u128, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Nodes, Ownrs,
+    Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var,
+  },
 };
-use proptest::{arbitrary::any, collection::vec, option, prop_oneof, strategy::Strategy};
+use proptest::{
+  arbitrary::any,
+  collection::{hash_map, vec},
+  option, prop_oneof,
+  strategy::{Just, Strategy},
+};
 
 // generate valid names
 pub fn name() -> impl Strategy<Value = u128> {
@@ -47,9 +57,13 @@ pub fn term() -> impl Strategy<Value = Term> {
   )
 }
 
+fn fun() -> impl Strategy<Value = Term> {
+  (fun_name(), vec(term(), 0..32)).prop_map(|(n, b)| Term::Fun { name: n, args: b })
+}
+
 // generate rules
 pub fn rule() -> impl Strategy<Value = Rule> {
-  (term(), term()).prop_map(|(lhs, rhs)| Rule { lhs, rhs })
+  (fun(), term()).prop_map(|(lhs, rhs)| Rule { lhs, rhs })
 }
 
 pub fn func() -> impl Strategy<Value = Func> {
@@ -73,4 +87,87 @@ pub fn statement() -> impl Strategy<Value = Statement> {
     (name(), name(), option::of(sign()))
       .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
+}
+
+pub fn nodes() -> impl Strategy<Value = Nodes> {
+  (map(any::<u128>())).prop_map(|m| Nodes { nodes: m })
+}
+
+pub fn map<A: std::fmt::Debug>(s: impl Strategy<Value = A>) -> impl Strategy<Value = Map<A>> {
+  vec((any::<u128>(), s), 0..10).prop_map(|v| {
+    let mut m = init_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
+pub fn store() -> impl Strategy<Value = Store> {
+  map(any::<u128>()).prop_map(|m| Store { links: m })
+}
+
+pub fn arits() -> impl Strategy<Value = Arits> {
+  map(any::<u128>()).prop_map(|m| Arits { arits: m })
+}
+
+pub fn ownrs() -> impl Strategy<Value = Ownrs> {
+  map(any::<u128>()).prop_map(|m| Ownrs { ownrs: m })
+}
+
+pub fn var() -> impl Strategy<Value = Var> {
+  (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>()).prop_map(|(n, p, f, e)| Var {
+    name: n,
+    param: p,
+    field: f,
+    erase: e,
+  })
+}
+
+pub fn comp_rule() -> impl Strategy<Value = CompRule> {
+  (vec(any::<u128>(), 0..32), vec(var(), 0..32), vec((any::<u128>(), any::<u128>()), 0..32), term())
+    .prop_map(|(c, v, e, b)| CompRule { cond: c, vars: v, eras: e, body: b })
+}
+
+pub fn comp_func() -> impl Strategy<Value = CompFunc> {
+  (func(), any::<u128>(), vec(any::<u128>(), 0..32), vec(comp_rule(), 0..32))
+    .prop_map(|(f, a, r, s)| CompFunc { func: f, arity: a, redux: r, rules: s })
+}
+
+pub fn funcs() -> impl Strategy<Value = Funcs> {
+  map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
+}
+
+pub fn heap() -> impl Strategy<Value = Heap> {
+  let tuple_strategy = (
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+  );
+
+  (tuple_strategy, tuple_strategy, any::<i128>(),nodes(), store(), arits(), ownrs(), funcs()).prop_map(
+    |((uuid, mcap, tick, funs, dups, rwts), (mana, next, meta, hax1, hax0, time), size, memo, disk, arit, ownr, file)| Heap {
+      mcap,
+      disk,
+      arit,
+      ownr,
+      file: Funcs { funcs: init_map() }, // TODO, fix?
+      uuid,
+      memo,
+      tick,
+      funs,
+      dups,
+      rwts,
+      mana,
+      size,
+      next,
+      meta,
+      hax0,
+      hax1,
+      time,
+    },
+  )
 }

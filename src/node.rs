@@ -638,7 +638,7 @@ impl Node {
       peer_id    : HashMap::new(),
       peers      : HashMap::new(),
       peer_idx   : 0,
-      runtime    : init_runtime(),
+      runtime    : init_runtime(None),
       receiver   : query_receiver,
     };
 
