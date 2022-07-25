@@ -29,15 +29,15 @@ use crate::hvm::{self,*};
 // Kindelia's block format is agnostic to HVM. A Transaction is just a vector of bytes. A Body
 // groups transactions in a single combined vector of bytes, using the following format:
 //
-//   body ::= TX_COUNT | LENBYTE(tx_0) | tx_0 | LENBYTE(tx_1) | tx_1 | ...
+//   body ::= TX_COUNT | LEN_BYTE(tx_0) | tx_0 | LEN_BYTE(tx_1) | tx_1 | ...
 //
 // TX_COUNT is a single byte storing the number of transactions in this block. The length of each
-// transaction is stored using 1 byte, called LENBYTE. The actual number of bytes occupied by the
+// transaction is stored using 1 byte, called LEN_BYTE. The actual number of bytes occupied by the
 // transaction is recovered through the following formula:
 //
-//   size(tx) = LENBYTE(tx) * 5 + 1
+//   size(tx) = LEN_BYTE(tx) * 5 + 1
 //
-// For example, LENBYTE(tx) is 3, then it occupies 16 bytes on body (excluding the LENBYTE). In
+// For example, LEN_BYTE(tx) is 3, then it occupies 16 bytes on body (excluding the LEN_BYTE). In
 // other words, this means that transactions are stored in multiples of 40 bits, so, for example,
 // if a transaction has 42 bits, it actually uses 88 bits of the Body: 8 bits for the length and 80
 // bits for the value, of which 38 are not used. The max transaction size is 1280 bytes, and the
@@ -474,9 +474,9 @@ pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let tx_count = body.data[0];
   for i in 0 .. tx_count {
     if index >= body.data.len() { break; }
-    let lenbyte = body.data[index];
+    let len_byte = body.data[index];
     index += 1;
-    let len_used = Transaction::lenbyte_to_len(lenbyte);
+    let len_used = Transaction::len_byte_to_len(len_byte);
     if index + len_used > body.data.len() { break; }
     transactions.push(Transaction::new(body.data[index .. index + len_used].to_vec()));
     index += len_used;
@@ -525,12 +525,12 @@ impl Transaction {
     return Transaction { data, hash };
   }
 
-  pub fn lenbyte(&self) -> u8 {
-    return len_to_lenbyte(self.data.len());
+  pub fn len_byte(&self) -> u8 {
+    return ((self.data.len() - 1) / 5) as u8;
   }
 
-  pub fn lenbyte_to_len(lenbyte: u8) -> usize {
-    return lenbyte_to_len(lenbyte);
+  pub fn len_byte_to_len(len_byte: u8) -> usize {
+    return ((len_byte + 1) * 5) as usize;
   }
 
   pub fn to_statement(&self) -> Option<Statement> {
@@ -1143,13 +1143,17 @@ impl Node {
     for (transaction, score) in self.pool.iter() {
       let len_real = transaction.data.len(); // how many bytes the original transaction has
       if len_real == 0 { continue; }
-      let lenbyte = transaction.lenbyte(); // number we will store as the byte_len value
-      let len_used = Transaction::lenbyte_to_len(lenbyte); // how many bytes the transaction will then occupy
+      let len_byte = transaction.len_byte(); // number we will store as the byte_len value
+      let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
       if body_vec.len() + 1 + len_used > MAX_BODY_SIZE { break; }
       if tx_count + 1 > 255 { break; }
-      body_vec.push(lenbyte as u8);
+      body_vec.push(len_byte as u8);
       body_vec.extend_from_slice(&transaction.data);
       tx_count += 1;
+      //body_val[body_len] = len_byte as u8;
+      //body_len += 1;
+      //body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
+      //body_len += len_used;
     }
     body_vec[0] = tx_count as u8;
     return Body { data: body_vec };

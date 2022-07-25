@@ -221,14 +221,6 @@ pub fn deserialized_peer(bits: &BitVec) -> Option<Peer> {
 
 // A block
 
-pub fn len_to_lenbyte(len: usize) -> u8 {
-  return ((len - 1) / 5) as u8;
-}
-
-pub fn lenbyte_to_len(lenbyte: u8) -> usize {
-  return ((lenbyte + 1) * 5) as usize;
-}
-
 pub fn serialized_block_size(block: &Block) -> u128 {
   return 32 + 16 + 16 + 2 + block.body.data.len() as u128;
 }
@@ -237,7 +229,7 @@ pub fn serialize_block(block: &Block, bits: &mut BitVec) {
   serialize_fixlen(256, &block.prev, bits);
   serialize_fixlen(128, &u256(block.time), bits);
   serialize_fixlen(128, &u256(block.meta), bits);
-  serialize_fixlen(8, &u256(len_to_lenbyte(block.body.data.len()) as u128), bits);
+  serialize_fixlen(16, &u256(block.body.data.len() as u128), bits);
   serialize_bytes(block.body.data.len() as u128, &block.body.data, bits);
 }
 
@@ -245,8 +237,8 @@ pub fn deserialize_block(bits: &BitVec, index: &mut u128) -> Option<Block> {
   let prev = deserialize_fixlen(256, bits, index)?;
   let time = deserialize_fixlen(128, bits, index)?.low_u128();
   let meta = deserialize_fixlen(128, bits, index)?.low_u128();
-  let byte = deserialize_fixlen(8, bits, index)?.low_u128() as u8;
-  let data = deserialize_bytes(lenbyte_to_len(byte) as u128, bits, index)?;
+  let size = deserialize_fixlen(16, bits, index)?.low_u128();
+  let data = deserialize_bytes(size, bits, index)?;
   let body = Body { data };
   return Some(new_block(prev, time, meta, body));
 }
@@ -313,7 +305,7 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec) {
         panic!("Invalid transaction length.");
       } else {
         serialize_fixlen(4, &u256(2), bits);
-        serialize_fixlen(8, &u256(trans.lenbyte() as u128), bits);
+        serialize_fixlen(8, &u256(trans.len_byte() as u128), bits);
         serialize_bytes(trans.data.len() as u128, &trans.data, bits);
       }
     }
