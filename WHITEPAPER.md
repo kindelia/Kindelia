@@ -9,7 +9,7 @@ machine, to run formally verified apps natively, making it as secure as
 mathematically possible. It replaces expensive Merkle tree insertions by
 reversible heaps snapshots, greatly reducing the cost of SSTORE and SLOAD, which
 makes real-time apps economically viable. Unlike similar projects, it addresses
-political and economical centralization. Finally, is extremelly minimal: a full
+political and economical centralization. Finally, it is extremelly minimal: a full
 node requires drastically less lines of code than alternatives.
 
 Introduction
