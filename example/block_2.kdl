@@ -1,9 +1,6 @@
 // Deploys a simple Counter function
 // ---------------------------------
 
-ctr {Inc} // Inc: action that incs the counter
-ctr {Get} // Get: action that gets the counter
-
 fun (Counter action) {
 
   (Counter {Inc}) =
