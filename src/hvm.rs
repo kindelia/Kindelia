@@ -2875,7 +2875,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
               return None;
             } else {
               vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == VAR_NONE }); // add its location
-              cond.push(0); // it has no matching condition
+              cond.push(Var(0)); // it has no matching condition
             }
           }
           _ => {
@@ -3354,6 +3354,12 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                     let same_tag = get_tag(ask_arg(rt, term, i)) == CTR;
                     let same_ext = get_ext(ask_arg(rt, term, i)) == get_ext(cond);
                     matched = matched && same_tag && same_ext;
+                  }
+                  VAR => {
+                    if func.redux.contains(&i) {
+                      let not_var = get_tag(ask_arg(rt, term, i)) > VAR;
+                      matched = matched && not_var;
+                    }
                   }
                   _ => {}
                 }
