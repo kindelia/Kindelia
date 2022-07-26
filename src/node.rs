@@ -179,6 +179,7 @@ pub struct MinerCommunication {
 #[derive(Debug, Clone)]
 pub enum Message {
   NoticeTheseBlocks {
+    gossip: bool,
     blocks: Vec<Block>,
     peers: Vec<Peer>,
   },
@@ -1007,10 +1008,10 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(&mut self, addrs: Vec<Address>, blocks: Vec<Block>, share_peers: u128) {
+  pub fn send_blocks_to(&mut self, addrs: Vec<Address>, gossip: bool, blocks: Vec<Block>, share_peers: u128) {
     //println!("- sending block: {:?}", block);
     let peers = self.get_random_peers(share_peers);
-    let msg = Message::NoticeTheseBlocks { blocks, peers };
+    let msg = Message::NoticeTheseBlocks { gossip, blocks, peers };
     udp_send(&mut self.socket, addrs, &msg);
   }
 
@@ -1079,10 +1080,10 @@ impl Node {
             tsize += bsize;
             bhash = &block.prev;
           }
-          self.send_blocks_to(vec![addr], chunk, 0);
+          self.send_blocks_to(vec![addr], false, chunk, 0);
         }
-        // Someone sent us a block
-        Message::NoticeTheseBlocks { blocks, peers } => {
+        // Someone sent us some blocks
+        Message::NoticeTheseBlocks { gossip, blocks, peers } => {
           // TODO: validate if blocks are sorted by age?
 
           // Notice received peers
@@ -1095,9 +1096,9 @@ impl Node {
             self.add_block(block);
           }
 
-          // Requests the first missing ancestor of the oldest block received
-          if let Some(oldest_block) = blocks.last() {
-            self.request_missing_ancestor(addr, &oldest_block.hash);
+          // Requests missing ancestors
+          if *gossip && blocks.len() > 0 {
+            self.request_missing_ancestor(addr, &blocks[0].hash);
           }
         }
         // Someone sent us a transaction to mine
@@ -1126,13 +1127,13 @@ impl Node {
   fn broadcast_tip_block(&mut self) {
     let addrs  = self.peers.values().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
-    self.send_blocks_to(addrs, blocks, 3);
+    self.send_blocks_to(addrs, true, blocks, 3);
   }
 
   fn gossip_tip_block(&mut self, peer_count: u128) {
     let addrs  = self.get_random_peers(peer_count).iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
-    self.send_blocks_to(addrs, blocks, 3);
+    self.send_blocks_to(addrs, true, blocks, 3);
   }
 
   fn peers_timeout(&mut self) {

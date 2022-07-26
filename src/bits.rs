@@ -306,13 +306,10 @@ pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128, names: &mu
 
 pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names) {
   match message {
-    Message::NoticeTheseBlocks { blocks, peers } => {
-      // tag    : 4 bits
-      // blocks : 1 + (1 + 256 + 128 + 128 + 10240) * blocks bits
-      // peers  : (1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * peers) bits
-      // total  : (4 + 1 + (1 + 256 + 128 + 128 + 10240) * blocks + 1 + 1 + (1 + 1 + 8 + 8 + 8 + 8 + 16 + 48) * peers) bits
-      // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
+    // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
+    Message::NoticeTheseBlocks { gossip, blocks, peers } => {
       serialize_fixlen(4, &u256(0), bits, names);
+      serialize_fixlen(1, &u256(*gossip as u128), bits, names);
       serialize_list(serialize_block, &blocks, bits, names);
       serialize_list(serialize_peer, peers, bits, names);
     }
@@ -336,9 +333,10 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128, names: &mut Names) -
   let code = deserialize_fixlen(4, bits, index, names)?.low_u128();
   match code {
     0 => {
+      let gossip = deserialize_fixlen(1, bits, index, names)?.low_u128() != 0;
       let blocks = deserialize_list(deserialize_block, bits, index, names)?;
-      let peers = deserialize_list(deserialize_peer, bits, index, names)?;
-      Some(Message::NoticeTheseBlocks { blocks, peers })
+      let peers  = deserialize_list(deserialize_peer, bits, index, names)?;
+      Some(Message::NoticeTheseBlocks { gossip, blocks, peers })
     }
     1 => {
       let bhash = deserialize_hash(bits, index, names)?;
