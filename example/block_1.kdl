@@ -27,7 +27,10 @@ fun (Gen depth) {
     {Leaf #1}
   (Gen x) =
     dup x0 x1 = x;
-    {Branch (Gen (- x0 #1)) (Gen (- x1 #1))}
+    {Branch
+      (Gen (- x0 #1))
+      (Gen (- x1 #1))
+    }
 }
 
 // Sums a tree with 2^16 numbers

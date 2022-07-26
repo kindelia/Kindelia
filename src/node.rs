@@ -322,13 +322,15 @@ pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
   return None;
 }
 
-/// Sends an UDP message
-pub fn udp_send(socket: &mut UdpSocket, address: Address, message: &Message) {
-  match address {
-    Address::IPv4 { val0, val1, val2, val3, port } => {
-      let bits = bitvec_to_bytes(&serialized_message(message));
-      let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
-      socket.send_to(bits.as_slice(), addr).ok();
+/// Sends an UDP message to many addresses
+pub fn udp_send(socket: &mut UdpSocket, addresses: Vec<Address>, message: &Message) {
+  let bits = bitvec_to_bytes(&serialized_message(message));
+  for address in addresses {
+    match address {
+      Address::IPv4 { val0, val1, val2, val3, port } => {
+        let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
+        socket.send_to(bits.as_slice(), addr).ok();
+      }
     }
   }
 }
@@ -968,11 +970,11 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(&mut self, addr: Address, blocks: Vec<Block>, share_peers: u128) {
+  pub fn send_blocks_to(&mut self, addrs: Vec<Address>, blocks: Vec<Block>, share_peers: u128) {
     //println!("- sending block: {:?}", block);
     let peers = self.get_random_peers(share_peers);
     let msg = Message::NoticeTheseBlocks { blocks, peers };
-    udp_send(&mut self.socket, addr, &msg);
+    udp_send(&mut self.socket, addrs, &msg);
   }
 
   // Returns the block inclusion state
@@ -1016,7 +1018,7 @@ impl Node {
   // Requests the most recent missing ancestor
   pub fn request_missing_ancestor(&mut self, addr: Address, bhash: &U256) {
     if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
-      udp_send(&mut self.socket, addr, &Message::GiveMeThatBlock { bhash: missing_ancestor })
+      udp_send(&mut self.socket, vec![addr], &Message::GiveMeThatBlock { bhash: missing_ancestor })
     }
   }
 
@@ -1040,7 +1042,7 @@ impl Node {
             tsize += bsize;
             bhash = &block.prev;
           }
-          self.send_blocks_to(addr, chunk, 0);
+          self.send_blocks_to(vec![addr], chunk, 0);
         }
         // Someone sent us a block
         Message::NoticeTheseBlocks { blocks, peers } => {
@@ -1066,27 +1068,34 @@ impl Node {
           //println!("- Transaction added to pool:");
           //println!("-- {:?}", trans.data);
           //println!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
-          self.pool.push(trans.clone(), trans.hash.low_u64());
+          if self.pool.get(&trans).is_none() {
+            self.pool.push(trans.clone(), trans.hash.low_u64());
+            self.gossip(5, msg);
+          }
         }
       }
     }
   }
 
   pub fn gossip(&mut self, peer_count: u128, message: &Message) {
-    for peer in self.get_random_peers(peer_count) {
-      udp_send(&mut self.socket, peer.address, message);
-    }
+    let addrs = self.get_random_peers(peer_count).iter().map(|x| x.address).collect();
+    udp_send(&mut self.socket, addrs, message);
   }
 
   pub fn get_blocks_path(&self) -> PathBuf {
     self.path.join("state").join("blocks")
   }
 
+  fn broadcast_tip_block(&mut self) {
+    let addrs  = self.peers.values().map(|x| x.address).collect();
+    let blocks = vec![self.block[&self.tip].clone()];
+    self.send_blocks_to(addrs, blocks, 3);
+  }
+
   fn gossip_tip_block(&mut self, peer_count: u128) {
-    let random_peers = self.get_random_peers(peer_count);
-    for peer in random_peers {
-      self.send_blocks_to(peer.address, vec![self.block[&self.tip].clone()], 3);
-    }
+    let addrs  = self.get_random_peers(peer_count).iter().map(|x| x.address).collect();
+    let blocks = vec![self.block[&self.tip].clone()];
+    self.send_blocks_to(addrs, blocks, 3);
   }
 
   fn peers_timeout(&mut self) {
@@ -1133,6 +1142,7 @@ impl Node {
   fn add_mined_block(&mut self, miner_communication: &MinerCommunication) {
     if let MinerMessage::Answer { block } = miner_communication.read() {
       self.add_block(&block);
+      self.broadcast_tip_block();
     }
   }
 

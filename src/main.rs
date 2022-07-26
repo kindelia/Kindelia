@@ -59,31 +59,44 @@ pub enum CliCmd {
     #[clap(long)]
     mine: bool,
   },
-  /// Runs a Kindelia file
+  /// Runs a Kindelia (.kdl) file
   Run {
     /// Input file
     file: String,
-    // #[clap(short, long)]
-    // debug: bool,
   },
   /// Prints the address and subject of a secret key
   Subject {
     /// File containing the 256-bit secret key, as a hex string
-    skey_file: String,
+    skey: String,
   },
-  /// Signs the last statement in a file
+  /// Parses and prints all statements in a Kindelia (.kdl) file
+  Print {
+    /// File containing the statements to be printed
+    file: String,
+  },
+  /// Serializes all statements in a Kindelia (.kdl) file
+  Serialize {
+    /// File containing the statements to be serialized
+    file: String,
+  },
+  /// Deserializes a statement
+  Deserialize {
+    /// The statement to be deserialized, in hex
+    hex: String,
+  },
+  /// Signs a serialized statement
   Sign {
     /// File containing the 256-bit secret key, as a hex string
-    skey_file: String,
-    /// File containing the statement to be signed
-    term_file: String,
+    skey: String,
+    /// The statement to be signed, in hex
+    hex: String,
   },
-  /// Posts the last statement in a file to the network
+  /// Posts a statement to the network
   Post {
     /// IP of the node to submit it to
-    node_addr: String, // TODO: parse address on clap
-    /// File where the statement is
-    term_file: String,
+    addr: String, // TODO: parse address on clap
+    /// The statement to be posted, in hex
+    hex: String,
   },
 }
 
@@ -112,8 +125,11 @@ fn get_kindelia_path(dir_cli: Option<String>) -> Result<PathBuf, String> {
 
 fn run_cli() -> Result<(), String> {
   let arguments = Cli::parse();
-
   let kindelia_path = get_kindelia_path(arguments.path)?;
+  
+  fn get_statement(hex: &str) -> Option<Statement> {
+    return deserialized_statement(&bytes_to_bitvec(&hex::decode(hex).expect("hex string")));
+  }
 
   match arguments.command {
     // Starts the node process
@@ -136,65 +152,81 @@ fn run_cli() -> Result<(), String> {
       }
     }
 
-    // Signs a run statement
-    CliCmd::Sign { term_file, skey_file } => {
-      fn format_sign(sign: &crypto::Signature) -> String {
-        let hex = sign.to_hex();
-        let mut text = String::new();
-        for i in 0 .. 5 {
-          text.push_str(&hex[i * 26 .. (i+1) * 26]);
-          text.push_str("\n");
+    // Prints all statements in a file
+    CliCmd::Print { file } => {
+      if let Ok(code) = std::fs::read_to_string(file) {
+        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?.1;
+        for statement in statements {
+          println!("// {}", hex::encode(serialized_statement(&statement).to_bytes()));
+          println!("{}", view_statement(&statement));
+          println!("");
         }
-        return text;
+      } else {
+        println!("Couldn't load file.");
       }
-      if let (Ok(code), Ok(skey)) = (std::fs::read_to_string(term_file), std::fs::read_to_string(skey_file)) {
-        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
-        let statements = statements.1;
-        if let Some(last_statement) = &statements.last() {
+    }
+
+    // Serializes all statements in a file
+    CliCmd::Serialize { file } => {
+      if let Ok(code) = std::fs::read_to_string(file) {
+        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?.1;
+        for statement in statements {
+          println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
+        }
+      } else {
+        println!("Couldn't load file.");
+      }
+    }
+
+    // Deserializes a statement
+    CliCmd::Deserialize { hex } => {
+      if let Some(statement) = get_statement(&hex) {
+        println!("{}", view_statement(&statement));
+      }
+    }
+
+    // Signs a statement
+    CliCmd::Sign { hex, skey: skey_file } => {
+      if let Ok(skey) = std::fs::read_to_string(skey_file) {
+        if let Some(statement) = get_statement(&hex) {
           let skey = hex::decode(&skey[0..64]).expect("hex string");
           let user = crypto::Account::from_private_key(&skey);
-          let hash = hvm::hash_statement(&last_statement);
+          let hash = hvm::hash_statement(&statement);
           let sign = user.sign(&hash);
-          //println!("expr: {}", hvm::view_term(&expr));
-          //println!("hash: {}", hex::encode(&hvm::hash_term(&expr).0));
-          //println!("user: {}", hex::encode(sign.signer_address(&hash).unwrap().0));
-          //println!("user: {}", hex::encode(crypto::Signature::from_hex(&format!("{}",sign.to_hex())).unwrap().signer_address(&hash).unwrap().0));
-          println!("{}", format_sign(&sign));
+          let stat = set_sign(&statement, sign);
+          println!("{}", hex::encode(serialized_statement(&stat).to_bytes()));
           return Ok(());
+        } else {
+          println!("Hex provided isn't a serialized statement.");
         }
-        panic!("File must have at least one statement.");
       } else {
         println!("Couldn't load term and secret key files.");
       }
     }
 
-    // Signs a run statement
-    CliCmd::Post { term_file, node_addr } => {
-      if let Ok(code) = std::fs::read_to_string(term_file) {
-        let statements = hvm::read_statements(&code).map_err(|err| err.erro)?;
-        let statements = statements.1;
-        if let Some(last_statement) = &statements.last() {
-          let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(last_statement)));
-          let ms = Message::PleaseMineThisTransaction { trans: tx };
-          let ip = read_address(&node_addr);
-          let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
-          if let Some((mut socket, port)) = udp_init(&ports) {
-            udp_send(&mut socket, ip, &ms);
-            println!("Sent statement to {} via UDP:\n\n{}", node_addr, view_statement(last_statement));
-            return Ok(());
-          } else {
-            panic!("Couldn't open UDP socket on ports: {:?}.", ports);
-          }
+
+    // Posts a run statement
+    CliCmd::Post { hex, addr: node_addr } => {
+      if let Some(statement) = get_statement(&hex) {
+        let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
+        let ms = Message::PleaseMineThisTransaction { trans: tx };
+        let ip = read_address(&node_addr);
+        let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
+        if let Some((mut socket, port)) = udp_init(&ports) {
+          udp_send(&mut socket, vec![ip], &ms);
+          println!("Sent statement to {} via UDP:\n\n{}", node_addr, view_statement(&statement));
+          return Ok(());
+        } else {
+          panic!("Couldn't open UDP socket on ports: {:?}.", ports);
         }
-        panic!("File must have at least one statement.");
       } else {
-        println!("Couldn't load term and secret key files.");
+        println!("Hex provided isn't a serialized statement.");
       }
     }
 
     // Prints the subject
-    CliCmd::Subject { skey_file } => {
-      if let Ok(skey) = std::fs::read_to_string(skey_file) {
+    CliCmd::Subject { skey } => {
+      if let Ok(skey) = std::fs::read_to_string(skey) {
         let skey = hex::decode(&skey[0..64]).expect("hex string");
         let acc  = crypto::Account::from_private_key(&skey);
         println!("Ethereum Address: {}", acc.address.show());

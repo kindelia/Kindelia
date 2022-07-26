@@ -866,7 +866,7 @@ pub fn get_namespace(name: u128) -> Option<u128> {
 // ----------
 
 // Removes the signature from a statement
-fn remove_sign(statement: &Statement) -> Statement {
+pub fn remove_sign(statement: &Statement) -> Statement {
   match statement {
     Statement::Fun { name, args, func, init, sign } => {
       Statement::Fun {
@@ -895,6 +895,40 @@ fn remove_sign(statement: &Statement) -> Statement {
         name: *name,
         ownr: *ownr,
         sign: None,
+      }
+    }
+  }
+}
+
+pub fn set_sign(statement: &Statement, new_sign: crypto::Signature) -> Statement {
+  match statement {
+    Statement::Fun { name, args, func, init, sign } => {
+      Statement::Fun {
+        name: *name,
+        args: args.clone(),
+        func: func.clone(),
+        init: init.clone(),
+        sign: Some(new_sign),
+      }
+    }
+    Statement::Ctr { name, args, sign } => {
+      Statement::Ctr {
+        name: *name,
+        args: args.clone(),
+        sign: Some(new_sign),
+      }
+    }
+    Statement::Run { expr, sign } => {
+      Statement::Run {
+        expr: expr.clone(),
+        sign: Some(new_sign),
+      }
+    }
+    Statement::Reg { name, ownr, sign } => {
+      Statement::Reg {
+        name: *name,
+        ownr: *ownr,
+        sign: Some(new_sign),
       }
     }
   }
@@ -4416,7 +4450,7 @@ pub fn view_term(term: &Term) -> String {
             output.push(view_name(*nam1));
             output.push(" = ".to_string());
             stack.push(StackItem::Term(&*body));
-            stack.push(StackItem::Str(";".to_string()));
+            stack.push(StackItem::Str("; ".to_string()));
             stack.push(StackItem::Term(&*expr));
           }
           Term::Lam { name, body } => {
@@ -4505,28 +4539,38 @@ pub fn view_oper(oper: &u128) -> String {
 
 pub fn view_statement(statement: &Statement) -> String {
   fn view_sign(sign: &Option<crypto::Signature>) -> String {
+    fn format_sign(sign: &crypto::Signature) -> String {
+      let hex = sign.to_hex();
+      let mut text = String::new();
+      for i in 0 .. 5 {
+        text.push_str("  ");
+        text.push_str(&hex[i * 26 .. (i+1) * 26]);
+        text.push_str("\n");
+      }
+      return text;
+    }
     match sign {
       None       => String::new(),
-      Some(sign) => format!(" sign {{ {} }}", hex::encode(sign.0)),
+      Some(sign) => format!(" sign {{\n{}}}", format_sign(sign)),
     }
   }
   match statement {
     Statement::Fun { name, args, func, init, sign } => {
       let name = u128_to_name(*name);
-      let func = func.rules.iter().map(|x| format!("  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
-      let func = func.collect::<Vec<String>>().join("\n");
+      let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
+      let func = func.collect::<Vec<String>>().join("");
       let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
-      let init = format!(" with {{ {} }}", init);
+      let init = format!(" with {{\n  {}\n}}", init);
       let sign = view_sign(sign);
-      return format!("fun ({} {}) {{ {} }}{}{}", name, args, func, init, sign);
+      return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
     }
     Statement::Ctr { name, args, sign } => {
       // correct:
       let name = u128_to_name(*name);
-      let args = args.iter().map(|x| u128_to_name(*x)).collect::<Vec<String>>().join(" ");
+      let args = args.iter().map(|x| format!(" {}", u128_to_name(*x))).collect::<Vec<String>>().join("");
       let sign = view_sign(sign);
-      return format!("ctr {{{} {}}}{}", name, args, sign);
+      return format!("ctr {{{}{}}}{}", name, args, sign);
     }
     Statement::Run { expr, sign } => {
       let expr = view_term(expr);
