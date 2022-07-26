@@ -75,14 +75,14 @@ Evangelion: mainnet history
 
 ---
 
-### What this means?
+### What does it mean?
 
-Kindelia is made to last, without needing maintenance. That is by design, because getting
-rid of the privileged class of "core developers" or "owning foundation", which are inevitably
-in a position of power, is the only way to achieve truly decentralization. In that sense, the
-Kindelia Foundation aims to fulfill a supportive role, promoting the growth of the network and
-applications that live inside it, as well as research of the related technologies. Note that
-this does not mean the Kindelia Foundation will deliberately stop working on Kindelia. Quite
-the opposite: it, its founders and developers, are and will be forever fully committed to keeping
-the network healthy and functional, including myself (Taelin). All that this means is that, if
-all goes as planned, this role won't even be necessary.
+Kindelia was created to be maintenance-free, which, by design, happens when you try to get rid
+of the privileged class of "core developers" or "owner foundation" who are inevitably in a
+position of power, which is the only way to achieve true decentralization. With that in mind,
+the Kindelia Foundation aims to fulfill a supportive role, promoting the growth of the network
+and the applications that live inside the blockchain, while also researching related technologies.
+Note that this does not mean that the Kindelia Foundation will deliberately stop working on Kindelia.
+Quite the opposite: It, Its Founders and Developers, are and always will be fully committed to trying
+to keep this network healthy and functional, including myself (Taelin). What it means is that, if 
+all goes as planned, this role will never be needed.

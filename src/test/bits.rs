@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
   bits::{
     deserialize_fixlen, deserialize_list, deserialize_varlen, deserialized_statements,
@@ -26,11 +28,12 @@ pub fn test_serializer_0() {
   let mut bits = BitVec::new();
   let a = u256(123);
   let b = u256(777);
-  serialize_fixlen(10, &a, &mut bits);
-  serialize_fixlen(16, &b, &mut bits);
+  let mut names = HashMap::new();
+  serialize_fixlen(10, &a, &mut bits, &mut names);
+  serialize_fixlen(16, &b, &mut bits, &mut names);
   let mut index = 0;
-  let x0 = deserialize_fixlen(10, &bits, &mut index).unwrap();
-  let x1 = deserialize_fixlen(16, &bits, &mut index).unwrap();
+  let x0 = deserialize_fixlen(10, &bits, &mut index, &mut names).unwrap();
+  let x1 = deserialize_fixlen(16, &bits, &mut index, &mut names).unwrap();
   assert_eq!(a, x0);
   assert_eq!(b, x1);
 }
@@ -40,11 +43,12 @@ pub fn test_serializer_1() {
   let mut bits = BitVec::new();
   let a = u256(123);
   let b = u256(777);
-  serialize_varlen(&a, &mut bits);
-  serialize_varlen(&b, &mut bits);
+  let mut names = HashMap::new();
+  serialize_varlen(&a, &mut bits, &mut names);
+  serialize_varlen(&b, &mut bits, &mut names);
   let mut index = 0;
-  let x0 = deserialize_varlen(&bits, &mut index).unwrap();
-  let x1 = deserialize_varlen(&bits, &mut index).unwrap();
+  let x0 = deserialize_varlen(&bits, &mut index, &mut names).unwrap();
+  let x1 = deserialize_varlen(&bits, &mut index, &mut names).unwrap();
   assert_eq!(a, x0);
   assert_eq!(b, x1);
 }
@@ -55,11 +59,21 @@ pub fn test_serializer_2() {
   let a = u256(123);
   let b = u256(777);
   let c = u256(1000);
+  let mut g_names = HashMap::new();
   let vals = vec![a, b, c];
-  serialize_list(|x, bits| serialize_fixlen(10, x, bits), &vals, &mut bits);
-  println!("{:?}", bits);
+  serialize_list(
+    |x, bits, names| serialize_fixlen(10, x, bits, names),
+    &vals,
+    &mut bits,
+    &mut g_names,
+  );
   let mut index = 0;
-  let gots =
-    deserialize_list(|bits, ix| deserialize_fixlen(10, bits, ix), &bits, &mut index).unwrap();
+  let gots = deserialize_list(
+    |bits, ix, names| deserialize_fixlen(10, bits, ix, names),
+    &bits,
+    &mut index,
+    &mut g_names,
+  )
+  .unwrap();
   assert_eq!(vals, gots);
 }
