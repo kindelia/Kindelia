@@ -27,12 +27,12 @@ use crate::hvm::*;
 use crate::node::*;
 use crate::util::*;
 
-// Kindelia Foundation nodes
-const ENTRY_PEERS : [&str; 4] = [
-  "143.244.179.61:42000",
-  "164.92.214.78:42000",
-  "159.223.39.129:42000",
-  "159.65.148.6:42000",
+// Testnet nodes
+// TODO: move to config file
+const ENTRY_PEERS : [&str; 3] = [
+  "143.110.233.192",
+  "164.92.151.251",
+  "159.65.8.239",
 ];
 
 // Starts the node process
