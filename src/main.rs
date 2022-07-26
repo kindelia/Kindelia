@@ -27,6 +27,14 @@ use crate::hvm::*;
 use crate::node::*;
 use crate::util::*;
 
+// Kindelia Foundation nodes
+const ENTRY_PEERS : [&str; 4] = [
+  "143.244.179.61:42000",
+  "164.92.214.78:42000",
+  "159.223.39.129:42000",
+  "159.65.148.6:42000",
+];
+
 // Starts the node process
 fn main() -> Result<(), String> {
   return run_cli();
@@ -69,7 +77,7 @@ pub enum CliCmd {
     /// File containing the 256-bit secret key, as a hex string
     skey: String,
   },
-  /// Parses and prints all statements in a Kindelia (.kdl) file
+  /// Prints all statements in a Kindelia (.kdl) file
   Print {
     /// File containing the statements to be printed
     file: String,
@@ -91,12 +99,12 @@ pub enum CliCmd {
     /// The statement to be signed, in hex
     hex: String,
   },
-  /// Posts a statement to the network
+  /// Posts a serialized statement to the network
   Post {
-    /// IP of the node to submit it to
-    addr: String, // TODO: parse address on clap
     /// The statement to be posted, in hex
     hex: String,
+    /// IP of the node to submit it to
+    addr: Option<String>,
   },
 }
 
@@ -209,11 +217,15 @@ fn run_cli() -> Result<(), String> {
       if let Some(statement) = get_statement(&hex) {
         let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
         let ms = Message::PleaseMineThisTransaction { trans: tx };
-        let ip = read_address(&node_addr);
         let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
         if let Some((mut socket, port)) = udp_init(&ports) {
-          udp_send(&mut socket, vec![ip], &ms);
-          println!("Sent statement to {} via UDP:\n\n{}", node_addr, view_statement(&statement));
+          let addrs = if let Some(node_addr) = node_addr {
+            vec![read_address(&node_addr)]
+          } else {
+            ENTRY_PEERS.iter().map(|x| read_address(x)).collect()
+          };
+          udp_send(&mut socket, addrs, &ms);
+          println!("Published statement:\n\n{}", view_statement(&statement));
           return Ok(());
         } else {
           panic!("Couldn't open UDP socket on ports: {:?}.", ports);
@@ -240,13 +252,7 @@ fn run_cli() -> Result<(), String> {
 
 fn start_node(kindelia_path: PathBuf, testnet: bool, mine: bool) {
   // TODO: move out to config file
-  let testnet_peers: Vec<Address> = vec![
-    "143.244.179.61:42000",
-    "164.92.214.78:42000",
-    "159.223.39.129:42000",
-    "159.65.148.6:42000",
-  ].into_iter().map(node::read_address).collect();
-
+  let testnet_peers: Vec<Address> = ENTRY_PEERS.into_iter().map(node::read_address).collect();
   let init_peers = if testnet { Some(testnet_peers) } else { None };
 
   // Reads the file contents
