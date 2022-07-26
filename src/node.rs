@@ -29,19 +29,10 @@ use crate::hvm::{self,*};
 // Kindelia's block format is agnostic to HVM. A Transaction is just a vector of bytes. A Body
 // groups transactions in a single combined vector of bytes, using the following format:
 //
-//   body ::= TX_COUNT | LEN_BYTE(tx_0) | tx_0 | LEN_BYTE(tx_1) | tx_1 | ...
+//   body ::= TX_COUNT | LEN(tx_0) | tx_0 | LEN(tx_1) | tx_1 | ...
 //
 // TX_COUNT is a single byte storing the number of transactions in this block. The length of each
-// transaction is stored using 1 byte, called LEN_BYTE. The actual number of bytes occupied by the
-// transaction is recovered through the following formula:
-//
-//   size(tx) = LEN_BYTE(tx) * 5 + 1
-//
-// For example, LEN_BYTE(tx) is 3, then it occupies 16 bytes on body (excluding the LEN_BYTE). In
-// other words, this means that transactions are stored in multiples of 40 bits, so, for example,
-// if a transaction has 42 bits, it actually uses 88 bits of the Body: 8 bits for the length and 80
-// bits for the value, of which 38 are not used. The max transaction size is 1280 bytes, and the
-// max number of transactions a block could fit is 256 (but slightly less due to lengths).
+// transaction is stored using 2 bytes, called LEN.
 
 // A u64 HashMap / HashSet
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
@@ -477,6 +468,17 @@ pub fn code_to_body(code: &str) -> Body {
   return body;
 }
 
+// Encodes a transaction length as a pair of 2 bytes
+fn encode_length(len: usize) -> (u8, u8) {
+  let num = (len as u16).reverse_bits();
+  (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
+}
+
+// Decodes an encoded transaction length
+fn decode_length(pair: (u8,u8)) -> usize {
+  (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
+}
+
 // Converts a body to a vector of transactions.
 pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
@@ -484,12 +486,11 @@ pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let tx_count = body.data[0];
   for i in 0 .. tx_count {
     if index >= body.data.len() { break; }
-    let len_byte = body.data[index];
-    index += 1;
-    let len_used = Transaction::len_byte_to_len(len_byte);
-    if index + len_used > body.data.len() { break; }
-    transactions.push(Transaction::new(body.data[index .. index + len_used].to_vec()));
-    index += len_used;
+    let tx_len = decode_length((body.data[index], body.data[index + 1]));
+    index += 2;
+    if index + tx_len > body.data.len() { break; }
+    transactions.push(Transaction::new(body.data[index .. index + tx_len].to_vec()));
+    index += tx_len;
   }
   return transactions;
 }
@@ -535,12 +536,8 @@ impl Transaction {
     return Transaction { data, hash };
   }
 
-  pub fn len_byte(&self) -> u8 {
-    return ((self.data.len() - 1) / 5) as u8;
-  }
-
-  pub fn len_byte_to_len(len_byte: u8) -> usize {
-    return ((len_byte + 1) * 5) as usize;
+  pub fn encode_length(&self) -> (u8, u8) {
+    return encode_length(self.data.len());
   }
 
   pub fn to_statement(&self) -> Option<Statement> {
@@ -1187,23 +1184,20 @@ impl Node {
   }
 
   // Builds the body to be mined.
+  // To convert back to a vector of transactions, use `extract_transactions()`.
   pub fn build_body(&self) -> Body {
     let mut body_vec = vec![0]; 
     let mut tx_count = 0;
     for (transaction, score) in self.pool.iter() {
-      let len_real = transaction.data.len(); // how many bytes the original transaction has
-      if len_real == 0 { continue; }
-      let len_byte = transaction.len_byte(); // number we will store as the byte_len value
-      let len_used = Transaction::len_byte_to_len(len_byte); // how many bytes the transaction will then occupy
-      if body_vec.len() + 1 + len_used > MAX_BODY_SIZE { break; }
+      let tx_len = transaction.data.len();
+      if tx_len == 0 { continue; }
+      let len_info = transaction.encode_length(); // number we will store as the length
+      if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE { break; }
       if tx_count + 1 > 255 { break; }
-      body_vec.push(len_byte as u8);
+      body_vec.push(len_info.0);
+      body_vec.push(len_info.1);
       body_vec.extend_from_slice(&transaction.data);
       tx_count += 1;
-      //body_val[body_len] = len_byte as u8;
-      //body_len += 1;
-      //body_val[body_len .. body_len + len_real].copy_from_slice(&transaction.data);
-      //body_len += len_used;
     }
     body_vec[0] = tx_count as u8;
     return Body { data: body_vec };

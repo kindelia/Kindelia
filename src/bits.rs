@@ -325,7 +325,7 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names
         panic!("Invalid transaction length.");
       } else {
         serialize_fixlen(4, &u256(2), bits, names);
-        serialize_fixlen(8, &u256(trans.len_byte() as u128), bits, names);
+        serialize_fixlen(16, &u256(trans.data.len() as u128), bits, names);
         serialize_bytes(trans.data.len() as u128, &trans.data, bits, names);
       }
     }
@@ -345,7 +345,7 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128, names: &mut Names) -
       Some(Message::GiveMeThatBlock { bhash })
     }
     2 => {
-      let size = (deserialize_fixlen(8, bits, index, names)?.low_u128() + 1) * 5;
+      let size = (deserialize_fixlen(16, bits, index, names)?.low_u128() + 1) * 5;
       let data = deserialize_bytes(size, bits, index, names)?;
       Some(Message::PleaseMineThisTransaction { trans: Transaction::new(data) })
     }
