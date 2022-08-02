@@ -105,8 +105,8 @@ pub struct Node {
 // =====
 
 pub struct PeersStore {
-  pub seen: HashMap<Address, Peer>,
-  pub active: HashMap<Address, Peer>,
+  seen: HashMap<Address, Peer>,
+  active: HashMap<Address, Peer>,
 }
 
 impl PeersStore {
@@ -1166,7 +1166,7 @@ impl Node {
   }
 
   fn broadcast_tip_block(&mut self) {
-    let addrs  = self.peers.active.values().map(|x| x.address).collect();
+    let addrs  = self.peers.get_all_active().iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
     self.send_blocks_to(addrs, true, blocks, 3);
   }
@@ -1260,7 +1260,7 @@ impl Node {
     debug_assert!(size_avail >= 0);
     debug_assert!(mana_avail >= 0);
 
-    let peers_num = self.peers.active.len();
+    let peers_num = self.peers.get_all_active().len();
 
     let log = object!{
       event: "heartbeat",
@@ -1297,7 +1297,7 @@ impl Node {
 
     print_with_timestamp!("Port: {}", self.port);
     print_with_timestamp!("Initial peers: ");
-    for peer in self.peers.active.values() {
+    for peer in self.peers.get_all_active() {
       print_with_timestamp!("- {}", peer.address);
     }
 
