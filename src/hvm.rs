@@ -4100,6 +4100,12 @@ pub fn read_name(code: &str) -> ParseResult<u128> {
         erro: format!("Expected identifier, found `{}`.", head(code))
       });
     }
+    if name == "ask" {
+      return Err(ParseErr {
+        code: code.to_string(),
+        erro: format!("Use of the keyword ask as a name for a term in `{}`.", code)
+      });
+    }
     // TODO: check identifier size and propagate error
     if name.len() > 20 {
       return Err(ParseErr {
@@ -4286,25 +4292,34 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       // (y @x z)
       } else if let ('a','s','k',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = skip(drop(code,3));
-        if nth(code,0) == '(' {
-          let (code, expr) = read_term(code)?;
-          let (code, unit) = read_char(code, ';')?;
-          let (code, body) = read_term(code)?;
-          return Ok((code, Term::App {
-            func: Box::new(expr),
-            argm: Box::new(Term::Lam { name: VAR_NONE, body: Box::new(body) }),
-          }));
-        } else {
-          let (code, name) = read_name(code)?;
-          let (code, unit) = read_char(code, '=')?;
-          let (code, expr) = read_term(code)?;
-          let (code, unit) = read_char(code, ';')?;
-          let (code, body) = read_term(code)?;
-          return Ok((code, Term::App {
-            func: Box::new(expr),
-            argm: Box::new(Term::Lam { name, body: Box::new(body) }),
-          }));
+        fn parse_ask(code: &str) -> ParseResult<Term> {
+          if nth(code,0) == '(' {
+            let (code, expr) = read_term(code)?;
+            let (code, unit) = read_char(code, ';')?;
+            let (code, body) = read_term(code)?;
+            return Ok((code, Term::App {
+              func: Box::new(expr),
+              argm: Box::new(Term::Lam { name: VAR_NONE, body: Box::new(body) }),
+            }));
+          } else {
+            let (code, name) = read_name(code)?;
+            let (code, unit) = read_char(code, '=')?;
+            let (code, expr) = read_term(code)?;
+            let (code, unit) = read_char(code, ';')?;
+            let (code, body) = read_term(code)?;
+            return Ok((code, Term::App {
+              func: Box::new(expr),
+              argm: Box::new(Term::Lam { name, body: Box::new(body) }),
+            }));
+          }
         }
+        return parse_ask(code).map_err(|err| 
+          ParseErr { code: err.code, erro: 
+            format!(
+              "{}\n\nThis error may have happened due 
+              \rto the use of the keyword 'ask' 
+              \ras a name for a term.", err.erro)}
+        );
       } else {
         let (code, name) = read_name(code)?;
         return Ok((code, Term::Var { name }));
