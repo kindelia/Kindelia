@@ -153,6 +153,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     }
   });
 
+
   // == Blocks ==
 
   let query_tx = node_query_sender.clone();
@@ -280,7 +281,21 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     },
   );
 
-  let interact_router = interact_test.or(interact_send);
+  let query_tx = node_query_sender.clone();
+  let interact_run = path!("run" / String).and_then(move |hex: String| {
+    let query_tx = query_tx.clone();
+    async move {
+      let result = ask(query_tx, |tx| {
+        NodeRequest::Run { hex: hex.clone(), tx }
+      }).await;
+      match result {
+        Ok(res) => Ok(ok_json(format!("Result: {:?}", res))),
+        Err(_err) => Err(reject::custom(InvalidParameter::from("Failed to execute statement".to_string()))), // TODO: create specific error
+      }
+    }
+  });
+
+  let interact_router = interact_test.or(interact_send).or(interact_run);
 
   // ==
 

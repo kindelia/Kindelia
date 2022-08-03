@@ -220,13 +220,19 @@ pub enum Request {
     name: u128,
     tx: RequestAnswer<Option<Term>>,
   },
+  /// deprecated
   TestCode {
     code: String,
     tx: RequestAnswer<Vec<StatementResult>>,
   },
+  /// deprecated
   PostCode {
     code: String,
     tx: RequestAnswer<Result<(), String>>,
+  },
+  Run {
+    hex: String,
+    tx: RequestAnswer<StatementResult>,
   },
 }
 
@@ -1027,10 +1033,7 @@ impl Node {
           Ok(statements) => {
             statements
               .iter()
-              .map(
-                |s| 
-                  Transaction::new(bitvec_to_bytes(&serialized_statement(s)))
-              )
+              .map(|s| Transaction::new(bitvec_to_bytes(&serialized_statement(s))))
               .into_iter()
               .for_each(|t| {
                 let hash = t.hash.low_u64();
@@ -1041,7 +1044,17 @@ impl Node {
         };
       
         answer.send(res).unwrap();
-      }
+      },
+      Request::Run { hex, tx: answer } => {
+        if let Ok(bytes) = hex::decode(hex) {
+          if let Some(statement) = deserialized_statement(&bytes_to_bitvec(&bytes)) {
+            let result = self.runtime.test_statements(&[statement])[0].clone();
+            answer.send(result).unwrap();
+            return;
+          }
+        }
+        answer.send(Err(StatementErr { err: "Invalid hex statement on Run request.".to_string() })).unwrap();
+      },
     }
   }
 
