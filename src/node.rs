@@ -1198,7 +1198,7 @@ impl Node {
       file_paths.push(entry.unwrap().path());
     }
     file_paths.sort();
-    // print_with_timestamp!("Loading {} blocks from disk...", file_paths.len());
+    eprintln!("Loading {} blocks from disk...", file_paths.len());
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
       let block = deserialized_block(&bytes_to_bitvec(&buffer)).unwrap();
