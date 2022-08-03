@@ -24,6 +24,8 @@ pub fn name() -> impl Strategy<Value = u128> {
   // that start with a number anymore
   "[a-z][a-zA-Z0-9_]{1,19}"
     .prop_filter("Differente than 'ask'", |s| s != "ask")
+    .prop_filter("Differente than 'let'", |s| s != "let")
+    .prop_filter("Differente than 'dup'", |s| s != "dup")
     .prop_map(|s| name_to_u128(&s))
 }
 
