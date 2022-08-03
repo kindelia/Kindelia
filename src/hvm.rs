@@ -4100,10 +4100,10 @@ pub fn read_name(code: &str) -> ParseResult<u128> {
         erro: format!("Expected identifier, found `{}`.", head(code))
       });
     }
-    if name == "ask" {
+    if name == "ask" || name == "dup" || name == "let" {
       return Err(ParseErr {
         code: code.to_string(),
-        erro: format!("Use of the keyword ask as a name for a term in `{}`.", code)
+        erro: format!("Use of the keyword {} as a name for a term in `{}`.", name, code)
       });
     }
     // TODO: check identifier size and propagate error
