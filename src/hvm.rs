@@ -4010,8 +4010,8 @@ fn nth(code: &str, index: u128) -> char {
 fn skip(code: &str) -> &str {
   let mut code = code;
   loop {
-    if head(code) == ' ' || head(code) == '\n' {
-      while head(code) == ' ' || head(code) == '\n' {
+    if " \n\r\t".contains(head(code)) {
+      while " \n\r\t".contains(head(code)) {
         code = tail(code);
       }
       continue;
