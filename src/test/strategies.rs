@@ -22,7 +22,9 @@ pub fn name() -> impl Strategy<Value = u128> {
   // TODO: temporary fix to new limitation due
   // to the fact that is not possible make a name
   // that start with a number anymore
-  "[a-z][a-zA-Z0-9_]{1,19}".prop_map(|s| name_to_u128(&s))
+  "[a-z][a-zA-Z0-9_]{1,19}"
+    .prop_filter("Differente than 'ask'", |s| s != "ask")
+    .prop_map(|s| name_to_u128(&s))
 }
 
 pub fn fun_name() -> impl Strategy<Value = u128> {

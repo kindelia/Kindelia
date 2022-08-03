@@ -114,6 +114,24 @@ fn one_hundred_snapshots(temp_dir: TempDir) {
   }
 }
 
+#[test]
+#[should_panic]
+fn parse_ask_fail1() {
+  read_statements(ASK_FAIL_1).unwrap();
+}
+
+#[test]
+#[should_panic]
+fn parse_ask_fail2() {
+  read_statements(ASK_FAIL_2).unwrap();
+}
+
+#[test]
+#[should_panic]
+fn parse_ask_fail3() {
+  read_statements(ASK_FAIL_3).unwrap();
+}
+
 proptest! {
   #[test]
   fn name_conversion(name in name()) {
@@ -208,4 +226,30 @@ pub const COUNTER_STACKOVERFLOW: &'static str = "
   run {
     (Done (ToSucc #8000))
   }
+";
+
+pub const ASK_FAIL_1: &'static str = "
+fun (Test c) {
+  (Test {Aa ask aa}) = dup x y = #2; (+ x y)
+} with {
+  (S84_dKIY_)
+} sign {
+  a0389bb267d0cebd9190b74c65
+  33acf1c57b4cdb5166f202edfd
+  d52f06c3f4e560d01e3ced971a
+  54f3b3b47133daa1befe226a77
+  48afa13c8b2d3182382ee2fde8
+}
+";
+
+pub const ASK_FAIL_2: &'static str = "
+fun (Test) {
+  (Test) = dup ask y = #2; (+ ask y)
+}
+";
+
+pub const ASK_FAIL_3: &'static str = "
+fun (Test ask) {
+  (Test ask) = dup x y = ask; (+ x y)
+}
 ";
