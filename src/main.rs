@@ -4,6 +4,8 @@
 #![allow(unused_variables)]
 #![allow(clippy::style)]
 
+// TODO: `clean` CLI command
+
 mod api;
 mod bits;
 mod crypto;
