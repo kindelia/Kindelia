@@ -1290,15 +1290,15 @@ impl Node {
       }
     };
 
-    // print_with_timestamp!("{}", log);
+    println!("{}", log);
   }
 
   pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication, mine: bool) -> ! {
 
-    print_with_timestamp!("Port: {}", self.port);
-    print_with_timestamp!("Initial peers: ");
+    eprintln!("Port: {}", self.port);
+    eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {
-      print_with_timestamp!("- {}", peer.address);
+      eprintln!("- {}", peer.address);
     }
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
