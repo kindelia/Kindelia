@@ -63,23 +63,12 @@ where
 // HVM
 // ===
 
+// Maybe this is redundant. Should study the cost of Option on original function.
 pub fn name_to_u128_safe(name: &str) -> Option<u128> {
-  let mut num: u128 = 0;
-  for (i, chr) in name.chars().enumerate() {
-    debug_assert!(i < 20, "Name too big: `{}`.", name);
-    num = (num << 6) + char_to_u128_safe(chr)?;
-  }
-  Some(num)
-}
-
-pub const fn char_to_u128_safe(chr: char) -> Option<u128> {
-  match chr {
-    '.' => Some(0),
-    '0'..='9' => Some(1 + chr as u128 - '0' as u128),
-    'A'..='Z' => Some(11 + chr as u128 - 'A' as u128),
-    'a'..='z' => Some(37 + chr as u128 - 'a' as u128),
-    '_' => Some(63),
-    _ => None,
+  if name.len() > 20 {
+    None
+  } else {
+    Some(hvm::name_to_u128(name))
   }
 }
 
@@ -87,8 +76,8 @@ fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
   names.iter().copied().map(hvm::u128_to_name).collect::<Vec<_>>()
 }
 
-// Erros
-// =====
+// Errors
+// ======
 
 #[derive(Debug)]
 struct InvalidParameter {
@@ -120,7 +109,7 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
   }
 }
 
-pub fn api_loop(node_query_sender: SyncSender<NodeRequest>) {
+pub fn http_api_loop(node_query_sender: SyncSender<NodeRequest>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
@@ -404,7 +393,7 @@ mod ser {
       s.serialize_field("time", &self.time.to_string())?;
       s.serialize_field("meta", &self.meta.to_string())?; // ?? hex?
       s.serialize_field("prev", &u256_to_hex(&self.prev))?;
-      s.serialize_field("body", &body_bytes)?;
+      s.serialize_field("body", &body_bytes)?; // TODO: list of statements (hex)
       s.end()
     }
   }

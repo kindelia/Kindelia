@@ -23,7 +23,7 @@ use std::thread;
 
 pub use clap::{Parser, Subcommand};
 
-use crate::api::api_loop;
+use crate::api::http::http_api_loop;
 use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;
@@ -303,7 +303,7 @@ fn start_node(kindelia_path: PathBuf, testnet: bool, mine: bool) {
 
   // Spawns the API thread
   let api_thread = thread::spawn(move || {
-    api_loop(node_query_sender);
+    http_api_loop(node_query_sender);
   });
   threads.push(api_thread);
 

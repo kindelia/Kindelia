@@ -328,7 +328,7 @@ pub const TIME_PER_BLOCK : u128 = 3000;
 
 // Don't accept blocks from N milliseconds in the future
 pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
-  
+
 // Readjust difficulty every N blocks
 pub const BLOCKS_PER_PERIOD : u128 = 20;
 
