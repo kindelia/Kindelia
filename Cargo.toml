@@ -2,6 +2,9 @@
 name = "kindelia"
 version = "0.1.1"
 edition = "2021"
+description = "An efficient, secure cryptocomputer."
+license = "MIT"
+repository = "https://github.com/Kindelia/Kindelia"
 
 [profile.dev_fast]
 inherits = "dev"
