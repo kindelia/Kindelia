@@ -95,8 +95,7 @@ network state.
     | - Statement_N |         | - Statement_N |         | - Statement_N |
     '---------------'         '---------------'         '---------------'
 
-Kindelia nodes use Proof-of-Work consensus to order blocks canonically.
-Proof-of-State isn't intended, nor possible, since there is no native currency
+Kindelia nodes use Proof-of-Work consensus to order blocks canonically. Proof-of-Stake isn't intended, nor possible, since there is no native currency
 to stake. Blocks merely group statements, of which there are 4 kinds:
 
 - **CTR**: declares a new constructor
