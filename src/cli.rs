@@ -432,7 +432,7 @@ fn get_value_stdin<T: ConvertFrom<String>>(file: Option<String>) -> T {
     if let Ok(_) = std::io::stdin().read_line(&mut input) {
       T::convert(input.trim().to_string())
     } else {
-      panic!("Could not read from stdin");
+      panic!("Could not read file path or stdin");
     }
   }
 }
