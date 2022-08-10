@@ -17,6 +17,7 @@ mod crypto;
 mod hvm;
 mod node;
 mod util;
+mod cli;
 mod NoHashHasher;
 
 use std::path::PathBuf;
@@ -55,10 +56,10 @@ fn main() -> Result<(), String> {
     //println!("{:?}", encode_length(i as usize));
     //println!("{} == {}", i, decode_length(encode_length(i as usize)));
   //}
-  return run_cli();
+  cli::parse();
   //start_node(dirs::home_dir().unwrap().join(".kindelia"), false);
   //hvm::test_statements_from_file("./example/block_1.kdl");
-  //return Ok(());
+  return Ok(());
 }
 
 /// Environment variable where Kindelia path should be passed.
