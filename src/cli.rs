@@ -437,7 +437,7 @@ fn get_value_stdin<T: ConvertFrom<String>>(file: Option<String>) -> T {
   }
 }
 
-fn get_value_config<'a, T: ConvertFrom<String> + serde::Deserialize<'a> + Clone>(
+fn get_value_config<'a, T: ConvertFrom<String> + serde::Deserialize<'a>>(
   value: Option<T>,
   env_options: Option<&str>,
   config_options: ConfigOptions<'a>,
