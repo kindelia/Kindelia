@@ -6,6 +6,7 @@
     "kindelia",
     "oneshot",
     "readback",
+    "repr"
   ],
   "cSpell.ignoreWords": [
     "bitvec",

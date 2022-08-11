@@ -1,12 +1,11 @@
 use bit_vec::BitVec;
-use im::HashSet;
 use json::object;
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
 use sha3::Digest;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::*;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -19,9 +18,11 @@ use tokio::sync::oneshot;
 use std::hash::{BuildHasherDefault};
 use crate::{NoHashHasher as NHH, print_with_timestamp};
 
+use crate::api;
+use crate::api::{NodeRequest, BlockInfo, FuncInfo, BlockRepr};
 use crate::util::*;
 use crate::bits::*;
-use crate::hvm::{self,*};
+use crate::hvm::{self, *};
 
 // Types
 // -----
@@ -36,7 +37,7 @@ use crate::hvm::{self,*};
 
 // A u64 HashMap / HashSet
 pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
-pub type Set    = HashSet<u64, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
+pub type Set    = im::HashSet<u64, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -98,7 +99,7 @@ pub struct Node {
   pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
   pub peers      : PeersStore,                       // peers store and state control
   pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<Request>,                // Receives an API request
+  pub receiver   : Receiver<NodeRequest>,                // Receives an API request
 }
 
 // Peers
@@ -174,66 +175,6 @@ impl PeersStore {
     // print_with_timestamp!("- get random peers {:?}", peers.iter().map(|p| p.address).collect::<Vec<_>>());
     peers
   }
-}
-
-// API
-// ===
-
-#[derive(Debug)]
-pub struct BlockInfo {
-  pub block: Block,
-  pub hash: U256,
-  pub height: u64,
-  pub content: Vec<hvm::Statement>,
-  pub results: Option<Vec<hvm::StatementResult>>,
-}
-
-#[derive(Debug)]
-pub struct FuncInfo {
-  pub func: Func,
-}
-
-type RequestAnswer<T> = oneshot::Sender<T>;
-
-// TODO: store and serve tick where stuff where last changed
-// TODO: interaction API
-pub enum Request {
-  GetTick {
-    tx: RequestAnswer<u128>,
-  },
-  GetBlock {
-    hash: U256,
-    tx: RequestAnswer<Option<BlockInfo>>,
-  },
-  GetBlocks {
-    range: (i64, i64),
-    tx: RequestAnswer<Vec<BlockInfo>>,
-  },
-  GetFunctions {
-    tx: RequestAnswer<HashSet<u128>>,
-  },
-  GetFunction {
-    name: u128,
-    tx: RequestAnswer<Option<FuncInfo>>,
-  },
-  GetState {
-    name: u128,
-    tx: RequestAnswer<Option<Term>>,
-  },
-  /// deprecated
-  TestCode {
-    code: String,
-    tx: RequestAnswer<Vec<StatementResult>>,
-  },
-  /// deprecated
-  PostCode {
-    code: String,
-    tx: RequestAnswer<Result<(), String>>,
-  },
-  Run {
-    hex: String,
-    tx: RequestAnswer<StatementResult>,
-  },
 }
 
 #[derive(Debug, Clone)]
@@ -697,7 +638,7 @@ impl Node {
   pub fn new(
     kindelia_path: PathBuf,
     init_peers: &Option<Vec<Address>>,
-  ) -> (SyncSender<Request>, Self) {
+  ) -> (SyncSender<NodeRequest>, Self) {
     let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
     let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -954,6 +895,7 @@ impl Node {
   }
 
   pub fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
+    // TODO: cache
     let block = self.block.get(hash)?;
     let height = self.height.get(hash).expect("Missing block height.");
     let height: u64 = (*height).try_into().expect("Block height is too big.");
@@ -961,7 +903,7 @@ impl Node {
     let transactions = extract_transactions(&block.body);
     let content = transactions.iter().filter_map(Transaction::to_statement).collect();
     let info = BlockInfo {
-      block: block.clone(),
+      block: block.into(),
       hash: *hash,
       height,
       content,
@@ -976,13 +918,15 @@ impl Node {
     Some(FuncInfo { func })
   }
 
-  pub fn handle_request(&mut self, request: Request) {
+  pub fn handle_request(&mut self, request: NodeRequest) {
     // TODO: handle unwraps
     match request {
-      Request::GetTick { tx: answer } => {
-        answer.send(self.runtime.get_tick()).unwrap();
+      NodeRequest::GetStats { tx: answer } => {
+        let tick = self.runtime.get_tick();
+        let stats = api::Stats { tick };
+        answer.send(stats).unwrap();
       }
-      Request::GetBlocks { range, tx: answer } => {
+      NodeRequest::GetBlocks { range, tx: answer } => {
         let (start, end) = range;
         debug_assert!(start <= end);
         debug_assert!(end == -1);
@@ -994,12 +938,12 @@ impl Node {
           ).collect();
         answer.send(infos).unwrap();
       },
-      Request::GetBlock { hash, tx: answer } => {
+      NodeRequest::GetBlock { hash, tx: answer } => {
         // TODO: actual indexing
         let info = self.get_block_info(&hash);
         answer.send(info).unwrap();
       },
-      Request::GetFunctions { tx } => {
+      NodeRequest::GetFunctions { tx } => {
         let mut funcs: HashSet<u128> = HashSet::new();
         self.runtime.reduce_with(&mut funcs, |acc, heap| {
           for func in heap.disk.links.keys() {
@@ -1008,19 +952,19 @@ impl Node {
         });
         tx.send(funcs).unwrap();
       },
-      Request::GetFunction { name, tx: answer } =>  {
+      NodeRequest::GetFunction { name, tx: answer } =>  {
         let info = self.get_func_info(name);
         answer.send(info).unwrap();
       },
-      Request::GetState { name, tx: answer } => {
+      NodeRequest::GetState { name, tx: answer } => {
         let state = self.runtime.read_disk_as_term(name);
         answer.send(state).unwrap();
       },
-      Request::TestCode { code, tx: answer } => {
+      NodeRequest::TestCode { code, tx: answer } => {
         let result = self.runtime.test_statements_from_code(&code);
         answer.send(result).unwrap();
       },
-      Request::PostCode { code, tx: answer } => {
+      NodeRequest::PostCode { code, tx: answer } => {
         let statements = 
           hvm::read_statements(&code)
             .map_err(|err| err.erro)
@@ -1045,7 +989,7 @@ impl Node {
       
         answer.send(res).unwrap();
       },
-      Request::Run { hex, tx: answer } => {
+      NodeRequest::Run { hex, tx: answer } => {
         if let Ok(bytes) = hex::decode(hex) {
           if let Some(statement) = deserialized_statement(&bytes_to_bitvec(&bytes)) {
             let result = self.runtime.test_statements(&[statement])[0].clone();
