@@ -6,6 +6,11 @@
 
 // TODO: `clean` CLI command
 
+#[cfg(test)]
+mod test;
+#[cfg(test)]
+use rstest_reuse;
+
 mod api;
 mod bits;
 mod crypto;
@@ -13,9 +18,6 @@ mod hvm;
 mod node;
 mod util;
 mod NoHashHasher;
-
-#[cfg(test)]
-mod test;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
