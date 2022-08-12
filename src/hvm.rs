@@ -2092,7 +2092,7 @@ impl Runtime {
           if val != none {
             return val;
           }
-          back = &*tail;
+          back = tail;
         }
         Rollback::Nil => {
           return zero;
@@ -2120,7 +2120,7 @@ impl Runtime {
           if let Some(func) = got {
             return Some(func);
           }
-          back = &*tail;
+          back = tail;
         }
         Rollback::Nil => {
           return None;
@@ -2135,7 +2135,7 @@ impl Runtime {
     let mut back = &self.back;
     while let Rollback::Cons { keep: _, life, head, tail } = &**back {
       reduce(acc, self.get_heap(*head));
-      back = &*tail;
+      back = tail;
     }
   }
 
@@ -4500,20 +4500,20 @@ pub fn view_term(term: &Term) -> String {
             output.push(" ".to_string());
             output.push(view_name(*nam1));
             output.push(" = ".to_string());
-            stack.push(StackItem::Term(&*body));
+            stack.push(StackItem::Term(body));
             stack.push(StackItem::Str("; ".to_string()));
-            stack.push(StackItem::Term(&*expr));
+            stack.push(StackItem::Term(expr));
           }
           Term::Lam { name, body } => {
             output.push(format!("@{} ", view_name(*name)));
-            stack.push(StackItem::Term(&*body));
+            stack.push(StackItem::Term(body));
           }
           Term::App { func, argm } => {
             output.push("(".to_string());
             stack.push(StackItem::Str(")".to_string()));
-            stack.push(StackItem::Term(&*argm));
+            stack.push(StackItem::Term(argm));
             stack.push(StackItem::Str(" ".to_string()));
-            stack.push(StackItem::Term(&*func));
+            stack.push(StackItem::Term(func));
           }
           Term::Ctr { name, args } => {
             let name = view_name(*name);

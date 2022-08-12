@@ -87,11 +87,11 @@ impl Name {
 
 impl Account {
   pub fn new() -> Account {
-    return Account::from_secret_key(SecretKey::new(&mut OsRng::new().expect("OsRng")));
+    Account::from_secret_key(SecretKey::new(&mut OsRng::new().expect("OsRng")))
   }
 
   pub fn hash_public_key(pubk: &PublicKey) -> Hash {
-    return keccak256(&pubk.serialize_uncompressed()[1..65].to_vec());
+    keccak256(&pubk.serialize_uncompressed()[1..65])
   }
 
   pub fn from_private_key(key: &[u8]) -> Self {
@@ -103,13 +103,14 @@ impl Account {
     let hash = Account::hash_public_key(&pubk);
     let addr = Address::from_hash(&hash);
     let name = Name::from_hash(&hash);
-    return Account { secret_key, public_key: pubk, address: addr, name };
+    Account { secret_key, public_key: pubk, address: addr, name }
   }
 
   pub fn sign(&self, hash: &Hash) -> Signature {
     let secp = Secp256k1::new();
-    let sign = secp.sign_ecdsa_recoverable(&Message::from_slice(&hash.0).expect("32 bytes hash"), &self.secret_key).serialize_compact();
-    return Signature([vec![sign.0.to_i32() as u8], sign.1.to_vec()].concat().try_into().unwrap());
+    let msg = &Message::from_slice(&hash.0).expect("32 bytes hash");
+    let sign = secp.sign_ecdsa_recoverable(msg, &self.secret_key).serialize_compact();
+    Signature([vec![sign.0.to_i32() as u8], sign.1.to_vec()].concat().try_into().unwrap())
   }
 }
 
