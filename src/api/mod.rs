@@ -43,7 +43,7 @@ impl fmt::Display for Name {
 // Hash
 // ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub struct Hash {
   value: U256,
@@ -137,10 +137,10 @@ impl From<&node::Block> for BlockRepr {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)] // TODO: Deserialize
 pub struct BlockInfo {
   pub block: BlockRepr,
-  pub hash: U256,
+  pub hash: Hash,
   pub height: u64,
   pub content: Vec<hvm::Statement>,
   pub results: Option<Vec<hvm::StatementResult>>,

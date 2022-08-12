@@ -904,7 +904,7 @@ impl Node {
     let content = transactions.iter().filter_map(Transaction::to_statement).collect();
     let info = BlockInfo {
       block: block.into(),
-      hash: *hash,
+      hash: (*hash).into(),
       height,
       content,
       results,
