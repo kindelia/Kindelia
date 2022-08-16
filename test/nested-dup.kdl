@@ -15,5 +15,5 @@ fun (Destruct x) {
 }
 
 run {
-  !done (+ (Destruct (PaPair #42)) #0)
+  (Done (+ (Destruct (PaPair #42)) #0))
 }

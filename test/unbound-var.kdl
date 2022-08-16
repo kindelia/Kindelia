@@ -12,10 +12,14 @@ ctr {Set x}
 ctr {Get}
 
 fun (Store x) {
-  (Store {Set x}) = !save x !done x
-  (Store {Get}) = !take x !done x
+  (Store {Set x}) = 
+    ask (Save x);
+    (Done #0)
+  (Store {Get}) = 
+    ask x = (Take);
+    (Done x)
 } with { #0 }
 
 run {
-  !done (SumPair {Pair #777 #3})
+  (Done (SumPair {Pair #777 #3}))
 }

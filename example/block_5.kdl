@@ -25,8 +25,9 @@ fun (Insert_Aux cond key val k v xs) {
 }
 
 run {
-  !done
+  (Done
     (Insert #2 #200
     (Insert #7 #100
     {Empty}))
+  )
 }

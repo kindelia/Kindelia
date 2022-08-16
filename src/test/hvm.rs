@@ -4,15 +4,15 @@ use crate::{
     init_map, init_runtime, name_to_u128, read_statements, u128_to_name, view_statements, Rollback,
   },
   test::{
-    strategies::{func, heap, name, statement},
+    strategies::{func, heap, name, statement, term},
     util::{
       advance, rollback, rollback_path, rollback_simple, temp_dir, test_heap_checksum,
       view_rollback_ticks, RuntimeStateTest, TempDir,
     },
   },
 };
-use proptest::collection::vec;
 use proptest::proptest;
+use proptest::{collection::vec, strategy::Strategy};
 use rstest::rstest;
 use rstest_reuse::{apply, template};
 
@@ -296,12 +296,12 @@ ctr {Random_Get}
 
 fun (Random action) {
   (Random {Random_Inc}) = 
-    !take x
-    !save (% (+ (* #25214903917 x) #11) #281474976710656)
-    !done #0
+    ask x = (Take);
+    ask (Save (% (+ (* #25214903917 x) #11) #281474976710656));
+    (Done #0)
   (Random {Random_Get}) = 
-    !load x
-    !done x
+    ask x = (Load);
+    (Done x)
 } with {
   #1
 }
@@ -311,12 +311,12 @@ ctr {Bank_Get}
 
 fun (Bank action) {
   (Bank {Bank_Add acc}) = 
-    !take t
-    !save (AddAcc acc t)
-    !done #0
+    ask t = (Take);
+    ask (Save (AddAcc acc t));
+    (Done #0)
   (Bank {Bank_Get}) = 
-    !load x
-    !done x
+    ask x = (Load);
+    (Done x)
 } with {
   {Leaf}
 }
@@ -324,11 +324,11 @@ fun (Bank action) {
 
 pub const BANK: &'static str = "
   run {
-    !call ~   'Random' [{Random_Inc}]
-    !call acc 'Random' [{Random_Get}]
-    !call ~   'Bank' [{Bank_Add acc }]
-    !call b   'Bank' [{Bank_Get}]
-    !done b
+    ask (Call 'Random' [{Random_Inc}]);
+    ask acc = (Call 'Random' [{Random_Get}]);
+    ask (Call 'Bank' [{Bank_Add acc}]);
+    ask b = (Call 'Bank' [{Bank_Get}]);
+    (Done b)
     // !done (AddAcc #1 {Leaf})
   }
 ";
