@@ -27,12 +27,12 @@ ctr {Random_Get}
 
 fun (Random action) {
   (Random {Random_Inc}) = 
-    !take x
-    !save (% (+ (* #25214903917 x) #11) #281474976710656)
-    !done #0
+    ask x = (Take);
+    ask (Save (% (+ (* #25214903917 x) #11) #281474976710656));
+    (Done #0)
   (Random {Random_Get}) = 
-    !load x
-    !done x
+    ask x = (Load);
+    (Done x)
 } with {
   #1
 }
@@ -42,21 +42,21 @@ ctr {Bank_Get}
 
 fun (Bank action) {
   (Bank {Bank_Add acc}) = 
-    !take t
-    !save (AddAcc acc t)
-    !done #0
+    ask t = (Take);
+    ask (Save (AddAcc acc t));
+    (Done #0)
   (Bank {Bank_Get}) = 
-    !load x
-    !done x
+    ask x = (Load);
+    (Done x)
 } with {
   {Leaf}
 }
 
 run {
-  !call ~   'Random' [{Random_Inc}]
-  !call acc 'Random' [{Random_Get}]
-  !call ~   'Bank' [{Bank_Add acc }]
-  !call b   'Bank' [{Bank_Get}]
-  !done b
+  ask (Call 'Random' [{Random_Inc}]);
+  ask acc = (Call 'Random' [{Random_Get}]);
+  ask (Call 'Bank' [{Bank_Add acc}]);
+  ask b = (Call 'Bank' [{Bank_Get}]);
+  (Done b)
   // !done (AddAcc #1 {Leaf})
 }

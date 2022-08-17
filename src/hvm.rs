@@ -1806,7 +1806,7 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
-        let term = readback_linear_term(self, done);
+        let term = readback_term(self, done);
         self.collect(done);
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
@@ -2152,12 +2152,12 @@ impl Runtime {
   }
 
   pub fn read_disk(&self, fid: u128) -> Option<Ptr> {
-    return self.get_with(Some(0), None, |heap| heap.read_disk(fid));
+    return self.get_with(None, None, |heap| heap.read_disk(fid));
   }
 
   pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
     let host = self.read_disk(fid)?;
-    let term = readback_linear_term(self, host);
+    let term = readback_term(self, host);
     Some(term)
   }
 
@@ -3790,112 +3790,194 @@ fn show_runtime_error(err: RuntimeError) -> String {
   }).to_string()
 }
 
-// FIXME: This is NOT the readback function. I didn't notice it before. This is just the debug
-// stringification function, converted to return a term instead. There is a crucial difference: the
-// proper readback function does NOT return dups, i.e., it resolves pending dups, returning a
-// conventional lambda term. Seems like we removed the proper readback function! We must restore
-// it, and optimize it to use stacks instead of recursion. The original readback function can be
-// found on the HVM repository. 
-pub fn readback_linear_term(rt: &Runtime, term: Ptr) -> Term {
-  enum StackItem {
-    Term(Ptr),
-    Resolver(Ptr),
-  }
-
-  fn dups(rt: &Runtime, term: Ptr, names: &mut HashMap<u128, String>) -> Term {
-    let mut lets: HashMap<u128, u128> = HashMap::new();
-    let mut kinds: HashMap<u128, u128> = HashMap::new();
-    let mut count: u128 = 0;
+pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
+  fn find_names(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>) {
     let mut stack = vec![term];
     while !stack.is_empty() {
       let term = stack.pop().unwrap();
       match get_tag(term) {
         LAM => {
-          names.insert(get_loc(term, 0), format!("{}", count));
-          count += 1;
-          stack.push(ask_arg(rt, term, 1));
+          let param = ask_arg(rt, term, 0);
+          let body = ask_arg(rt, term, 1);
+          // TODO ask
+          names.insert(get_loc(term, 0), format!("{}", names.len()));
+          stack.push(body);
         }
         APP => {
-          stack.push(ask_arg(rt, term, 1));
-          stack.push(ask_arg(rt, term, 0));
+          let lam = ask_arg(rt, term, 0);
+          let arg = ask_arg(rt, term, 1);
+          stack.push(arg);
+          stack.push(lam);
         }
         SUP => {
-          stack.push(ask_arg(rt, term, 1));
-          stack.push(ask_arg(rt, term, 0));
+          let arg0 = ask_arg(rt, term, 0);
+          let arg1 = ask_arg(rt, term, 1);
+          stack.push(arg1);
+          stack.push(arg0);
         }
-        DP0 => {
-          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-            names.insert(get_loc(term, 0), format!("{}", count));
-            count += 1;
-            kinds.insert(get_loc(term, 0), get_ext(term));
-            e.insert(get_loc(term, 0));
-            stack.push(ask_arg(rt, term, 2));
-          }
-        }
-        DP1 => {
-          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-            names.insert(get_loc(term, 0), format!("{}", count));
-            count += 1;
-            kinds.insert(get_loc(term, 0), get_ext(term));
-            e.insert(get_loc(term, 0));
+        DP0 | DP1 => {
+          if let hash_map::Entry::Vacant(e) = names.entry(get_loc(term, 0)) {
+            names.insert(get_loc(term, 0), format!("{}", names.len()));
             stack.push(ask_arg(rt, term, 2));
           }
         }
         OP2 => {
-          stack.push(ask_arg(rt, term, 1));
-          stack.push(ask_arg(rt, term, 0));
+          let arg0 = ask_arg(rt, term, 0);
+          let arg1 = ask_arg(rt, term, 1);
+          stack.push(arg1);
+          stack.push(arg0);
         }
+        NUM => {}
         CTR | FUN => {
           let arity = rt.get_arity(get_ext(term));
           for i in (0..arity).rev() {
-            stack.push(ask_arg(rt, term, i));
+            let arg = ask_arg(rt, term, i);
+            stack.push(arg);
           }
         }
         _ => {}
       }
     }
+ }
 
-    let cont = expr(rt, term, &names);
-    if lets.is_empty() {
-      cont
-    } else {
-      let mut output = Term::Var { name: 0 };
-      for (i, (_key, pos)) in lets.iter().enumerate() {
-        // todo: reverse
-        let what = String::from("?h");
-        let name = names.get(&pos).unwrap_or(&what);
-        let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
-        let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-        let expr = expr(rt, ask_lnk(rt, pos + 2), &names);
-        if i == 0 {
-          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(cont.clone()) };
-        } else {
-          output = Term::Dup { nam0: name_to_u128(&nam0), nam1: name_to_u128(&nam1), expr: Box::new(expr), body: Box::new(output) };
-        }
-      }
-      output
+  struct DupStore {
+    stacks: HashMap<Ptr, Vec<bool>>,
+  }
+
+  impl DupStore {
+    fn new() -> DupStore {
+      DupStore { stacks: HashMap::new() }
+    }
+    fn get(&self, col: Ptr) -> Option<&Vec<bool>> {
+      self.stacks.get(&col)
+    }
+    fn pop(&mut self, col: Ptr) -> bool {
+      let stack = self.stacks.entry(col).or_insert_with(Vec::new);
+      stack.pop().unwrap_or(false)
+    }
+    fn push(&mut self, col: Ptr, val: bool) {
+      let stack = self.stacks.entry(col).or_insert_with(Vec::new);
+      stack.push(val);
     }
   }
 
-  fn expr(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>) -> Term {
-    let mut stack = vec![StackItem::Term(term)];
+  fn readback(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>, seen: &mut HashSet<Ptr>, dup_store: &mut DupStore) -> Term {
+    enum StackItem {
+      Term(Ptr),
+      Resolver(Ptr),
+      SUPResolverSome(Ptr, bool), // auxiliar case when in SUP does not have a DUP to evaluate
+      SUPResolverNone(Ptr), // auxiliar case when in SUP does not have a DUP to evaluate
+    }
+
     let mut output = Vec::new();
+    let mut stack = vec![StackItem::Term(term)];
+
     while !stack.is_empty() {
       let item = stack.pop().unwrap();
       match item {
+        StackItem::Term(term) => {
+          debug_assert!(term != 0);
+          match get_tag(term) {
+            DP0 | DP1 => {
+              if !seen.contains(&term) { // this avoids looping when term doesnt exist
+                seen.insert(term);
+                let col = get_ext(term);
+                let val = ask_arg(rt, term, 2);
+                if get_tag(term) == DP0 {
+                  dup_store.push(col, false);
+                } else {
+                  dup_store.push(col, true);
+                }
+                stack.push(StackItem::Resolver(term));
+                stack.push(StackItem::Term(val));
+              }
+            }
+            SUP => {
+              let col = get_ext(term);
+              let empty = &Vec::new();
+              let dup_stack = dup_store.get(col).unwrap_or(empty);
+              if let Some(val) = dup_stack.last() {
+                let arg_idx = *val as u128;
+                let val = ask_arg(rt, term, arg_idx);
+                let old = dup_store.pop(col);
+                stack.push(StackItem::SUPResolverSome(term, old));
+                stack.push(StackItem::Term(val));
+                // let got = readback(rt, val, names, dup_store);
+              } else {
+                let val0 = ask_arg(rt, term, 0);
+                let val1 = ask_arg(rt, term, 1);
+                stack.push(StackItem::SUPResolverNone(term));
+                stack.push(StackItem::Term(val1));
+                stack.push(StackItem::Term(val0));
+                // let val0 = readback(rt, val0, names, dup_store);
+                // let val1 = readback(rt, val1, names, dup_store);
+              }
+            }
+            VAR => {
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
+              output.push(Term::Var { name: name_to_u128(&name) });
+            }
+            NUM => {
+              let numb = get_num(term);
+              output.push(Term::Num { numb });
+            }
+            OP2 => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            CTR | FUN => {
+              let name = get_ext(term);
+              let arit = rt.get_arity(name);
+              stack.push(StackItem::Resolver(term));
+              for i in 0..arit {
+                stack.push(StackItem::Term(ask_arg(rt, term, i)));
+              }
+            }
+            LAM => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+            }
+            APP => {
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
+              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
+            }
+            _ => {}
+          }
+        }
+        StackItem::SUPResolverSome(term, old) => {
+          let col = get_ext(term); 
+          dup_store.push(col, old);
+        }
+        StackItem::SUPResolverNone(term) => {
+          let name = "HVM.sup".to_string(); // lang::Term doesn't have a Sup variant
+          let val0 = output.pop().unwrap();
+          let val1 = output.pop().unwrap();
+          let args = vec![val0, val1];
+          return Term::Ctr { name: name_to_u128(&name), args };
+        }
         StackItem::Resolver(term) => {
           match get_tag(term) {
-            CTR => {
-              let func = get_ext(term);
-              let arit = rt.get_arity(func);
+            DP0 | DP1 => {
+              let col = get_ext(term);
+              dup_store.pop(col);
+            }
+            CTR | FUN => {
+              let name = get_ext(term);
+              let arit = rt.get_arity(name);
               let mut args = Vec::new();
               for i in 0..arit {
                 args.push(output.pop().unwrap());
               }
-              output.push(Term::Ctr { name: func, args });
+              if get_tag(term) == CTR {
+                output.push(Term::Ctr { name, args });
+              } else {
+                output.push(Term::Fun { name, args });
+              }
             },
             LAM => {
-              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
               let body = Box::new(output.pop().unwrap());
               output.push(Term::Lam { name: name_to_u128(&name), body });
             }
@@ -3910,78 +3992,19 @@ pub fn readback_linear_term(rt: &Runtime, term: Ptr) -> Term {
               let val0 = Box::new(output.pop().unwrap());
               output.push(Term::Op2 { oper, val0, val1 })
             }
-            FUN => {
-              let func = get_ext(term);
-              let arit = rt.get_arity(func);
-              let mut args = Vec::new();
-              for i in 0..arit {
-                args.push(output.pop().unwrap());
-              }
-              output.push(Term::Fun { name: func, args });
-            }
             _ => panic!("Term not valid in readback"),
-          }
-        },
-        StackItem::Term(term) => {
-          match get_tag(term) {
-            DP0 => {
-              let name = format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a")));
-              output.push(Term::Var { name: name_to_u128(&name) });
-            }
-            DP1 => {
-              let name = format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b")));
-              output.push(Term::Var { name: name_to_u128(&name) });
-            }
-            VAR => {
-              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?x")));
-              output.push(Term::Var { name: name_to_u128(&name) });
-            }
-            LAM => {
-              stack.push(StackItem::Resolver(term));
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-            }
-            APP => {
-              stack.push(StackItem::Resolver(term));
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
-            }
-            SUP => {}
-            OP2 => {
-              stack.push(StackItem::Resolver(term));
-              stack.push(StackItem::Term(ask_arg(rt, term, 1)));
-              stack.push(StackItem::Term(ask_arg(rt, term, 0)));
-            }
-            NUM => {
-              let numb = get_num(term);
-              output.push(Term::Num { numb });
-            }
-            CTR => {
-              let func = get_ext(term);
-              let arit = rt.get_arity(func);
-              stack.push(StackItem::Resolver(term));
-              for i in 0..arit {
-                stack.push(StackItem::Term(ask_arg(rt, term, i)));
-              }
-            }
-            FUN => {
-              let func = get_ext(term);
-              let arit = rt.get_arity(func);
-              stack.push(StackItem::Resolver(term));
-              for i in 0..arit {
-                stack.push(StackItem::Term(ask_arg(rt, term, i)));
-              }
-            }
-            ERA => {}
-            _ => {}
           }
         }
       }
     }
-    output.pop().unwrap()
+    output.pop().unwrap_or(Term::Ctr { name: name_to_u128("None"), args: [].to_vec() })
   }
 
-  let mut names: HashMap<u128, String> = HashMap::new();
-  dups(rt, term, &mut names)
+  let mut names: HashMap<Ptr, String> = HashMap::new();
+  let mut seen: HashSet<Ptr> = HashSet::new();
+  let mut dup_store = DupStore::new();
+  find_names(rt, term, &mut names);
+  readback(rt, term, &mut names, &mut seen, &mut dup_store)
 }
 
 // Parsing

@@ -16,10 +16,10 @@ fun (LeFun2 x) {
 
 // Should not work
 run {
-  !done (LeFun #3)
+  (Done (LeFun #3))
 }
 
 // Should not work
 run {
-  !done (LeFun2 #777)
+  (Done (LeFun2 #777))
 }

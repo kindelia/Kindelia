@@ -1,0 +1,33 @@
+ctr {Cons x xs}
+ctr {Nil}
+ctr {Pair a b}
+
+run {
+  // (Done @~ dup a ~ = #2; a)
+  // [readback_old view] dup a1 _ = #2; @x0 a1
+  // [readback_new view] @x0 #2
+
+  // (Done @~ {Cons #4 {Nil}})
+  // [readback_old view] @x0 {Cons #4 {Nil}}
+  // [readback_new view] @x0 {Cons #4 {Nil}}
+
+  // (Done @~ dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x)
+  // [readback_old view] dup a1 _ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; @x0 a1
+  // [readback_new view] @x0 {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}
+
+  // (Done dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x)
+  // [readback_old view] {Cons #2 {Cons #4 {Cons #6 {Nil}}}}
+  // [readback_new view] {Cons #2 {Cons #4 {Cons #6 {Nil}}}}
+
+  // (Done dup a b = @x @y {Pair x y}; {Pair a b})
+  // [readback_old view] dup a0 b0 = @x1 @x2 {Pair x1 x2}; {Pair a0 b0}
+  // [readback_new view] {Pair @x1 @x2 {Pair x1 x2} @x1 @x2 {Pair x1 x2}}
+
+  (Done dup a b = (! @x @y {Pair (+ x #1) y} #2); {Pair (!a #10) (!b #20)})
+  // [readback_old view] dup a0 b0 = (@x1 @x2 {Pair (+ x1 #1) x2} #2); {Pair (a0 #10) (b0 #20)}
+  // [readback_new view] {Pair ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #10) ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #20)}
+
+  // (Done dup a ~ = (! @x @y {Pair (+ x #1) y} #2); (!a #10))
+  // [readback_old view] {Pair #3 #10}
+  // [readback_new view] {Pair #3 #10}
+}

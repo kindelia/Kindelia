@@ -4,34 +4,36 @@ ctr {Add x}
 ctr {Get}
 
 fun (DaList act) {
-  (DaList {Get})   = !load x !done x
+  (DaList {Get})   = 
+    ask x = (Load);
+    (Done x)
   (DaList {Add x}) = 
-    !take xs
-    !save {Cons x xs}
-    !done #0
+    ask xs = (Take);
+    ask (Save {Cons x xs});
+    (Done #0)
 } with { {Cons #42 {Nil}} }
 
 run {
-  !call x 'DaList' [{Get}] 
-  !done x
+  ask x = (Call 'DaList' [{Get}] );
+  (Done x)
 }
 
 run {
-  !call ~ 'DaList' [{Add #69}] 
-  !done #0
+  ask (Call 'DaList' [{Add #69}] );
+  (Done #0)
 }
 
 run {
-  !call x 'DaList' [{Get}]
-  !done x
+  ask x = (Call 'DaList' [{Get}]);
+  (Done x)
 }
 
 run {
-  !call ~ 'DaList' [{Add #111}]
-  !done #0
+  ask (Call 'DaList' [{Add #111}]);
+  (Done #0)
 }
 
 run {
-  !call x 'DaList' [{Get}]
-  !done x
+  ask x = (Call 'DaList' [{Get}]);
+  (Done x)
 }
