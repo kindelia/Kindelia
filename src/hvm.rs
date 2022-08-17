@@ -1806,7 +1806,7 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
-        let term = readback_linear_term(self, done);
+        let term = readback_term(self, done);
         self.collect(done);
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
@@ -2157,7 +2157,7 @@ impl Runtime {
 
   pub fn read_disk_as_term(&mut self, fid: u128) -> Option<Term> {
     let host = self.read_disk(fid)?;
-    let term = readback_linear_term(self, host);
+    let term = readback_term(self, host);
     Some(term)
   }
 
@@ -3790,7 +3790,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
   }).to_string()
 }
 
-pub fn readback_linear_term(rt: &Runtime, term: Ptr) -> Term {
+pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
   fn find_names(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>) {
     let mut stack = vec![term];
     while !stack.is_empty() {
