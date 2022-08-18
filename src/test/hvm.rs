@@ -1,7 +1,8 @@
 use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
-    init_map, init_runtime, name_to_u128_unsafe, read_statements, u128_to_name, view_statements, Rollback,
+    init_map, init_runtime, name_to_u128_unsafe, read_statements, readback_term, show_term,
+    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo,
   },
   test::{
     strategies::{func, heap, name, statement, term},
@@ -158,17 +159,76 @@ fn parse_ask_fail1(
   read_statements(&code).unwrap();
 }
 
-// #[test]
-// #[should_panic]
-// fn parse_ask_fail2() {
-//   read_statements(ASK_FAIL_2).unwrap();
-// }
+#[rstest]
+fn dupped_state_test(temp_dir: TempDir) {
+  fn print_and_assert_states(
+    rt: &mut Runtime,
+    expected_original_readback: &str,
+    expected_other_readback: &str,
+  ) {
+    let original_state = rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
+    let other_state = rt.read_disk(Name::try_from("Other").unwrap()).unwrap();
+    println!();
+    println!("original ptr: {}", original_state);
+    println!("original: {}", show_term(&rt, original_state, None));
+    println!("original readback: {}", view_term(&readback_term(&rt, original_state)));
+    assert_eq!(expected_original_readback, view_term(&readback_term(&rt, original_state)));
+    println!();
+    println!("other ptr: {}", other_state);
+    println!("other: {}", show_term(&rt, other_state, None));
+    println!("other readback: {}", view_term(&readback_term(&rt, other_state)));
+    assert_eq!(expected_other_readback, view_term(&readback_term(&rt, other_state)));
+    println!();
+  }
 
-// #[test]
-// #[should_panic]
-// fn parse_ask_fail3() {
-//   read_statements(ASK_FAIL_3).unwrap();
-// }
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  rt.run_statements_from_code(&PRE_DUPPED_STATE, false);
+  rt.run_statements_from_code(&DUPPED_STATE, false);
+  print_and_assert_states(&mut rt, "@x0 @x1 #7", "@x0 @x1 #7");
+  rt.run_statements_from_code(&CHANGE_DUPPED_STATE, false);
+  print_and_assert_states(&mut rt, "@x0 @x1 #8", "@x0 @x1 #7");
+}
+
+#[rstest]
+#[case("@~ dup a ~ = #2; a", "@x0 #2")]
+#[case("@~ {Cons #4 {Nil}}", "@x0 {Cons #4 {Nil}}")]
+#[case("dup a ~ = (! @x @y {Pair (+ x #1) y} #2); (!a #10)", "{Pair #3 #10}")]
+#[case(
+  "@~ dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x",
+  "@x0 {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}"
+)]
+#[case(
+  "dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x",
+  "{Cons #2 {Cons #4 {Cons #6 {Nil}}}}"
+)]
+#[case(
+  "dup a b = @x @y {Pair x y}; {Pair a b}",
+  "{Pair @x1 @x2 {Pair x1 x2} @x1 @x2 {Pair x1 x2}}"
+)]
+#[case(
+  "dup a b = (! @x @y {Pair (+ x #1) y} #2); {Pair (!a #10) (!b #20)}",
+  "{Pair ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #10) ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #20)}"
+)]
+fn readback(#[case] code: &str, #[case] expected_readback: &str, temp_dir: TempDir) {
+  // initialize runtime
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  // declare used constructors
+  let pre_code = "ctr {Cons x xs} ctr {Nil} ctr {Pair x y}";
+  rt.run_statements_from_code(&pre_code, false);
+  // run code
+  let code = format!("run{{ (Done {}) }}", code); // always run one statement
+  let result = rt.run_statements_from_code(&code, false); // get vector of results
+  let result = result[0].clone(); // get first and only result
+  let result = result.unwrap(); // expect result not to be an error (fails test if it is)
+
+  // verify readback
+  if let StatementInfo::Run { done_term, .. } = result {
+    let readback = view_term(&done_term);
+    assert_eq!(expected_readback, readback);
+  } else {
+    panic!("Expected Run statement, got {:?}", result);
+  }
+}
 
 proptest! {
   #[test]
@@ -374,3 +434,43 @@ pub fn keyword_fail_3(keyword: &str) -> String {
     keyword, keyword, keyword
   )
 }
+
+const PRE_DUPPED_STATE: &'static str = "
+ctr {Copy}
+ctr {Change}
+
+fun (Original action) {
+  (Original {Copy}) =
+    ask x = (Take);
+    dup a b = x;
+    ask (Save a);
+    (Done b)
+  (Original {Change}) = 
+    ask (Take);
+    ask (Save @~ @~ #8);
+    (Done #0)
+} with {
+  @~ @~ #7
+}
+
+fun (Other) {
+  (Other) =
+    ask x = (Call 'Original' {Copy});
+    ask (Save x);
+    (Done #0)
+}
+";
+
+const DUPPED_STATE: &'static str = "
+run {
+  ask (Call 'Other' []);
+  (Done #0)
+}
+";
+
+const CHANGE_DUPPED_STATE: &'static str = "
+run {
+  ask (Call 'Original' {Change});
+  (Done #1)
+}
+";
