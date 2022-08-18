@@ -1,0 +1,13 @@
+ctr {Run}
+
+fun (Test action) {
+  (Test {Run}) =
+    let a = ((@x @y (+ x y) #2) #3);
+    ask (Save a);
+    (Done #0)
+}
+
+run {
+  ask (Call 'Test' [{Run}]);
+  (Done #0)
+}

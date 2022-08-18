@@ -1,0 +1,16 @@
+run {
+  (Done dup a ~ = @x @y (!x y); a)
+}
+
+run {
+  (Done dup a ~ = @x @y (+ x y); a)
+}
+
+fun (Add a b) {
+  (Add {True} {True}) = {T2 {True} {True}}
+  (Add a b) = {T2 a b}
+}
+
+run {
+  (Done dup a ~ = @x @y (Add x y); a)
+}

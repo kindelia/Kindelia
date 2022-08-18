@@ -3031,8 +3031,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             }
           }
         }
-        // We don't need to reduce the head
-        CTR | NUM | VAR | LAM | ERA => {}
+        // We don't need to reduce further
+        CTR | NUM | LAM | VAR | SUP | ERA => {}
         _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     } else {
@@ -3435,8 +3435,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           }
 
         }
-        // When we don't need to reduce the term
-        CTR | NUM | VAR | LAM | ERA => {}
+        // We don't need to reduce further
+        CTR | NUM | LAM | VAR | SUP | ERA => {}
         _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     }
