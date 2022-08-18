@@ -540,12 +540,14 @@ pub const VAL: u128 = 1 << 0;
 pub const EXT: u128 = 1 << 48;
 pub const TAG: u128 = 1 << 120;
 
-// FIXME: what were these used for? can this be explained if uncommented?
+// FIXME: document and replace magic numbers on code
 //pub const VAL_MASK: u128 = EXT - 1;
 //pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
-//pub const TAG_MASK: u128 = (u128::MAX) ^ EXT_MASK;
 //pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
+//pub const TAG_MASK: u128 = (u128::MAX) ^ NUM_MASK;
 pub const NUM_MASK: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
+// TODO: refactor to enums with u128 repr
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -2964,11 +2966,13 @@ pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
   }
 }
 
+// TODO: document
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeError> {
   let mut vars_data: Map<u128> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
 
+  // TODO: document `init` / refactor to tuple/struct if no performance impact
   let mut init = 1;
   let mut host = root;
 
@@ -3027,7 +3031,9 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             }
           }
         }
-        _ => {}
+        // We don't need to reduce the head
+        CTR | NUM | VAR | LAM | ERA => {}
+        _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     } else {
       match get_tag(term) {
@@ -3429,10 +3435,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           }
 
         }
-        _ => {}
+        // When we don't need to reduce the term
+        CTR | NUM | VAR | LAM | ERA => {}
+        _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     }
 
+    // When we don't need to reduce the head
     if let Some(item) = stack.pop() {
       init = item >> 48;
       host = item & 0x0_FFFF_FFFF_FFFF;
@@ -3450,7 +3459,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 
 /// Evaluates redexes iteratively. This is used to save space before storing a term, since,
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
-/// normal form, though, since it stops on whnfs. If it did, then storing a state wouldn't be O(1),
+/// normal form, though, since it stops on WHNFs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
 pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
   enum StackItem {
