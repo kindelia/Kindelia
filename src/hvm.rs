@@ -459,7 +459,6 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-  TypeMismatch,
   EffectFailure,
 }
 
@@ -588,7 +587,7 @@ pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 //   (DONE expr)           : (IO r)
 //   (TAKE           then) : (IO r)
 //   (SAVE expr      then) : (IO r)
-//   (CALL expr args then) : (IO r)
+//   (CALL name argm then) : (IO r)
 //   (SUBJ           then) : (IO r)
 //   (FROM           then) : (IO r)
 //   (TICK           then) : (IO r)
@@ -750,6 +749,12 @@ ctr {TE x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13}
 ctr {TF x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14}
 ctr {TG x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15}
 
+// An if-then-else statement
+fun (If cond t f) {
+  (If #0 ~ f) = f
+  (If  ~ t ~) = t
+}
+
 // Used to pretty-print names
 ctr {Name name}
 
@@ -775,9 +780,9 @@ fun (Save expr) {
 
 // CALL calls another IO operation, assigning
 // the caller name to the current subject name
-ctr {CALL name args cont}
-fun (Call name args) {
-  (Call name args) = @cont {CALL name args cont}
+ctr {CALL name argm cont}
+fun (Call name argm) {
+  (Call name argm) = @cont {CALL name argm cont}
 }
 
 // SUBJ returns the name of the current subject
@@ -1569,7 +1574,7 @@ impl Runtime {
 
   pub fn run_io(&mut self, subject: u128, caller: u128, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
     let term = reduce(self, host, mana)?;
-    // eprintln!("-- {}", show_term(self, term));
+    //eprintln!("-- {}", show_term(self, term, None));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -1608,24 +1613,32 @@ impl Runtime {
           }
           IO_CALL => {
             let fnid = ask_arg(self, term, 0);
-            let tupl = ask_arg(self, term, 1);
+            let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
+
             // Builds the argument vector
-            let arit = self.get_arity(get_ext(tupl));
-            let mut args = Vec::new();
+            let arit = self.get_arity(get_ext(argm));
+            // Checks if the argument is a constructor with numeric fields. This is needed since
+            // Kindelia's language is untyped, yet contracts can call each other freely. That would
+            // allow a contract to pass an argument with an unexpected type to another, corrupting
+            // its state. To avoid that, we only allow contracts to communicate by passing flat
+            // constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
             for i in 0 .. arit {
-              args.push(ask_arg(self, tupl, i));
+              let argm = reduce(self, get_loc(argm, 0), mana)?;
+              if get_tag(argm) != NUM {
+                return Err(RuntimeError::EffectFailure);
+              }
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, get_num(fnid), &args);
+            let ioxp = alloc_fun(self, get_num(fnid), &vec![argm]);
             let retr = self.run_io(get_num(fnid), subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
             let done = self.run_io(subject, caller, cont, mana);
             // Clears memory
             clear(self, host, 1);
-            clear(self, get_loc(tupl, 0), arit);
+            //clear(self, get_loc(argm, 0), arit);
             clear(self, get_loc(term, 0), 3);
             return done;
           }
@@ -3074,8 +3087,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             link(rt, par0 + 1, App(app1));
             let done = Par(get_ext(arg0), par0);
             link(rt, host, done);
-          } else {
-            return Err(RuntimeError::TypeMismatch);
           }
         }
         DP0 | DP1 => {
@@ -3219,8 +3230,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             clear(rt, get_loc(term, 0), 3);
             init = 1;
             continue;
-          } else {
-            return Err(RuntimeError::TypeMismatch);
           }
         }
         OP2 => {
@@ -3300,8 +3309,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             link(rt, par0 + 1, Op2(get_ext(term), op21));
             let done = Par(get_ext(arg1), par0);
             link(rt, host, done);
-          } else {
-            return Err(RuntimeError::TypeMismatch);
           }
         }
         FUN => {
@@ -3429,8 +3436,6 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             if call_function(rt, func, host, term, mana, &mut vars_data) {
               init = 1;
               continue;
-            } else {
-              return Err(RuntimeError::TypeMismatch);
             }
           }
 
@@ -3794,7 +3799,6 @@ fn show_runtime_error(err: RuntimeError) -> String {
   (match err {
     RuntimeError::NotEnoughMana => "Not enough mana.",
     RuntimeError::NotEnoughSpace => "Not enough space.",
-    RuntimeError::TypeMismatch => "Runtime type mismatch.",
     RuntimeError::EffectFailure => "Runtime effect failure."
   }).to_string()
 }

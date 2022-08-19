@@ -9,7 +9,6 @@ fun (Sum tree) {
   (Sum {Branch a b}) = (+ (Sum a) (Sum b))
 }
 
-
 // Sums a tree with 4 numbers
 // --------------------------
 

@@ -127,8 +127,8 @@ current state:
 
 ```c
 run {
-  ask (Call 'Count' [{Inc}]);
-  ask num = (Call 'Count' [{Get}]);
+  ask (Call 'Count' {Inc});
+  ask num = (Call 'Count' {Get});
   (Done state)
 }
 ```
@@ -179,13 +179,13 @@ fun (Count action) {
 
   // Increments the counter
   (Count {Inc}) =
-    ask num = (Load);
+    ask num = Load;
     ask (Save (+ num #1));
     (Done #0)
 
   // Returns the counter
   (Count {Get}) =
-    ask num = (Load);
+    ask num = Load;
     (Done num)
 
 } with { #0 }
@@ -242,7 +242,7 @@ Statements can also be signed:
 
 ```c
 run {
-  ask (Call 'CatCoin' [{Send 'Alice' 100}]);
+  ask (Call 'CatCoin' {Send 'Alice' 100});
   (Done #0)
 } sign {
   00c0777281fe0a814d0f1826ad
@@ -281,9 +281,9 @@ prioritize their statements:
 ```c
 // Statement signed by Bob to send 1000 CAT to Alice
 run {
-  ask miner = (call 'BlockMiner' [{Get}]);    // gets the miner name
-  ask (call 'CatCoin' [{Send 'Alice' 1000}]); // Alice gets: 1000 CAT
-  ask (call 'CatCoin' [{Send miner     50}]); // Miner fees:   50 CAT
+  ask miner = (call 'BlockMiner' {Get});    // gets the miner name
+  ask (call 'CatCoin' {Send 'Alice' 1000}); // Alice gets: 1000 CAT
+  ask (call 'CatCoin' {Send miner     50}); // Miner fees:   50 CAT
   (Done #0)
 } sign {
   ...signature...

@@ -1,9 +1,3 @@
-// An if-then-else statement
-fun (If cond if_true if_false) {
-  (If #0 ~       if_false) = if_false
-  (If  ~ if_true ~       ) = if_true
-}
-
 ctr {Empty}
 ctr {Entry key val rest}
 

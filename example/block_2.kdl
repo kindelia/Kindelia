@@ -12,15 +12,20 @@ fun (Counter action) {
     ask x = (Load);
     (Done x)
 
+  (Counter {Foo x}) =
+    (Done (+ x #3))
+
 } with { #0 }
 
 // Increments the Counter's state 3 times, and prints
 // --------------------------------------------------
 
+ctr {Foo val}
+
 run {
-  ask (Call 'Counter' [{Inc}]);
-  ask (Call 'Counter' [{Inc}]);
-  ask (Call 'Counter' [{Inc}]);
-  ask count = (Call 'Counter' [{Get}]);
+  ask (Call 'Counter' {Inc});
+  ask (Call 'Counter' {Inc});
+  ask (Call 'Counter' {Inc});
+  ask count = (Call 'Counter' {Get});
   (Done count)
 }

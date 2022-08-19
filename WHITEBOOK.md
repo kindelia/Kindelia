@@ -223,10 +223,10 @@ fun (Counter action) {
 // --------------------------------------------------
 
 run {
-  ask (Call 'Counter' [{Inc}]);
-  ask (Call 'Counter' [{Inc}]);
-  ask (Call 'Counter' [{Inc}]);
-  ask count = (Call 'Counter' [{Get}]);
+  ask (Call 'Counter' {Inc});
+  ask (Call 'Counter' {Inc});
+  ask (Call 'Counter' {Inc});
+  ask count = (Call 'Counter' {Get});
   (Done count)
 }
 ```
