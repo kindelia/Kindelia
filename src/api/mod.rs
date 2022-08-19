@@ -6,11 +6,12 @@ use std::fmt::{self, Display};
 use std::sync::mpsc::SyncSender;
 
 use primitive_types::U256;
-use tokio::sync::oneshot;
 use serde::{Deserialize, Serialize};
+use serde_with::DisplayFromStr;
+use tokio::sync::oneshot;
 
-use crate::node;
 use crate::hvm;
+use crate::node;
 
 use self::serialization::u256_to_hex;
 
@@ -19,18 +20,35 @@ type NodeRequester = SyncSender<NodeRequest>;
 // Basic
 // =====
 
+pub fn name_to_u128_safe(name: &str) -> Option<u128> {
+  if name.len() > 20 {
+    None
+  } else {
+    Some(hvm::name_to_u128(name))
+  }
+}
+
 // Name Type
 // ---------
 
-struct Name(u128);
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "&str")]
+pub struct Name(u128);
 
-impl Name {
-  fn new(name: u128) -> Option<Name> {
+impl TryFrom<&u128> for Name {
+  type Error = String;
+  fn try_from(name: &u128) -> Result<Self, Self::Error> {
     if name >> 120 != 0 {
-      None
+      Err("Name does not fit 120-bits.".into())
     } else {
-      Some(Name(name))
+      Ok(Name(*name))
     }
+  }
+}
+
+impl Into<u128> for Name {
+  fn into(self) -> u128 {
+    self.0
   }
 }
 
@@ -40,11 +58,29 @@ impl fmt::Display for Name {
   }
 }
 
+impl Into<String> for Name {
+  fn into(self) -> String {
+    format!("{}", self)
+  }
+}
+
+impl TryFrom<&str> for Name {
+  type Error = String;
+  fn try_from(name: &str) -> Result<Self, Self::Error> {
+    fn err_msg<E: fmt::Debug>(e: E) -> String {
+      format!("Invalid name: {:?}", e)
+    }
+    let name: u128 = name.parse::<u128>().map_err(err_msg)?;
+    let name = Name::try_from(&name).map_err(err_msg)?;
+    Ok(name)
+  }
+}
+
 // Hash
 // ----
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "String")]
+#[serde(into = "String", try_from = "&str")]
 pub struct Hash {
   value: U256,
 }
@@ -69,9 +105,9 @@ impl Display for Hash {
   }
 }
 
-impl TryFrom<String> for Hash {
+impl TryFrom<&str> for Hash {
   type Error = String;
-  fn try_from(value: String) -> Result<Self, Self::Error> {
+  fn try_from(value: &str) -> Result<Self, Self::Error> {
     let rest = value.strip_prefix("0x");
     let hex_str = rest.ok_or("Missing `0x` prefix from hash hex string.")?;
     let bytes = hex::decode(hex_str).map_err(|e| e.to_string())?;
@@ -107,7 +143,7 @@ impl Into<String> for Hash {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Stats {
-  pub tick: u128,
+  pub tick: u64,
 }
 
 impl Into<String> for &node::Transaction {
@@ -116,37 +152,84 @@ impl Into<String> for &node::Transaction {
   }
 }
 
+use serde_with::serde_as;
+
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockRepr {
+  #[serde(with = "u128_time_ser")]
   pub time: u128, // block timestamp
-  pub meta: u128, // block metadata
-  pub prev: Hash, // previous block (32 bytes)
-  pub body: Vec<String>, // block contents (1280 bytes) 
+  // #[serde_as(as = "serde_with::hex::Hex")] // TODO
+  #[serde_as(as = "DisplayFromStr")]
+  pub meta: u128,         // block metadata
+  pub prev: Hash,         // previous block hash (32 bytes)
+  pub body: Vec<String>,  // block contents (list of statements)
+}
+
+mod u128_time_ser {
+  use chrono::prelude::{DateTime, Utc};
+  use serde::{de, ser};
+  use serde::{Deserializer, Serializer};
+  use std::{fmt, time};
+  type T = u128;
+
+  struct TimeVisitor;
+
+  impl<'de> de::Visitor<'de> for TimeVisitor {
+    type Value = T;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      f.write_str("a valid ISO 8601 timestamp string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: de::Error,
+    {
+      let dt = DateTime::parse_from_rfc3339(v);
+      let dt = dt.map_err(|e| de::Error::custom(format!("Invalid timestamp '{}': {}.", v, e)))?;
+      let st: time::SystemTime = dt.into();
+      let epoc = st.duration_since(time::UNIX_EPOCH);
+      let epoc = epoc.map_err(|e| de::Error::custom(format!("Invalid epoch '{}': {}.", dt, e)))?;
+      Ok(epoc.as_millis())
+    }
+  }
+
+  pub fn serialize<S>(v: &T, s: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let epoc = *v as u64;
+    let st = time::SystemTime::UNIX_EPOCH.checked_add(time::Duration::from_micros(epoc));
+    let st = st.ok_or_else(|| ser::Error::custom(format!("Invalid time value: '{:?}'.", epoc)))?;
+    let dt: DateTime<Utc> = st.into();
+    s.serialize_str(&dt.format("%+").to_string())
+  }
+  pub fn deserialize<'de, D>(d: D) -> Result<T, D::Error>
+  where
+    D: Deserializer<'de>,
+  {
+    d.deserialize_str(TimeVisitor)
+  }
 }
 
 impl From<&node::Block> for BlockRepr {
   fn from(block: &node::Block) -> Self {
     let transactions = node::extract_transactions(&block.body);
     let hexes = transactions.iter().map(|t| t.into());
-    BlockRepr {
-      time: block.time,
-      meta: block.meta,
-      prev: block.prev.into(),
-      body: hexes.collect(),
-    }
+    BlockRepr { time: block.time, meta: block.meta, prev: block.prev.into(), body: hexes.collect() }
   }
 }
 
-#[derive(Debug, Serialize)] // TODO: Deserialize
+#[derive(Debug, Serialize)]
 pub struct BlockInfo {
   pub block: BlockRepr,
   pub hash: Hash,
   pub height: u64,
-  pub content: Vec<hvm::Statement>,
   pub results: Option<Vec<hvm::StatementResult>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)] // TODO: Deserialize
 pub struct FuncInfo {
   pub func: hvm::Func,
 }

@@ -901,12 +901,10 @@ impl Node {
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).map(|r| r.clone());
     let transactions = extract_transactions(&block.body);
-    let content = transactions.iter().filter_map(Transaction::to_statement).collect();
     let info = BlockInfo {
       block: block.into(),
       hash: (*hash).into(),
       height,
-      content,
       results,
     };
     Some(info)
@@ -923,7 +921,7 @@ impl Node {
     match request {
       NodeRequest::GetStats { tx: answer } => {
         let tick = self.runtime.get_tick();
-        let stats = api::Stats { tick };
+        let stats = api::Stats { tick: tick as u64 };
         answer.send(stats).unwrap();
       }
       NodeRequest::GetBlocks { range, tx: answer } => {

@@ -244,6 +244,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+
 use crate::NoHashHasher as NHH;
 
 use crate::bits;
@@ -251,6 +252,11 @@ use crate::crypto;
 use crate::dbg_println;
 use crate::util::U128_SIZE;
 use crate::util;
+
+// TODO: refactor out
+use serde::{Serialize, Deserialize};
+use serde_with::{serde_as, DisplayFromStr};
+use crate::api::{self, Name};
 
 // Types
 // -----
@@ -488,22 +494,32 @@ pub enum RuntimeError {
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
-#[derive(Debug, Clone)]
+// TODO: refactor (de)serialization out or simplify
+#[serde_as]
+#[derive(Debug, Clone, Serialize)] // TODO: Deserialize
 pub enum StatementInfo {
-  Ctr { name: u128, args: Vec<u128> },
-  Fun { name: u128, args: Vec<u128> },
-  Run { done_term: Term, used_mana: u128, size_diff: i128, end_size: u128 },
-  Reg { name: u128, ownr: u128 },
+  Ctr { name: Name, args: Vec<Name> },
+  Fun { name: Name, args: Vec<Name> },
+  Run {
+    done_term: Term,
+    #[serde_as(as = "DisplayFromStr")]
+    used_mana: u128,
+    #[serde_as(as = "DisplayFromStr")]
+    size_diff: i128,
+    #[serde_as(as = "DisplayFromStr")]
+    end_size: u128,
+  },
+  Reg { name: Name, ownr: Name },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatementErr {
   pub err: String,
 }
 
 pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParseErr {
   pub code: String,
   pub erro: String,
@@ -1782,7 +1798,9 @@ impl Runtime {
         self.define_function(*name, func);
         let state = self.create_term(init, 0, &mut init_map());
         self.write_disk(*name, state);
-        Ok(StatementInfo::Fun { name: *name, args: args.clone() })
+        let name = name.try_into().unwrap();
+        let args = args.iter().map(|x| x.try_into().unwrap()).collect::<Vec<_>>();
+        Ok(StatementInfo::Fun { name, args })
       }
       Statement::Ctr { name, args, sign } => {
         if self.exists(*name) {
@@ -1799,7 +1817,9 @@ impl Runtime {
           println!("[ctr] {}", u128_to_name(*name));
         }
         self.set_arity(*name, args.len() as u128);
-        Ok(StatementInfo::Ctr { name: *name, args: args.clone() })
+        let name = name.try_into().unwrap();
+        let args = args.iter().map(|x| x.try_into().unwrap()).collect::<Vec<_>>();
+        Ok(StatementInfo::Ctr { name, args })
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -1852,8 +1872,8 @@ impl Runtime {
           println!("[reg] #x{:0>30x} {}", ownr, u128_to_name(*name));
         }
         Ok(StatementInfo::Reg {
-          name: *name,
-          ownr: *ownr,
+          name: name.try_into().unwrap(),
+          ownr: ownr.try_into().unwrap(),
         })
       }
     }

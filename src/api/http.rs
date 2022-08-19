@@ -4,6 +4,7 @@
 #![warn(unused_variables)]
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
+
 use std::sync::mpsc::SyncSender;
 
 use serde_json::json;
@@ -15,8 +16,8 @@ use warp::reply::{self, Reply};
 use warp::{body, path, post, Filter};
 use warp::{reject, Rejection};
 
+use super::{name_to_u128_safe, NodeRequest};
 use crate::hvm;
-use crate::api::NodeRequest;
 use crate::util::U256;
 
 // Util
@@ -55,15 +56,6 @@ where
 
 // HVM
 // ===
-
-// Maybe this is redundant. Should study the cost of Option on original function.
-pub fn name_to_u128_safe(name: &str) -> Option<u128> {
-  if name.len() > 20 {
-    None
-  } else {
-    Some(hvm::name_to_u128(name))
-  }
-}
 
 fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
   names.iter().copied().map(hvm::u128_to_name).collect::<Vec<_>>()
@@ -134,7 +126,6 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
       ok_json(stats)
     }
   });
-
 
   // == Blocks ==
 
@@ -267,12 +258,12 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let interact_run = path!("run" / String).and_then(move |hex: String| {
     let query_tx = query_tx.clone();
     async move {
-      let result = ask(query_tx, |tx| {
-        NodeRequest::Run { hex: hex.clone(), tx }
-      }).await;
+      let result = ask(query_tx, |tx| NodeRequest::Run { hex: hex.clone(), tx }).await;
       match result {
         Ok(res) => Ok(ok_json(format!("Result: {:?}", res))),
-        Err(_err) => Err(reject::custom(InvalidParameter::from("Failed to execute statement".to_string()))), // TODO: create specific error
+        Err(_err) => {
+          Err(reject::custom(InvalidParameter::from("Failed to execute statement".to_string())))
+        } // TODO: create specific error
       }
     }
   });
