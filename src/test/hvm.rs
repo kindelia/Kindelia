@@ -1,7 +1,7 @@
 use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
-    init_map, init_runtime, name_to_u128, read_statements, u128_to_name, view_statements, Rollback,
+    init_map, init_runtime, name_to_u128_unsafe, read_statements, u128_to_name, view_statements, Rollback,
   },
   test::{
     strategies::{func, heap, name, statement, term},
@@ -173,8 +173,9 @@ fn parse_ask_fail1(
 proptest! {
   #[test]
   fn name_conversion(name in name()) {
+    let name = *name;
     let a = u128_to_name(name);
-    let b = name_to_u128(&a);
+    let b = name_to_u128_unsafe(&a);
     let c = u128_to_name(b);
     assert_eq!(name, b);
     assert_eq!(a, c);

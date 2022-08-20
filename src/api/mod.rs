@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use tokio::sync::oneshot;
 
-use crate::hvm;
+use crate::hvm::{self, Name, name_to_u128};
 use crate::node;
 
 use self::serialization::u256_to_hex;
@@ -19,62 +19,6 @@ type NodeRequester = SyncSender<NodeRequest>;
 
 // Basic
 // =====
-
-pub fn name_to_u128_safe(name: &str) -> Option<u128> {
-  if name.len() > 20 {
-    None
-  } else {
-    Some(hvm::name_to_u128(name))
-  }
-}
-
-// Name Type
-// ---------
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "&str")]
-pub struct Name(u128);
-
-impl TryFrom<&u128> for Name {
-  type Error = String;
-  fn try_from(name: &u128) -> Result<Self, Self::Error> {
-    if name >> 120 != 0 {
-      Err("Name does not fit 120-bits.".into())
-    } else {
-      Ok(Name(*name))
-    }
-  }
-}
-
-impl Into<u128> for Name {
-  fn into(self) -> u128 {
-    self.0
-  }
-}
-
-impl fmt::Display for Name {
-  fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-    write!(f, "{}", hvm::u128_to_name(self.0))
-  }
-}
-
-impl Into<String> for Name {
-  fn into(self) -> String {
-    format!("{}", self)
-  }
-}
-
-impl TryFrom<&str> for Name {
-  type Error = String;
-  fn try_from(name: &str) -> Result<Self, Self::Error> {
-    fn err_msg<E: fmt::Debug>(e: E) -> String {
-      format!("Invalid name: {:?}", e)
-    }
-    let name: u128 = name.parse::<u128>().map_err(err_msg)?;
-    let name = Name::try_from(&name).map_err(err_msg)?;
-    Ok(name)
-  }
-}
 
 // Hash
 // ----
@@ -255,11 +199,11 @@ pub enum NodeRequest {
     tx: RequestAnswer<HashSet<u128>>,
   },
   GetFunction {
-    name: u128,
+    name: Name,
     tx: RequestAnswer<Option<FuncInfo>>,
   },
   GetState {
-    name: u128,
+    name: Name,
     tx: RequestAnswer<Option<hvm::Term>>,
   },
   /// deprecated

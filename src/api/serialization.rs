@@ -38,7 +38,7 @@ pub fn name_to_u128_safe(name: &str) -> Option<u128> {
   if name.len() > 20 {
     None
   } else {
-    Some(hvm::name_to_u128(name))
+    Some(hvm::name_to_u128_unsafe(name))
   }
 }
 
@@ -58,8 +58,8 @@ impl serde::Serialize for Statement {
       // TODO: serialize sign
       Statement::Fun { name, args, func, init, sign: _ } => {
         let mut s = serializer.serialize_struct_variant("Statement", 0, "Fun", 4)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
-        s.serialize_field("args", &u128_names_to_strings(args))?;
+        s.serialize_field("name", name)?;
+        s.serialize_field("args", args)?;
         s.serialize_field("func", func)?;
         s.serialize_field("init", init)?;
         s.end()
@@ -67,8 +67,8 @@ impl serde::Serialize for Statement {
       // TODO: serialize sign
       Statement::Ctr { name, args, sign: _ } => {
         let mut s = serializer.serialize_struct_variant("Statement", 1, "Ctr", 2)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
-        s.serialize_field("args", &u128_names_to_strings(args))?;
+        s.serialize_field("name", name)?;
+        s.serialize_field("args", args)?;
         s.end()
       }
       // TODO: serialize sign
@@ -116,20 +116,20 @@ impl serde::Serialize for Term {
     match self {
       Term::Var { name } => {
         let mut s = serializer.serialize_struct_variant("Term", 0, "Var", 1)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
+        s.serialize_field("name", name)?;
         s.end()
       }
       Term::Dup { nam0, nam1, expr, body } => {
         let mut s = serializer.serialize_struct_variant("Term", 1, "Dup", 4)?;
-        s.serialize_field("nam0", &u128_to_name(*nam0))?;
-        s.serialize_field("nam1", &u128_to_name(*nam1))?;
+        s.serialize_field("nam0", nam0)?;
+        s.serialize_field("nam1", nam1)?;
         s.serialize_field("expr", &expr)?;
         s.serialize_field("body", &body)?;
         s.end()
       }
       Term::Lam { name, body } => {
         let mut s = serializer.serialize_struct_variant("Term", 2, "Lam", 2)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
+        s.serialize_field("name", name)?;
         s.serialize_field("body", &body)?;
         s.end()
       }
@@ -141,13 +141,13 @@ impl serde::Serialize for Term {
       }
       Term::Ctr { name, args } => {
         let mut s = serializer.serialize_struct_variant("Term", 4, "Ctr", 2)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
+        s.serialize_field("name", name)?;
         s.serialize_field("args", args)?;
         s.end()
       }
       Term::Fun { name, args } => {
         let mut s = serializer.serialize_struct_variant("Term", 5, "Fun", 2)?;
-        s.serialize_field("name", &u128_to_name(*name))?;
+        s.serialize_field("name", name)?;
         s.serialize_field("args", args)?;
         s.end()
       }

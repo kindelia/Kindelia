@@ -16,8 +16,8 @@ use warp::reply::{self, Reply};
 use warp::{body, path, post, Filter};
 use warp::{reject, Rejection};
 
-use super::{name_to_u128_safe, NodeRequest};
-use crate::hvm;
+use super::{name_to_u128, NodeRequest};
+use crate::hvm::{self, Name};
 use crate::util::U256;
 
 // Util
@@ -178,16 +178,17 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let get_function_base =
     path!("functions" / String / ..).and_then(move |name_txt: String| async move {
-      if let Some(name) = name_to_u128_safe(&name_txt) {
-        Ok(name)
-      } else {
-        let msg = format!("Invalid function name: '{}'", name_txt);
-        Err(reject::custom(InvalidParameter::from(msg)))
+      match name_to_u128(&name_txt) {
+        Ok(name) => Ok(name),
+        Err(err) => {
+          let msg = format!("Invalid function name '{}': {}", name_txt, err);
+          Err(reject::custom(InvalidParameter::from(msg)))
+        }
       }
     });
 
   let query_tx = node_query_sender.clone();
-  let get_function = get_function_base.and(path!()).and_then(move |name: u128| {
+  let get_function = get_function_base.and(path!()).and_then(move |name: Name| {
     let query_tx = query_tx.clone();
     async move {
       let function = ask(query_tx, |tx| NodeRequest::GetFunction { name, tx }).await;
@@ -200,7 +201,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   });
 
   let query_tx = node_query_sender.clone();
-  let get_function_state = get_function_base.and(path!("state")).and_then(move |name: u128| {
+  let get_function_state = get_function_base.and(path!("state")).and_then(move |name: Name| {
     let query_tx = query_tx.clone();
     async move {
       let state = ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;

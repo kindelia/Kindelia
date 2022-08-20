@@ -95,12 +95,12 @@ pub fn deserialize_bits(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
 
 // A name is grouped by 6-bit letters
 
-pub fn serialize_name(name: &u128, bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_name(name: &Name, bits: &mut BitVec, names: &mut Names) {
   if let Some(id) = names.get(name) {
     bits.push(true);
     serialize_varlen(&u256(*id), bits, names);
   } else {
-    let mut name = *name;
+    let mut name = **name;
     names.insert(name, names.len() as u128);
     bits.push(false); // compressed-name flag
     while name > 0 {
@@ -112,7 +112,7 @@ pub fn serialize_name(name: &u128, bits: &mut BitVec, names: &mut Names) {
   }
 }
 
-pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<u128> {
+pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Name> {
   let mut nam : u128 = 0;
   let mut add : u128 = 1;
   let compressed = bits.get(*index as usize)?;
@@ -120,7 +120,7 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
   if compressed {
     let id = deserialize_varlen(bits, index, names)?.low_u128();
     let nm = *names.get(&id)?;
-    return Some(nm);
+    return Some(Name::from_u128_unchecked(nm));
   } else {
     while bits.get(*index as usize)? {
       *index += 1;
@@ -131,7 +131,7 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     *index = *index + 1;
     if add > 1 {
       names.insert(names.len() as u128, nam);
-      return Some(nam);
+      return Some(Name::from_u128_unchecked(nam));
     } else {
       return None;
     };

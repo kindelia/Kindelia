@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use crate::{
   crypto,
   hvm::{
-    init_map, name_to_u128, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Nodes, Ownrs,
+    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Name, Nodes, Ownrs,
     Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var,
   },
   node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
@@ -18,7 +18,7 @@ use proptest::{
 };
 
 // generate valid names
-pub fn name() -> impl Strategy<Value = u128> {
+pub fn name() -> impl Strategy<Value = Name> {
   // TODO: temporary fix to new limitation due
   // to the fact that is not possible make a name
   // that start with a number anymore
@@ -26,18 +26,21 @@ pub fn name() -> impl Strategy<Value = u128> {
     .prop_filter("Differente than 'ask'", |s| s != "ask")
     .prop_filter("Differente than 'let'", |s| s != "let")
     .prop_filter("Differente than 'dup'", |s| s != "dup")
-    .prop_map(|s| name_to_u128(&s))
+    .prop_map(|s| name_to_u128_unsafe(&s))
+    .prop_map(|s| Name::from_u128_unchecked(s))
 }
 
-pub fn fun_name() -> impl Strategy<Value = u128> {
-  "[A-Z][a-zA-Z0-9_]{1,19}".prop_map(|s| name_to_u128(&s))
+pub fn fun_name() -> impl Strategy<Value = Name> {
+  "[A-Z][a-zA-Z0-9_]{1,19}"
+    .prop_map(|s| name_to_u128_unsafe(&s))
+    .prop_map(|s| Name::from_u128_unchecked(s))
 }
 
 // generate valid terms
 pub fn term() -> impl Strategy<Value = Term> {
   let leaf = prop_oneof![
     name().prop_map(|n| Term::Var { name: n }),
-    name().prop_map(|n| Term::Num { numb: n }),
+    name().prop_map(|n| Term::Num { numb: *n }),
   ];
 
   leaf.prop_recursive(
@@ -92,7 +95,7 @@ pub fn statement() -> impl Strategy<Value = Statement> {
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
     (term(), option::of(sign())).prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
     (name(), name(), option::of(sign()))
-      .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
+      .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr: *ownr, sign } }),
   ]
 }
 

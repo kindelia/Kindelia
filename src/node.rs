@@ -910,8 +910,8 @@ impl Node {
     Some(info)
   }
 
-  pub fn get_func_info(&self, fid: u128) -> Option<FuncInfo> {
-    let comp_func = self.runtime.read_file(fid)?;
+  pub fn get_func_info(&self, name: &Name) -> Option<FuncInfo> {
+    let comp_func = self.runtime.read_file(name)?;
     let func = comp_func.func;
     Some(FuncInfo { func })
   }
@@ -951,7 +951,7 @@ impl Node {
         tx.send(funcs).unwrap();
       },
       NodeRequest::GetFunction { name, tx: answer } =>  {
-        let info = self.get_func_info(name);
+        let info = self.get_func_info(&name);
         answer.send(info).unwrap();
       },
       NodeRequest::GetState { name, tx: answer } => {

@@ -1,6 +1,6 @@
 use rstest::fixture;
 
-use crate::hvm::{init_runtime, name_to_u128, show_term, Rollback, Runtime, U128_NONE};
+use crate::hvm::{init_runtime, name_to_u128_unsafe, show_term, Rollback, Runtime, U128_NONE, Name};
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
   hash::{Hash, Hasher},
@@ -75,7 +75,8 @@ impl RuntimeStateTest {
 
 // Generate a checksum for a runtime state (for testing)
 pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
-  let fn_ids = fn_names.iter().map(|x| name_to_u128(x)).collect::<Vec<u128>>();
+  let fn_ids =
+    fn_names.iter().map(|x| Name::from_u128_unchecked(name_to_u128_unsafe(x))).collect::<Vec<Name>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id);
