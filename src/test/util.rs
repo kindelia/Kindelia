@@ -99,13 +99,13 @@ pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Opti
   rt.rollback(tick);
   if rt.get_tick() == 0 {
     if let Some(pre_code) = pre_code {
-      rt.run_statements_from_code(pre_code, true);
+      rt.run_statements_from_code(pre_code, true, true);
     }
   }
   let tick_diff = tick - rt.get_tick();
   for _ in 0..tick_diff {
     if let Some(code) = code {
-      rt.run_statements_from_code(code, true);
+      rt.run_statements_from_code(code, true, true);
     }
     rt.tick();
   }
@@ -118,7 +118,7 @@ pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
   let actual_tick = rt.get_tick();
   for _ in actual_tick..tick {
     if let Some(code) = code {
-      rt.run_statements_from_code(code, true);
+      rt.run_statements_from_code(code, true, true);
     }
     rt.tick();
   }
@@ -146,9 +146,9 @@ pub fn rollback_simple(
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
-  rt.run_statements_from_code(pre_code, true);
+  rt.run_statements_from_code(pre_code, true, true);
   for _ in 0..total_tick {
-    rt.run_statements_from_code(code, true);
+    rt.run_statements_from_code(code, true, true);
     rt.tick();
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
@@ -158,12 +158,12 @@ pub fn rollback_simple(
   // Does rollback to nearest rollback_tick saved state
   rt.rollback(rollback_tick);
   if rt.get_tick() == 0 {
-    rt.run_statements_from_code(pre_code, true);
+    rt.run_statements_from_code(pre_code, true, true);
   }
   // Run until rollback_tick
   let tick_diff = rollback_tick - rt.get_tick();
   for _ in 0..tick_diff {
-    rt.run_statements_from_code(code, true);
+    rt.run_statements_from_code(code, true, true);
     rt.tick();
   }
   // Calculates new checksum, after rollback
@@ -194,7 +194,7 @@ pub fn rollback_path(
   };
 
   let mut rt = init_runtime(Some(dir_path));
-  rt.run_statements_from_code(pre_code, true);
+  rt.run_statements_from_code(pre_code, true, true);
 
   for tick in path {
     let tick = *tick;
