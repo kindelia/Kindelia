@@ -1,9 +1,3 @@
-#![warn(dead_code)]
-#![warn(unused_imports)]
-#![warn(non_snake_case)]
-#![warn(unused_variables)]
-#![warn(clippy::style)]
-#![allow(clippy::let_and_return)]
 
 use std::sync::mpsc::SyncSender;
 
@@ -16,8 +10,8 @@ use warp::reply::{self, Reply};
 use warp::{body, path, post, Filter};
 use warp::{reject, Rejection};
 
-use super::{name_to_u128, NodeRequest};
-use crate::hvm::{self, Name};
+use super::NodeRequest;
+use crate::hvm::{self, Name, name_to_u128};
 use crate::util::U256;
 
 // Util

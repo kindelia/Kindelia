@@ -1,7 +1,14 @@
+#![warn(dead_code)]
+#![warn(unused_imports)]
+#![warn(non_snake_case)]
+#![warn(unused_variables)]
+#![warn(clippy::style)]
+#![allow(clippy::let_and_return)]
+
 pub mod http;
 pub mod serialization;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 use std::sync::mpsc::SyncSender;
 
@@ -10,12 +17,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use tokio::sync::oneshot;
 
-use crate::hvm::{self, Name, name_to_u128};
+use crate::hvm::{self, Name};
 use crate::node;
 
 use self::serialization::u256_to_hex;
-
-type NodeRequester = SyncSender<NodeRequest>;
 
 // Basic
 // =====

@@ -1,9 +1,6 @@
 use serde::ser::{SerializeStruct, SerializeStructVariant};
-use serde::Serialize;
 
-use super::{BlockInfo, FuncInfo, Stats};
-use crate::hvm::{self, u128_to_name, Func, Rule, Statement, StatementErr, StatementInfo, Term};
-use crate::node::Block;
+use crate::hvm::{self, Func, Rule, Statement, Term};
 use crate::util::U256;
 
 // Util
@@ -16,35 +13,20 @@ pub fn u256_to_hex(value: &U256) -> String {
   format!("0x{}", hex::encode(be_bytes))
 }
 
-// Hexadecimal string to U256
-pub fn hex_to_u256(hex: &str) -> Result<U256, String> {
-  let bytes = hex::decode(hex);
-  let bytes = match bytes {
-    Ok(bytes) => bytes,
-    Err(_) => return Err(format!("Invalid hexadecimal string: '{}'", hex)),
-  };
-  if bytes.len() != 256 / 8 {
-    Err(format!("Invalid hexadecimal string: {}", hex))
-  } else {
-    let num = U256::from_big_endian(&bytes);
-    Ok(num)
-  }
-}
-
-// HVM
-// ===
-
-pub fn name_to_u128_safe(name: &str) -> Option<u128> {
-  if name.len() > 20 {
-    None
-  } else {
-    Some(hvm::name_to_u128_unsafe(name))
-  }
-}
-
-pub fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
-  names.iter().copied().map(hvm::u128_to_name).collect::<Vec<_>>()
-}
+// // Hexadecimal string to U256
+// pub fn hex_to_u256(hex: &str) -> Result<U256, String> {
+//   let bytes = hex::decode(hex);
+//   let bytes = match bytes {
+//     Ok(bytes) => bytes,
+//     Err(_) => return Err(format!("Invalid hexadecimal string: '{}'", hex)),
+//   };
+//   if bytes.len() != 256 / 8 {
+//     Err(format!("Invalid hexadecimal string: {}", hex))
+//   } else {
+//     let num = U256::from_big_endian(&bytes);
+//     Ok(num)
+//   }
+// }
 
 // Serde Implementations
 // =====================
