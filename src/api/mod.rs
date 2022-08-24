@@ -10,7 +10,6 @@ pub mod serialization;
 
 use std::collections::HashSet;
 use std::fmt::{self, Display};
-use std::sync::mpsc::SyncSender;
 
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
@@ -40,9 +39,9 @@ impl From<U256> for Hash {
   }
 }
 
-impl Into<U256> for Hash {
-  fn into(self) -> U256 {
-    self.value
+impl From<Hash> for U256 {
+  fn from(hash: Hash) -> Self {
+      hash.value
   }
 }
 
@@ -69,9 +68,9 @@ impl TryFrom<&str> for Hash {
   }
 }
 
-impl Into<String> for Hash {
-  fn into(self) -> String {
-    u256_to_hex(&self.value)
+impl From<Hash> for String {
+  fn from(hash: Hash) -> Self {
+    u256_to_hex(&hash.value)
   }
 }
 
@@ -95,9 +94,9 @@ pub struct Stats {
   pub tick: u64,
 }
 
-impl Into<String> for &node::Transaction {
-  fn into(self) -> String {
-    hex::encode(&self.data)
+impl From<&node::Transaction> for String {
+  fn from(transaction: &node::Transaction) -> Self {
+    hex::encode(&transaction.data)
   }
 }
 
