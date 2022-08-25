@@ -364,12 +364,16 @@ pub struct CompFunc {
   pub rules: Vec<CompRule>, // vector of rules
 }
 
+// TODO: refactor all these maps to use `Name` newtype
+
 // A file, which is just a map of `FuncID -> CompFunc`
 // It is used to find a function when it is called, in order to apply its rewrite rules.
 #[derive(Clone, Debug)]
 pub struct Funcs {
   pub funcs: Map<Arc<CompFunc>>,
 }
+
+// TODO: arity with no u128
 
 // A map of `FuncID -> Arity`
 // It is used in many places to find the arity (argument count) of functions and constructors.
@@ -559,9 +563,13 @@ const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapsho
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
-pub const VAL: u128 = 1 << 0;
-pub const EXT: u128 = 1 << 48;
-pub const TAG: u128 = 1 << 120;
+pub const VAL_SIZE: usize = 48;
+pub const EXT_SIZE: usize = 72;
+pub const TAG_SIZE: usize = 8;
+
+pub const VAL_POS: u128 = 1 << 0;
+pub const EXT_POS: u128 = 1 << VAL_SIZE;
+pub const TAG_POS: u128 = 1 << (EXT_SIZE + VAL_SIZE);
 
 // FIXME: document and replace magic numbers on code
 //pub const VAL_MASK: u128 = EXT - 1;
@@ -892,8 +900,9 @@ impl Name {
     self.0 == VAR_NONE
   }
 
+  /// Check if a name can be used directly (fits in the `EXT` field).
   pub fn is_small(&self) -> bool {
-    self.0 >> 72 == 0
+    self.0 >> EXT_SIZE == 0
   }
 
   pub fn from_u128_unchecked(numb: u128) -> Self {
@@ -1806,8 +1815,8 @@ impl Runtime {
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, get_num(fnid), &[argm]);
-            let fnid = Name(get_num(fnid));
+            let ioxp = alloc_fun(self, *get_num(fnid), &[argm]);
+            let fnid = get_num(fnid).into();
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
@@ -2019,7 +2028,7 @@ impl Runtime {
         })
       }
       Statement::Reg { name, ownr, sign } => {
-        let ownr = **ownr; // ASK: should we do this or change all the ownr map to store Name, instead u128
+        let ownr = **ownr;
         
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
@@ -2536,73 +2545,73 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // ------------
 
 pub fn Var(pos: u128) -> Ptr {
-  (VAR * TAG) | pos
+  (VAR * TAG_POS) | pos
 }
 
 pub fn Dp0(col: u128, pos: u128) -> Ptr {
-  (DP0 * TAG) | (col * EXT) | pos
+  (DP0 * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Dp1(col: u128, pos: u128) -> Ptr {
-  (DP1 * TAG) | (col * EXT) | pos
+  (DP1 * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Arg(pos: u128) -> Ptr {
-  (ARG * TAG) | pos
+  (ARG * TAG_POS) | pos
 }
 
 pub fn Era() -> Ptr {
-  ERA * TAG
+  ERA * TAG_POS
 }
 
 pub fn Lam(pos: u128) -> Ptr {
-  (LAM * TAG) | pos
+  (LAM * TAG_POS) | pos
 }
 
 pub fn App(pos: u128) -> Ptr {
-  (APP * TAG) | pos
+  (APP * TAG_POS) | pos
 }
 
 pub fn Par(col: u128, pos: u128) -> Ptr {
-  (SUP * TAG) | (col * EXT) | pos
+  (SUP * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Op2(ope: u128, pos: u128) -> Ptr {
-  (OP2 * TAG) | (ope * EXT) | pos
+  (OP2 * TAG_POS) | (ope * EXT_POS) | pos
 }
 
 pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG) | (val & NUM_MASK)
+  (NUM * TAG_POS) | (val & NUM_MASK)
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
-  (CTR * TAG) | (fun * EXT) | pos
+  (CTR * TAG_POS) | (fun * EXT_POS) | pos
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
-  (FUN * TAG) | (fun * EXT) | pos
+  (FUN * TAG_POS) | (fun * EXT_POS) | pos
 }
 
 // Getters
 // -------
 
 pub fn get_tag(lnk: Ptr) -> u128 {
-  lnk / TAG
+  lnk / TAG_POS
 }
 
 pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT) & 0xFF_FFFF_FFFF_FFFF_FFFF
+  (lnk / EXT_POS) & 0xFF_FFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Ptr) -> u128 {
   lnk & 0xFFFF_FFFF_FFFF
 }
 
-pub fn get_num(lnk: Ptr) -> u128 {
-  lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
+pub fn get_num(lnk: Ptr) -> U120 {
+  U120(lnk & NUM_MASK)
 }
 
 //pub fn get_ari(lnk: Ptr) -> u128 {
@@ -3423,23 +3432,23 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
             let res = match op {
-              // U120
-              ADD => a_u.wrapping_add(b_u) & NUM_MASK,
-              SUB => a_u.wrapping_sub(b_u) & NUM_MASK,
-              MUL => a_u.wrapping_mul(b_u) & NUM_MASK,
-              DIV => a_u.wrapping_div(b_u) & NUM_MASK,
-              MOD => a_u.wrapping_rem(b_u) & NUM_MASK,
-              AND => (a_u &  b_u) & NUM_MASK,
-              OR  => (a_u |  b_u) & NUM_MASK,
-              XOR => (a_u ^  b_u) & NUM_MASK,
-              SHL => a_u.wrapping_shl(b_u as u32) & NUM_MASK,
-              SHR => a_u.wrapping_shr(b_u as u32) & NUM_MASK,
-              LTN => u128::from(a_u <  b_u),
-              LTE => u128::from(a_u <= b_u),
-              EQL => u128::from(a_u == b_u),
-              GTE => u128::from(a_u >= b_u),
-              GTN => u128::from(a_u >  b_u),
-              NEQ => u128::from(a_u != b_u),
+              // TODO: implement U120 operations
+              ADD => (*a_u).wrapping_add(*b_u) & NUM_MASK,
+              SUB => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
+              MUL => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
+              DIV => (*a_u).wrapping_div(*b_u) & NUM_MASK,
+              MOD => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
+              AND => (*a_u &  *b_u) & NUM_MASK,
+              OR  => (*a_u |  *b_u) & NUM_MASK,
+              XOR => (*a_u ^  *b_u) & NUM_MASK,
+              SHL => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
+              SHR => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
+              LTN => u128::from(*a_u <  *b_u),
+              LTE => u128::from(*a_u <= *b_u),
+              EQL => u128::from(*a_u == *b_u),
+              GTE => u128::from(*a_u >= *b_u),
+              GTN => u128::from(*a_u >  *b_u),
+              NEQ => u128::from(*a_u != *b_u),
               _ => panic!("Invalid operation!"),
             };
             let done = Num(res);
@@ -3931,7 +3940,8 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               if name == "Name" && arit == 1 {
                 let arg = ask_arg(rt, term, 0);
                 if get_tag(arg) == NUM {
-                  name = format!("Name '{}'", Name(get_num(arg)));
+                  let sugar: Name = get_num(arg).into();
+                  name = format!("Name '{}'", sugar);
                   arit = 0; // erase arit to avoid for
                 }
               }
@@ -4112,7 +4122,6 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
             }
             NUM => {
               let numb = get_num(term);
-              let numb: U120 = numb.try_into().unwrap(); // ASK: the number here must already fit in u120, this cast is needed?
               output.push(Term::Num { numb });
             }
             OP2 => {
@@ -4478,7 +4487,6 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
         // checking function name size _on direct calling_
-        // ASK: this will forbid create lhs rules with big names
         if !name.is_small() {
           return Err(ParseErr::new(code, format!("Direct calling function with too long name: `{}`.", name)))
         }
@@ -4615,6 +4623,7 @@ pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
 }
 
 pub fn read_rule(code: &str) -> ParseResult<Rule> {
+  // TODO: custom parser for lhs
   let (code, lhs) = read_term(code)?;
   let (code, ())  = read_char(code, '=')?;
   let (code, rhs) = read_term(code)?;
