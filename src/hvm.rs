@@ -281,7 +281,7 @@ pub struct U120(u128);
 // - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
 // - Op2: a numeric operation.
 /// A native HVM term
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Term {
   Var { name: Name },
   Dup { nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term> },
@@ -290,7 +290,7 @@ pub enum Term {
   Ctr { name: Name, args: Vec<Term> },
   Fun { name: Name, args: Vec<Term> },
   Num { numb: U120 },
-  Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
+  Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
 }
 
 // A native HVM 120-bit machine integer operation
@@ -322,14 +322,14 @@ pub enum Oper {
 pub type Map<T> = util::U128Map<T>;
 
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rule {
   pub lhs: Term,
   pub rhs: Term,
 }
 
 /// A function, which is just a vector of rewrite rules.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct Func {
   pub rules: Vec<Rule>,
 }
@@ -397,7 +397,7 @@ pub struct Store {
 }
 
 /// A global statement that alters the state of the blockchain
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
   Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },

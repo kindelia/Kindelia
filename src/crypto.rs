@@ -3,12 +3,15 @@ extern crate secp256k1;
 use secp256k1::rand::rngs::OsRng;
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
+use serde::{Serialize, Deserialize};
 use tiny_keccak::Hasher;
 
 use crate::hvm::Name;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "&str")]
 pub struct Signature(pub [u8; 65]);
+
 pub struct Address(pub [u8; 20]);
 pub struct Hash(pub [u8; 32]);
 
@@ -53,6 +56,19 @@ impl Signature {
 
   pub fn signer_name(&self, hash: &Hash) -> Option<Name> {
     return Some(Name::from_public_key(&self.signer_public_key(hash)?));
+  }
+}
+
+impl From<Signature> for String {
+  fn from(signature: Signature) -> Self {
+    signature.to_hex()
+  }
+}
+
+impl TryFrom<&str> for Signature {
+  type Error = String;
+  fn try_from(value: &str) -> Result<Self, Self::Error> {
+    Signature::from_hex(&value).ok_or_else(|| "Invalid signature hex string".to_string())
   }
 }
 

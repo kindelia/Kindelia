@@ -6,7 +6,6 @@
 #![allow(clippy::let_and_return)]
 
 pub mod http;
-pub mod serialization;
 
 use std::collections::HashSet;
 use std::fmt::{self, Display};
@@ -19,7 +18,30 @@ use tokio::sync::oneshot;
 use crate::hvm::{self, Name};
 use crate::node;
 
-use self::serialization::u256_to_hex;
+// Util
+// ====
+
+// U256 to hexadecimal string
+pub fn u256_to_hex(value: &U256) -> String {
+  let mut be_bytes = [0u8; 32];
+  value.to_big_endian(&mut be_bytes);
+  format!("0x{}", hex::encode(be_bytes))
+}
+
+// // Hexadecimal string to U256
+// pub fn hex_to_u256(hex: &str) -> Result<U256, String> {
+//   let bytes = hex::decode(hex);
+//   let bytes = match bytes {
+//     Ok(bytes) => bytes,
+//     Err(_) => return Err(format!("Invalid hexadecimal string: '{}'", hex)),
+//   };
+//   if bytes.len() != 256 / 8 {
+//     Err(format!("Invalid hexadecimal string: {}", hex))
+//   } else {
+//     let num = U256::from_big_endian(&bytes);
+//     Ok(num)
+//   }
+// }
 
 // Basic
 // =====
