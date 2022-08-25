@@ -3,8 +3,8 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use crate::{
   crypto,
   hvm::{
-    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Name, Nodes, Ownrs,
-    Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var,
+    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Name, Nodes,
+    Ownrs, Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var, U120,
   },
   node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
 };
@@ -30,8 +30,12 @@ pub fn name() -> impl Strategy<Value = Name> {
     .prop_map(|s| Name::from_u128_unchecked(s))
 }
 
-pub fn fun_name() -> impl Strategy<Value = Name> {
-  "[A-Z][a-zA-Z0-9_]{1,19}"
+pub fn u120() -> impl Strategy<Value = U120> {
+  (0_u128..*(U120::MAX) + 1).prop_map(|n| n.try_into().unwrap())
+}
+
+pub fn small_name() -> impl Strategy<Value = Name> {
+  "[A-Z][a-zA-Z0-9_]{0,11}"
     .prop_map(|s| name_to_u128_unsafe(&s))
     .prop_map(|s| Name::from_u128_unchecked(s))
 }
@@ -40,7 +44,7 @@ pub fn fun_name() -> impl Strategy<Value = Name> {
 pub fn term() -> impl Strategy<Value = Term> {
   let leaf = prop_oneof![
     name().prop_map(|n| Term::Var { name: n }),
-    name().prop_map(|n| Term::Num { numb: *n }),
+    u120().prop_map(|n| Term::Num { numb: n }),
   ];
 
   leaf.prop_recursive(
@@ -55,9 +59,9 @@ pub fn term() -> impl Strategy<Value = Term> {
         (name(), inner.clone()).prop_map(|(n, e)| { Term::Lam { name: n, body: Box::new(e) } }),
         (inner.clone(), inner.clone())
           .prop_map(|(f, a)| { Term::App { func: Box::new(f), argm: Box::new(a) } }),
-        (fun_name(), vec(inner.clone(), 0..10))
+        (small_name(), vec(inner.clone(), 0..10))
           .prop_map(|(n, v)| { Term::Ctr { name: n, args: v } }),
-        (fun_name(), vec(inner.clone(), 0..10))
+        (small_name(), vec(inner.clone(), 0..10))
           .prop_map(|(n, v)| { Term::Fun { name: n, args: v } }),
         (0..15_u128, inner.clone(), inner).prop_map(|(o, v0, v1)| {
           Term::Op2 { oper: o, val0: Box::new(v0), val1: Box::new(v1) }
@@ -68,7 +72,7 @@ pub fn term() -> impl Strategy<Value = Term> {
 }
 
 fn fun() -> impl Strategy<Value = Term> {
-  (fun_name(), vec(term(), 0..32)).prop_map(|(n, b)| Term::Fun { name: n, args: b })
+  (small_name(), vec(term(), 0..32)).prop_map(|(n, b)| Term::Fun { name: n, args: b })
 }
 
 // generate rules
@@ -88,14 +92,14 @@ pub fn sign() -> impl Strategy<Value = crypto::Signature> {
 // generate statements
 pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
-    (fun_name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
+    (small_name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
       |(name, args, func, init, sign)| { Statement::Fun { name, args, func, init, sign } }
     ),
-    (fun_name(), vec(name(), 0..10), option::of(sign()))
+    (small_name(), vec(name(), 0..10), option::of(sign()))
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
     (term(), option::of(sign())).prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
     (name(), name(), option::of(sign()))
-      .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr: *ownr, sign } }),
+      .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
 }
 

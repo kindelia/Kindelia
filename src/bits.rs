@@ -399,7 +399,7 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec, names: &mut Names) {
     }
     Term::Num { numb } => {
       serialize_fixlen(3, &u256(6), bits, names);
-      serialize_number(&u256(*numb), bits, names);
+      serialize_number(&u256(**numb), bits, names);
     }
     Term::Op2 { oper, val0, val1 } => {
       serialize_fixlen(3, &u256(7), bits, names);
@@ -450,6 +450,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     }
     6 => {
       let numb = deserialize_number(bits, index, names)?.low_u128();
+      let numb: U120 = numb.try_into().ok()?;
       Some(Term::Num { numb })
     }
     7 => {
@@ -560,7 +561,7 @@ pub fn serialize_statement(statement: &Statement, bits: &mut BitVec, names: &mut
     Statement::Reg { name, ownr, sign } => {
       serialize_fixlen(4, &u256(3), bits, names);
       serialize_name(name, bits, names);
-      serialize_fixlen(128, &u256(*ownr), bits, names);
+      serialize_fixlen(128, &u256(**ownr), bits, names);
       serialize_sign(sign, bits, names);
     }
   }
@@ -591,6 +592,7 @@ pub fn deserialize_statement(bits: &BitVec, index: &mut u128, names: &mut Names)
     3 => {
       let name = deserialize_name(bits, index, names)?;
       let ownr = deserialize_fixlen(128, bits, index, names)?.low_u128();
+      let ownr: Name = ownr.try_into().ok()?;
       let sign = deserialize_sign(bits, index, names)?;
       Some(Statement::Reg { name, ownr, sign })
     }

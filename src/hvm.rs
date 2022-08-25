@@ -265,6 +265,10 @@ use crate::api;
 #[serde(into = "String", try_from = "&str")]
 pub struct Name(u128);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "&str")]
+pub struct U120(u128);
+
 // This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 // rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
 // later on. Below is a description of each variant:
@@ -285,7 +289,7 @@ pub enum Term {
   App { func: Box<Term>, argm: Box<Term> },
   Ctr { name: Name, args: Vec<Term> },
   Fun { name: Name, args: Vec<Term> },
-  Num { numb: u128 },
+  Num { numb: U120 },
   Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
 }
 
@@ -394,7 +398,7 @@ pub enum Statement {
   Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
-  Reg { name: Name, ownr: u128, sign: Option<crypto::Signature> },
+  Reg { name: Name, ownr: Name, sign: Option<crypto::Signature> },
 }
 
 // An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
@@ -933,6 +937,78 @@ impl TryFrom<&str> for Name {
     }
     let name = name_to_u128(name).map_err(err_msg)?;
     Ok(name)
+  }
+}
+
+impl From<U120> for Name {
+  fn from(num: U120) -> Self {
+    Name(num.0)
+  }
+}
+
+// U120
+// ====
+
+impl U120 {
+  pub const ZERO: U120 = U120(0);
+  pub const MAX: U120 = U120(2_u128.pow(120) - 1);
+}
+
+impl std::ops::Deref for U120 {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl TryFrom<u128> for U120 {
+  type Error = String;
+  fn try_from(numb: u128) -> Result<Self, Self::Error> {
+    if numb >> 120 != 0 {
+      Err(format!("Number {} does not fit in 120-bits.", numb))
+    } else {
+      Ok(U120(numb))
+    }
+  }
+}
+
+impl fmt::Display for U120 {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      write!(f, "{}", self.0)
+  }
+}
+
+impl From<U120> for String {
+  fn from(num: U120) -> Self {
+      num.to_string()
+  }
+}
+
+impl TryFrom<&str> for U120 {
+  type Error = String;
+  fn try_from(numb: &str) -> Result<Self, Self::Error> {
+    fn err_msg<E: fmt::Debug>(e: E) -> String {
+      format!("Invalid name: {:?}.", e)
+    }
+    let (rest, result) = read_numb(numb).map_err(err_msg)?;
+    if !rest.is_empty() {
+      Err(err_msg(numb))
+    } else {
+      Ok(result)
+    }
+  }
+}
+
+// Parser
+// ======
+
+impl ParseErr {
+  fn new<C, E>(code: C, erro: E) -> Self
+  where 
+    C: Into<String>,
+    E: Into<String>
+  {
+    ParseErr { code: code.into(), erro: erro.into() }
   }
 }
 
@@ -1925,7 +2001,8 @@ impl Runtime {
         })
       }
       Statement::Reg { name, ownr, sign } => {
-        let ownr = *ownr;
+        let ownr = **ownr; // ASK: should we do this or change all the ownr map to store Name, instead u128
+        
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
@@ -2857,8 +2934,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       }
     }
     Term::Num { numb } => {
-      // TODO: assert numb size
-      Num(*numb as u128)
+      Num(**numb)
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
@@ -2967,7 +3043,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
           // If it is a number...
           Term::Num { numb: arg_numb } => {
             strict[i as usize] = true;
-            cond.push(Num(*arg_numb as u128)); // adds its matching condition
+            cond.push(Num(**arg_numb)); // adds its matching condition
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
@@ -4018,6 +4094,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
             }
             NUM => {
               let numb = get_num(term);
+              let numb: U120 = numb.try_into().unwrap(); // ASK: the number here must already fit in u120, this cast is needed?
               output.push(Term::Num { numb });
             }
             OP2 => {
@@ -4181,35 +4258,47 @@ pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
   }
 }
 
-pub fn read_numb(code: &str) -> ParseResult<u128> {
+pub fn read_numb<T>(code: &str) -> ParseResult<T>
+where
+  T: TryFrom<u128, Error = String>,
+{
   let mut code = skip(code);
-  if head(code) == 'x' {
-    code = tail(code);
-    let mut numb = 0;
-    let mut code = code;
-    loop {
-      if head(code) >= '0' && head(code) <= '9' {
-        numb = numb * 16 + head(code) as u128 - 0x30;
-        code = tail(code);
-      } else if head(code) >= 'a' && head(code) <= 'f' {
-        numb = numb * 16 + head(code) as u128 - 0x61 + 10;
-        code = tail(code);
-      } else if head(code) >= 'A' && head(code) <= 'F' {
-        numb = numb * 16 + head(code) as u128 - 0x41 + 10;
-        code = tail(code);
-      } else {
-        break;
-      }
-    }
-    return Ok((code, numb));
-  } else {
-    let mut numb = 0;
-    while head(code) >= '0' && head(code) <= '9' {
-      numb = numb * 10 + head(code) as u128 - 0x30;
+  let (code, numb) = {
+    if head(code) == 'x' {
       code = tail(code);
+      let mut numb = 0;
+      let mut code = code;
+      let mut digits = 0; // this will be used to prevent number overflow panicking
+      loop {
+        if head(code) >= '0' && head(code) <= '9' {
+          numb = numb * 16 + head(code) as u128 - 0x30;
+          code = tail(code);
+        } else if head(code) >= 'a' && head(code) <= 'f' {
+          numb = numb * 16 + head(code) as u128 - 0x61 + 10;
+          code = tail(code);
+        } else if head(code) >= 'A' && head(code) <= 'F' {
+          numb = numb * 16 + head(code) as u128 - 0x41 + 10;
+          code = tail(code);
+        } else {
+          break;
+        }
+        digits += 1;
+        if digits > 30 {
+          return Err(ParseErr::new(code, "Hexadecimal number with more than 30 digits"))
+        }
+      }
+      (code, numb)
+    } else {
+      let mut numb = 0;
+      while head(code) >= '0' && head(code) <= '9' {
+        numb = numb * 10 + head(code) as u128 - 0x30;
+        code = tail(code);
+      }
+      (code, numb)
     }
-    return Ok((code, numb));
-  }
+  };
+  let numb: T = numb.try_into().map_err(|err| ParseErr::new(code, err))?;
+  Ok((code, numb))
 }
 
 pub fn read_name(code: &str) -> ParseResult<Name> {
@@ -4407,6 +4496,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let (code, name) = read_name(code)?;
       let (code, unit) = read_char(code, '\'')?;
       let numb = *name;
+      let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
       return Ok((code, Term::Num { numb }));
     },
     _ => {
@@ -4561,7 +4651,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         let (code, unit) = read_char(code, '}')?;
         (code, init)
       } else {
-        (code, Term::Num { numb: 0 })
+        (code, Term::Num { numb: U120::ZERO })
       };
       let (code, sign) = read_sign(code)?;
       let func = Func { rules: ruls };
@@ -4588,8 +4678,20 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
       let code = skip(drop(code, 3));
       let (code, name) = if nth(code,0) == '{' { (code, Name(0)) } else { read_name(code)? };
       let (code, unit) = read_char(code, '{')?;
-      let (code, unit) = read_char(code, '#')?;
-      let (code, ownr) = read_numb(code)?;
+      let code = skip(code);
+      let (code, ownr) = match head(code) {
+        '#' => {
+          let code = tail(code);
+          read_numb(code)?
+        },
+        '\'' => {
+          let code = tail(code);
+          let (code, name) = read_name(code)?;
+          let (code, unit) = read_char(code, '\'')?;
+          (code, name)
+        },
+        _ => return Err(ParseErr::new(code, "Expected a number representation"))
+      };
       let (code, unit) = read_char(code, '}')?;
       let (code, sign) = read_sign(code)?;
       return Ok((code, Statement::Reg { name, ownr, sign }));
@@ -4663,7 +4765,7 @@ pub fn view_term(term: &Term) -> String {
             // Pretty print names
             if name == "Name" && args.len() == 1 {
               if let Term::Num { numb } = args[0] {
-                output.push(format!("{{Name '{}'}}", view_name(Name(numb))));
+                output.push(format!("{{Name '{}'}}", view_name(numb.into())));
               }
             } else {
               output.push("{".to_string());
@@ -4772,7 +4874,7 @@ pub fn view_statement(statement: &Statement) -> String {
     }
     Statement::Reg { name, ownr, sign } => {
       let name = name;
-      let ownr = format!("#x{:0>30x}", ownr);
+      let ownr = format!("#x{:0>30x}", **ownr);
       let sign = view_sign(sign);
       return format!("reg {} {{ {} }}{}", name, ownr, sign);
     }
