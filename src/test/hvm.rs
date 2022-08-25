@@ -1,7 +1,8 @@
 use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
-    init_map, init_runtime, name_to_u128_unsafe, read_statements, u128_to_name, view_statements, Rollback,
+    init_map, init_runtime, name_to_u128_unsafe, read_statements, readback_term, show_term,
+    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo,
   },
   test::{
     strategies::{func, heap, name, statement, term},
@@ -20,6 +21,7 @@ use rstest_reuse::{apply, template};
 #[rstest]
 #[case(&["Count", "Store", "Sub", "Add"], PRE_COUNTER, COUNTER)]
 #[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK)]
+#[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER)]
 fn hvm_cases(#[case] fn_names: &[&str], #[case] pre_code: &str, #[case] code: &str) {}
 
 #[apply(hvm_cases)]
@@ -46,7 +48,7 @@ pub fn advanced_rollback_in_saved_state(
   temp_dir: TempDir,
 ) {
   let mut rt = init_runtime(Some(&temp_dir.path));
-  rt.run_statements_from_code(pre_code, true);
+  rt.run_statements_from_code(pre_code, true, true);
   advance(&mut rt, 1000, Some(code));
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
@@ -81,7 +83,7 @@ pub fn advanced_rollback_run_fail(
 pub fn stack_overflow(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: TempDir) {
   // caused by compute_at function
   let mut rt = init_runtime(Some(&temp_dir.path));
-  rt.run_statements_from_code(pre_code, true);
+  rt.run_statements_from_code(pre_code, true, true);
   advance(&mut rt, 1000, Some(code));
 }
 
@@ -91,8 +93,8 @@ pub fn stack_overflow(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: T
 pub fn stack_overflow2(temp_dir: TempDir) {
   // caused by drop of term
   let mut rt = init_runtime(Some(&temp_dir.path));
-  rt.run_statements_from_code(PRE_COUNTER, false);
-  rt.run_statements_from_code(COUNTER_STACKOVERFLOW, false);
+  rt.run_statements_from_code(PRE_COUNTER, false, true);
+  rt.run_statements_from_code(COUNTER_STACKOVERFLOW, false, true);
 }
 
 #[apply(hvm_cases)]
@@ -104,7 +106,7 @@ pub fn persistence1(
   temp_dir: TempDir,
 ) {
   let mut rt = init_runtime(Some(&temp_dir.path));
-  rt.run_statements_from_code(pre_code, true);
+  rt.run_statements_from_code(pre_code, true, true);
 
   advance(&mut rt, tick, Some(code));
   let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
@@ -158,17 +160,105 @@ fn parse_ask_fail1(
   read_statements(&code).unwrap();
 }
 
-// #[test]
-// #[should_panic]
-// fn parse_ask_fail2() {
-//   read_statements(ASK_FAIL_2).unwrap();
-// }
+#[rstest]
+fn compute_at_funs(temp_dir: TempDir) {
+  let code = "
+    fun (Add a b) {
+      (Add #256 #256) = #512
+      (Add {True} {True}) = {T2 {True} {True}}
+      (Add a b) = {T2 a b}
+    }
+    
+    run {
+      (Done dup ~ b = @x @y (Add x y); b)
+    }
+  ";
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("@x0 @x1 (Add x0 x1)", view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  }
+}
 
-// #[test]
-// #[should_panic]
-// fn parse_ask_fail3() {
-//   read_statements(ASK_FAIL_3).unwrap();
-// }
+#[rstest]
+fn dupped_state_test(temp_dir: TempDir) {
+  fn print_and_assert_states(
+    rt: &mut Runtime,
+    expected_original_readback: &str,
+    expected_other_readback: &str,
+  ) {
+    let original_state = rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
+    let other_state = rt.read_disk(Name::try_from("Other").unwrap()).unwrap();
+    println!();
+    println!("original ptr: {}", original_state);
+    println!("original: {}", show_term(&rt, original_state, None));
+    println!("original readback: {}", view_term(&readback_term(&rt, original_state)));
+    assert_eq!(expected_original_readback, view_term(&readback_term(&rt, original_state)));
+    println!();
+    println!("other ptr: {}", other_state);
+    println!("other: {}", show_term(&rt, other_state, None));
+    println!("other readback: {}", view_term(&readback_term(&rt, other_state)));
+    assert_eq!(expected_other_readback, view_term(&readback_term(&rt, other_state)));
+    println!();
+  }
+
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  rt.run_statements_from_code(&PRE_DUPPED_STATE, false, true);
+  rt.run_statements_from_code(&DUPPED_STATE, false, true);
+  print_and_assert_states(&mut rt, "@x0 @x1 #7", "@x0 @x1 #7");
+  rt.run_statements_from_code(&CHANGE_DUPPED_STATE, false, true);
+  print_and_assert_states(&mut rt, "@x0 @x1 #8", "@x0 @x1 #7");
+}
+
+#[rstest]
+#[case("@~ dup a ~ = #2; a", "@x0 #2")]
+#[case("@~ {Cons #4 {Nil}}", "@x0 {Cons #4 {Nil}}")]
+#[case("dup a ~ = (! @x @y {Pair (+ x #1) y} #2); (!a #10)", "{Pair #3 #10}")]
+#[case(
+  "@~ dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x",
+  "@x0 {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}"
+)]
+#[case(
+  "dup x ~ = {Cons (+ #1 #1) {Cons (+ #2 #2) {Cons (+ #3 #3) {Nil}}}}; x",
+  "{Cons #2 {Cons #4 {Cons #6 {Nil}}}}"
+)]
+#[case(
+  "dup a b = @x @y {Pair x y}; {Pair a b}",
+  "{Pair @x1 @x2 {Pair x1 x2} @x1 @x2 {Pair x1 x2}}"
+)]
+#[case(
+  "dup a b = (! @x @y {Pair (+ x #1) y} #2); {Pair (!a #10) (!b #20)}",
+  "{Pair ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #10) ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #20)}"
+)]
+#[case("dup a ~ = @~ #2; a", "@x0 #2")]
+#[case("dup a ~ = @x (!x #4); a", "@x0 (x0 #4)")]
+#[case("dup a ~ = @x dup b ~ = x; b; a", "@x0 x0")]
+#[case("dup a ~ = @x dup ~ b = x; b; a", "@x0 x0")]
+#[case("dup a ~ = dup b ~ = @x (+ x #2); b; a", "@x0 (+ x0 #2)")]
+#[case("dup a ~ = dup b ~ = @x (+ #2 x); b; a", "@x0 (+ #2 x0)")]
+fn readback(#[case] code: &str, #[case] expected_readback: &str, temp_dir: TempDir) {
+  // initialize runtime
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  // declare used constructors
+  let pre_code = "ctr {Cons x xs} ctr {Nil} ctr {Pair x y}";
+  rt.run_statements_from_code(&pre_code, false, true);
+  // run code
+  let code = format!("run{{ (Done {}) }}", code); // always run one statement
+  let result = rt.run_statements_from_code(&code, false, true); // get vector of results
+  let result = result[0].clone(); // get first and only result
+  let result = result.unwrap(); // expect result not to be an error (fails test if it is)
+
+  // verify readback
+  if let StatementInfo::Run { done_term, .. } = result {
+    let readback = view_term(&done_term);
+    assert_eq!(expected_readback, readback);
+  } else {
+    panic!("Expected Run statement, got {:?}", result);
+  }
+}
 
 proptest! {
   #[test]
@@ -241,22 +331,22 @@ pub const PRE_COUNTER: &'static str = "
 
 pub const COUNTER: &'static str = "
   run {
-    ask (Call 'Store' [{StoreAdd}]);
-    ask count = (Call 'Store' [{StoreGet}]);
+    ask (Call 'Store' {StoreAdd});
+    ask count = (Call 'Store' {StoreGet});
     (Done count)
   }
 
   run {
-    ask (Call 'Count' [{Inc}]);
-    ask count = (Call 'Count' [{Get}]);
+    ask (Call 'Count' {Inc});
+    ask count = (Call 'Count' {Get});
     (Done count)
   }
 ";
 
 pub const SIMPLE_COUNT: &'static str = "
   run {
-    ask (Call 'Count' [{Inc}]);
-    ask count = (Call 'Count' [{Get}]);
+    ask (Call 'Count' {Inc});
+    ask count = (Call 'Count' {Get});
     (Done count)
   }
 ";
@@ -325,13 +415,74 @@ fun (Bank action) {
 
 pub const BANK: &'static str = "
   run {
-    ask (Call 'Random' [{Random_Inc}]);
-    ask acc = (Call 'Random' [{Random_Get}]);
-    ask (Call 'Bank' [{Bank_Add acc}]);
-    ask b = (Call 'Bank' [{Bank_Get}]);
+    ask (Call 'Random' {Random_Inc});
+    ask acc = (Call 'Random' {Random_Get});
+    ask (Call 'Bank' {Bank_Add acc}]);
+    ask b = (Call 'Bank' {Bank_Get});
     (Done b)
     // !done (AddAcc #1 {Leaf})
   }
+";
+
+pub const PRE_BIT_COUNTER: &'static str = "
+// The Scott-Encoded Bits type
+fun (End) {
+  (End) = @e @~ @~ e 
+}
+
+fun (B0 p) {
+  (B0 p) = @~ @o @~ (!o p)
+}
+
+fun (B1 p) {
+  (B1 p) = @~ @~ @i (!i p)
+}
+
+fun (IncBit xs) {
+  (IncBit xs) = @ex @ox @ix
+    let e = ex;
+    let o = ix;
+    let i = @p (!ox (IncBit p));
+    (!(!(!xs e) o) i)
+}
+
+fun (ToNum ys) {
+  (ToNum ys) =
+    let e = #0;
+    let o = @p (+ #0 (* #2 (ToNum p)));
+    let i = @p (+ #1 (* #2 (ToNum p)));
+    (!(!(!ys e) o) i)
+}
+
+fun (FromNum s i) {
+  (FromNum #0 ~) = (End)
+  (FromNum s i) = dup i0 i1 = i; (FromNumPut (- s #1) (% i0 #2) (/ i1 #2))
+}
+
+fun (FromNumPut s b i) {
+  (FromNumPut s #0 i) = (B0 (FromNum s i))
+  (FromNumPut s #1 i) = (B1 (FromNum s i))
+}
+
+fun (CountBit action) {
+  (CountBit {Inc}) =  
+    ask x = (Take);
+    ask (Save (IncBit x));
+    (Done #0)
+  (CountBit {Get}) = 
+    ask x = (Load);
+    (Done x)
+} with {
+  (FromNum #32 #1)
+}
+";
+
+pub const BIT_COUNTER: &'static str = "
+run {
+  ask (Call 'CountBit' {Inc});
+  ask x = (Call 'CountBit' {Get});
+  (Done (ToNum x))
+}
 ";
 
 pub fn keyword_fail_1(keyword: &str) -> String {
@@ -374,3 +525,43 @@ pub fn keyword_fail_3(keyword: &str) -> String {
     keyword, keyword, keyword
   )
 }
+
+const PRE_DUPPED_STATE: &'static str = "
+ctr {Copy}
+ctr {Change}
+
+fun (Original action) {
+  (Original {Copy}) =
+    ask x = (Take);
+    dup a b = x;
+    ask (Save a);
+    (Done b)
+  (Original {Change}) = 
+    ask (Take);
+    ask (Save @~ @~ #8);
+    (Done #0)
+} with {
+  @~ @~ #7
+}
+
+fun (Other) {
+  (Other) =
+    ask x = (Call 'Original' {Copy});
+    ask (Save x);
+    (Done #0)
+}
+";
+
+const DUPPED_STATE: &'static str = "
+run {
+  ask (Call 'Other' []);
+  (Done #0)
+}
+";
+
+const CHANGE_DUPPED_STATE: &'static str = "
+run {
+  ask (Call 'Original' {Change});
+  (Done #1)
+}
+";

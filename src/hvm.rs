@@ -1483,7 +1483,7 @@ pub fn init_runtime(path: Option<&PathBuf>) -> Runtime {
     back: Arc::new(Rollback::Nil),
     path: path.clone(),
   };
-  rt.run_statements_from_code(GENESIS, true);
+  rt.run_statements_from_code(GENESIS, true, false);
   
   rt.snapshot();
   return rt;
@@ -1546,10 +1546,10 @@ impl Runtime {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
-  pub fn run_statements(&mut self, statements: &[Statement], silent: bool) -> Vec<StatementResult> {
+  pub fn run_statements(&mut self, statements: &[Statement], silent: bool, debug: bool) -> Vec<StatementResult> {
     statements.iter().map(
       |s| { 
-        let res = self.run_statement(s, silent);
+        let res = self.run_statement(s, silent, debug);
         if let Ok(..) = res {
           self.draw();
         }
@@ -1558,10 +1558,10 @@ impl Runtime {
     ).collect()
   }
 
-  pub fn run_statements_from_code(&mut self, code: &str, silent: bool) -> Vec<StatementResult> {
+  pub fn run_statements_from_code(&mut self, code: &str, silent: bool, debug: bool) -> Vec<StatementResult> {
     let stataments = read_statements(code);
     match stataments {
-      Ok((.., statements)) => self.run_statements(&statements, silent),
+      Ok((.., statements)) => self.run_statements(&statements, silent, debug),
       Err(ParseErr { erro , .. }) => {
         return vec![Err(StatementErr { err: erro })];
       }
@@ -1571,7 +1571,7 @@ impl Runtime {
   pub fn test_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
     let mut results = vec![];
     for (idx, statement) in statements.iter().enumerate() {
-      let res = self.run_statement(statement, true);
+      let res = self.run_statement(statement, true, false);
       match res {
         Ok(..) => {
           results.push(res);
@@ -1833,7 +1833,7 @@ impl Runtime {
   /// 
   /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
-  pub fn run_statement(&mut self, statement: &Statement, silent: bool) -> StatementResult {
+  pub fn run_statement(&mut self, statement: &Statement, silent: bool, debug: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo();
       println!("[{}] Error. {}", tag, err);
@@ -1911,7 +1911,7 @@ impl Runtime {
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
         let size_dif = size_end - size_ini;
-        if size_end > size_lim {
+        if size_end > size_lim && !debug {
           return error(self, "run", format!("Not enough space."));
         }
         if !silent {
@@ -2766,7 +2766,7 @@ pub fn is_linear(term: &Term) -> bool {
     }
   };
 
-  // println!("{}", res);
+  // println!("{}: {}", view_term(term), res);
   res
 }
 
@@ -3129,7 +3129,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           }
         }
         // We don't need to reduce further
-        CTR | NUM | LAM | VAR | SUP | ERA => {}
+        CTR | NUM | LAM | VAR | SUP | ERA | ARG => {}
         _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     } else {
@@ -3525,7 +3525,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 
         }
         // We don't need to reduce further
-        CTR | NUM | LAM | VAR | SUP | ERA => {}
+        CTR | NUM | LAM | VAR | SUP | ERA | ARG => {}
         _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
       }
     }
@@ -4827,7 +4827,7 @@ pub fn test_statements(statements: &[Statement]) {
 
   let mut rt = init_runtime(None);
   let init = Instant::now();
-  rt.run_statements(&statements, false);
+  rt.run_statements(&statements, false, false);
   println!();
 
   println!("Stats");

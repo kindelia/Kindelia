@@ -1,6 +1,6 @@
 use serde::ser::{SerializeStruct, SerializeStructVariant};
 
-use crate::hvm::{self, Func, Rule, Statement, Term};
+use crate::hvm::{Func, Rule, Statement, Term};
 use crate::util::U256;
 
 // Util

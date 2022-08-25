@@ -36,7 +36,7 @@ pub fn fun_name() -> impl Strategy<Value = Name> {
     .prop_map(|s| Name::from_u128_unchecked(s))
 }
 
-// generate valid terms
+// generate terms
 pub fn term() -> impl Strategy<Value = Term> {
   let leaf = prop_oneof![
     name().prop_map(|n| Term::Var { name: n }),
