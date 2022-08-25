@@ -265,6 +265,10 @@ use crate::api;
 #[serde(into = "String", try_from = "&str")]
 pub struct Name(u128);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "&str")]
+pub struct U120(u128);
+
 // This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 // rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
 // later on. Below is a description of each variant:
@@ -285,7 +289,7 @@ pub enum Term {
   App { func: Box<Term>, argm: Box<Term> },
   Ctr { name: Name, args: Vec<Term> },
   Fun { name: Name, args: Vec<Term> },
-  Num { numb: u128 },
+  Num { numb: U120 },
   Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },
 }
 
@@ -360,12 +364,16 @@ pub struct CompFunc {
   pub rules: Vec<CompRule>, // vector of rules
 }
 
+// TODO: refactor all these maps to use `Name` newtype
+
 // A file, which is just a map of `FuncID -> CompFunc`
 // It is used to find a function when it is called, in order to apply its rewrite rules.
 #[derive(Clone, Debug)]
 pub struct Funcs {
   pub funcs: Map<Arc<CompFunc>>,
 }
+
+// TODO: arity with no u128
 
 // A map of `FuncID -> Arity`
 // It is used in many places to find the arity (argument count) of functions and constructors.
@@ -394,7 +402,7 @@ pub enum Statement {
   Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
-  Reg { name: Name, ownr: u128, sign: Option<crypto::Signature> },
+  Reg { name: Name, ownr: Name, sign: Option<crypto::Signature> },
 }
 
 // An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
@@ -555,9 +563,13 @@ const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapsho
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
-pub const VAL: u128 = 1 << 0;
-pub const EXT: u128 = 1 << 48;
-pub const TAG: u128 = 1 << 120;
+pub const VAL_SIZE: usize = 48;
+pub const EXT_SIZE: usize = 72;
+pub const TAG_SIZE: usize = 8;
+
+pub const VAL_POS: u128 = 1 << 0;
+pub const EXT_POS: u128 = 1 << VAL_SIZE;
+pub const TAG_POS: u128 = 1 << (EXT_SIZE + VAL_SIZE);
 
 // FIXME: document and replace magic numbers on code
 //pub const VAL_MASK: u128 = EXT - 1;
@@ -888,6 +900,11 @@ impl Name {
     self.0 == VAR_NONE
   }
 
+  /// Check if a name can be used directly (fits in the `EXT` field).
+  pub fn is_small(&self) -> bool {
+    self.0 >> EXT_SIZE == 0
+  }
+
   pub fn from_u128_unchecked(numb: u128) -> Self {
     Name(numb)
   }
@@ -933,6 +950,78 @@ impl TryFrom<&str> for Name {
     }
     let name = name_to_u128(name).map_err(err_msg)?;
     Ok(name)
+  }
+}
+
+impl From<U120> for Name {
+  fn from(num: U120) -> Self {
+    Name(num.0)
+  }
+}
+
+// U120
+// ====
+
+impl U120 {
+  pub const ZERO: U120 = U120(0);
+  pub const MAX: U120 = U120(2_u128.pow(120) - 1);
+}
+
+impl std::ops::Deref for U120 {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl TryFrom<u128> for U120 {
+  type Error = String;
+  fn try_from(numb: u128) -> Result<Self, Self::Error> {
+    if numb >> 120 != 0 {
+      Err(format!("Number {} does not fit in 120-bits.", numb))
+    } else {
+      Ok(U120(numb))
+    }
+  }
+}
+
+impl fmt::Display for U120 {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      write!(f, "{}", self.0)
+  }
+}
+
+impl From<U120> for String {
+  fn from(num: U120) -> Self {
+      num.to_string()
+  }
+}
+
+impl TryFrom<&str> for U120 {
+  type Error = String;
+  fn try_from(numb: &str) -> Result<Self, Self::Error> {
+    fn err_msg<E: fmt::Debug>(e: E) -> String {
+      format!("Invalid name: {:?}.", e)
+    }
+    let (rest, result) = read_numb(numb).map_err(err_msg)?;
+    if !rest.is_empty() {
+      Err(err_msg(numb))
+    } else {
+      Ok(result)
+    }
+  }
+}
+
+// Parser
+// ======
+
+impl ParseErr {
+  fn new<C, E>(code: C, erro: E) -> Self
+  where 
+    C: Into<String>,
+    E: Into<String>
+  {
+    ParseErr { code: code.into(), erro: erro.into() }
   }
 }
 
@@ -1712,8 +1801,8 @@ impl Runtime {
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, get_num(fnid), &[argm]);
-            let fnid = Name(get_num(fnid));
+            let ioxp = alloc_fun(self, *get_num(fnid), &[argm]);
+            let fnid = get_num(fnid).into();
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
@@ -1925,7 +2014,8 @@ impl Runtime {
         })
       }
       Statement::Reg { name, ownr, sign } => {
-        let ownr = *ownr;
+        let ownr = **ownr;
+        
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
@@ -2441,73 +2531,73 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // ------------
 
 pub fn Var(pos: u128) -> Ptr {
-  (VAR * TAG) | pos
+  (VAR * TAG_POS) | pos
 }
 
 pub fn Dp0(col: u128, pos: u128) -> Ptr {
-  (DP0 * TAG) | (col * EXT) | pos
+  (DP0 * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Dp1(col: u128, pos: u128) -> Ptr {
-  (DP1 * TAG) | (col * EXT) | pos
+  (DP1 * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Arg(pos: u128) -> Ptr {
-  (ARG * TAG) | pos
+  (ARG * TAG_POS) | pos
 }
 
 pub fn Era() -> Ptr {
-  ERA * TAG
+  ERA * TAG_POS
 }
 
 pub fn Lam(pos: u128) -> Ptr {
-  (LAM * TAG) | pos
+  (LAM * TAG_POS) | pos
 }
 
 pub fn App(pos: u128) -> Ptr {
-  (APP * TAG) | pos
+  (APP * TAG_POS) | pos
 }
 
 pub fn Par(col: u128, pos: u128) -> Ptr {
-  (SUP * TAG) | (col * EXT) | pos
+  (SUP * TAG_POS) | (col * EXT_POS) | pos
 }
 
 pub fn Op2(ope: u128, pos: u128) -> Ptr {
-  (OP2 * TAG) | (ope * EXT) | pos
+  (OP2 * TAG_POS) | (ope * EXT_POS) | pos
 }
 
 pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG) | (val & NUM_MASK)
+  (NUM * TAG_POS) | (val & NUM_MASK)
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
-  (CTR * TAG) | (fun * EXT) | pos
+  (CTR * TAG_POS) | (fun * EXT_POS) | pos
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Ptr {
   debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
-  (FUN * TAG) | (fun * EXT) | pos
+  (FUN * TAG_POS) | (fun * EXT_POS) | pos
 }
 
 // Getters
 // -------
 
 pub fn get_tag(lnk: Ptr) -> u128 {
-  lnk / TAG
+  lnk / TAG_POS
 }
 
 pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT) & 0xFF_FFFF_FFFF_FFFF_FFFF
+  (lnk / EXT_POS) & 0xFF_FFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Ptr) -> u128 {
   lnk & 0xFFFF_FFFF_FFFF
 }
 
-pub fn get_num(lnk: Ptr) -> u128 {
-  lnk & 0xFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
+pub fn get_num(lnk: Ptr) -> U120 {
+  U120(lnk & NUM_MASK)
 }
 
 //pub fn get_ari(lnk: Ptr) -> u128 {
@@ -2857,8 +2947,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       }
     }
     Term::Num { numb } => {
-      // TODO: assert numb size
-      Num(*numb as u128)
+      Num(**numb)
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
@@ -2967,7 +3056,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
           // If it is a number...
           Term::Num { numb: arg_numb } => {
             strict[i as usize] = true;
-            cond.push(Num(*arg_numb as u128)); // adds its matching condition
+            cond.push(Num(**arg_numb)); // adds its matching condition
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
@@ -3329,23 +3418,23 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
             let res = match op {
-              // U120
-              ADD => a_u.wrapping_add(b_u) & NUM_MASK,
-              SUB => a_u.wrapping_sub(b_u) & NUM_MASK,
-              MUL => a_u.wrapping_mul(b_u) & NUM_MASK,
-              DIV => a_u.wrapping_div(b_u) & NUM_MASK,
-              MOD => a_u.wrapping_rem(b_u) & NUM_MASK,
-              AND => (a_u &  b_u) & NUM_MASK,
-              OR  => (a_u |  b_u) & NUM_MASK,
-              XOR => (a_u ^  b_u) & NUM_MASK,
-              SHL => a_u.wrapping_shl(b_u as u32) & NUM_MASK,
-              SHR => a_u.wrapping_shr(b_u as u32) & NUM_MASK,
-              LTN => u128::from(a_u <  b_u),
-              LTE => u128::from(a_u <= b_u),
-              EQL => u128::from(a_u == b_u),
-              GTE => u128::from(a_u >= b_u),
-              GTN => u128::from(a_u >  b_u),
-              NEQ => u128::from(a_u != b_u),
+              // TODO: implement U120 operations
+              ADD => (*a_u).wrapping_add(*b_u) & NUM_MASK,
+              SUB => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
+              MUL => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
+              DIV => (*a_u).wrapping_div(*b_u) & NUM_MASK,
+              MOD => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
+              AND => (*a_u &  *b_u) & NUM_MASK,
+              OR  => (*a_u |  *b_u) & NUM_MASK,
+              XOR => (*a_u ^  *b_u) & NUM_MASK,
+              SHL => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
+              SHR => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
+              LTN => u128::from(*a_u <  *b_u),
+              LTE => u128::from(*a_u <= *b_u),
+              EQL => u128::from(*a_u == *b_u),
+              GTE => u128::from(*a_u >= *b_u),
+              GTN => u128::from(*a_u >  *b_u),
+              NEQ => u128::from(*a_u != *b_u),
               _ => panic!("Invalid operation!"),
             };
             let done = Num(res);
@@ -3837,7 +3926,8 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               if name == "Name" && arit == 1 {
                 let arg = ask_arg(rt, term, 0);
                 if get_tag(arg) == NUM {
-                  name = format!("Name '{}'", Name(get_num(arg)));
+                  let sugar: Name = get_num(arg).into();
+                  name = format!("Name '{}'", sugar);
                   arit = 0; // erase arit to avoid for
                 }
               }
@@ -4181,35 +4271,47 @@ pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
   }
 }
 
-pub fn read_numb(code: &str) -> ParseResult<u128> {
+pub fn read_numb<T>(code: &str) -> ParseResult<T>
+where
+  T: TryFrom<u128, Error = String>,
+{
   let mut code = skip(code);
-  if head(code) == 'x' {
-    code = tail(code);
-    let mut numb = 0;
-    let mut code = code;
-    loop {
-      if head(code) >= '0' && head(code) <= '9' {
-        numb = numb * 16 + head(code) as u128 - 0x30;
-        code = tail(code);
-      } else if head(code) >= 'a' && head(code) <= 'f' {
-        numb = numb * 16 + head(code) as u128 - 0x61 + 10;
-        code = tail(code);
-      } else if head(code) >= 'A' && head(code) <= 'F' {
-        numb = numb * 16 + head(code) as u128 - 0x41 + 10;
-        code = tail(code);
-      } else {
-        break;
-      }
-    }
-    return Ok((code, numb));
-  } else {
-    let mut numb = 0;
-    while head(code) >= '0' && head(code) <= '9' {
-      numb = numb * 10 + head(code) as u128 - 0x30;
+  let (code, numb) = {
+    if head(code) == 'x' {
       code = tail(code);
+      let mut numb = 0;
+      let mut code = code;
+      let mut digits = 0; // this will be used to prevent number overflow panicking
+      loop {
+        if head(code) >= '0' && head(code) <= '9' {
+          numb = numb * 16 + head(code) as u128 - 0x30;
+          code = tail(code);
+        } else if head(code) >= 'a' && head(code) <= 'f' {
+          numb = numb * 16 + head(code) as u128 - 0x61 + 10;
+          code = tail(code);
+        } else if head(code) >= 'A' && head(code) <= 'F' {
+          numb = numb * 16 + head(code) as u128 - 0x41 + 10;
+          code = tail(code);
+        } else {
+          break;
+        }
+        digits += 1;
+        if digits > 30 {
+          return Err(ParseErr::new(code, "Hexadecimal number with more than 30 digits"))
+        }
+      }
+      (code, numb)
+    } else {
+      let mut numb = 0;
+      while head(code) >= '0' && head(code) <= '9' {
+        numb = numb * 10 + head(code) as u128 - 0x30;
+        code = tail(code);
+      }
+      (code, numb)
     }
-    return Ok((code, numb));
-  }
+  };
+  let numb: T = numb.try_into().map_err(|err| ParseErr::new(code, err))?;
+  Ok((code, numb))
 }
 
 pub fn read_name(code: &str) -> ParseResult<Name> {
@@ -4370,7 +4472,10 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       } else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
-        // TODO: check function name size _on direct calling_, and propagate error
+        // checking function name size _on direct calling_
+        if !name.is_small() {
+          return Err(ParseErr::new(code, format!("Direct calling function with too long name: `{}`.", name)))
+        }
         return Ok((code, Term::Fun { name, args }));
       } else {
         let (code, func) = read_term(code)?;
@@ -4382,6 +4487,9 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     '{' => {
       let code = tail(code);
       let (code, name) = read_name(code)?;
+      if !name.is_small() {
+        return Err(ParseErr::new(code, format!("Direct calling constructor with too long name: `{}`.", name)))
+      }
       let (code, args) = read_until(code, '}', read_term)?;
       return Ok((code, Term::Ctr { name, args }));
     },
@@ -4407,6 +4515,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let (code, name) = read_name(code)?;
       let (code, unit) = read_char(code, '\'')?;
       let numb = *name;
+      let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
       return Ok((code, Term::Num { numb }));
     },
     _ => {
@@ -4500,6 +4609,7 @@ pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
 }
 
 pub fn read_rule(code: &str) -> ParseResult<Rule> {
+  // TODO: custom parser for lhs
   let (code, lhs) = read_term(code)?;
   let (code, ())  = read_char(code, '=')?;
   let (code, rhs) = read_term(code)?;
@@ -4561,7 +4671,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         let (code, unit) = read_char(code, '}')?;
         (code, init)
       } else {
-        (code, Term::Num { numb: 0 })
+        (code, Term::Num { numb: U120::ZERO })
       };
       let (code, sign) = read_sign(code)?;
       let func = Func { rules: ruls };
@@ -4588,8 +4698,20 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
       let code = skip(drop(code, 3));
       let (code, name) = if nth(code,0) == '{' { (code, Name(0)) } else { read_name(code)? };
       let (code, unit) = read_char(code, '{')?;
-      let (code, unit) = read_char(code, '#')?;
-      let (code, ownr) = read_numb(code)?;
+      let code = skip(code);
+      let (code, ownr) = match head(code) {
+        '#' => {
+          let code = tail(code);
+          read_numb(code)?
+        },
+        '\'' => {
+          let code = tail(code);
+          let (code, name) = read_name(code)?;
+          let (code, unit) = read_char(code, '\'')?;
+          (code, name)
+        },
+        _ => return Err(ParseErr::new(code, "Expected a number representation"))
+      };
       let (code, unit) = read_char(code, '}')?;
       let (code, sign) = read_sign(code)?;
       return Ok((code, Statement::Reg { name, ownr, sign }));
@@ -4663,7 +4785,7 @@ pub fn view_term(term: &Term) -> String {
             // Pretty print names
             if name == "Name" && args.len() == 1 {
               if let Term::Num { numb } = args[0] {
-                output.push(format!("{{Name '{}'}}", view_name(Name(numb))));
+                output.push(format!("{{Name '{}'}}", view_name(numb.into())));
               }
             } else {
               output.push("{".to_string());
@@ -4772,7 +4894,7 @@ pub fn view_statement(statement: &Statement) -> String {
     }
     Statement::Reg { name, ownr, sign } => {
       let name = name;
-      let ownr = format!("#x{:0>30x}", ownr);
+      let ownr = format!("#x{:0>30x}", **ownr);
       let sign = view_sign(sign);
       return format!("reg {} {{ {} }}{}", name, ownr, sign);
     }
