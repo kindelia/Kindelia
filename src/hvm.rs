@@ -892,6 +892,10 @@ impl Name {
     self.0 == VAR_NONE
   }
 
+  pub fn is_small(&self) -> bool {
+    self.0 >> 72 == 0
+  }
+
   pub fn from_u128_unchecked(numb: u128) -> Self {
     Name(numb)
   }
@@ -4459,7 +4463,11 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       } else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
-        // TODO: check function name size _on direct calling_, and propagate error
+        // checking function name size _on direct calling_
+        // ASK: this will forbid create lhs rules with big names
+        if !name.is_small() {
+          return Err(ParseErr::new(code, format!("Direct calling function with too long name: `{}`.", name)))
+        }
         return Ok((code, Term::Fun { name, args }));
       } else {
         let (code, func) = read_term(code)?;
@@ -4471,6 +4479,9 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     '{' => {
       let code = tail(code);
       let (code, name) = read_name(code)?;
+      if !name.is_small() {
+        return Err(ParseErr::new(code, format!("Direct calling constructor with too long name: `{}`.", name)))
+      }
       let (code, args) = read_until(code, '}', read_term)?;
       return Ok((code, Term::Ctr { name, args }));
     },
