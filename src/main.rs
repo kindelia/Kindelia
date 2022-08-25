@@ -259,7 +259,7 @@ fn run_cli() -> Result<(), String> {
         let skey = hex::decode(&skey[0..64]).expect("hex string");
         let acc  = crypto::Account::from_private_key(&skey);
         println!("Ethereum Address: {}", acc.address.show());
-        println!("Kindelia Subject: {}", acc.name.show());
+        println!("Kindelia Subject: {}", acc.name.show_hex());
       } else {
         println!("Couldn't load term and secret key files.");
       }

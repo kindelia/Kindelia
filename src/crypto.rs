@@ -70,6 +70,22 @@ impl Address {
   }
 }
 
+impl Name {
+  pub fn from_public_key(pubk: &PublicKey) -> Self {
+    return Name::from_hash(&Account::hash_public_key(pubk));
+  }
+
+  // A Kindelia name is the first 120 bxits of an Ethereum address
+  // This corresponds to the bytes 12-27 of the ECDSA public key.
+  pub fn from_hash(hash: &Hash) -> Self {
+    return Name::from_u128_unchecked(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
+  }
+
+  pub fn show_hex(&self) -> String {
+    format!("#x{:0>30x}", **self)
+  }
+}
+
 impl Account {
   pub fn new() -> Account {
     Account::from_secret_key(SecretKey::new(&mut OsRng::new().expect("OsRng")))
