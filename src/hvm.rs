@@ -899,6 +899,20 @@ impl Name {
   pub fn from_u128_unchecked(numb: u128) -> Self {
     Name(numb)
   }
+
+  pub fn from_public_key(pubk: &secp256k1::PublicKey) -> Self {
+    return Name::from_hash(&crypto::Account::hash_public_key(pubk));
+  }
+
+  // A Kindelia name is the first 120 bxits of an Ethereum address
+  // This corresponds to the bytes 12-27 of the ECDSA public key.
+  pub fn from_hash(hash: &crypto::Hash) -> Self {
+    return Name(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
+  }
+
+  pub fn show(&self) -> String {
+    format!("#x{:0>30x}", self.0)
+  }
 }
 
 impl std::ops::Deref for Name {

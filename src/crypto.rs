@@ -5,11 +5,12 @@ use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
 use tiny_keccak::Hasher;
 
+use crate::hvm::Name;
+
 #[derive(Debug, PartialEq)]
 pub struct Signature(pub [u8; 65]);
 pub struct Address(pub [u8; 20]);
 pub struct Hash(pub [u8; 32]);
-pub struct Name(pub u128);
 
 pub fn keccak256(data: &[u8]) -> Hash {
   let mut hasher = tiny_keccak::Keccak::v256();
@@ -66,22 +67,6 @@ impl Address {
 
   pub fn show(&self) -> String {
     format!("0x{}", hex::encode(self.0))
-  }
-}
-
-impl Name {
-  pub fn from_public_key(pubk: &PublicKey) -> Self {
-    return Name::from_hash(&Account::hash_public_key(pubk));
-  }
-
-  // A Kindelia name is the first 120 bits of an Ethereum address
-  // This corresponds to the bytes 12-27 of the ECDSA public key.
-  pub fn from_hash(hash: &Hash) -> Self {
-    return Name(u128::from_be_bytes(vec![hash.0[12..27].to_vec(), vec![0]].concat().try_into().unwrap()) >> 8);
-  }
-
-  pub fn show(&self) -> String {
-    format!("#x{:0>30x}", self.0)
   }
 }
 
