@@ -477,8 +477,7 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-  EffectFailure,
-  InvalidOperation
+  EffectFailure
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -3443,7 +3442,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             //eprintln!("op2-num");
             rt.set_mana(rt.get_mana() + Op2NumMana());
-            let op  = get_ext(term).try_into().map_err(|_| RuntimeError::InvalidOperation)?;
+            let op  = get_ext(term).try_into().expect("Invalid operation coming from HVM");
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
             let res = match op {
@@ -4001,7 +4000,6 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::NotEnoughMana => "Not enough mana.",
     RuntimeError::NotEnoughSpace => "Not enough space.",
     RuntimeError::EffectFailure => "Runtime effect failure.",
-    RuntimeError::InvalidOperation => "Tried to execute an invalid operation"
   }).to_string()
 }
 
