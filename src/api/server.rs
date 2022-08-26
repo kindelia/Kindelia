@@ -1,7 +1,6 @@
 
 use std::sync::mpsc::SyncSender;
 
-use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -36,16 +35,8 @@ fn ok_json<T>(data: T) -> warp::reply::Json
 where
   T: serde::Serialize,
 {
-  let json_body = json!({ "status": "ok", "data": data });
-  warp::reply::json(&json_body)
-}
-
-fn error_json<T>(error: T) -> warp::reply::Json
-where
-  T: serde::Serialize,
-{
-  let json_body = json!({ "status": "error", "error": error });
-  warp::reply::json(&json_body)
+  // let json_body = json!({ "status": "ok", "data": data });
+  warp::reply::json(&data)
 }
 
 // HVM
@@ -77,14 +68,14 @@ impl reject::Reject for InvalidParameter {}
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
   if err.is_not_found() {
-    Ok(reply::with_status(error_json("NOT_FOUND"), StatusCode::NOT_FOUND))
+    Ok(reply::with_status("NOT_FOUND".into(), StatusCode::NOT_FOUND))
   } else if let Some(e) = err.find::<InvalidParameter>() {
     let name = e.name.as_ref().map(|n| format!(" '{}'", n)).unwrap_or_default();
     let msg = format!("Parameter{} is invalid: {}", name, e.message);
-    Ok(reply::with_status(error_json(msg), StatusCode::BAD_REQUEST))
+    Ok(reply::with_status(msg, StatusCode::BAD_REQUEST))
   } else {
     eprintln!("unhandled rejection: {:?}", err);
-    Ok(reply::with_status(error_json("INTERNAL_SERVER_ERROR"), StatusCode::INTERNAL_SERVER_ERROR))
+    Ok(reply::with_status("INTERNAL_SERVER_ERROR".into(), StatusCode::INTERNAL_SERVER_ERROR))
   }
 }
 

@@ -1,18 +1,21 @@
-use crate::{
-  bits::{deserialized_statement, serialized_statement},
-  crypto,
-  hvm::{self, view_statement, Statement},
-  node::{
-    self, read_address, udp_init, udp_send, Address, Message, MinerCommunication, Node,
-    Transaction, UDP_PORT,
-  },
-  util::{bitvec_to_bytes, bytes_to_bitvec},
-  ENTRY_PEERS,
-};
-use clap::{Parser, Subcommand};
 use core::panic;
 use std::collections::HashMap;
 use std::{path::PathBuf, str::FromStr, thread};
+
+use clap::{Parser, Subcommand};
+use hvm::Name;
+use warp::Future;
+
+use crate::api::client as api_client;
+use crate::bits::{deserialized_statement, serialized_statement};
+use crate::crypto;
+use crate::hvm::{self, view_statement, Statement};
+use crate::node::{
+  self, read_address, udp_init, udp_send, Address, Message, MinerCommunication, Node, Transaction,
+  UDP_PORT,
+};
+use crate::util::{bitvec_to_bytes, bytes_to_bitvec};
+use crate::ENTRY_PEERS;
 
 /*
 == Client ==
@@ -140,7 +143,7 @@ pub enum CLICommand {
     init_peers: Option<Vec<String>>,
     /// Mine blocks
     #[clap(long)]
-    mine: Option<bool>,
+    mine: bool,
   },
 }
 
@@ -247,7 +250,7 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
 // ==============
 
 /// Parse Cli arguments and do an action
-pub fn parse() {
+pub fn run_cli() -> Result<(), String> {
   let parsed = CLI::parse();
   let default_kindelia_path = || dirs::home_dir().unwrap().join(".kindelia");
 
@@ -262,21 +265,33 @@ pub fn parse() {
   let config = read_toml(&config_path);
 
   match parsed.command {
-    CLICommand::Serialize { file } => serialize(&file),
+    CLICommand::Serialize { file } => {
+      serialize(&file);
+      Ok(())
+    },
     CLICommand::Deserialize { file } => {
       let content = get_value_stdin::<String>(file);
       deserialize(&content);
+      Ok(())
     }
     CLICommand::Sign { file, skey } => {
       let content = get_value_stdin::<String>(file);
       sign(&content, &skey);
+      Ok(())
     }
     CLICommand::Post { file, host } => {
       let content = get_value_stdin::<String>(file);
       post(&content, host);
+      Ok(())
     }
-    CLICommand::Test { file } => run(&file),
-    CLICommand::Run { file } => run(&file),
+    CLICommand::Test { file } => {
+      run_file(&file);
+      Ok(())
+    }
+    CLICommand::Run { file } => {
+      run_file(&file);
+      Ok(())
+    }
     CLICommand::Start { kindelia_path, init_peers, mine } => {
       // get arguments from cli, env or config
       let path = ConfigValueOption {
@@ -296,7 +311,7 @@ pub fn parse() {
       .get_value_config();
 
       let mine = ConfigValueOption {
-        value: mine,
+        value: Some(mine), // TODO: fix
         env: Some("KINDELIA_MINE"),
         config: ConfigFileOptions::new(&config, "mine"),
         default: || false,
@@ -305,11 +320,48 @@ pub fn parse() {
 
       // start node
       start(path, init_peers, mine);
+
+      Ok(())
     }
-    _ => {
-      unimplemented!()
+    CLICommand::Completion { shell } => todo!(),
+    CLICommand::Get { kind } => {
+      let client =
+        api_client::ApiClient::new("http://localhost:8000", None).map_err(|e| e.to_string())?;
+      match kind {
+        GetKind::Fn { name, stat } => match stat {
+          GetFnKind::Code => todo!(),
+          GetFnKind::State => {
+            // TODO move `Name` parsing / error to clap
+            let name: Name = Name::try_from(&name as &str)?;
+            let state = run_async_blocking(client.get_function_state(name));
+            // TODO: Display trait on `Term`
+            println!("{:?}", state);
+            Ok(())
+          }
+          GetFnKind::Slots => todo!(),
+        },
+        GetKind::Ns { name, stat } => todo!(),
+        GetKind::Bk { hash } => todo!(),
+        GetKind::Ct { name, stat } => todo!(),
+        GetKind::Tick => todo!(),
+        GetKind::Mana => todo!(),
+        GetKind::Space => todo!(),
+        GetKind::FnCount => todo!(),
+        GetKind::NsCount => todo!(),
+        GetKind::CtCount => todo!(),
+      }
     }
   }
+}
+
+// TODO: ew
+fn run_async_blocking<T, P>(prom: P) -> Result<T, String>
+where
+  P: Future<Output = Result<T, reqwest::Error>>,
+{
+  let runtime = tokio::runtime::Runtime::new().unwrap();
+  let res = runtime.block_on(prom).map_err(|err| err.to_string())?;
+  Ok(res)
 }
 
 // Main Actions
@@ -382,7 +434,7 @@ pub fn test(file: &str) {
   }
 }
 
-fn run(file: &PathBuf) {
+fn run_file(file: &PathBuf) {
   let code = std::fs::read_to_string(file).unwrap();
   // TODO: flag to disable size limit / debug
   hvm::test_statements_from_code(&code);
@@ -407,9 +459,6 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   let miner_comm_0 = MinerCommunication::new();
   let miner_comm_1 = miner_comm_0.clone();
 
-  // API thread channel
-  //let (api_send, api_recv) = mpsc::channel();
-
   // Threads
   let mut threads = vec![];
 
@@ -429,7 +478,7 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
 
   // Spawns the API thread
   let api_thread = thread::spawn(move || {
-    crate::api::http::http_api_loop(node_query_sender);
+    crate::api::server::http_api_loop(node_query_sender);
   });
   threads.push(api_thread);
 

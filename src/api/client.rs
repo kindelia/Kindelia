@@ -10,7 +10,7 @@ use crate::hvm::Term;
 
 use super::{BlockInfo, FuncInfo, Hash, Name, Stats};
 
-struct ApiClient {
+pub struct ApiClient {
   client: reqwest::Client,
   base_url: Url,
 }
