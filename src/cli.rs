@@ -77,6 +77,8 @@ kindelia node clean [-f]       // asks confirmation
 pub struct CLI {
   #[clap(subcommand)]
   command: CLICommand,
+  /// Path to config file.
+  config: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -84,22 +86,22 @@ pub enum CLICommand {
   /// Test a file.
   Test {
     /// The path to the file to test.
-    file: String,
+    file: PathBuf,
   },
   /// Serialize a code file.
   Serialize {
     /// The path to the file to serialize.
-    file: String,
+    file: PathBuf,
   },
   /// Deserialize a code file.
   Deserialize {
     /// The path to the file to deserialize.
-    file: Option<String>,
+    file: Option<PathBuf>,
   },
   /// Sign a code file.
   Sign {
     /// The path to the file to sign.
-    file: Option<String>,
+    file: Option<PathBuf>,
     /// File containing the 256-bit secret key, as a hex string
     #[clap(short, long)]
     skey: String,
@@ -107,7 +109,7 @@ pub enum CLICommand {
   /// Post a code file.
   Post {
     /// The path to the file to post.
-    file: Option<String>,
+    file: Option<PathBuf>,
     /// Node address to post to.
     #[clap(short, long)]
     host: Option<String>,
@@ -126,16 +128,13 @@ pub enum CLICommand {
   /// Runs a Kindelia (.kdl) file
   Run {
     /// Input file
-    file: String,
+    file: PathBuf,
   },
   /// Starts a Kindelia node
   Start {
     /// Path to store the node's data in
     #[clap(short, long)]
-    kindelia_path: Option<String>,
-    /// Path to config file
-    #[clap(short, long)]
-    config_path: Option<String>,
+    kindelia_path: Option<PathBuf>,
     /// Adds testnet nodes as initial peers
     #[clap(long)]
     init_peers: Option<Vec<String>>,
@@ -216,12 +215,52 @@ pub enum GetCtKind {
   Arity,
 }
 
+struct ConfigValueOption<'a, T: Clone, F: Fn() -> T> {
+  value: Option<T>,
+  env: Option<&'a str>,
+  config: ConfigFileOptions<'a>,
+  default: F,
+}
+
+impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
+  fn get_value_config(self) -> T
+  where
+    T: ConvertFrom<String> + serde::Deserialize<'a>,
+  {
+    if let Some(value) = self.value {
+      // read from var
+      value
+    } else if let Some(Ok(env_value)) = self.env.map(|e| std::env::var(e)) {
+      // if env var is set and valid, read from env var
+      T::convert(env_value)
+    } else if let ConfigFileOptions { toml: Some(toml_value), prop: Some(prop) } = self.config {
+      // if config file is set and valid, read from config file
+      // doing this way because of issue #469 toml-rs
+      toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
+    } else {
+      (self.default)()
+    }
+  }
+}
+
 // Parse function
 // ==============
 
 /// Parse Cli arguments and do an action
 pub fn parse() {
   let parsed = CLI::parse();
+  let default_kindelia_path = || dirs::home_dir().unwrap().join(".kindelia");
+
+  // get possible config path and content
+  let config_path = ConfigValueOption {
+    value: parsed.config,
+    env: Some("KINDELIA_CONFIG"),
+    config: ConfigFileOptions::none(),
+    default: || PathBuf::from_str("config.toml").expect("config.toml"),
+  }
+  .get_value_config();
+  let config = read_toml(&config_path);
+
   match parsed.command {
     CLICommand::Serialize { file } => serialize(&file),
     CLICommand::Deserialize { file } => {
@@ -238,31 +277,31 @@ pub fn parse() {
     }
     CLICommand::Test { file } => run(&file),
     CLICommand::Run { file } => run(&file),
-    CLICommand::Start { kindelia_path, config_path, init_peers, mine } => {
-      // get possible config path and content
-      let config_path = get_value_config(
-        config_path.map(PathBuf::from),
-        Some("KINDELIA_CONFIG"),
-        ConfigOptions::none(),
-        PathBuf::from_str("config.toml").expect("config.toml"),
-      );
-      let config = read_toml(&config_path);
-
+    CLICommand::Start { kindelia_path, init_peers, mine } => {
       // get arguments from cli, env or config
-      let path = get_value_config(
-        kindelia_path.map(PathBuf::from),
-        Some("KINDELIA_PATH"),
-        ConfigOptions::new(&config, "path"),
-        dirs::home_dir().unwrap().join(".kindelia"),
-      );
-      let init_peers = get_value_config(
-        init_peers,
-        Some("KINDELIA_INIT_PEERS"),
-        ConfigOptions::new(&config, "init_peers"),
-        vec![],
-      );
-      let mine =
-        get_value_config(mine, Some("KINDELIA_MINE"), ConfigOptions::new(&config, "mine"), false);
+      let path = ConfigValueOption {
+        value: kindelia_path,
+        env: Some("KINDELIA_PATH"),
+        config: ConfigFileOptions::new(&config, "path"),
+        default: default_kindelia_path,
+      }
+      .get_value_config();
+
+      let init_peers = ConfigValueOption {
+        value: init_peers,
+        env: Some("KINDELIA_INIT_PEERS"),
+        config: ConfigFileOptions::new(&config, "init_peers"),
+        default: || vec![],
+      }
+      .get_value_config();
+
+      let mine = ConfigValueOption {
+        value: mine,
+        env: Some("KINDELIA_MINE"),
+        config: ConfigFileOptions::new(&config, "mine"),
+        default: || false,
+      }
+      .get_value_config();
 
       // start node
       start(path, init_peers, mine);
@@ -276,7 +315,7 @@ pub fn parse() {
 // Main Actions
 // ============
 
-pub fn serialize(file: &str) {
+pub fn serialize(file: &PathBuf) {
   if let Ok(code) = std::fs::read_to_string(file) {
     let statements = hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
     for statement in statements {
@@ -343,7 +382,7 @@ pub fn test(file: &str) {
   }
 }
 
-fn run(file: &str) {
+fn run(file: &PathBuf) {
   let code = std::fs::read_to_string(file).unwrap();
   // TODO: flag to disable size limit / debug
   hvm::test_statements_from_code(&code);
@@ -404,13 +443,21 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
 // ==================
 
 #[derive(Debug, Clone)]
-struct ConfigOptions<'a>(Option<toml::Value>, Option<&'a str>);
-impl<'a> ConfigOptions<'a> {
-  pub fn new(toml_value: &Option<toml::Value>, prop: &'a str) -> Self {
-    ConfigOptions(toml_value.clone(), Some(prop))
+struct ConfigFileOptions<'a> {
+  toml: Option<&'a toml::Value>,
+  prop: Option<String>,
+}
+
+impl<'a> ConfigFileOptions<'a> {
+  pub fn new(toml: &'a Option<toml::Value>, prop: &str) -> Self {
+    match toml {
+      Some(_) => ConfigFileOptions { toml: toml.as_ref(), prop: Some(prop.into()) },
+      None => Self::none(),
+    }
   }
+
   pub fn none() -> Self {
-    ConfigOptions(None, None)
+    ConfigFileOptions { toml: None, prop: None }
   }
 }
 
@@ -422,7 +469,7 @@ fn get_statement(hex: &str) -> Option<Statement> {
   return deserialized_statement(&bytes_to_bitvec(&hex::decode(hex).expect("hex string")));
 }
 
-fn get_value_stdin<T: ConvertFrom<String>>(file: Option<String>) -> T {
+fn get_value_stdin<T: ConvertFrom<String>>(file: Option<PathBuf>) -> T {
   if let Some(file) = file {
     // read from file
     T::convert(std::fs::read_to_string(file).unwrap())
@@ -437,26 +484,30 @@ fn get_value_stdin<T: ConvertFrom<String>>(file: Option<String>) -> T {
   }
 }
 
-fn get_value_config<'a, T: ConvertFrom<String> + serde::Deserialize<'a>>(
-  value: Option<T>,
-  env_options: Option<&str>,
-  config_options: ConfigOptions<'a>,
-  default: T,
-) -> T {
-  if let Some(value) = value {
-    // read from var
-    value
-  } else if let Some(Ok(env_value)) = env_options.map(|e| std::env::var(e)) {
-    // if env var is set and valid, read from env var
-    T::convert(env_value)
-  } else if let ConfigOptions(Some(toml_value), Some(prop)) = config_options {
-    // if config file is set and valid, read from config file
-    // doing this way because of issue #469 toml-rs
-    toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
-  } else {
-    default
-  }
-}
+// fn get_value_config<'a, T, F>(
+//   value: Option<T>,
+//   env_options: Option<&str>,
+//   config_options: ConfigOptions<'a>,
+//   default: F,
+// ) -> T
+// where
+//   T: ConvertFrom<String> + serde::Deserialize<'a>,
+//   F: Fn() -> T,
+// {
+//   if let Some(value) = value {
+//     // read from var
+//     value
+//   } else if let Some(Ok(env_value)) = env_options.map(|e| std::env::var(e)) {
+//     // if env var is set and valid, read from env var
+//     T::convert(env_value)
+//   } else if let ConfigOptions(Some(toml_value), Some(prop)) = config_options {
+//     // if config file is set and valid, read from config file
+//     // doing this way because of issue #469 toml-rs
+//     toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
+//   } else {
+//     default()
+//   }
+// }
 
 fn read_toml(file: &PathBuf) -> Option<toml::Value> {
   std::fs::read_to_string(file).ok().and_then(|content| content.parse::<toml::Value>().ok())
