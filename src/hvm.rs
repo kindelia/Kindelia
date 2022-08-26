@@ -508,7 +508,7 @@ pub type StatementResult = Result<StatementInfo, StatementErr>;
 
 // TODO: refactor (de)serialization out or simplify
 #[serde_as]
-#[derive(Debug, Clone, Serialize)] // TODO: Deserialize
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StatementInfo {
   Ctr { name: Name, args: Vec<Name> },
   Fun { name: Name, args: Vec<Name> },

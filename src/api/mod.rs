@@ -5,7 +5,8 @@
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
 
-pub mod http;
+pub mod server;
+pub mod client;
 
 use std::collections::HashSet;
 use std::fmt::{self, Display};
@@ -15,8 +16,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use tokio::sync::oneshot;
 
-use crate::hvm::{self, Name};
+use crate::hvm;
 use crate::node;
+
+pub use crate::hvm::Name;
 
 // Util
 // ====
@@ -191,7 +194,7 @@ impl From<&node::Block> for BlockRepr {
   }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BlockInfo {
   pub block: BlockRepr,
   pub hash: Hash,
@@ -199,7 +202,7 @@ pub struct BlockInfo {
   pub results: Option<Vec<hvm::StatementResult>>,
 }
 
-#[derive(Debug, Serialize)] // TODO: Deserialize
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FuncInfo {
   pub func: hvm::Func,
 }
