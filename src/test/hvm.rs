@@ -2,16 +2,17 @@ use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
     init_map, init_runtime, name_to_u128_unsafe, read_statements, readback_term, show_term,
-    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo,
+    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo, Term, U120,
   },
   test::{
-    strategies::{func, heap, name, statement, term},
+    strategies::{func, heap, name, op2, statement, term},
     util::{
-      advance, rollback, rollback_path, rollback_simple, temp_dir, test_heap_checksum,
-      view_rollback_ticks, RuntimeStateTest, TempDir,
+      advance, rollback, rollback_path, rollback_simple, run_term_and, run_term_from_code_and,
+      temp_dir, test_heap_checksum, view_rollback_ticks, RuntimeStateTest, TempDir,
     },
   },
 };
+use proptest::prelude::ProptestConfig;
 use proptest::proptest;
 use proptest::{collection::vec, strategy::Strategy};
 use rstest::rstest;
@@ -288,6 +289,68 @@ proptest! {
     let s2 = format!("{:?}", h1);
     assert_eq!(s1, s2);
   }
+}
+
+// ===========================================================
+// Operations
+
+proptest! {
+  #![proptest_config(ProptestConfig::with_cases(1000))]
+  #[test]
+  fn operators_dont_panic(op in op2(0..16)) {
+    // this test also ensures that all op2 dont panic
+    // and that their results are numbers
+    run_term_and(&op, |res| {
+      match res {
+        Term::Num {..} => (),
+        _ => panic!("Not a number: {}", view_term(res))
+      }
+    });
+  }
+
+  #[test]
+  fn boolean_operators(op in op2(10..16)) {
+    // verifies if boolean operators always returns
+    // 0 or 1
+    run_term_and(&op, |res| {
+      match res {
+        Term::Num {numb} => assert!(**numb == 0 || **numb == 1),
+        _ => panic!("Not a number: {}", view_term(res))
+      }
+    });
+  }
+
+  #[test]
+  #[should_panic]
+  fn invalid_operation(op in op2(16_u128..u128::MAX)) {
+    run_term_and(&op, |res| {});
+  }
+}
+
+#[rstest]
+#[case("(+ #1 #2)", 3)]
+#[case("(- #2 #1)", 1)]
+#[case("(* #1 #2)", 2)]
+#[case("(/ #5 #3)", 1)]
+#[case("(% #5 #3)", 2)]
+#[case("(<< #1 #120)", *U120::ZERO)]
+#[case("(- (<< #1 #120) #1)", *U120::MAX)]
+#[case(&format!("(> #{} #0)", U120::MAX), 1)]
+#[case("(> (- #0 #1) #0)", 1)]
+#[case(&format!("(< (+ #{} #1) #1)", U120::MAX), 1)]
+#[case(&format!("(* #{} #2)", U120::MAX), *U120::MAX - 1)]
+#[case(&format!("(| #{} #1)", U120::MAX), *U120::MAX)]
+#[case(&format!("(& #{} #1)", U120::MAX), 1)]
+#[case(&format!("(^ #{} #1)", U120::MAX), *U120::MAX - 1)]
+#[case(&format!("(>> #{} #119)", U120::MAX), 1)]
+#[case(&format!("(>> #{} #118)", U120::MAX), 3)]
+#[case(&format!("(+ #{} #1)", U120::MAX), *U120::ZERO)]
+#[case("(- #0 #1)", *U120::MAX)]
+fn operators_cases(#[case] code: &str, #[case] expected: u128) {
+  run_term_from_code_and(code, |res| match res {
+    Term::Num { numb } => assert_eq!(**numb, expected),
+    _ => panic!("Not a number as result: {}", view_term(res)),
+  })
 }
 
 // ===========================================================

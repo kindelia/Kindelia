@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, ops::Range};
 
 use crate::{
   crypto,
@@ -69,6 +69,14 @@ pub fn term() -> impl Strategy<Value = Term> {
       ]
     },
   )
+}
+
+pub fn op2(operator: Range<u128>) -> impl Strategy<Value = Term> {
+  (operator, u120(), u120()).prop_map(|(op, a, b)| Term::Op2 {
+    oper: op.try_into().unwrap(),
+    val0: Box::new(Term::Num { numb: a }),
+    val1: Box::new(Term::Num { numb: b }),
+  })
 }
 
 fn oper() -> impl Strategy<Value = Oper> {
