@@ -40,6 +40,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --profile=dev_fast
 
   cargo_clippy:
     name: 👃 Cargo Clippy
