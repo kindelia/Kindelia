@@ -478,6 +478,7 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   EffectFailure,
+  InvalidOperation
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -1019,22 +1020,22 @@ impl TryFrom<u128> for Oper {
   type Error = String;
   fn try_from(value: u128) -> Result<Self, Self::Error> {
       match value {
-        0 => Ok(Oper::Add),
-        1 => Ok(Oper::Sub),
-        2 => Ok(Oper::Mul),
-        3 => Ok(Oper::Div),
-        4 => Ok(Oper::Mod),
-        5 => Ok(Oper::And),
-        6 => Ok(Oper::Or),
-        7 => Ok(Oper::Xor),
-        8 => Ok(Oper::Shl),
-        9 => Ok(Oper::Shr),
-        10 => Ok(Oper::Ltn),
-        11 => Ok(Oper::Lte),
-        12 => Ok(Oper::Eql),
-        13 => Ok(Oper::Gte),
-        14 => Ok(Oper::Gtn),
-        15 => Ok(Oper::Neq),
+        ADD => Ok(Oper::Add),
+        SUB => Ok(Oper::Sub),
+        MUL => Ok(Oper::Mul),
+        DIV => Ok(Oper::Div),
+        MOD => Ok(Oper::Mod),
+        AND => Ok(Oper::And),
+        OR => Ok(Oper::Or),
+        XOR => Ok(Oper::Xor),
+        SHL => Ok(Oper::Shl),
+        SHR => Ok(Oper::Shr),
+        LTN => Ok(Oper::Ltn),
+        LTE => Ok(Oper::Lte),
+        EQL => Ok(Oper::Eql),
+        GTE => Ok(Oper::Gte),
+        GTN => Ok(Oper::Gtn),
+        NEQ => Ok(Oper::Neq),
         _ => Err(format!("Invalid value for operation: {}", value))
       }
   }
@@ -3442,28 +3443,27 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             //eprintln!("op2-num");
             rt.set_mana(rt.get_mana() + Op2NumMana());
-            let op  = get_ext(term);
+            let op  = get_ext(term).try_into().map_err(|_| RuntimeError::InvalidOperation)?;
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
             let res = match op {
               // TODO: implement U120 operations
-              ADD => (*a_u).wrapping_add(*b_u) & NUM_MASK,
-              SUB => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
-              MUL => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
-              DIV => (*a_u).wrapping_div(*b_u) & NUM_MASK,
-              MOD => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
-              AND => (*a_u &  *b_u) & NUM_MASK,
-              OR  => (*a_u |  *b_u) & NUM_MASK,
-              XOR => (*a_u ^  *b_u) & NUM_MASK,
-              SHL => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
-              SHR => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
-              LTN => u128::from(*a_u <  *b_u),
-              LTE => u128::from(*a_u <= *b_u),
-              EQL => u128::from(*a_u == *b_u),
-              GTE => u128::from(*a_u >= *b_u),
-              GTN => u128::from(*a_u >  *b_u),
-              NEQ => u128::from(*a_u != *b_u),
-              _ => panic!("Invalid operation!"),
+              Oper::Add => (*a_u).wrapping_add(*b_u) & NUM_MASK,
+              Oper::Sub => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
+              Oper::Mul => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
+              Oper::Div => (*a_u).wrapping_div(*b_u) & NUM_MASK,
+              Oper::Mod => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
+              Oper::And => (*a_u &  *b_u) & NUM_MASK,
+              Oper::Or  => (*a_u |  *b_u) & NUM_MASK,
+              Oper::Xor => (*a_u ^  *b_u) & NUM_MASK,
+              Oper::Shl => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
+              Oper::Shr => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
+              Oper::Ltn => u128::from(*a_u <  *b_u),
+              Oper::Lte => u128::from(*a_u <= *b_u),
+              Oper::Eql => u128::from(*a_u == *b_u),
+              Oper::Gte => u128::from(*a_u >= *b_u),
+              Oper::Gtn => u128::from(*a_u >  *b_u),
+              Oper::Neq => u128::from(*a_u != *b_u),
             };
             let done = Num(res);
             clear(rt, get_loc(term, 0), 2);
@@ -3916,25 +3916,24 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
             OP2 => {
-              let oper = get_ext(term);
+              let oper = get_ext(term).try_into().unwrap();
               let symb = match oper {
-                ADD => "+",
-                SUB => "-",
-                MUL => "*",
-                DIV => "/",
-                MOD => "%",
-                AND => "&",
-                OR  => "|",
-                XOR => "^",
-                SHL => "<<",
-                SHR => ">>",
-                LTN => "<",
-                LTE => "<=",
-                EQL => "=",
-                GTE => ">=",
-                GTN => ">",
-                NEQ => "!=",
-                _        => "?",
+                Oper::Add => "+",
+                Oper::Sub => "-",
+                Oper::Mul => "*",
+                Oper::Div => "/",
+                Oper::Mod => "%",
+                Oper::And => "&",
+                Oper::Or  => "|",
+                Oper::Xor => "^",
+                Oper::Shl => "<<",
+                Oper::Shr => ">>",
+                Oper::Ltn => "<",
+                Oper::Lte => "<=",
+                Oper::Eql => "=",
+                Oper::Gte => ">=",
+                Oper::Gtn => ">",
+                Oper::Neq => "!=",
               };
               output.push(format!("({} ", symb));
               stack.push(StackItem::Str(")".to_string()));
@@ -4001,7 +4000,8 @@ fn show_runtime_error(err: RuntimeError) -> String {
   (match err {
     RuntimeError::NotEnoughMana => "Not enough mana.",
     RuntimeError::NotEnoughSpace => "Not enough space.",
-    RuntimeError::EffectFailure => "Runtime effect failure."
+    RuntimeError::EffectFailure => "Runtime effect failure.",
+    RuntimeError::InvalidOperation => "Tried to execute an invalid operation"
   }).to_string()
 }
 
