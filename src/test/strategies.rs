@@ -4,7 +4,7 @@ use crate::{
   crypto,
   hvm::{
     init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Name, Nodes,
-    Ownrs, Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var, U120,
+    Ownrs, Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var, U120, Oper,
   },
   node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
 };
@@ -63,12 +63,16 @@ pub fn term() -> impl Strategy<Value = Term> {
           .prop_map(|(n, v)| { Term::Ctr { name: n, args: v } }),
         (small_name(), vec(inner.clone(), 0..10))
           .prop_map(|(n, v)| { Term::Fun { name: n, args: v } }),
-        (0..15_u128, inner.clone(), inner).prop_map(|(o, v0, v1)| {
+        (oper(), inner.clone(), inner).prop_map(|(o, v0, v1)| {
           Term::Op2 { oper: o, val0: Box::new(v0), val1: Box::new(v1) }
         }),
       ]
     },
   )
+}
+
+fn oper() -> impl Strategy<Value = Oper> {
+  (0_u128..16_u128).prop_map(|v| v.try_into().unwrap())
 }
 
 fn fun() -> impl Strategy<Value = Term> {
