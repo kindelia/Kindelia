@@ -25,7 +25,7 @@ use std::thread;
 
 pub use clap::{Parser, Subcommand};
 
-use crate::api::http::http_api_loop;
+use crate::api::server::http_api_loop;
 use crate::bits::*;
 use crate::hvm::*;
 use crate::node::*;

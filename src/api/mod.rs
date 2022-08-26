@@ -5,7 +5,8 @@
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
 
-pub mod http;
+pub mod server;
+pub mod client;
 
 use std::collections::HashSet;
 use std::fmt::{self, Display};
