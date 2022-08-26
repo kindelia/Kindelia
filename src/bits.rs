@@ -455,6 +455,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     }
     7 => {
       let oper = deserialize_fixlen(4, bits, index, names)?.low_u128();
+      let oper = oper.try_into().ok()?;
       let val0 = Box::new(deserialize_term(bits, index, names)?);
       let val1 = Box::new(deserialize_term(bits, index, names)?);
       Some(Term::Op2 { oper, val0, val1 })

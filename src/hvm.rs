@@ -290,7 +290,7 @@ pub enum Term {
   Ctr { name: Name, args: Vec<Term> },
   Fun { name: Name, args: Vec<Term> },
   Num { numb: U120 },
-  Op2 { oper: u128, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
+  Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
 }
 
 // A native HVM 120-bit machine integer operation
@@ -310,7 +310,7 @@ pub enum Term {
 // - Gte: greater than or equal
 // - Gtn: greater than
 // - Neq: not equal
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Oper {
   Add, Sub, Mul, Div,
   Mod, And, Or,  Xor,
@@ -477,7 +477,7 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-  EffectFailure,
+  EffectFailure
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -1009,6 +1009,34 @@ impl TryFrom<&str> for U120 {
     } else {
       Ok(result)
     }
+  }
+}
+
+// Oper
+// ====
+
+impl TryFrom<u128> for Oper {
+  type Error = String;
+  fn try_from(value: u128) -> Result<Self, Self::Error> {
+      match value {
+        ADD => Ok(Oper::Add),
+        SUB => Ok(Oper::Sub),
+        MUL => Ok(Oper::Mul),
+        DIV => Ok(Oper::Div),
+        MOD => Ok(Oper::Mod),
+        AND => Ok(Oper::And),
+        OR => Ok(Oper::Or),
+        XOR => Ok(Oper::Xor),
+        SHL => Ok(Oper::Shl),
+        SHR => Ok(Oper::Shr),
+        LTN => Ok(Oper::Ltn),
+        LTE => Ok(Oper::Lte),
+        EQL => Ok(Oper::Eql),
+        GTE => Ok(Oper::Gte),
+        GTN => Ok(Oper::Gtn),
+        NEQ => Ok(Oper::Neq),
+        _ => Err(format!("Invalid value for operation: {}", value))
+      }
   }
 }
 
@@ -2955,7 +2983,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       link(rt, node + 0, val0);
       let val1 = create_term(rt, val1, node + 1, vars_data);
       link(rt, node + 1, val1);
-      Op2(*oper, node)
+      Op2(*oper as u128, node)
     }
   }
 }
@@ -3414,28 +3442,27 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             //eprintln!("op2-num");
             rt.set_mana(rt.get_mana() + Op2NumMana());
-            let op  = get_ext(term);
+            let op  = get_ext(term).try_into().expect("Invalid operation coming from HVM");
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
             let res = match op {
               // TODO: implement U120 operations
-              ADD => (*a_u).wrapping_add(*b_u) & NUM_MASK,
-              SUB => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
-              MUL => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
-              DIV => (*a_u).wrapping_div(*b_u) & NUM_MASK,
-              MOD => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
-              AND => (*a_u &  *b_u) & NUM_MASK,
-              OR  => (*a_u |  *b_u) & NUM_MASK,
-              XOR => (*a_u ^  *b_u) & NUM_MASK,
-              SHL => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
-              SHR => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
-              LTN => u128::from(*a_u <  *b_u),
-              LTE => u128::from(*a_u <= *b_u),
-              EQL => u128::from(*a_u == *b_u),
-              GTE => u128::from(*a_u >= *b_u),
-              GTN => u128::from(*a_u >  *b_u),
-              NEQ => u128::from(*a_u != *b_u),
-              _ => panic!("Invalid operation!"),
+              Oper::Add => (*a_u).wrapping_add(*b_u) & NUM_MASK,
+              Oper::Sub => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
+              Oper::Mul => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
+              Oper::Div => (*a_u).wrapping_div(*b_u) & NUM_MASK,
+              Oper::Mod => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
+              Oper::And => (*a_u &  *b_u) & NUM_MASK,
+              Oper::Or  => (*a_u |  *b_u) & NUM_MASK,
+              Oper::Xor => (*a_u ^  *b_u) & NUM_MASK,
+              Oper::Shl => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
+              Oper::Shr => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
+              Oper::Ltn => u128::from(*a_u <  *b_u),
+              Oper::Lte => u128::from(*a_u <= *b_u),
+              Oper::Eql => u128::from(*a_u == *b_u),
+              Oper::Gte => u128::from(*a_u >= *b_u),
+              Oper::Gtn => u128::from(*a_u >  *b_u),
+              Oper::Neq => u128::from(*a_u != *b_u),
             };
             let done = Num(res);
             clear(rt, get_loc(term, 0), 2);
@@ -3888,25 +3915,24 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
             OP2 => {
-              let oper = get_ext(term);
+              let oper = get_ext(term).try_into().unwrap();
               let symb = match oper {
-                ADD => "+",
-                SUB => "-",
-                MUL => "*",
-                DIV => "/",
-                MOD => "%",
-                AND => "&",
-                OR  => "|",
-                XOR => "^",
-                SHL => "<<",
-                SHR => ">>",
-                LTN => "<",
-                LTE => "<=",
-                EQL => "=",
-                GTE => ">=",
-                GTN => ">",
-                NEQ => "!=",
-                _        => "?",
+                Oper::Add => "+",
+                Oper::Sub => "-",
+                Oper::Mul => "*",
+                Oper::Div => "/",
+                Oper::Mod => "%",
+                Oper::And => "&",
+                Oper::Or  => "|",
+                Oper::Xor => "^",
+                Oper::Shl => "<<",
+                Oper::Shr => ">>",
+                Oper::Ltn => "<",
+                Oper::Lte => "<=",
+                Oper::Eql => "=",
+                Oper::Gte => ">=",
+                Oper::Gtn => ">",
+                Oper::Neq => "!=",
               };
               output.push(format!("({} ", symb));
               stack.push(StackItem::Str(")".to_string()));
@@ -3973,7 +3999,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
   (match err {
     RuntimeError::NotEnoughMana => "Not enough mana.",
     RuntimeError::NotEnoughSpace => "Not enough space.",
-    RuntimeError::EffectFailure => "Runtime effect failure."
+    RuntimeError::EffectFailure => "Runtime effect failure.",
   }).to_string()
 }
 
@@ -4179,6 +4205,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
             }
             OP2 => {
               let oper = get_ext(term);
+              let oper = oper.try_into().unwrap();
               let val1 = Box::new(output.pop().unwrap());
               let val0 = Box::new(output.pop().unwrap());
               output.push(Term::Op2 { oper, val0, val1 })
@@ -4574,34 +4601,34 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
   }
 }
 
-pub fn read_oper(in_code: &str) -> (&str, Option<u128>) {
+pub fn read_oper(in_code: &str) -> (&str, Option<Oper>) {
   let code = skip(in_code);
   match head(code) {
     // Should not match with `~`
-    '+' => (tail(code), Some(ADD)),
-    '-' => (tail(code), Some(SUB)),
-    '*' => (tail(code), Some(MUL)),
-    '/' => (tail(code), Some(DIV)),
-    '%' => (tail(code), Some(MOD)),
-    '&' => (tail(code), Some(AND)),
-    '|' => (tail(code), Some(OR)),
-    '^' => (tail(code), Some(XOR)),
+    '+' => (tail(code), Some(Oper::Add)),
+    '-' => (tail(code), Some(Oper::Sub)),
+    '*' => (tail(code), Some(Oper::Mul)),
+    '/' => (tail(code), Some(Oper::Div)),
+    '%' => (tail(code), Some(Oper::Mod)),
+    '&' => (tail(code), Some(Oper::And)),
+    '|' => (tail(code), Some(Oper::Or)),
+    '^' => (tail(code), Some(Oper::Xor)),
     '<' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(LTE)),
-      '<' => (tail(tail(code)), Some(SHL)),
-      _   => (tail(code), Some(LTN)),
+      '=' => (tail(tail(code)), Some(Oper::Lte)),
+      '<' => (tail(tail(code)), Some(Oper::Shl)),
+      _   => (tail(code), Some(Oper::Ltn)),
     },
     '>' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(GTE)),
-      '>' => (tail(tail(code)), Some(SHR)),
-      _   => (tail(code), Some(GTN)),
+      '=' => (tail(tail(code)), Some(Oper::Gte)),
+      '>' => (tail(tail(code)), Some(Oper::Shr)),
+      _   => (tail(code), Some(Oper::Gtn)),
     },
     '=' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(EQL)),
+      '=' => (tail(tail(code)), Some(Oper::Eql)),
       _   => (code, None),
     },
     '!' => match head(tail(code)) {
-      '=' => (tail(tail(code)), Some(NEQ)),
+      '=' => (tail(tail(code)), Some(Oper::Neq)),
       _   => (code, None),
     },
     _ => (code, None),
@@ -4831,25 +4858,24 @@ pub fn view_term(term: &Term) -> String {
   res
 }
 
-pub fn view_oper(oper: &u128) -> String {
-  match *oper {
-    ADD => "+",
-    SUB => "-",
-    MUL => "*",
-    DIV => "/",
-    MOD => "%",
-    AND => "&",
-    OR  => "|",
-    XOR => "^",
-    SHL => "<<",
-    SHR => ">>",
-    LTN => "<",
-    LTE => "<=",
-    EQL => "==",
-    GTE => ">=",
-    GTN => ">",
-    NEQ => "!=",
-    _   => "??",
+pub fn view_oper(oper: &Oper) -> String {
+  match oper {
+    Oper::Add => "+",
+    Oper::Sub => "-",
+    Oper::Mul => "*",
+    Oper::Div => "/",
+    Oper::Mod => "%",
+    Oper::And => "&",
+    Oper::Or  => "|",
+    Oper::Xor => "^",
+    Oper::Shl => "<<",
+    Oper::Shr => ">>",
+    Oper::Ltn => "<",
+    Oper::Lte => "<=",
+    Oper::Eql => "==",
+    Oper::Gte => ">=",
+    Oper::Gtn => ">",
+    Oper::Neq => "!=",
   }.to_string()
 }
 

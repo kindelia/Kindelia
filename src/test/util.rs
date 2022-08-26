@@ -1,6 +1,9 @@
 use rstest::fixture;
 
-use crate::hvm::{init_runtime, name_to_u128_unsafe, show_term, Rollback, Runtime, U128_NONE, Name};
+use crate::hvm::{
+  init_runtime, name_to_u128_unsafe, show_term, Name, Rollback, Runtime, Statement, StatementInfo,
+  Term, U128_NONE, read_term,
+};
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
   hash::{Hash, Hasher},
@@ -75,8 +78,10 @@ impl RuntimeStateTest {
 
 // Generate a checksum for a runtime state (for testing)
 pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
-  let fn_ids =
-    fn_names.iter().map(|x| Name::from_u128_unchecked(name_to_u128_unsafe(x))).collect::<Vec<Name>>();
+  let fn_ids = fn_names
+    .iter()
+    .map(|x| Name::from_u128_unchecked(name_to_u128_unsafe(x)))
+    .collect::<Vec<Name>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id);
@@ -211,6 +216,30 @@ pub fn rollback_path(
   states_store.values().all(|vec| are_all_elemenets_equal(vec))
 }
 
+pub fn run_term_and<A>(term: &Term, action: A)
+where
+  A: Fn(&Term),
+{
+  let temp_dir = temp_dir();
+  let mut rt = init_runtime(Some(&temp_dir.path));
+
+  let term = Term::Fun { name: "Done".try_into().unwrap(), args: [term.clone()].to_vec() };
+  let stmt = Statement::Run { expr: term, sign: None };
+  let result = rt.run_statement(&stmt, false, true).unwrap();
+
+  if let StatementInfo::Run { done_term, .. } = result {
+    action(&done_term)
+  }
+}
+
+pub fn run_term_from_code_and<A>(code: &str, action: A)
+where 
+  A: Fn(&Term)
+{
+  let (_, term) = read_term(code).unwrap();
+  run_term_and(&term, action)
+}
+
 // ===========================================================
 // BEFORE EACH
 
@@ -235,6 +264,5 @@ impl Drop for TempDir {
 pub fn temp_dir() -> TempDir {
   let path = std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
   let temp_dir = TempDir { path };
-  println!("Temp dir: {:?}", temp_dir.path);
   temp_dir
 }
