@@ -416,24 +416,27 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
   match tag.low_u128() {
     0 => {
       let name = deserialize_name(bits, index, names)?;
-      Some(Term::Var { name })
+      Some(Term::var(name))
     }
     1 => {
       let nam0 = deserialize_name(bits, index, names)?;
       let nam1 = deserialize_name(bits, index, names)?;
       let expr = Box::new(deserialize_term(bits, index, names)?);
       let body = Box::new(deserialize_term(bits, index, names)?);
-      Some(Term::Dup { nam0, nam1, expr, body })
+      let term = Term::dup(nam0, nam1, expr, body);
+      Some(term)
     }
     2 => {
       let name = deserialize_name(bits, index, names)?;
       let body = Box::new(deserialize_term(bits, index, names)?);
-      Some(Term::Lam { name, body })
+      let term = Term::lam(name, body);
+      Some(term)
     }
     3 => {
       let func = Box::new(deserialize_term(bits, index, names)?);
       let argm = Box::new(deserialize_term(bits, index, names)?);
-      Some(Term::App { func, argm })
+      let term = Term::app(func, argm);
+      Some(term)
     }
     4 => {
       let name = deserialize_name(bits, index, names)?;
@@ -441,24 +444,28 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
         let term = deserialize_term(bits, index, names)?;
         return Some(term);
       }, bits, index, names)?;
-      Some(Term::Ctr { name, args })
+      let term = Term::ctr(name, args).ok()?;
+      Some(term)
     }
     5 => {
       let name = deserialize_name(bits, index, names)?;
       let args = deserialize_list(deserialize_term, bits, index, names)?;
-      Some(Term::Fun { name, args })
+      let term = Term::fun(name, args).ok()?;
+      Some(term)
     }
     6 => {
       let numb = deserialize_number(bits, index, names)?.low_u128();
       let numb: U120 = numb.try_into().ok()?;
-      Some(Term::Num { numb })
+      let term = Term::num(numb);
+      Some(term)
     }
     7 => {
       let oper = deserialize_fixlen(4, bits, index, names)?.low_u128();
       let oper = oper.try_into().ok()?;
       let val0 = Box::new(deserialize_term(bits, index, names)?);
       let val1 = Box::new(deserialize_term(bits, index, names)?);
-      Some(Term::Op2 { oper, val0, val1 })
+      let term = Term::op2(oper, val0, val1);
+      Some(term)
     }
     _ => {
       None
