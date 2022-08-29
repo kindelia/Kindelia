@@ -1058,7 +1058,6 @@ impl TryFrom<u128> for Oper {
 // ====
 
 impl Term {
-
   pub fn num(numb: U120) -> Self {
     Term::Num { numb }
   }
@@ -1097,6 +1096,12 @@ impl Term {
     } else {
       Err(format!("Direct calling function with too long name: `{}`.", name))
     }
+  }
+}
+
+impl fmt::Display for Term {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "{}", view_term(self))
   }
 }
 
