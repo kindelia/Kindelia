@@ -1049,7 +1049,6 @@ impl Term {
     Term::Num { numb }
   }
 
-  // ASK: a var can be a "big name"?
   pub fn var(name: Name) -> Self {
     Term::Var { name }
   }
