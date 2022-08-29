@@ -89,7 +89,7 @@ fn fun() -> impl Strategy<Value = Term> {
 
 // generate rules
 pub fn rule() -> impl Strategy<Value = Rule> {
-  (fun(), term()).prop_map(|(lhs, rhs)| Rule { lhs, rhs })
+  (vec(term(), 0..10), term()).prop_map(|(lhs, rhs)| Rule { lhs, rhs })
 }
 
 pub fn func() -> impl Strategy<Value = Func> {
