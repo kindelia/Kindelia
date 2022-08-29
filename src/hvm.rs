@@ -246,6 +246,7 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -961,6 +962,14 @@ impl TryFrom<&str> for Name {
 impl From<U120> for Name {
   fn from(num: U120) -> Self {
     Name(num.0)
+  }
+}
+
+// needed for `clap` parsing
+impl FromStr for Name {
+  type Err = String;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+      s.try_into()
   }
 }
 
