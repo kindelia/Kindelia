@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(clippy::style)]
+
 use bit_vec::BitVec;
 use std::collections::HashMap;
 
@@ -15,12 +18,14 @@ type Names = HashMap<u128, u128>;
 
 // A number with a known amount of bits
 
+#[allow(unused_variables)]
 pub fn serialize_fixlen(size: u128, value: &U256, bits: &mut BitVec, names: &mut Names) {
   for i in 0 .. size {
     bits.push((value >> i).low_u128() & 1 == 1);
   }
 }
 
+#[allow(unused_variables)]
 pub fn deserialize_fixlen(size: u128, bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
   let mut result = u256(0);
   for i in 0 .. size {
@@ -37,6 +42,7 @@ pub fn deserialize_fixlen(size: u128, bits: &BitVec, index: &mut u128, names: &m
 
 // A number with an unknown amount of bits
 
+#[allow(unused_variables)]
 pub fn serialize_varlen(value: &U256, bits: &mut BitVec, names: &mut Names) {
   let mut value : U256 = *value;
   while value > u256(0) {
@@ -47,6 +53,7 @@ pub fn serialize_varlen(value: &U256, bits: &mut BitVec, names: &mut Names) {
   bits.push(false);
 }
 
+#[allow(unused_variables)]
 pub fn deserialize_varlen(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
   let mut val : U256 = u256(0);
   let mut add : U256 = u256(1);
@@ -56,7 +63,7 @@ pub fn deserialize_varlen(bits: &BitVec, index: &mut u128, names: &mut Names) ->
     *index = *index + 2;
   }
   *index = *index + 1;
-  return Some(val);
+  Some(val)
 }
 
 // A number
@@ -70,11 +77,12 @@ pub fn serialize_number(value: &U256, bits: &mut BitVec, names: &mut Names) {
 pub fn deserialize_number(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
   let size = deserialize_varlen(&bits, index, names)?.low_u128();
   let numb = deserialize_fixlen(size, &bits, index, names)?;
-  return Some(numb);
+  Some(numb)
 }
 
 // A bitvec with an unknown amount of bits
 
+#[allow(unused_variables)]
 pub fn serialize_bits(data: &BitVec, bits: &mut BitVec, names: &mut Names) {
   for bit in data.iter() {
     bits.push(true);
@@ -83,6 +91,7 @@ pub fn serialize_bits(data: &BitVec, bits: &mut BitVec, names: &mut Names) {
   bits.push(false);
 }
 
+#[allow(unused_variables)]
 pub fn deserialize_bits(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<BitVec> {
   let mut result = BitVec::new();
   while bits.get(*index as usize)? {
@@ -90,7 +99,7 @@ pub fn deserialize_bits(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     *index = *index + 2;
   }
   *index = *index + 1;
-  return Some(result);
+  Some(result)
 }
 
 // A name is grouped by 6-bit letters
@@ -120,7 +129,7 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
   if compressed {
     let id = deserialize_varlen(bits, index, names)?.low_u128();
     let nm = *names.get(&id)?;
-    return Some(Name::from_u128_unchecked(nm));
+    Some(Name::from_u128_unchecked(nm))
   } else {
     while bits.get(*index as usize)? {
       *index += 1;
@@ -131,10 +140,10 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     *index = *index + 1;
     if add > 1 {
       names.insert(names.len() as u128, nam);
-      return Some(Name::from_u128_unchecked(nam));
+      Some(Name::from_u128_unchecked(nam))
     } else {
-      return None;
-    };
+      None
+    }
   }
 }
 

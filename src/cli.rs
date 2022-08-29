@@ -1,5 +1,13 @@
+#![warn(dead_code)]
+#![warn(unused_imports)]
+#![warn(non_snake_case)]
+#![warn(unused_variables)]
+#![warn(clippy::style)]
+
+// TODO: `clean` CLI command
+
 use core::panic;
-use std::collections::HashMap;
+use std::path::Path;
 use std::{path::PathBuf, str::FromStr, thread};
 
 use clap::{Parser, Subcommand};
@@ -11,8 +19,8 @@ use crate::bits::{deserialized_statement, serialized_statement};
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
 use crate::node::{
-  self, read_address, udp_init, udp_send, Address, Message, MinerCommunication, Node, Transaction,
-  UDP_PORT,
+  self, read_address, udp_init, udp_send, Message, MinerCommunication, Node,
+  Transaction, UDP_PORT,
 };
 use crate::util::{bitvec_to_bytes, bytes_to_bitvec};
 use crate::ENTRY_PEERS;
@@ -77,7 +85,7 @@ kindelia node clean [-f]       // asks confirmation
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
-pub struct CLI {
+pub struct Cli {
   #[clap(subcommand)]
   command: CLICommand,
   /// Path to config file.
@@ -226,6 +234,13 @@ struct ConfigValueOption<'a, T: Clone, F: Fn() -> T> {
 }
 
 impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
+  /// Resolve config value.
+  ///
+  /// Priority is:
+  /// 1. CLI argument
+  /// 2. Environment variable
+  /// 3. Config file
+  /// 4. Default value
   fn get_value_config(self) -> T
   where
     T: ConvertFrom<String> + serde::Deserialize<'a>,
@@ -233,10 +248,14 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
     if let Some(value) = self.value {
       // read from var
       value
-    } else if let Some(Ok(env_value)) = self.env.map(|e| std::env::var(e)) {
+    } else if let Some(Ok(env_value)) = self.env.map(std::env::var) {
       // if env var is set and valid, read from env var
       T::convert(env_value)
-    } else if let ConfigFileOptions { toml: Some(toml_value), prop: Some(prop) } = self.config {
+    } else if let ConfigFileOptions {
+      toml: Some(toml_value),
+      prop: Some(prop),
+    } = self.config
+    {
       // if config file is set and valid, read from config file
       // doing this way because of issue #469 toml-rs
       toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
@@ -251,7 +270,7 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
 
 /// Parse Cli arguments and do an action
 pub fn run_cli() -> Result<(), String> {
-  let parsed = CLI::parse();
+  let parsed = Cli::parse();
   let default_kindelia_path = || dirs::home_dir().unwrap().join(".kindelia");
 
   // get possible config path and content
@@ -268,7 +287,7 @@ pub fn run_cli() -> Result<(), String> {
     CLICommand::Serialize { file } => {
       serialize(&file);
       Ok(())
-    },
+    }
     CLICommand::Deserialize { file } => {
       let content = get_value_stdin::<String>(file);
       deserialize(&content);
@@ -306,7 +325,7 @@ pub fn run_cli() -> Result<(), String> {
         value: init_peers,
         env: Some("KINDELIA_INIT_PEERS"),
         config: ConfigFileOptions::new(&config, "init_peers"),
-        default: || vec![],
+        default: std::vec::Vec::new,
       }
       .get_value_config();
 
@@ -323,34 +342,8 @@ pub fn run_cli() -> Result<(), String> {
 
       Ok(())
     }
-    CLICommand::Completion { shell } => todo!(),
-    CLICommand::Get { kind } => {
-      let client =
-        api_client::ApiClient::new("http://localhost:8000", None).map_err(|e| e.to_string())?;
-      match kind {
-        GetKind::Fn { name, stat } => match stat {
-          GetFnKind::Code => todo!(),
-          GetFnKind::State => {
-            // TODO move `Name` parsing / error to clap
-            let name: Name = Name::try_from(&name as &str)?;
-            let state = run_async_blocking(client.get_function_state(name));
-            // TODO: Display trait on `Term`
-            println!("{:?}", state);
-            Ok(())
-          }
-          GetFnKind::Slots => todo!(),
-        },
-        GetKind::Ns { name, stat } => todo!(),
-        GetKind::Bk { hash } => todo!(),
-        GetKind::Ct { name, stat } => todo!(),
-        GetKind::Tick => todo!(),
-        GetKind::Mana => todo!(),
-        GetKind::Space => todo!(),
-        GetKind::FnCount => todo!(),
-        GetKind::NsCount => todo!(),
-        GetKind::CtCount => todo!(),
-      }
-    }
+    CLICommand::Get { kind } => get_info(kind),
+    CLICommand::Completion { shell: _ } => todo!(),
   }
 }
 
@@ -367,9 +360,38 @@ where
 // Main Actions
 // ============
 
+pub fn get_info(kind: GetKind) -> Result<(), String> {
+  let client = api_client::ApiClient::new("http://localhost:8000", None)
+    .map_err(|e| e.to_string())?;
+  match kind {
+    GetKind::Fn { name, stat } => match stat {
+      GetFnKind::Code => todo!(),
+      GetFnKind::State => {
+        // TODO move `Name` parsing / error to clap
+        let name: Name = Name::try_from(&name as &str)?;
+        let state = run_async_blocking(client.get_function_state(name));
+        // TODO: Display trait on `Term`
+        println!("{:?}", state);
+        Ok(())
+      }
+      GetFnKind::Slots => todo!(),
+    },
+    GetKind::Ns { name: _, stat: _ } => todo!(),
+    GetKind::Bk { hash: _ } => todo!(),
+    GetKind::Ct { name: _, stat: _ } => todo!(),
+    GetKind::Tick => todo!(),
+    GetKind::Mana => todo!(),
+    GetKind::Space => todo!(),
+    GetKind::FnCount => todo!(),
+    GetKind::NsCount => todo!(),
+    GetKind::CtCount => todo!(),
+  }
+}
+
 pub fn serialize(file: &PathBuf) {
   if let Ok(code) = std::fs::read_to_string(file) {
-    let statements = hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
+    let statements =
+      hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
     for statement in statements {
       println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
     }
@@ -379,13 +401,13 @@ pub fn serialize(file: &PathBuf) {
 }
 
 pub fn deserialize(content: &str) {
-  let statement = get_statement(&content).expect("invalid hex string");
+  let statement = get_statement(content).expect("invalid hex string");
   println!("{}", view_statement(&statement));
 }
 
 pub fn sign(content: &str, skey_file: &str) {
   if let Ok(skey) = std::fs::read_to_string(skey_file) {
-    if let Some(statement) = get_statement(&content) {
+    if let Some(statement) = get_statement(content) {
       let skey = hex::decode(&skey[0..64]).expect("hex string");
       let user = crypto::Account::from_private_key(&skey);
       let hash = hvm::hash_statement(&statement);
@@ -401,11 +423,13 @@ pub fn sign(content: &str, skey_file: &str) {
 }
 
 pub fn post(content: &str, host: Option<String>) {
-  if let Some(statement) = get_statement(&content) {
-    let tx = Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
+  if let Some(statement) = get_statement(content) {
+    let tx =
+      Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
     let ms = Message::PleaseMineThisTransaction { trans: tx };
-    let ports = [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
-    if let Some((mut socket, port)) = udp_init(&ports) {
+    let ports =
+      [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
+    if let Some((mut socket, _)) = udp_init(&ports) {
       let addrs = if let Some(host) = host {
         vec![read_address(&host)]
       } else {
@@ -421,11 +445,11 @@ pub fn post(content: &str, host: Option<String>) {
   }
 }
 
-pub fn test(file: &str) {
+pub fn run_file(file: &Path) {
   let file = std::fs::read_to_string(file);
   match file {
     Err(err) => {
-      return println!("{}", err);
+      eprintln!("{}", err);
     }
     Ok(code) => {
       // TODO: flag to disable size limit / debug
@@ -434,16 +458,11 @@ pub fn test(file: &str) {
   }
 }
 
-fn run_file(file: &PathBuf) {
-  let code = std::fs::read_to_string(file).unwrap();
-  // TODO: flag to disable size limit / debug
-  hvm::test_statements_from_code(&code);
-}
-
 fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
-  let init_peers = init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
-  let init_peers = if init_peers.len() > 0 { Some(init_peers) } else { None };
+  let init_peers =
+    init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
+  let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
 
   dbg!(init_peers.clone());
   dbg!(kindelia_path.clone());
@@ -453,7 +472,7 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let (node_query_sender, node) = Node::new(kindelia_path.clone(), &init_peers);
+  let (node_query_sender, node) = Node::new(kindelia_path, &init_peers);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();
@@ -464,7 +483,7 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
 
   // Spawns the node thread
   let node_thread = thread::spawn(move || {
-    node.main(kindelia_path.clone(), miner_comm_0, mine);
+    node.main(miner_comm_0, mine);
   });
   threads.push(node_thread);
 
@@ -500,7 +519,9 @@ struct ConfigFileOptions<'a> {
 impl<'a> ConfigFileOptions<'a> {
   pub fn new(toml: &'a Option<toml::Value>, prop: &str) -> Self {
     match toml {
-      Some(_) => ConfigFileOptions { toml: toml.as_ref(), prop: Some(prop.into()) },
+      Some(_) => {
+        ConfigFileOptions { toml: toml.as_ref(), prop: Some(prop.into()) }
+      }
       None => Self::none(),
     }
   }
@@ -510,12 +531,16 @@ impl<'a> ConfigFileOptions<'a> {
   }
 }
 
+#[allow(dead_code)]
 fn get_statements(txt: &str) -> Vec<Option<Statement>> {
-  txt.split('\n').map(|hex| get_statement(hex)).collect()
+  // FIXME: should split on all whitespace
+  txt.split('\n').map(get_statement).collect()
 }
 
 fn get_statement(hex: &str) -> Option<Statement> {
-  return deserialized_statement(&bytes_to_bitvec(&hex::decode(hex).expect("hex string")));
+  deserialized_statement(&bytes_to_bitvec(
+    &hex::decode(hex).expect("hex string"),
+  ))
 }
 
 fn get_value_stdin<T: ConvertFrom<String>>(file: Option<PathBuf>) -> T {
@@ -525,7 +550,7 @@ fn get_value_stdin<T: ConvertFrom<String>>(file: Option<PathBuf>) -> T {
   } else {
     // read from stdin
     let mut input = String::new();
-    if let Ok(_) = std::io::stdin().read_line(&mut input) {
+    if std::io::stdin().read_line(&mut input).is_ok() {
       T::convert(input.trim().to_string())
     } else {
       panic!("Could not read file path or stdin");
@@ -559,7 +584,9 @@ fn get_value_stdin<T: ConvertFrom<String>>(file: Option<PathBuf>) -> T {
 // }
 
 fn read_toml(file: &PathBuf) -> Option<toml::Value> {
-  std::fs::read_to_string(file).ok().and_then(|content| content.parse::<toml::Value>().ok())
+  std::fs::read_to_string(file)
+    .ok()
+    .and_then(|content| content.parse::<toml::Value>().ok())
 }
 
 // Auxiliar Traits

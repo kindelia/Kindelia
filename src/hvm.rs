@@ -235,6 +235,11 @@
 // conventional HVM. This file will be extensively commented, with in-depth explanations of every
 // little aspect, from the HVM's memory model to interaction net rewrite rules.
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
+#![allow(unused_variables)]
+#![allow(clippy::style)]
 #![allow(clippy::identity_op)]
 
 use std::collections::{hash_map, HashMap, HashSet};

@@ -1,3 +1,9 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
+#![allow(unused_variables)]
+#![allow(clippy::style)]
+
 use bit_vec::BitVec;
 use json::object;
 use primitive_types::U256;
@@ -9,17 +15,14 @@ use std::collections::{HashMap, HashSet};
 use std::net::*;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender, Receiver};
-
-use tokio::sync::oneshot;
 
 use std::hash::{BuildHasherDefault};
 use crate::{NoHashHasher as NHH, print_with_timestamp};
 
 use crate::api;
-use crate::api::{NodeRequest, BlockInfo, FuncInfo, BlockRepr};
+use crate::api::{NodeRequest, BlockInfo, FuncInfo};
 use crate::util::*;
 use crate::bits::*;
 use crate::hvm::{self, *};
@@ -1248,7 +1251,7 @@ impl Node {
     println!("{}", log);
   }
 
-  pub fn main(mut self, kindelia_path: PathBuf, mut miner_communication: MinerCommunication, mine: bool) -> ! {
+  pub fn main(mut self, mut miner_communication: MinerCommunication, mine: bool) -> ! {
 
     eprintln!("Port: {}", self.port);
     eprintln!("Initial peers: ");

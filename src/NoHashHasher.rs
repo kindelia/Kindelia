@@ -75,6 +75,7 @@ pub type IntSet<T> = std::collections::HashSet<T, BuildNoHashHasher<T>>;
 /// assert_eq!(Some(&'a'), m.get(&0));
 /// assert_eq!(Some(&'b'), m.get(&1));
 /// ```
+#[allow(dead_code)]
 pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;
 
 /// For an enabled type `T`, a `NoHashHasher<T>` implements `std::hash::Hasher` and
@@ -255,7 +256,7 @@ impl<T: IsEnabled> Hasher for NoHashHasher<T> {
             if self.idx >= 8 {
                 break;
             }
-            self.val = self.val ^ u64::from(*byte) << ((self.idx % 8) * 8);
+            self.val ^= u64::from(*byte) << ((self.idx % 8) * 8);
             self.idx += 1;
         }
     }

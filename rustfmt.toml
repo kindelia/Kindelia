@@ -1,4 +1,4 @@
-max_width = 100
+max_width = 80
 tab_spaces = 2
 
 use_field_init_shorthand = true
