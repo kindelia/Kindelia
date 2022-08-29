@@ -246,6 +246,7 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -964,6 +965,14 @@ impl From<U120> for Name {
   }
 }
 
+// needed for `clap` parsing
+impl FromStr for Name {
+  type Err = String;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+      s.try_into()
+  }
+}
+
 // U120
 // ====
 
@@ -1049,7 +1058,6 @@ impl TryFrom<u128> for Oper {
 // ====
 
 impl Term {
-
   pub fn num(numb: U120) -> Self {
     Term::Num { numb }
   }
@@ -1088,6 +1096,12 @@ impl Term {
     } else {
       Err(format!("Direct calling function with too long name: `{}`.", name))
     }
+  }
+}
+
+impl fmt::Display for Term {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "{}", view_term(self))
   }
 }
 

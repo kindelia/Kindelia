@@ -160,7 +160,7 @@ pub enum GetKind {
   /// Get a function by name.
   Fn {
     /// The name of the function to get.
-    name: String,
+    name: Name,
     /// The stat of the function to get.
     #[clap(subcommand)]
     stat: GetFnKind,
@@ -168,7 +168,7 @@ pub enum GetKind {
   /// Get a namespace by name.
   Ns {
     /// The name of the namespace to get.
-    name: String,
+    name: String, // ASK: use Name here too?
     /// The stat of the namespace to get.
     #[clap(subcommand)]
     stat: GetNsKind,
@@ -181,7 +181,7 @@ pub enum GetKind {
   /// Get a constructor by name.
   Ct {
     /// The name of the constructor to get.
-    name: String,
+    name: Name,
     /// The stat of the constructor to get.
     #[clap(subcommand)]
     stat: GetCtKind,
@@ -342,8 +342,31 @@ pub fn run_cli() -> Result<(), String> {
 
       Ok(())
     }
-    CLICommand::Get { kind } => get_info(kind),
-    CLICommand::Completion { shell: _ } => todo!(),
+    CLICommand::Completion { shell } => todo!(),
+    CLICommand::Get { kind } => {
+      let client =
+        api_client::ApiClient::new("http://localhost:8000", None).map_err(|e| e.to_string())?;
+      match kind {
+        GetKind::Fn { name, stat } => match stat {
+          GetFnKind::Code => todo!(),
+          GetFnKind::State => {
+            let state = run_async_blocking(client.get_function_state(name))?;
+            println!("{}", state);
+            Ok(())
+          }
+          GetFnKind::Slots => todo!(),
+        },
+        GetKind::Ns { name, stat } => todo!(),
+        GetKind::Bk { hash } => todo!(),
+        GetKind::Ct { name, stat } => todo!(),
+        GetKind::Tick => todo!(),
+        GetKind::Mana => todo!(),
+        GetKind::Space => todo!(),
+        GetKind::FnCount => todo!(),
+        GetKind::NsCount => todo!(),
+        GetKind::CtCount => todo!(),
+      }
+    }
   }
 }
 
@@ -367,8 +390,6 @@ pub fn get_info(kind: GetKind) -> Result<(), String> {
     GetKind::Fn { name, stat } => match stat {
       GetFnKind::Code => todo!(),
       GetFnKind::State => {
-        // TODO move `Name` parsing / error to clap
-        let name: Name = Name::try_from(&name as &str)?;
         let state = run_async_blocking(client.get_function_state(name));
         // TODO: Display trait on `Term`
         println!("{:?}", state);
@@ -401,8 +422,13 @@ pub fn serialize(file: &PathBuf) {
 }
 
 pub fn deserialize(content: &str) {
-  let statement = get_statement(content).expect("invalid hex string");
-  println!("{}", view_statement(&statement));
+  let statements = get_statements(content);
+  for statement in statements {
+    match statement {
+      None => println!("Could not deserialize into a statement"),
+      Some(statement) => println!("{}", view_statement(&statement)),
+    }
+  }
 }
 
 pub fn sign(content: &str, skey_file: &str) {
@@ -533,8 +559,7 @@ impl<'a> ConfigFileOptions<'a> {
 
 #[allow(dead_code)]
 fn get_statements(txt: &str) -> Vec<Option<Statement>> {
-  // FIXME: should split on all whitespace
-  txt.split('\n').map(get_statement).collect()
+  txt.split(|c: char| c.is_whitespace()).map(get_statement).collect()
 }
 
 fn get_statement(hex: &str) -> Option<Statement> {
