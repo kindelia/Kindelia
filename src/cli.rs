@@ -422,8 +422,13 @@ pub fn serialize(file: &PathBuf) {
 }
 
 pub fn deserialize(content: &str) {
-  let statement = get_statement(content).expect("invalid hex string");
-  println!("{}", view_statement(&statement));
+  let statements = get_statements(content);
+  for statement in statements {
+    match statement {
+      None => println!("Could not deserialize into a statement"),
+      Some(statement) => println!("{}", view_statement(&statement)),
+    }
+  }
 }
 
 pub fn sign(content: &str, skey_file: &str) {
@@ -554,8 +559,7 @@ impl<'a> ConfigFileOptions<'a> {
 
 #[allow(dead_code)]
 fn get_statements(txt: &str) -> Vec<Option<Statement>> {
-  // FIXME: should split on all whitespace
-  txt.split('\n').map(get_statement).collect()
+  txt.split(|c: char| c.is_whitespace()).map(get_statement).collect()
 }
 
 fn get_statement(hex: &str) -> Option<Statement> {
