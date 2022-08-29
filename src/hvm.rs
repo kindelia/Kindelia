@@ -1040,6 +1040,52 @@ impl TryFrom<u128> for Oper {
   }
 }
 
+// Term
+// ====
+
+impl Term {
+
+  pub fn num(numb: U120) -> Self {
+    Term::Num { numb }
+  }
+
+  pub fn var(name: Name) -> Self {
+    Term::Var { name }
+  }
+
+  pub fn lam(name: Name, body: Box<Term>) -> Self {
+    Term::Lam { name, body }
+  }
+
+  pub fn dup(nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term>) -> Self {
+    Term::Dup { nam0, nam1, expr, body }
+  }
+
+  pub fn op2(oper: Oper, val0: Box<Term>, val1: Box<Term>) -> Self {
+    Term::Op2 { oper, val0, val1 }
+  }
+
+  pub fn app(func: Box<Term>, argm: Box<Term>) -> Self {
+    Term::App { func, argm }
+  }
+
+  pub fn fun(name: Name, args: Vec<Term>) -> Result<Self, String> {
+    if name.is_small() {
+      Ok(Term::Fun { name, args })
+    } else {
+      Err(format!("Direct calling function with too long name: `{}`.", name))
+    }
+  }
+
+  pub fn ctr(name: Name, args: Vec<Term>) -> Result<Self, String> {
+    if name.is_small() {
+      Ok(Term::Ctr { name, args })
+    } else {
+      Err(format!("Direct calling function with too long name: `{}`.", name))
+    }
+  }
+}
+
 // Parser
 // ======
 
@@ -4130,11 +4176,11 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
             VAR => {
               let name = &format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
               let name: Name = (name as &str).try_into().unwrap(); 
-              output.push(Term::Var { name });
+              output.push(Term::var(name));
             }
             NUM => {
               let numb = get_num(term);
-              output.push(Term::Num { numb });
+              output.push(Term::num(numb));
             }
             OP2 => {
               stack.push(StackItem::Resolver(term));
@@ -4171,7 +4217,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
           let val0 = output.pop().unwrap();
           let val1 = output.pop().unwrap();
           let args = vec![val0, val1];
-          return Term::Ctr { name, args };
+          return Term::ctr(name, args).unwrap();
         }
         StackItem::Resolver(term) => {
           match get_tag(term) {
@@ -4187,28 +4233,28 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
                 args.push(output.pop().unwrap());
               }
               if get_tag(term) == CTR {
-                output.push(Term::Ctr { name, args });
+                output.push(Term::ctr(name, args).unwrap());
               } else {
-                output.push(Term::Fun { name, args });
+                output.push(Term::fun(name, args).unwrap());
               }
             },
             LAM => {
               let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
               let name = Name(name_to_u128_unsafe(&name));
               let body = Box::new(output.pop().unwrap());
-              output.push(Term::Lam { name, body });
+              output.push(Term::lam(name, body));
             }
             APP => {
               let argm = Box::new(output.pop().unwrap());
               let func = Box::new(output.pop().unwrap());
-              output.push(Term::App { func , argm });
+              output.push(Term::app(func, argm));
             }
             OP2 => {
               let oper = get_ext(term);
               let oper = oper.try_into().unwrap();
               let val1 = Box::new(output.pop().unwrap());
               let val0 = Box::new(output.pop().unwrap());
-              output.push(Term::Op2 { oper, val0, val1 })
+              output.push(Term::op2(oper, val0, val1))
             }
             _ => panic!("Term not valid in readback"),
           }
@@ -4216,7 +4262,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
       }
     }
     let name = Name::try_from("None").unwrap(); // FIXME: "None" ?
-    output.pop().unwrap_or(Term::Ctr { name, args: [].to_vec() })
+    output.pop().unwrap_or_else(|| Term::ctr(name, [].to_vec()).unwrap())
   }
 
   let mut names: HashMap<Ptr, String> = HashMap::new();
@@ -4480,7 +4526,8 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let code         = tail(code);
       let (code, name) = read_name(code)?;
       let (code, body) = read_term(code)?;
-      return Ok((code, Term::Lam { name, body: Box::new(body) }));
+      let term = Term::lam(name, Box::new(body));
+      return Ok((code, term));
     },
     '(' => {
       let code = skip(tail(code));
@@ -4489,45 +4536,44 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, val0) = read_term(code)?;
         let (code, val1) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
-        return Ok((code, Term::Op2 { oper: oper, val0: Box::new(val0), val1: Box::new(val1) }));
+        let term = Term::op2(oper, Box::new(val0), Box::new(val1));
+        return Ok((code, term));
       } else if head(code) == '!' {
         let code = tail(code);
         let (code, func) = read_term(code)?;
         let (code, argm) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
-        return Ok((code, Term::App { func: Box::new(func), argm: Box::new(argm) }));
+        let term = Term::app(Box::new(func), Box::new(argm));
+        return Ok((code, term));
       } else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
-        // checking function name size _on direct calling_
-        if !name.is_small() {
-          return Err(ParseErr::new(code, format!("Direct calling function with too long name: `{}`.", name)))
-        }
-        return Ok((code, Term::Fun { name, args }));
+        let term = Term::fun(name, args).map_err(|erro| ParseErr::new(code, erro))?;
+        return Ok((code, term));
       } else {
         let (code, func) = read_term(code)?;
         let (code, argm) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
-        return Ok((code, Term::App { func: Box::new(func), argm: Box::new(argm) }));
+        let term = Term::app(Box::new(func), Box::new(argm));
+        return Ok((code, term));
       }
     },
     '{' => {
       let code = tail(code);
       let (code, name) = read_name(code)?;
-      if !name.is_small() {
-        return Err(ParseErr::new(code, format!("Direct calling constructor with too long name: `{}`.", name)))
-      }
       let (code, args) = read_until(code, '}', read_term)?;
-      return Ok((code, Term::Ctr { name, args }));
+      let term = Term::ctr(name, args).map_err(|erro| ParseErr::new(code, erro))?;
+      return Ok((code, term));
     },
     '[' => {
       let code = tail(code);
       let (code, vals) = read_until(code, ']', read_term)?;
       if vals.len() <= 12 { 
-        return Ok((code, Term::Ctr {
-          name: Name(name_to_u128_unsafe(&format!("T{}", vals.len()))),
-          args: vals
-        }));
+        let term = Term::ctr(
+          Name(name_to_u128_unsafe(&format!("T{}", vals.len()))),
+          vals
+        ).map_err(|erro| ParseErr::new(code, erro))?;
+        return Ok((code, term));
       } else {
         return Err(ParseErr { code: code.to_string(), erro: "Tuple too long".to_string() });
       }
@@ -4535,7 +4581,8 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     '#' => {
       let code = tail(code);
       let (code, numb) = read_numb(code)?;
-      return Ok((code, Term::Num { numb }));
+      let term = Term::num(numb);
+      return Ok((code, term));
     },
     '\'' => {
       let code = tail(code);
@@ -4543,7 +4590,8 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let (code, unit) = read_char(code, '\'')?;
       let numb = *name;
       let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
-      return Ok((code, Term::Num { numb }));
+      let term = Term::num(numb);
+      return Ok((code, term));
     },
     _ => {
       if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
@@ -4554,7 +4602,8 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, expr) = read_term(code)?;
         let (code, unit) = read_char(code, ';')?;
         let (code, body) = read_term(code)?;
-        return Ok((code, Term::Dup { nam0, nam1, expr: Box::new(expr), body: Box::new(body) }));
+        let term = Term::dup(nam0, nam1, Box::new(expr), Box::new(body));
+        return Ok((code, term));
       // let x = y; z
       // ------------
       // (@x z y)
@@ -4565,10 +4614,9 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let (code, expr) = read_term(code)?;
         let (code, unit) = read_char(code, ';')?;
         let (code, body) = read_term(code)?;
-        return Ok((code, Term::App {
-          func: Box::new(Term::Lam { name, body: Box::new(body) }),
-          argm: Box::new(expr),
-        }));
+        let lam = Term::lam(name, Box::new(body));
+        let app = Term::app(Box::new(lam), Box::new(expr));
+        return Ok((code, app));
       // ask x = y; z
       // ------------
       // (y @x z)
@@ -4578,24 +4626,23 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
           let (code, expr) = read_term(code)?;
           let (code, unit) = read_char(code, ';')?;
           let (code, body) = read_term(code)?;
-          return Ok((code, Term::App {
-            func: Box::new(expr),
-            argm: Box::new(Term::Lam { name: Name::NONE, body: Box::new(body) }),
-          }));
+          let argm = Term::lam(Name::NONE, Box::new(body));
+          let term = Term::app(Box::new(expr), Box::new(argm));
+          return Ok((code, term));
         } else {
           let (code, name) = read_name(code)?;
           let (code, unit) = read_char(code, '=')?;
           let (code, expr) = read_term(code)?;
           let (code, unit) = read_char(code, ';')?;
           let (code, body) = read_term(code)?;
-          return Ok((code, Term::App {
-            func: Box::new(expr),
-            argm: Box::new(Term::Lam { name, body: Box::new(body) }),
-          }));
+          let argm = Term::lam(name, Box::new(body));
+          let term = Term::app(Box::new(expr), Box::new(argm));
+          return Ok((code, term));
         }
       } else {
         let (code, name) = read_name(code)?;
-        return Ok((code, Term::Var { name }));
+        let term = Term::var(name);
+        return Ok((code, term));
       }
     }
   }
@@ -4698,7 +4745,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         let (code, unit) = read_char(code, '}')?;
         (code, init)
       } else {
-        (code, Term::Num { numb: U120::ZERO })
+        (code, Term::num(U120::ZERO))
       };
       let (code, sign) = read_sign(code)?;
       let func = Func { rules: ruls };
