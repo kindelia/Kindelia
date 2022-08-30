@@ -1,14 +1,5 @@
-// run {
-//   (Done #21267647932558653966460912964485513216)
-// }
+run {
+  (Done #21267647932558653966460912964485513216)
+}
 
 // should fail
-
-fun (Nomemuitograndemesmo) {
-  (Nomemuitograndemesmo #2) = #4
-  (Nomemuitograndemesmo #3) = #6
-}
-
-run {
-  (Done (Test #2))
-}
