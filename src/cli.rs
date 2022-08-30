@@ -418,26 +418,38 @@ pub async fn get_info(kind: GetKind, json: bool) -> Result<(), String> {
     GetKind::Block { hash: _ } => todo!(),
     GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Tick => {
-      let stats =
-        client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
       println!("{}", stats.tick);
       Ok(())
     }
     GetKind::Mana => {
-      let stats =
-        client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
       println!("{}", stats.mana);
       Ok(())
     }
     GetKind::Size => {
-      let stats =
-        client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
       println!("{}", stats.size);
       Ok(())
     }
-    GetKind::FnCount => todo!(),
-    GetKind::NsCount => todo!(),
-    GetKind::CtCount => todo!(),
+    GetKind::FnCount => {
+      let stats_count =
+        client.count_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats_count.fn_count);
+      Ok(())
+    }
+    GetKind::NsCount => {
+      let stats_count =
+        client.count_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats_count.ns_count);
+      Ok(())
+    }
+    GetKind::CtCount => {
+      let stats_count =
+        client.count_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats_count.ct_count);
+      Ok(())
+    }
   }
 }
 

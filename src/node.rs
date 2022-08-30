@@ -933,6 +933,26 @@ impl Node {
         };
         answer.send(stats).unwrap();
       }
+      NodeRequest::GetCountStats { tx: answer } => {
+        let mut fn_count = 0;
+        self.runtime.reduce_with(&mut fn_count, |acc, heap| {
+          *acc += heap.get_fn_count();
+        });
+        let mut ns_count = 0; 
+        self.runtime.reduce_with(&mut ns_count, |acc, heap| {
+          *acc += heap.get_ns_count();
+        });
+        let mut ct_count = 0;
+        self.runtime.reduce_with(&mut ct_count, |acc, heap| {
+          *acc += heap.get_ct_count();
+        });
+        let count_stats = api::CountStats { 
+          fn_count,
+          ns_count,
+          ct_count
+        };
+        answer.send(count_stats).unwrap();
+      }
       NodeRequest::GetBlocks { range, tx: answer } => {
         let (start, end) = range;
         debug_assert!(start <= end);
