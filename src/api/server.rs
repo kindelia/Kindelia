@@ -1,3 +1,4 @@
+// TODO: spam control system
 
 use std::sync::mpsc::SyncSender;
 
@@ -253,6 +254,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
       }
     }
   });
+
+  // TODO: post code endpoint
 
   let interact_router = interact_test.or(interact_send).or(interact_run);
 

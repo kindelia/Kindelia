@@ -441,6 +441,7 @@ pub struct Heap {
   pub size: i128,  // total used memory (in 64-bit words)
   pub mcap: u128,  // memory capacity (in 64-bit words)
   pub next: u128,  // memory index that *may* be empty
+  // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
 }
 
 #[derive(Debug, Clone)]
@@ -617,10 +618,11 @@ pub const GTE : u128 = 0xD;
 pub const GTN : u128 = 0xE;
 pub const NEQ : u128 = 0xF;
 
-pub const VAR_NONE  : u128 = 0x3FFFF;
+pub const VAR_NONE  : u128 = 0x3FFFF; // ?? '___'
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
+// TODO: r -> U120
 // (IO r:Type) : Type
 //   (DONE expr)           : (IO r)
 //   (TAKE           then) : (IO r)
@@ -642,6 +644,7 @@ const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
 const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
 const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
 const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
+// TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
 pub const BLOCK_MANA_LIMIT : u128 = 4_000_000;
@@ -1096,12 +1099,6 @@ impl Term {
     } else {
       Err(format!("Direct calling function with too long name: `{}`.", name))
     }
-  }
-}
-
-impl fmt::Display for Term {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "{}", view_term(self))
   }
 }
 
@@ -1842,6 +1839,7 @@ impl Runtime {
       CTR => {
         match get_ext(term) {
           IO_DONE => {
+            // TODO: should allow only Num
             let retr = ask_arg(self, term, 0);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
@@ -5000,6 +4998,18 @@ pub fn view_statements(statements: &[Statement]) -> String {
     result.push_str("\n");
   }
   return result;
+}
+
+impl fmt::Display for Term {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "{}", view_term(self))
+  }
+}
+
+impl fmt::Display for Statement {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "{}", view_statement(self))
+  }
 }
 
 // Hashing

@@ -1,10 +1,5 @@
-#![warn(dead_code)]
-#![warn(unused_imports)]
-#![warn(non_snake_case)]
-#![warn(unused_variables)]
-#![warn(clippy::style)]
-
-// TODO: `clean` CLI command
+// TODO: `node clean` CLI command
+// TODO: refactor `space` counters to reflect nodes / cells instead of bits
 
 use core::panic;
 use std::path::Path;
@@ -26,6 +21,7 @@ use crate::util::{bitvec_to_bytes, bytes_to_bitvec};
 use crate::ENTRY_PEERS;
 
 /*
+
 == Client ==
 
 kindelia test file.kdl
@@ -48,27 +44,32 @@ kindelia completion zsh >> .zshrc
 
 == Remote ==
 
-kindelia get fn Count code
-kindelia get fn Count state
-kindelia get fn Count slots
+kindelia get fun Count code
+kindelia get fun Count state
+kindelia get fun Count slots
 
-kindelia get ns Foo.Bar owner
-kindelia get ns Foo.Bar list
+kindelia get reg Foo.Bar owner
+kindelia get reg Foo.Bar list
 
-kindelia get bk 0xc7da4b76b4d7a64b7 | kindelia deserialize
-kindelia get bk 751
-kindelia get bk 2756
+kindelia get block 0xc7da4b76b4d7a64b7 | kindelia deserialize
+kindelia get block 751
+kindelia get block 2756
 
-kindelia get ct Pair code
-kindelia get ct Pair arity
+kindelia get ctr Pair code
+kindelia get ctr Pair arity
 
-kindelia get tick
-kindelia get mana
-kindelia get space
+kindelia get run <BLOCK_IDX> <STM_IDX>
 
-kindelia get fn-count
-kindelia get ns-count
-kindelia get ct-count
+TODO aggregate stats in one sub-command as in:
+
+kindelia get stats
+
+kindelia get stats tick
+kindelia get stats mana
+kindelia get stats space
+kindelia get stats ctr-count
+kindelia get stats fun-count
+kindelia get stats reg-count
 
 kindelia run  [--host ""] code.hex.txt
 kindelia post [--host ""] code.hex.txt
@@ -80,8 +81,8 @@ kindelia node clean [-f]       // asks confirmation
 
 */
 
-// Clap Struct
-// ===========
+// Clap CLI definitions
+// ====================
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -94,7 +95,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum CLICommand {
-  /// Test a file.
+  /// Test a Kindelia code file (.kdl), running locally.
   Test {
     /// The path to the file to test.
     file: PathBuf,
@@ -117,7 +118,12 @@ pub enum CLICommand {
     #[clap(short, long)]
     skey: String,
   },
-  /// Post a code file.
+  /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
+  Run {
+    /// Input file
+    file: PathBuf,
+  },
+  /// Post a Kindelia code file.
   Post {
     /// The path to the file to post.
     file: Option<PathBuf>,
@@ -125,23 +131,24 @@ pub enum CLICommand {
     #[clap(short, long)]
     host: Option<String>,
   },
-  /// Auto-complete for a shell.
-  Completion {
-    /// The shell to generate completion for.
-    shell: String,
+  /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
+  PostUdp {
+    /// The path to the file to post.
+    file: Option<PathBuf>,
+    /// Node address to post to.
+    #[clap(short, long)]
+    host: Option<String>,
   },
   /// Get remote information.
   Get {
     /// The kind of information to get.
     #[clap(subcommand)]
     kind: GetKind,
+    #[clap(short, long)]
+    /// Outputs JSON machine readable output.
+    json: bool,
   },
-  /// Runs a Kindelia (.kdl) file
-  Run {
-    /// Input file
-    file: PathBuf,
-  },
-  /// Starts a Kindelia node
+  /// Start a Kindelia node.
   Start {
     /// Path to store the node's data in
     #[clap(short, long)]
@@ -153,12 +160,17 @@ pub enum CLICommand {
     #[clap(long)]
     mine: bool,
   },
+  /// Generate auto-completion for a shell.
+  Completion {
+    /// The shell to generate completion for.
+    shell: String,
+  },
 }
 
 #[derive(Subcommand)]
 pub enum GetKind {
   /// Get a function by name.
-  Fn {
+  Fun {
     /// The name of the function to get.
     name: Name,
     /// The stat of the function to get.
@@ -166,7 +178,7 @@ pub enum GetKind {
     stat: GetFnKind,
   },
   /// Get a namespace by name.
-  Ns {
+  Reg {
     /// The name of the namespace to get.
     name: String, // ASK: use Name here too?
     /// The stat of the namespace to get.
@@ -174,12 +186,12 @@ pub enum GetKind {
     stat: GetNsKind,
   },
   /// Get a block by hash.
-  Bk {
+  Block {
     /// The hash of the block to get.
     hash: String,
   },
   /// Get a constructor by name.
-  Ct {
+  Ctr {
     /// The name of the constructor to get.
     name: Name,
     /// The stat of the constructor to get.
@@ -243,14 +255,14 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
   /// 4. Default value
   fn get_value_config(self) -> T
   where
-    T: ConvertFrom<String> + serde::Deserialize<'a>,
+    T: ArgumentFrom<String> + serde::Deserialize<'a>,
   {
     if let Some(value) = self.value {
       // read from var
       value
     } else if let Some(Ok(env_value)) = self.env.map(std::env::var) {
       // if env var is set and valid, read from env var
-      T::convert(env_value)
+      T::arg_from(env_value)
     } else if let ConfigFileOptions {
       toml: Some(toml_value),
       prop: Some(prop),
@@ -265,8 +277,10 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
   }
 }
 
-// Parse function
-// ==============
+// CLI main function
+// =================
+
+// TODO: refactor into main?
 
 /// Parse Cli arguments and do an action
 pub fn run_cli() -> Result<(), String> {
@@ -284,6 +298,10 @@ pub fn run_cli() -> Result<(), String> {
   let config = read_toml(&config_path);
 
   match parsed.command {
+    CLICommand::Test { file } => {
+      run_file(&file);
+      Ok(())
+    }
     CLICommand::Serialize { file } => {
       serialize(&file);
       Ok(())
@@ -298,20 +316,24 @@ pub fn run_cli() -> Result<(), String> {
       sign(&content, &skey);
       Ok(())
     }
-    CLICommand::Post { file, host } => {
+    CLICommand::Run { file: _ } => {
+      todo!()
+    }
+    CLICommand::Post { file: _, host: _ } => {
+      todo!()
+    }
+    CLICommand::PostUdp { file, host } => {
       let content = get_value_stdin::<String>(file);
-      post(&content, host);
+      post_udp(&content, host);
       Ok(())
     }
-    CLICommand::Test { file } => {
-      run_file(&file);
-      Ok(())
-    }
-    CLICommand::Run { file } => {
-      run_file(&file);
-      Ok(())
+    CLICommand::Get { kind, json } => {
+      let prom = get_info(kind, json);
+      run_async_blocking(prom)
     }
     CLICommand::Start { kindelia_path, init_peers, mine } => {
+      // TODO: refactor config resolution out of command handling (how?)
+
       // get arguments from cli, env or config
       let path = ConfigValueOption {
         value: kindelia_path,
@@ -325,12 +347,12 @@ pub fn run_cli() -> Result<(), String> {
         value: init_peers,
         env: Some("KINDELIA_INIT_PEERS"),
         config: ConfigFileOptions::new(&config, "init_peers"),
-        default: std::vec::Vec::new,
+        default: Vec::new,
       }
       .get_value_config();
 
       let mine = ConfigValueOption {
-        value: Some(mine), // TODO: fix
+        value: Some(mine), // TODO: fix boolean resolution
         env: Some("KINDELIA_MINE"),
         config: ConfigFileOptions::new(&config, "mine"),
         default: || false,
@@ -342,64 +364,60 @@ pub fn run_cli() -> Result<(), String> {
 
       Ok(())
     }
-    CLICommand::Completion { shell } => todo!(),
-    CLICommand::Get { kind } => {
-      let client =
-        api_client::ApiClient::new("http://localhost:8000", None).map_err(|e| e.to_string())?;
-      match kind {
-        GetKind::Fn { name, stat } => match stat {
-          GetFnKind::Code => todo!(),
-          GetFnKind::State => {
-            let state = run_async_blocking(client.get_function_state(name))?;
-            println!("{}", state);
-            Ok(())
-          }
-          GetFnKind::Slots => todo!(),
-        },
-        GetKind::Ns { name, stat } => todo!(),
-        GetKind::Bk { hash } => todo!(),
-        GetKind::Ct { name, stat } => todo!(),
-        GetKind::Tick => todo!(),
-        GetKind::Mana => todo!(),
-        GetKind::Space => todo!(),
-        GetKind::FnCount => todo!(),
-        GetKind::NsCount => todo!(),
-        GetKind::CtCount => todo!(),
-      }
-    }
+    CLICommand::Completion { shell: _ } => todo!(),
   }
 }
 
-// TODO: ew
-fn run_async_blocking<T, P>(prom: P) -> Result<T, String>
+fn run_async_blocking<T, E: ToString, P>(prom: P) -> Result<T, E>
 where
-  P: Future<Output = Result<T, reqwest::Error>>,
+  P: Future<Output = Result<T, E>>,
 {
   let runtime = tokio::runtime::Runtime::new().unwrap();
-  let res = runtime.block_on(prom).map_err(|err| err.to_string())?;
-  Ok(res)
+  runtime.block_on(prom)
 }
 
 // Main Actions
 // ============
 
-pub fn get_info(kind: GetKind) -> Result<(), String> {
+pub async fn get_info(kind: GetKind, json: bool) -> Result<(), String> {
+  // TODO: API URL from clap/config (e.g. --api on top level + [api.url])
   let client = api_client::ApiClient::new("http://localhost:8000", None)
     .map_err(|e| e.to_string())?;
   match kind {
-    GetKind::Fn { name, stat } => match stat {
-      GetFnKind::Code => todo!(),
+    GetKind::Fun { name, stat } => match stat {
+      GetFnKind::Code => {
+        let func_info =
+          client.get_function(name).await.map_err(|e| e.to_string())?;
+        if json {
+          println!("{}", serde_json::to_string(&func_info).unwrap());
+        } else {
+          let func = func_info.func;
+          let statement = hvm::Statement::Fun {
+            name,
+            args: vec![Name::NONE],
+            func,
+            init: hvm::Term::var(Name::NONE),
+            sign: None,
+          };
+          println!("{}", statement);
+        }
+        Ok(())
+      }
       GetFnKind::State => {
-        let state = run_async_blocking(client.get_function_state(name));
-        // TODO: Display trait on `Term`
-        println!("{:?}", state);
+        let state =
+          client.get_function_state(name).await.map_err(|e| e.to_string())?;
+        if json {
+          println!("{}", serde_json::to_string_pretty(&state).unwrap());
+        } else {
+          println!("{}", state);
+        }
         Ok(())
       }
       GetFnKind::Slots => todo!(),
     },
-    GetKind::Ns { name: _, stat: _ } => todo!(),
-    GetKind::Bk { hash: _ } => todo!(),
-    GetKind::Ct { name: _, stat: _ } => todo!(),
+    GetKind::Reg { name: _, stat: _ } => todo!(),
+    GetKind::Block { hash: _ } => todo!(),
+    GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Tick => todo!(),
     GetKind::Mana => todo!(),
     GetKind::Space => todo!(),
@@ -448,7 +466,7 @@ pub fn sign(content: &str, skey_file: &str) {
   }
 }
 
-pub fn post(content: &str, host: Option<String>) {
+pub fn post_udp(content: &str, host: Option<String>) {
   if let Some(statement) = get_statement(content) {
     let tx =
       Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
@@ -568,45 +586,20 @@ fn get_statement(hex: &str) -> Option<Statement> {
   ))
 }
 
-fn get_value_stdin<T: ConvertFrom<String>>(file: Option<PathBuf>) -> T {
+fn get_value_stdin<T: ArgumentFrom<String>>(file: Option<PathBuf>) -> T {
   if let Some(file) = file {
     // read from file
-    T::convert(std::fs::read_to_string(file).unwrap())
+    T::arg_from(std::fs::read_to_string(file).unwrap()) // TODO: handle panic
   } else {
     // read from stdin
     let mut input = String::new();
     if std::io::stdin().read_line(&mut input).is_ok() {
-      T::convert(input.trim().to_string())
+      T::arg_from(input.trim().to_string())
     } else {
-      panic!("Could not read file path or stdin");
+      panic!("Could not read file path or stdin"); // TODO: handle panic
     }
   }
 }
-
-// fn get_value_config<'a, T, F>(
-//   value: Option<T>,
-//   env_options: Option<&str>,
-//   config_options: ConfigOptions<'a>,
-//   default: F,
-// ) -> T
-// where
-//   T: ConvertFrom<String> + serde::Deserialize<'a>,
-//   F: Fn() -> T,
-// {
-//   if let Some(value) = value {
-//     // read from var
-//     value
-//   } else if let Some(Ok(env_value)) = env_options.map(|e| std::env::var(e)) {
-//     // if env var is set and valid, read from env var
-//     T::convert(env_value)
-//   } else if let ConfigOptions(Some(toml_value), Some(prop)) = config_options {
-//     // if config file is set and valid, read from config file
-//     // doing this way because of issue #469 toml-rs
-//     toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
-//   } else {
-//     default()
-//   }
-// }
 
 fn read_toml(file: &PathBuf) -> Option<toml::Value> {
   std::fs::read_to_string(file)
@@ -621,36 +614,38 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
 /// It is equal to standard From trait, but
 /// it has the From<String> for Vec<String> implementation.
 /// As like From, the conversion must be perfect.
-trait ConvertFrom<T> {
-  fn convert(t: T) -> Self;
+/// 
+/// TODO: should be like `TryFrom`, not `From`. see below.
+trait ArgumentFrom<T> {
+  fn arg_from(t: T) -> Self;
 }
 
-impl ConvertFrom<String> for String {
-  fn convert(t: String) -> Self {
+impl ArgumentFrom<String> for String {
+  fn arg_from(t: String) -> Self {
     t
   }
 }
 
-impl ConvertFrom<String> for Vec<String> {
-  fn convert(t: String) -> Self {
+impl ArgumentFrom<String> for Vec<String> {
+  fn arg_from(t: String) -> Self {
     t.split(',').map(|x| x.to_string()).collect()
   }
 }
 
-impl ConvertFrom<String> for bool {
-  fn convert(t: String) -> Self {
+impl ArgumentFrom<String> for bool {
+  fn arg_from(t: String) -> Self {
     if t == "true" {
       true
     } else if t == "false" {
       false
     } else {
-      panic!("Invalid boolean value: {}", t);
+      panic!("Invalid boolean value: {}", t); // TODO: should never panic on invalid external input
     }
   }
 }
 
-impl ConvertFrom<String> for PathBuf {
-  fn convert(t: String) -> Self {
-    PathBuf::from_str(&t).expect("Invalid path")
+impl ArgumentFrom<String> for PathBuf {
+  fn arg_from(t: String) -> Self {
+    PathBuf::from_str(&t).expect("Invalid path") // TODO: idem
   }
 }

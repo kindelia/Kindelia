@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::hvm::Term;
 
@@ -52,15 +52,22 @@ impl ApiClient {
     self.base_request(Method::GET, path)
   }
 
-  pub async fn req<T>(
+  pub async fn req<T, B>(
     &self,
     method: Method,
     path: &str,
+    body: Option<B>,
   ) -> Result<T, reqwest::Error>
   where
     T: DeserializeOwned,
+    B: Serialize,
   {
     let req = self.base_request(method, path);
+    let req = if let Some(body) = body {
+      req.json(&body)
+    } else {
+      req
+    };
     let res = req.send().await?;
     let value = res.json().await?;
     Ok(value)
@@ -70,10 +77,10 @@ impl ApiClient {
   where
     T: DeserializeOwned,
   {
-    self.req(Method::GET, path).await
+    self.req::<T, String>(Method::GET, path, None).await
   }
 
-  pub async fn stats(&self) -> ApiResult<Stats> {
+  pub async fn get_stats(&self) -> ApiResult<Stats> {
     self.get::<Stats>("/stats").await
   }
 
@@ -97,5 +104,11 @@ impl ApiClient {
     self.get::<Term>(&format!("/functions/{}/state", name)).await
   }
 
-  // TODO: interact
+  pub async fn run_code(&self, code: &str) -> ApiResult<String> {
+    self.req(Method::POST, "/run", Some(code)).await
+  }
+
+  pub async fn post_code(&self, code: &str) -> ApiResult<String> {
+    self.req(Method::POST, "/post", Some(code)).await
+  }
 }
