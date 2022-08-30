@@ -4684,24 +4684,34 @@ pub fn read_oper(in_code: &str) -> (&str, Option<Oper>) {
   }
 }
 
-pub fn read_rule(code: &str) -> ParseResult<Rule> {
-  let (code, lhs) = read_lhs(code)?;
-  let (code, ())  = read_char(code, '=')?;
-  let (code, rhs) = read_term(code)?;
-  return Ok((code, Rule{lhs, rhs}));
+pub fn read_rules(func_name: Name, code: &str) -> ParseResult<Vec<Rule>> {
+  let mut rules = Vec::new();
+  let mut code = code;
+  while code.len() > 0 && head(skip(code)) != '}' {
+    let (new_code, lhs) = read_lhs(func_name, code)?;
+    let (new_code, ())  = read_char(new_code, '=')?;
+    let (new_code, rhs) = read_term(new_code)?;
+    code = new_code;
+    rules.push(Rule { lhs, rhs });
+  }
+  code = tail(skip(code));
+  return Ok((code, rules));
 }
 
-pub fn read_lhs<'a>(code: &'a str) -> ParseResult<'a, Vec<Term>> {
-  let (code, _) = read_char(code, '(')?;
+pub fn read_lhs(func_name: Name, code: &str) -> ParseResult<Vec<Term>> {
+  let (code, ()) = read_char(code, '(')?;
   let (code, name) = read_name(code)?;
+  if func_name != name {
+    return Err(ParseErr::new(code, format!("Function rule with different name in function {}", func_name)))
+  }
   let (code, args) = read_until(code, ')', read_term)?;
   Ok((code, args))
 }
 
-pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
-  let (code, rules) = read_until(code, '\0', read_rule)?;
-  return Ok((code, rules));
-}
+// pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
+//   let (code, rules) = read_until(code, '\0', read_rule)?;
+//   return Ok((code, rules));
+// }
 
 pub fn read_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
   let code = skip(code);
@@ -4731,7 +4741,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
       let (code, name) = read_name(code)?;
       let (code, args) = read_until(code, ')', read_name)?;
       let (code, unit) = read_char(code, '{')?;
-      let (code, ruls) = read_until(code, '}', read_rule)?;
+      let (code, ruls) = read_rules(name, code)?;
       let code = skip(code);
       let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);

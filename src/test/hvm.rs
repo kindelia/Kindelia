@@ -1,14 +1,16 @@
 use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
-    init_map, init_runtime, name_to_u128_unsafe, read_statements, readback_term, show_term,
-    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo, Term, U120,
+    init_map, init_runtime, name_to_u128_unsafe, read_statements,
+    readback_term, show_term, u128_to_name, view_statements, view_term, Name,
+    Rollback, Runtime, StatementInfo, Term, U120,
   },
   test::{
     strategies::{func, heap, name, op2, statement, term},
     util::{
-      advance, rollback, rollback_path, rollback_simple, run_term_and, run_term_from_code_and,
-      temp_dir, test_heap_checksum, view_rollback_ticks, RuntimeStateTest, TempDir,
+      advance, rollback, rollback_path, rollback_simple, run_term_and,
+      run_term_from_code_and, temp_dir, test_heap_checksum,
+      view_rollback_ticks, RuntimeStateTest, TempDir,
     },
   },
 };
@@ -23,10 +25,20 @@ use rstest_reuse::{apply, template};
 #[case(&["Count", "Store", "Sub", "Add"], PRE_COUNTER, COUNTER)]
 #[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK)]
 #[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER)]
-fn hvm_cases(#[case] fn_names: &[&str], #[case] pre_code: &str, #[case] code: &str) {}
+fn hvm_cases(
+  #[case] fn_names: &[&str],
+  #[case] pre_code: &str,
+  #[case] code: &str,
+) {
+}
 
 #[apply(hvm_cases)]
-pub fn simple_rollback(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: TempDir) {
+pub fn simple_rollback(
+  fn_names: &[&str],
+  pre_code: &str,
+  code: &str,
+  temp_dir: TempDir,
+) {
   assert!(rollback_simple(pre_code, code, fn_names, 1000, 1, &temp_dir.path));
 }
 
@@ -77,11 +89,22 @@ pub fn advanced_rollback_run_fail(
   temp_dir: TempDir,
 ) {
   let path = [2, 1, 2, 1, 2, 1];
-  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path, &temp_dir.path));
+  assert!(rollback_path(
+    PRE_COUNTER,
+    COUNTER,
+    &fn_names,
+    &path,
+    &temp_dir.path
+  ));
 }
 
 #[apply(hvm_cases)]
-pub fn stack_overflow(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: TempDir) {
+pub fn stack_overflow(
+  fn_names: &[&str],
+  pre_code: &str,
+  code: &str,
+  temp_dir: TempDir,
+) {
   // caused by compute_at function
   let mut rt = init_runtime(Some(&temp_dir.path));
   rt.run_statements_from_code(pre_code, true, true);
@@ -144,7 +167,11 @@ fn one_hundred_snapshots(temp_dir: TempDir) {
   let mut rt = init_runtime(Some(&temp_dir.path));
   for i in 0..100000 {
     rt.tick();
-    println!(" - tick: {}, - rollback: {}", rt.get_tick(), view_rollback_ticks(&rt));
+    println!(
+      " - tick: {}, - rollback: {}",
+      rt.get_tick(),
+      view_rollback_ticks(&rt)
+    );
   }
 }
 
@@ -191,18 +218,28 @@ fn dupped_state_test(temp_dir: TempDir) {
     expected_original_readback: &str,
     expected_other_readback: &str,
   ) {
-    let original_state = rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
+    let original_state =
+      rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
     let other_state = rt.read_disk(Name::try_from("Other").unwrap()).unwrap();
     println!();
     println!("original ptr: {}", original_state);
     println!("original: {}", show_term(&rt, original_state, None));
-    println!("original readback: {}", view_term(&readback_term(&rt, original_state)));
-    assert_eq!(expected_original_readback, view_term(&readback_term(&rt, original_state)));
+    println!(
+      "original readback: {}",
+      view_term(&readback_term(&rt, original_state))
+    );
+    assert_eq!(
+      expected_original_readback,
+      view_term(&readback_term(&rt, original_state))
+    );
     println!();
     println!("other ptr: {}", other_state);
     println!("other: {}", show_term(&rt, other_state, None));
     println!("other readback: {}", view_term(&readback_term(&rt, other_state)));
-    assert_eq!(expected_other_readback, view_term(&readback_term(&rt, other_state)));
+    assert_eq!(
+      expected_other_readback,
+      view_term(&readback_term(&rt, other_state))
+    );
     println!();
   }
 
@@ -240,7 +277,11 @@ fn dupped_state_test(temp_dir: TempDir) {
 #[case("dup a ~ = @x dup ~ b = x; b; a", "@x0 x0")]
 #[case("dup a ~ = dup b ~ = @x (+ x #2); b; a", "@x0 (+ x0 #2)")]
 #[case("dup a ~ = dup b ~ = @x (+ #2 x); b; a", "@x0 (+ #2 x0)")]
-fn readback(#[case] code: &str, #[case] expected_readback: &str, temp_dir: TempDir) {
+fn readback(
+  #[case] code: &str,
+  #[case] expected_readback: &str,
+  temp_dir: TempDir,
+) {
   // initialize runtime
   let mut rt = init_runtime(Some(&temp_dir.path));
   // declare used constructors
@@ -274,6 +315,7 @@ proptest! {
 
   #[test]
   fn parser(statements in vec(statement(), 0..10)) {
+    println!("{}\n=================", statements.iter().map(crate::hvm::view_statement).collect::<Vec<_>>().join("\n"));
     let str = view_statements(&statements);
     let (.., s1) = read_statements(&str).unwrap();
     assert_eq!(statements, s1);
