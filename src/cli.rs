@@ -390,9 +390,8 @@ pub fn get_info(kind: GetKind) -> Result<(), String> {
     GetKind::Fn { name, stat } => match stat {
       GetFnKind::Code => todo!(),
       GetFnKind::State => {
-        let state = run_async_blocking(client.get_function_state(name));
-        // TODO: Display trait on `Term`
-        println!("{:?}", state);
+        let state = run_async_blocking(client.get_function_state(name))?;
+        println!("{}", state);
         Ok(())
       }
       GetFnKind::Slots => todo!(),
