@@ -128,7 +128,7 @@ pub enum CLICommand {
     /// The path to the file to post.
     file: Option<PathBuf>,
     /// Node address to post to.
-    #[clap(short, long)]
+    #[clap(long)]
     host: Option<String>,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
@@ -136,7 +136,7 @@ pub enum CLICommand {
     /// The path to the file to post.
     file: Option<PathBuf>,
     /// Node address to post to.
-    #[clap(short, long)]
+    #[clap(long)]
     host: Option<String>,
   },
   /// Get remote information.
@@ -308,12 +308,12 @@ pub fn run_cli() -> Result<(), String> {
     }
     CLICommand::Deserialize { file } => {
       let content = get_value_stdin::<String>(file);
-      deserialize(&content);
+      deserialize(&content)?;
       Ok(())
     }
     CLICommand::Sign { file, skey } => {
       let content = get_value_stdin::<String>(file);
-      sign(&content, &skey);
+      sign(&content, &skey)?;
       Ok(())
     }
     CLICommand::Run { file: _ } => {
@@ -324,8 +324,7 @@ pub fn run_cli() -> Result<(), String> {
     }
     CLICommand::PostUdp { file, host } => {
       let content = get_value_stdin::<String>(file);
-      post_udp(&content, host);
-      Ok(())
+      post_udp(&content, host)
     }
     CLICommand::Get { kind, json } => {
       let prom = get_info(kind, json);
@@ -364,7 +363,7 @@ pub fn run_cli() -> Result<(), String> {
 
       Ok(())
     }
-    CLICommand::Completion { shell: _ } => todo!(),
+    CLICommand::Completion { .. } => todo!(),
   }
 }
 
@@ -418,9 +417,24 @@ pub async fn get_info(kind: GetKind, json: bool) -> Result<(), String> {
     GetKind::Reg { name: _, stat: _ } => todo!(),
     GetKind::Block { hash: _ } => todo!(),
     GetKind::Ctr { name: _, stat: _ } => todo!(),
-    GetKind::Tick => todo!(),
-    GetKind::Mana => todo!(),
-    GetKind::Space => todo!(),
+    GetKind::Tick => {
+      let stats =
+        client.get_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats.tick);
+      Ok(())
+    }
+    GetKind::Mana => {
+      let stats =
+        client.get_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats.mana);
+      Ok(())
+    }
+    GetKind::Space => {
+      let stats =
+        client.get_stats().await.map_err(|e| e.to_string())?;
+      println!("{}", stats.size);
+      Ok(())
+    }
     GetKind::FnCount => todo!(),
     GetKind::NsCount => todo!(),
     GetKind::CtCount => todo!(),
@@ -439,54 +453,50 @@ pub fn serialize(file: &PathBuf) {
   }
 }
 
-pub fn deserialize(content: &str) {
-  let statements = get_statements(content);
+pub fn deserialize(content: &str) -> Result<(), String> {
+  let statements = get_statements(content)?;
   for statement in statements {
-    match statement {
-      None => println!("Could not deserialize into a statement"),
-      Some(statement) => println!("{}", view_statement(&statement)),
-    }
+    println!("{}", view_statement(&statement))
   }
+  Ok(())
 }
 
-pub fn sign(content: &str, skey_file: &str) {
+pub fn sign(content: &str, skey_file: &str) -> Result<(), String> {
   if let Ok(skey) = std::fs::read_to_string(skey_file) {
-    if let Some(statement) = get_statement(content) {
-      let skey = hex::decode(&skey[0..64]).expect("hex string");
-      let user = crypto::Account::from_private_key(&skey);
-      let hash = hvm::hash_statement(&statement);
-      let sign = user.sign(&hash);
-      let stat = hvm::set_sign(&statement, sign);
-      println!("{}", hex::encode(serialized_statement(&stat).to_bytes()));
-    } else {
-      println!("Hex provided isn't a serialized statement.");
-    }
+    let statement = get_statement(content)?;
+    let skey = hex::decode(&skey[0..64]).expect("hex string");
+    let user = crypto::Account::from_private_key(&skey);
+    let hash = hvm::hash_statement(&statement);
+    let sign = user.sign(&hash);
+    let stat = hvm::set_sign(&statement, sign);
+    println!("{}", hex::encode(serialized_statement(&stat).to_bytes()));
+    Ok(())
   } else {
-    println!("Couldn't load term and secret key files.");
+    Err("Couldn't load term and secret key files.".into())
   }
 }
 
-pub fn post_udp(content: &str, host: Option<String>) {
-  if let Some(statement) = get_statement(content) {
+pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
+  let statements = get_statements(content)?;
+  for statement in statements {
     let tx =
       Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
     let ms = Message::PleaseMineThisTransaction { trans: tx };
     let ports =
       [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
     if let Some((mut socket, _)) = udp_init(&ports) {
-      let addrs = if let Some(host) = host {
-        vec![read_address(&host)]
+      let addrs = if let Some(ref host) = host {
+        vec![read_address(host)]
       } else {
         ENTRY_PEERS.iter().map(|x| read_address(x)).collect()
       };
       udp_send(&mut socket, addrs, &ms);
       println!("Published statement:\n\n{}", view_statement(&statement));
     } else {
-      panic!("Couldn't open UDP socket on ports: {:?}.", ports);
+      return Err(format!("Couldn't open UDP socket on ports: {:?}.", ports));
     }
-  } else {
-    println!("Hex provided isn't a serialized statement.");
   }
+  Ok(())
 }
 
 pub fn run_file(file: &Path) {
@@ -576,14 +586,15 @@ impl<'a> ConfigFileOptions<'a> {
 }
 
 #[allow(dead_code)]
-fn get_statements(txt: &str) -> Vec<Option<Statement>> {
-  txt.split(|c: char| c.is_whitespace()).map(get_statement).collect()
+fn get_statements(txt: &str) -> Result<Vec<Statement>, String> {
+  txt.trim().split(|c: char| c.is_whitespace()).map(get_statement).collect()
 }
 
-fn get_statement(hex: &str) -> Option<Statement> {
-  deserialized_statement(&bytes_to_bitvec(
-    &hex::decode(hex).expect("hex string"),
-  ))
+fn get_statement(hex: &str) -> Result<Statement, String> {
+  let bytes = hex::decode(hex)
+    .map_err(|_| format!("Error when trying to convert hexadecimal {}", hex))?;
+  deserialized_statement(&bytes_to_bitvec(&bytes))
+    .ok_or(format!("Error when trying to deserialize {}", hex))
 }
 
 fn get_value_stdin<T: ArgumentFrom<String>>(file: Option<PathBuf>) -> T {
@@ -614,7 +625,7 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
 /// It is equal to standard From trait, but
 /// it has the From<String> for Vec<String> implementation.
 /// As like From, the conversion must be perfect.
-/// 
+///
 /// TODO: should be like `TryFrom`, not `From`. see below.
 trait ArgumentFrom<T> {
   fn arg_from(t: T) -> Self;

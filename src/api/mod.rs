@@ -117,6 +117,8 @@ impl From<Hash> for String {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Stats {
   pub tick: u64,
+  pub mana: u64,
+  pub size: i128
 }
 
 impl From<&node::Transaction> for String {

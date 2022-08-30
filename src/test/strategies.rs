@@ -1,10 +1,11 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc, ops::Range};
+use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
   crypto,
   hvm::{
-    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs, Heap, Map, Name, Nodes,
-    Ownrs, Rollback, Rule, Runtime, SerializedHeap, Statement, Store, Term, Var, U120, Oper,
+    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs,
+    Heap, Map, Name, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
+    SerializedHeap, Statement, Store, Term, Var, U120,
   },
   node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
 };
@@ -53,12 +54,21 @@ pub fn term() -> impl Strategy<Value = Term> {
     10,  // We put up to 10 items per collection
     |inner| {
       prop_oneof![
-        (name(), name(), inner.clone(), inner.clone()).prop_map(|(n0, n1, e, b)| {
-          Term::Dup { nam0: n0, nam1: n1, expr: Box::new(e), body: Box::new(b) }
+        (name(), name(), inner.clone(), inner.clone()).prop_map(
+          |(n0, n1, e, b)| {
+            Term::Dup {
+              nam0: n0,
+              nam1: n1,
+              expr: Box::new(e),
+              body: Box::new(b),
+            }
+          }
+        ),
+        (name(), inner.clone())
+          .prop_map(|(n, e)| { Term::Lam { name: n, body: Box::new(e) } }),
+        (inner.clone(), inner.clone()).prop_map(|(f, a)| {
+          Term::App { func: Box::new(f), argm: Box::new(a) }
         }),
-        (name(), inner.clone()).prop_map(|(n, e)| { Term::Lam { name: n, body: Box::new(e) } }),
-        (inner.clone(), inner.clone())
-          .prop_map(|(f, a)| { Term::App { func: Box::new(f), argm: Box::new(a) } }),
         (small_name(), vec(inner.clone(), 0..10))
           .prop_map(|(n, v)| { Term::Ctr { name: n, args: v } }),
         (small_name(), vec(inner.clone(), 0..10))
@@ -84,7 +94,8 @@ fn oper() -> impl Strategy<Value = Oper> {
 }
 
 fn fun() -> impl Strategy<Value = Term> {
-  (small_name(), vec(term(), 0..32)).prop_map(|(n, b)| Term::Fun { name: n, args: b })
+  (small_name(), vec(term(), 0..32))
+    .prop_map(|(n, b)| Term::Fun { name: n, args: b })
 }
 
 // generate rules
@@ -104,12 +115,14 @@ pub fn sign() -> impl Strategy<Value = crypto::Signature> {
 // generate statements
 pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
-    (small_name(), vec(name(), 0..10), func(), term(), option::of(sign())).prop_map(
-      |(name, args, func, init, sign)| { Statement::Fun { name, args, func, init, sign } }
-    ),
+    (small_name(), vec(name(), 0..10), func(), term(), option::of(sign()))
+      .prop_map(|(name, args, func, init, sign)| {
+        Statement::Fun { name, args, func, init, sign }
+      }),
     (small_name(), vec(name(), 0..10), option::of(sign()))
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
-    (term(), option::of(sign())).prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
+    (term(), option::of(sign()))
+      .prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
     (name(), name(), option::of(sign()))
       .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
@@ -119,7 +132,9 @@ pub fn nodes() -> impl Strategy<Value = Nodes> {
   (map(any::<u128>())).prop_map(|m| Nodes { nodes: m })
 }
 
-pub fn map<A: std::fmt::Debug>(s: impl Strategy<Value = A>) -> impl Strategy<Value = Map<A>> {
+pub fn map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = Map<A>> {
   vec((any::<u128>(), s), 0..10).prop_map(|v| {
     let mut m = init_map();
     for (k, v) in v {
@@ -142,16 +157,17 @@ pub fn ownrs() -> impl Strategy<Value = Ownrs> {
 }
 
 pub fn var() -> impl Strategy<Value = Var> {
-  (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>()).prop_map(|(n, p, f, e)| Var {
-    name: n,
-    param: p,
-    field: f,
-    erase: e,
-  })
+  (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>())
+    .prop_map(|(n, p, f, e)| Var { name: n, param: p, field: f, erase: e })
 }
 
 pub fn comp_rule() -> impl Strategy<Value = CompRule> {
-  (vec(any::<u128>(), 0..32), vec(var(), 0..32), vec((any::<u128>(), any::<u128>()), 0..32), term())
+  (
+    vec(any::<u128>(), 0..32),
+    vec(var(), 0..32),
+    vec((any::<u128>(), any::<u128>()), 0..32),
+    term(),
+  )
     .prop_map(|(c, v, e, b)| CompRule { cond: c, vars: v, eras: e, body: b })
 }
 
@@ -165,10 +181,25 @@ pub fn funcs() -> impl Strategy<Value = Funcs> {
 }
 
 pub fn heap() -> impl Strategy<Value = Heap> {
-  let tuple_strategy =
-    (any::<u128>(), any::<u128>(), any::<u128>(), any::<u128>(), any::<u128>(), any::<u128>());
+  let tuple_strategy = (
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+    any::<u128>(),
+  );
 
-  (tuple_strategy, tuple_strategy, any::<i128>(), nodes(), store(), arits(), ownrs(), funcs())
+  (
+    tuple_strategy,
+    tuple_strategy,
+    any::<i128>(),
+    nodes(),
+    store(),
+    arits(),
+    ownrs(),
+    funcs(),
+  )
     .prop_map(
       |(
         (uuid, mcap, tick, funs, dups, rwts),
@@ -216,12 +247,20 @@ pub fn block() -> impl Strategy<Value = Block> {
 }
 
 pub fn address() -> impl Strategy<Value = Address> {
-  (any::<u8>(), any::<u8>(), any::<u8>(), any::<u8>(), any::<u16>())
-    .prop_map(|(a, b, c, d, e)| Address::IPv4 { val0: a, val1: b, val2: c, val3: d, port: e })
+  (any::<u8>(), any::<u8>(), any::<u8>(), any::<u8>(), any::<u16>()).prop_map(
+    |(a, b, c, d, e)| Address::IPv4 {
+      val0: a,
+      val1: b,
+      val2: c,
+      val3: d,
+      port: e,
+    },
+  )
 }
 
 pub fn peer() -> impl Strategy<Value = Peer> {
-  (any::<u32>(), address()).prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
+  (any::<u32>(), address())
+    .prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
 }
 
 pub fn transaction() -> impl Strategy<Value = Transaction> {
@@ -230,9 +269,11 @@ pub fn transaction() -> impl Strategy<Value = Transaction> {
 
 pub fn message() -> impl Strategy<Value = Message> {
   prop_oneof![
-    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10))
-      .prop_map(|(g, b, p)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p }),
+    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10)).prop_map(
+      |(g, b, p)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p }
+    ),
     (u256()).prop_map(|h| Message::GiveMeThatBlock { bhash: h }),
-    (transaction()).prop_map(|t| Message::PleaseMineThisTransaction { trans: t })
+    (transaction())
+      .prop_map(|t| Message::PleaseMineThisTransaction { trans: t })
   ]
 }

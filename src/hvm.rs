@@ -2470,9 +2470,12 @@ impl Runtime {
   }
 
   pub fn exists(&self, name: &Name) -> bool {
-    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
+    // there is a function or a constructor with this name
+    if let Some(_) = self.get_with(None, None, |heap| heap.read_arit(name)) {
       return true;
-    } else if let Some(owner) = self.get_with(None, None, |heap| heap.read_ownr(name)) {
+    }
+    // there is a namespace with this name
+    else if let Some(_) = self.get_with(None, None, |heap| heap.read_ownr(name)) {
       return true;
     } else {
       return false;

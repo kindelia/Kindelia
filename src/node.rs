@@ -924,7 +924,13 @@ impl Node {
     match request {
       NodeRequest::GetStats { tx: answer } => {
         let tick = self.runtime.get_tick();
-        let stats = api::Stats { tick: tick as u64 };
+        let mana = self.runtime.get_mana();
+        let size = self.runtime.get_size();
+        let stats = api::Stats { 
+          tick: tick as u64,
+          mana: mana as u64,
+          size
+        };
         answer.send(stats).unwrap();
       }
       NodeRequest::GetBlocks { range, tx: answer } => {

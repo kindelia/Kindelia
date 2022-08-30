@@ -105,7 +105,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   // TODO: macro to wrap those clones
 
   let query_tx = node_query_sender.clone();
-  let get_tick = path!("tick").then(move || {
+  let get_stats = path!("stats").then(move || {
     let query_tx = query_tx.clone();
     async move {
       let stats = ask(query_tx, |tx| NodeRequest::GetStats { tx }).await;
@@ -261,7 +261,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   // ==
 
-  let app = root.or(get_tick).or(blocks_router).or(functions_router).or(interact_router);
+  let app = root.or(get_stats).or(blocks_router).or(functions_router).or(interact_router);
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
 
