@@ -495,15 +495,17 @@ pub fn deserialized_term(bits: &BitVec) -> Option<Term> {
 // A Rule
 
 pub fn serialize_rule(rule: &Rule, bits: &mut BitVec, names: &mut Names) {
-  serialize_term(&rule.lhs, bits, names);
+  serialize_list(serialize_term, &rule.lhs, bits, names);
   serialize_term(&rule.rhs, bits, names);
 }
 
 pub fn deserialize_rule(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Rule> {
-  let lhs  = deserialize_term(bits, index, names)?;
+  let lhs  = deserialize_list(deserialize_term, bits, index, names)?;
   let rhs  = deserialize_term(bits, index, names)?;
   Some(Rule{lhs, rhs})
 }
+
+// A lhs
 
 // A Func
 

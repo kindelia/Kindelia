@@ -330,7 +330,7 @@ pub type Map<T> = util::U128Map<T>;
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rule {
-  pub lhs: Term,
+  pub lhs: Vec<Term>,
   pub rhs: Term,
 }
 
@@ -1453,11 +1453,12 @@ impl Heap {
     let mut i = 0;
     while i < serial.file.len() {
       let fnid = serial.file[i + 0];
+      let name = Name(fnid);
       let size = serial.file[i + 1];
       let buff = &serial.file[i + 2 .. i + 2 + size as usize];
       let func = &bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
-      let func = compile_func(func, false).unwrap();
-      self.write_file(Name(fnid), Arc::new(func));
+      let func = compile_func(func, false, &name).unwrap();
+      self.write_file(name, Arc::new(func));
       i = i + 2 + size as usize;
     }
     // Deserializes Arits
@@ -2034,7 +2035,7 @@ impl Runtime {
         if !self.check_func(&func) {
           return error(self, "fun", format!("Invalid function {}.", name));
         }
-        let func = compile_func(func, true);
+        let func = compile_func(func, true, name);
         if func.is_none() {
           return error(self, "fun", format!("Invalid function {}.", name));
         }
@@ -2132,7 +2133,7 @@ impl Runtime {
 
   pub fn check_func(&self, func: &Func) -> bool {
     for rule in &func.rules {
-      if !self.check_term(&rule.lhs) || !self.check_term(&rule.rhs) {
+      if !rule.lhs.iter().all(|term| self.check_term(&term)) || !self.check_term(&rule.rhs) {
         return false;
       }
     }
@@ -3054,7 +3055,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 }
 
 /// Given a Func (a vector of rules, lhs/rhs pairs), builds the CompFunc object
-pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
+pub fn compile_func(func: &Func, debug: bool, func_name: &Name) -> Option<CompFunc> {
   let rules = &func.rules;
 
   // If there are no rules, return none
@@ -3066,15 +3067,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
   }
 
   // Find the function arity
-  let arity;
-  if let Term::Fun { args, .. } = &rules[0].lhs {
-    arity = args.len() as u128;
-  } else {
-    if debug {
-      println!("  - failed to build function: left-hand side must be !(Fun ...)");
-    }
-    return None;
-  }
+  let arity = rules[0].lhs.len() as u128;
 
   // The resulting vector
   let mut comp_rules = Vec::new();
@@ -3104,80 +3097,70 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     let mut cond = Vec::new();
     let mut vars = Vec::new();
     let mut eras = Vec::new();
+    let args = &rule.lhs;
 
-    // If the lhs is a Fun
-    if let Term::Fun { ref name, ref args } = rule.lhs {
-
-      // If there is an arity mismatch, return None
-      if args.len() as u128 != arity {
-        if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", rule_index);
-        }
-        return None;
-      }
-
-      // For each lhs argument
-      for i in 0 .. args.len() as u128 {
-
-        match &args[i as usize] {
-          // If it is a constructor...
-          Term::Ctr { name: arg_name, args: arg_args } => {
-            strict[i as usize] = true;
-            cond.push(Ctr(**arg_name, 0)); // adds its matching condition
-            eras.push((i, arg_args.len() as u128)); // marks its index and arity for freeing
-            // For each of its fields...
-            for j in 0 .. arg_args.len() as u128 {
-              // If it is a variable...
-              if let Term::Var { name } = arg_args[j as usize] {
-                if !check_var(*name, &rule.rhs, &mut seen) {
-                  if debug {
-                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                  }
-                  return None;
-                } else {
-                  vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
-                }
-              // Otherwise..
-              } else {
-                if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                }
-                return None; // return none, because we don't allow nested matches
-              }
-            }
-          }
-          // If it is a number...
-          Term::Num { numb: arg_numb } => {
-            strict[i as usize] = true;
-            cond.push(Num(**arg_numb)); // adds its matching condition
-          }
-          // If it is a variable...
-          Term::Var { name: arg_name } => {
-            if !check_var(**arg_name, &rule.rhs, &mut seen) {
-              if debug {
-                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", arg_name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-              }
-              return None;
-            } else {
-              vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
-              cond.push(Var(0)); // it has no matching condition
-            }
-          }
-          _ => {
-            if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-            }
-            return None;
-          }
-        }
-      }
-
-    // If lhs isn't a Ctr, return None
-    } else {
+    // If there is an arity mismatch, return None
+    if args.len() as u128 != arity {
       if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.lhs), view_term(&rule.rhs));
+        println!("  - failed to build function: arity mismatch on rule {}", rule_index);
       }
       return None;
+    }
+
+    // For each lhs argument
+    for i in 0 .. args.len() as u128 {
+
+      match &args[i as usize] {
+        // If it is a constructor...
+        Term::Ctr { name: arg_name, args: arg_args } => {
+          strict[i as usize] = true;
+          cond.push(Ctr(**arg_name, 0)); // adds its matching condition
+          eras.push((i, arg_args.len() as u128)); // marks its index and arity for freeing
+          // For each of its fields...
+          for j in 0 .. arg_args.len() as u128 {
+            // If it is a variable...
+            if let Term::Var { name } = arg_args[j as usize] {
+              if !check_var(*name, &rule.rhs, &mut seen) {
+                if debug {
+                  println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", name, rule_index, i, view_lhs(func_name, &rule.lhs), view_term(&rule.rhs));
+                }
+                return None;
+              } else {
+                vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
+              }
+            // Otherwise..
+            } else {
+              if debug {
+                println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_lhs(func_name, &rule.lhs), view_term(&rule.rhs));
+              }
+              return None; // return none, because we don't allow nested matches
+            }
+          }
+        }
+        // If it is a number...
+        Term::Num { numb: arg_numb } => {
+          strict[i as usize] = true;
+          cond.push(Num(**arg_numb)); // adds its matching condition
+        }
+        // If it is a variable...
+        Term::Var { name: arg_name } => {
+          if !check_var(**arg_name, &rule.rhs, &mut seen) {
+            if debug {
+              println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", arg_name, rule_index, i, view_lhs(func_name, &rule.lhs), view_term(&rule.rhs));
+            }
+            return None;
+          } else {
+            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
+            cond.push(Var(0)); // it has no matching condition
+          }
+        }
+        _ => {
+          if debug {
+            println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_lhs(func_name, &rule.lhs), view_term(&rule.rhs));
+          }
+          return None;
+        }
+      }
     }
 
     // Creates the rhs body
@@ -4526,7 +4509,7 @@ pub fn u128_to_name(num: u128) -> String {
   name.chars().rev().collect()
 }
 
-pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -> ParseResult<Vec<A>> {
+pub fn read_until<A, F: Fn(&str) -> ParseResult<A>>(code: &str, stop: char, read: F) -> ParseResult<Vec<A>> {
   let mut elems = Vec::new();
   let mut code = code;
   while code.len() > 0 && head(skip(code)) != stop {
@@ -4701,31 +4684,34 @@ pub fn read_oper(in_code: &str) -> (&str, Option<Oper>) {
   }
 }
 
-pub fn read_rule(code: &str) -> ParseResult<Rule> {
-  // TODO: custom parser for lhs
-  let (code, lhs) = read_term(code)?;
-  let (code, ())  = read_char(code, '=')?;
-  let (code, rhs) = read_term(code)?;
-  return Ok((code, Rule{lhs, rhs}));
-}
-
-pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
-  let (code, rules) = read_until(code, '\0', read_rule)?;
+pub fn read_rules(func_name: Name, code: &str) -> ParseResult<Vec<Rule>> {
+  let mut rules = Vec::new();
+  let mut code = code;
+  while code.len() > 0 && head(skip(code)) != '}' {
+    let (new_code, lhs) = read_lhs(func_name, code)?;
+    let (new_code, ())  = read_char(new_code, '=')?;
+    let (new_code, rhs) = read_term(new_code)?;
+    code = new_code;
+    rules.push(Rule { lhs, rhs });
+  }
+  code = tail(skip(code));
   return Ok((code, rules));
 }
 
-pub fn read_func(code: &str) -> ParseResult<CompFunc> {
-  let (code, rules) = read_until(code, '\0', read_rule)?;
-  let func = Func { rules };
-  if let Some(func) = compile_func(&func, false) {
-    return Ok((code, func));
-  } else {
-    return Err(ParseErr { 
-      code: code.to_string(), 
-      erro: "Couldn't parse function".to_string()
-    });
+pub fn read_lhs(func_name: Name, code: &str) -> ParseResult<Vec<Term>> {
+  let (code, ()) = read_char(code, '(')?;
+  let (code, name) = read_name(code)?;
+  if func_name != name {
+    return Err(ParseErr::new(code, format!("Function rule with different name in function {}", func_name)))
   }
+  let (code, args) = read_until(code, ')', read_term)?;
+  Ok((code, args))
 }
+
+// pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
+//   let (code, rules) = read_until(code, '\0', read_rule)?;
+//   return Ok((code, rules));
+// }
 
 pub fn read_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
   let code = skip(code);
@@ -4755,7 +4741,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
       let (code, name) = read_name(code)?;
       let (code, args) = read_until(code, ')', read_name)?;
       let (code, unit) = read_char(code, '{')?;
-      let (code, ruls) = read_until(code, '}', read_rule)?;
+      let (code, ruls) = read_rules(name, code)?;
       let code = skip(code);
       let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);
@@ -4945,6 +4931,11 @@ pub fn view_oper(oper: &Oper) -> String {
   }.to_string()
 }
 
+pub fn view_lhs(name: &Name, args: &Vec<Term>) -> String {
+  let args = args.iter().map(view_term).collect::<Vec<_>>();
+  format!("({} {})", name, args.join(" "))
+}
+
 pub fn view_statement(statement: &Statement) -> String {
   fn view_sign(sign: &Option<crypto::Signature>) -> String {
     fn format_sign(sign: &crypto::Signature) -> String {
@@ -4964,7 +4955,7 @@ pub fn view_statement(statement: &Statement) -> String {
   }
   match statement {
     Statement::Fun { name, args, func, init, sign } => {
-      let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
+      let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_lhs(&name, &x.lhs), view_term(&x.rhs)));
       let func = func.collect::<Vec<String>>().join("");
       let args = args.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(" ");
       let init = view_term(init);
