@@ -923,13 +923,13 @@ impl Node {
     // TODO: handle unwraps
     match request {
       NodeRequest::GetStats { tx: answer } => {
-        let tick = self.runtime.get_tick();
-        let mana = self.runtime.get_mana();
-        let size = self.runtime.get_size();
+        let tick = self.runtime.get_tick().try_into().unwrap();
+        let mana = self.runtime.get_mana().try_into().unwrap();
+        let size = self.runtime.get_size().try_into().unwrap();
         let stats = api::Stats { 
-          tick: tick as u64,
-          mana: mana as u64,
-          size: size as u64
+          tick,
+          mana,
+          size,
         };
         answer.send(stats).unwrap();
       }
