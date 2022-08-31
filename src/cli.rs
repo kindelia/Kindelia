@@ -102,6 +102,9 @@ pub enum CLICommand {
   Test {
     /// The path to the file to test.
     file: PathBuf,
+    /// Whether to consider size and mana in the execution.
+    #[clap(long)]
+    debug: bool
   },
   /// Serialize a code file.
   Serialize {
@@ -343,8 +346,8 @@ pub fn run_cli() -> Result<(), String> {
   .get_value_config()?;
 
   match parsed.command {
-    CLICommand::Test { file } => {
-      test_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
+    CLICommand::Test { file, debug } => {
+      test_code(&file, debug); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
       Ok(())
     }
     CLICommand::Serialize { file } => {
@@ -602,15 +605,14 @@ pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
   Ok(())
 }
 
-pub fn test_code(file: &Path) {
+pub fn test_code(file: &Path, debug: bool) {
   let file = std::fs::read_to_string(file);
   match file {
     Err(err) => {
       eprintln!("{}", err);
     }
     Ok(code) => {
-      // TODO: flag to disable size limit / debug
-      hvm::test_statements_from_code(&code);
+      hvm::test_statements_from_code(&code, debug);
     }
   }
 }

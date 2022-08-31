@@ -5053,7 +5053,7 @@ pub fn print_io_consts() {
 }
 
 // Serializes, deserializes and evaluates statements
-pub fn test_statements(statements: &[Statement]) {
+pub fn test_statements(statements: &[Statement], debug: bool) {
   let str_0 = view_statements(statements);
   let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)).unwrap());
 
@@ -5063,7 +5063,7 @@ pub fn test_statements(statements: &[Statement]) {
 
   let mut rt = init_runtime(None);
   let init = Instant::now();
-  rt.run_statements(&statements, false, false);
+  rt.run_statements(&statements, false, debug);
   println!();
 
   println!("Stats");
@@ -5076,14 +5076,14 @@ pub fn test_statements(statements: &[Statement]) {
   println!("[time] {} ms", init.elapsed().as_millis());
 }
 
-pub fn test_statements_from_code(code: &str) {
+pub fn test_statements_from_code(code: &str, debug: bool) {
   let statments = read_statements(code);
   match statments {
-    Ok((.., statements)) => test_statements(&statements),
+    Ok((.., statements)) => test_statements(&statements, debug),
     Err(ParseErr { code, erro }) => println!("{}", erro),
   }
 }
 
-pub fn test_statements_from_file(file: &str) {
-  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"));
+pub fn test_statements_from_file(file: &str, debug: bool) {
+  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"), debug);
 }
