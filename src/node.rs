@@ -923,8 +923,14 @@ impl Node {
     // TODO: handle unwraps
     match request {
       NodeRequest::GetStats { tx: answer } => {
-        let tick = self.runtime.get_tick();
-        let stats = api::Stats { tick: tick as u64 };
+        let tick = self.runtime.get_tick().try_into().unwrap();
+        let mana = self.runtime.get_mana().try_into().unwrap();
+        let size = self.runtime.get_size().try_into().unwrap();
+        let stats = api::Stats { 
+          tick,
+          mana,
+          size,
+        };
         answer.send(stats).unwrap();
       }
       NodeRequest::GetBlocks { range, tx: answer } => {
