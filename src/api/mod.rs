@@ -118,7 +118,7 @@ impl From<Hash> for String {
 pub struct Stats {
   pub tick: u64,
   pub mana: u64,
-  pub size: i128
+  pub size: u64
 }
 
 impl From<&node::Transaction> for String {

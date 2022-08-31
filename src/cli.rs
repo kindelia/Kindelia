@@ -203,7 +203,7 @@ pub enum GetKind {
   /// Get the runtime mana.
   Mana,
   /// Get the runtime space.
-  Space,
+  Size,
   /// Get the number of functions.
   FnCount,
   /// Get the number of namespaces.
@@ -429,7 +429,7 @@ pub async fn get_info(kind: GetKind, json: bool) -> Result<(), String> {
       println!("{}", stats.mana);
       Ok(())
     }
-    GetKind::Space => {
+    GetKind::Size => {
       let stats =
         client.get_stats().await.map_err(|e| e.to_string())?;
       println!("{}", stats.size);

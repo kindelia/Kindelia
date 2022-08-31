@@ -929,7 +929,7 @@ impl Node {
         let stats = api::Stats { 
           tick: tick as u64,
           mana: mana as u64,
-          size
+          size: size as u64
         };
         answer.send(stats).unwrap();
       }
