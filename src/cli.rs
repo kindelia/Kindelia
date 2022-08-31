@@ -1,5 +1,4 @@
 // TODO: `node clean` CLI command
-// TODO: refactor `space` counters to reflect nodes / cells instead of bits
 
 use std::path::Path;
 use std::{path::PathBuf, str::FromStr, thread};
@@ -8,7 +7,7 @@ use clap::{Parser, Subcommand};
 use hvm::Name;
 use warp::Future;
 
-use crate::api::client as api_client;
+use crate::api::{client as api_client, HexStatement};
 use crate::bits::{deserialized_statement, serialized_statement};
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
@@ -27,17 +26,14 @@ kindelia test file.kdl
 
 kindelia serialize code.kdl > code.hex.txt
 
-kindelia deserialize stmt.hex.txt
+kindelia deserialize code.hex.txt
 kindelia deserialize <<< a67bd36d75da
 
-kindelia [--pvt-file] ?
-kindelia [--pvt-pass] ?
+kindelia run-remote --hex <<< a67bd36d75da
+kindelia publish    --hex <<< a67bd36d75da
 
-kindelia sign stmt.hex.txt
-kindelia sign <<< a67bd36d75da
-
-kindelia post stmt.hex.txt
-kindelia sign <<< a67bd36d75da
+kindelia sign code.hex.txt
+kindelia sign <<< a67bd36d75da > code.sig.hex.tx
 
 kindelia completion zsh >> .zshrc
 
@@ -70,13 +66,17 @@ kindelia get stats ctr-count
 kindelia get stats fun-count
 kindelia get stats reg-count
 
-kindelia run  [--host ""] code.hex.txt
-kindelia post [--host ""] code.hex.txt
+kindelia [--api ""] run-remote  code.hex.txt
+kindelia [--api ""] publish     code.hex.txt
 
 == Node ==
 
 kindelia node start --mine --local --log-events --nice-ui?
 kindelia node clean [-f]       // asks confirmation
+
+== Accounts ==
+
+kindelia account ...
 
 */
 
@@ -122,17 +122,14 @@ pub enum CLICommand {
     skey: String,
   },
   /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
-  Run {
+  RunRemote {
     /// Input file
-    file: PathBuf,
+    file: Option<PathBuf>,
   },
   /// Post a Kindelia code file.
-  Post {
+  Publish {
     /// The path to the file to post.
     file: Option<PathBuf>,
-    /// Node address to post to.
-    #[clap(long)]
-    host: Option<String>,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
@@ -347,31 +344,52 @@ pub fn run_cli() -> Result<(), String> {
 
   match parsed.command {
     CLICommand::Test { file } => {
-      run_file(&file);
+      test_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
       Ok(())
     }
     CLICommand::Serialize { file } => {
-      serialize(&file);
+      serialize_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
       Ok(())
     }
     CLICommand::Deserialize { file } => {
-      let content = get_value_stdin::<String>(file)?;
-      deserialize(&content)?;
-      Ok(())
+      let content = from_file_or_stdin::<String>(file)?;
+      deserialize_code(&content)
     }
     CLICommand::Sign { file, skey } => {
-      let content = get_value_stdin::<String>(file)?;
-      sign(&content, &skey)?;
+      let content = from_file_or_stdin::<String>(file)?;
+      sign_code(&content, &skey)
+    }
+    CLICommand::RunRemote { file } => {
+      // TODO: extract code repetition with branch below
+      // TODO: `--hex` flag to read statement hexes instead of code
+      let code = from_file_or_stdin::<String>(file)?;
+      let stmts = parse_code(&code)?;
+      let stmts: Vec<HexStatement> =
+        stmts.into_iter().map(|s| s.into()).collect();
+      // TODO: client timeout
+      let client = api_client::ApiClient::new("http://localhost:8000", None) // TODO: timeout
+        .map_err(|e| e.to_string())?;
+      let res = run_async_blocking(client.run_code(stmts));
+      let val = res?;
+      // TODO: Displat for StatementInfo + print each in one line
+      println!("{:?}", val);
       Ok(())
     }
-    CLICommand::Run { file: _ } => {
-      todo!()
-    }
-    CLICommand::Post { file: _, host: _ } => {
-      todo!()
+    CLICommand::Publish { file } => {
+      let code = from_file_or_stdin::<String>(file)?;
+      let client = api_client::ApiClient::new("http://localhost:8000", None)
+        .map_err(|e| e.to_string())?;
+      let stmts = parse_code(&code)?;
+      let stmts: Vec<HexStatement> =
+        stmts.into_iter().map(|s| s.into()).collect();
+      // TODO: implement on server. return value will be different from Run-Remote, like "this transaction was included"
+      let res = run_async_blocking(client.publish_code(stmts));
+      let val = res?;
+      println!("{:?}", val);
+      Ok(())
     }
     CLICommand::PostUdp { file, host } => {
-      let content = get_value_stdin::<String>(file)?;
+      let content = from_file_or_stdin::<String>(file)?;
       post_udp(&content, host)
     }
     CLICommand::Get { kind, json } => {
@@ -383,9 +401,11 @@ pub fn run_cli() -> Result<(), String> {
         NodeCommand::Start { kindelia_path, init_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
-          let config = read_toml(&config_path).ok_or(
-            format!("No config file was found in {}. You can create a default one using `kindelia node init`", config_path.display())
-          )?;
+          let config = read_toml(&config_path).ok_or(format!(
+            "No config file was found in '{}'. \
+             You can create a default one running `kindelia node init`",
+            config_path.display()
+          ))?;
           let config = Some(config);
 
           // get arguments from cli, env or config
@@ -423,32 +443,24 @@ pub fn run_cli() -> Result<(), String> {
         }
         NodeCommand::Init => {
           println!(
-            "Writing default configuration in '$HOME$/.kindelia/kindelia.toml'"
+            "Writing default configuration to '$HOME/.kindelia/kindelia.toml'..."
           );
           let file_path = default_config_path()?;
           let dir_path = file_path.parent().ok_or_else(|| {
-            "Error trying to create path for '$HOME$/.kindelia'".to_string()
+            "Failed to resolve path for '$HOME/.kindelia'".to_string()
           })?;
           let content = include_str!("../default.toml");
-          std::fs::create_dir_all(&dir_path).map_err(|_| {
-            "Could not create '$HOME$/.kindelia' directory".to_string()
+          std::fs::create_dir_all(&dir_path).map_err(|err| {
+            format!("Could not create '$HOME/.kindelia' directory: {}", err)
           })?;
-          std::fs::write(file_path, content).map_err(|_| {
-            "Could not save in $HOME$/.kindelia/kindelia.toml".to_string()
+          std::fs::write(file_path, content).map_err(|err| {
+            format!("Could not write to '$HOME/.kindelia/kindelia.toml': {}", err)
           })
         }
       }
     }
     CLICommand::Completion { .. } => todo!(),
   }
-}
-
-fn run_async_blocking<T, E: ToString, P>(prom: P) -> Result<T, E>
-where
-  P: Future<Output = Result<T, E>>,
-{
-  let runtime = tokio::runtime::Runtime::new().unwrap();
-  runtime.block_on(prom)
 }
 
 // Main Actions
@@ -532,7 +544,7 @@ pub async fn get_info(
   }
 }
 
-pub fn serialize(file: &PathBuf) {
+pub fn serialize_code(file: &PathBuf) {
   if let Ok(code) = std::fs::read_to_string(file) {
     let statements =
       hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
@@ -544,17 +556,17 @@ pub fn serialize(file: &PathBuf) {
   }
 }
 
-pub fn deserialize(content: &str) -> Result<(), String> {
-  let statements = get_statements(content)?;
+pub fn deserialize_code(content: &str) -> Result<(), String> {
+  let statements = statments_from_hex_seq(content)?;
   for statement in statements {
     println!("{}", view_statement(&statement))
   }
   Ok(())
 }
 
-pub fn sign(content: &str, skey_file: &str) -> Result<(), String> {
+pub fn sign_code(content: &str, skey_file: &str) -> Result<(), String> {
   if let Ok(skey) = std::fs::read_to_string(skey_file) {
-    let statement = get_statement(content)?;
+    let statement = statement_from_hex(content)?;
     let skey = hex::decode(&skey[0..64]).expect("hex string");
     let user = crypto::Account::from_private_key(&skey);
     let hash = hvm::hash_statement(&statement);
@@ -568,7 +580,7 @@ pub fn sign(content: &str, skey_file: &str) -> Result<(), String> {
 }
 
 pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
-  let statements = get_statements(content)?;
+  let statements = statments_from_hex_seq(content)?;
   for statement in statements {
     let tx =
       Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
@@ -590,7 +602,7 @@ pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
   Ok(())
 }
 
-pub fn run_file(file: &Path) {
+pub fn test_code(file: &Path) {
   let file = std::fs::read_to_string(file);
   match file {
     Err(err) => {
@@ -653,7 +665,15 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
 }
 
 // Auxiliar Functions and Structs
-// ==================
+// ==============================
+
+fn run_async_blocking<T, E: ToString, P>(prom: P) -> Result<T, E>
+where
+  P: Future<Output = Result<T, E>>,
+{
+  let runtime = tokio::runtime::Runtime::new().unwrap();
+  runtime.block_on(prom)
+}
 
 #[derive(Debug, Clone)]
 struct ConfigFileOptions<'a> {
@@ -676,19 +696,26 @@ impl<'a> ConfigFileOptions<'a> {
   }
 }
 
-#[allow(dead_code)]
-fn get_statements(txt: &str) -> Result<Vec<Statement>, String> {
-  txt.trim().split(|c: char| c.is_whitespace()).map(get_statement).collect()
+fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
+  let stataments = hvm::read_statements(code);
+  match stataments {
+    Ok((_, statements)) => Ok(statements), // TODO: should _ be handled better?
+    Err(hvm::ParseErr { erro , .. }) => Err(erro)
+  }
 }
 
-fn get_statement(hex: &str) -> Result<Statement, String> {
+fn statments_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
+  txt.trim().split(|c: char| c.is_whitespace()).map(statement_from_hex).collect()
+}
+
+fn statement_from_hex(hex: &str) -> Result<Statement, String> {
   let bytes = hex::decode(hex)
-    .map_err(|_| format!("Error when trying to convert hexadecimal {}", hex))?;
+    .map_err(|err| format!("Invalid hexadecimal '{}': {}", hex, err))?;
   deserialized_statement(&bytes_to_bitvec(&bytes))
-    .ok_or(format!("Error when trying to deserialize {}", hex))
+    .ok_or(format!("Failed to deserialize '{}'", hex))
 }
 
-fn get_value_stdin<T: ArgumentFrom<String>>(
+fn from_file_or_stdin<T: ArgumentFrom<String>>(
   file: Option<PathBuf>,
 ) -> Result<T, String> {
   if let Some(file) = file {

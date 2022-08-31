@@ -347,12 +347,12 @@ pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
 
 /// Sends an UDP message to many addresses
 pub fn udp_send(socket: &mut UdpSocket, addresses: Vec<Address>, message: &Message) {
-  let bits = bitvec_to_bytes(&serialized_message(message));
+  let bytes = bitvec_to_bytes(&serialized_message(message));
   for address in addresses {
     match address {
       Address::IPv4 { val0, val1, val2, val3, port } => {
         let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
-        socket.send_to(bits.as_slice(), addr).ok();
+        socket.send_to(bytes.as_slice(), addr).ok();
       }
     }
   }
@@ -485,6 +485,7 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
 }
 
 // Converts a string (with a list of statements) to a body.
+// TODO: remove
 pub fn code_to_body(code: &str) -> Body {
   let (_rest, acts) = crate::hvm::read_statements(code).unwrap(); // TODO: handle error
   let bits = serialized_statements(&acts);
@@ -966,7 +967,6 @@ impl Node {
         answer.send(infos).unwrap();
       },
       NodeRequest::GetBlock { hash, tx: answer } => {
-        // TODO: actual indexing
         let info = self.get_block_info(&hash);
         answer.send(info).unwrap();
       },
@@ -996,7 +996,6 @@ impl Node {
           hvm::read_statements(&code)
             .map_err(|err| err.erro)
             .map(|(_, s)| s);
-      
         let res = match statements {
           Err(err) => {
             Err(err)
@@ -1013,19 +1012,16 @@ impl Node {
             Ok(())
           }
         };
-      
         answer.send(res).unwrap();
       },
-      NodeRequest::Run { hex, tx: answer } => {
-        if let Ok(bytes) = hex::decode(hex) {
-          if let Some(statement) = deserialized_statement(&bytes_to_bitvec(&bytes)) {
-            let result = self.runtime.test_statements(&[statement])[0].clone();
-            answer.send(result).unwrap();
-            return;
-          }
-        }
-        answer.send(Err(StatementErr { err: "Invalid hex statement on Run request.".to_string() })).unwrap();
+      NodeRequest::Run { code, tx: answer } => {
+        let result = self.runtime.test_statements(&code);
+        answer.send(result).unwrap();
       },
+      NodeRequest::Publish { code, tx } => {
+        // TODO
+        todo!()
+      }
     }
   }
 

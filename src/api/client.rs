@@ -6,9 +6,9 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::hvm::Term;
+use crate::hvm::{Term, self};
 
-use super::{BlockInfo, FuncInfo, Hash, Name, Stats, CountStats};
+use super::{BlockInfo, FuncInfo, Hash, Name, Stats, CountStats, HexStatement};
 
 pub struct ApiClient {
   client: reqwest::Client,
@@ -22,7 +22,7 @@ impl Deref for ApiClient {
   }
 }
 
-type ApiResult<T> = Result<T, reqwest::Error>;
+type ApiResult<T> = Result<T, String>;
 
 impl ApiClient {
   pub fn new<U>(
@@ -44,7 +44,7 @@ impl ApiClient {
     let url = self
       .base_url
       .join(path)
-      .unwrap_or_else(|_| panic!("Invalid URL sub-path '{}'.", path));
+      .unwrap_or_else(|err| panic!("Invalid URL sub-path '{}'; {}", path, err));
     self.client.request(method, url)
   }
 
@@ -57,7 +57,7 @@ impl ApiClient {
     method: Method,
     path: &str,
     body: Option<B>,
-  ) -> Result<T, reqwest::Error>
+  ) -> Result<T, String>
   where
     T: DeserializeOwned,
     B: Serialize,
@@ -68,9 +68,15 @@ impl ApiClient {
     } else {
       req
     };
-    let res = req.send().await?;
-    let value = res.json().await?;
-    Ok(value)
+    let res = req.send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() {
+      let value = res.json().await.map_err(|e| e.to_string())?;
+      Ok(value)
+    } else {
+      let status = res.status();
+      let text = res.text().await.map_err(|e| e.to_string())?;
+      Err(format!("Error {}: {}", status, text)) // TODO: better messages
+    }
   }
 
   pub async fn get<T>(&self, path: &str) -> ApiResult<T>
@@ -108,11 +114,12 @@ impl ApiClient {
     self.get::<Term>(&format!("/functions/{}/state", name)).await
   }
 
-  pub async fn run_code(&self, code: &str) -> ApiResult<String> {
+  pub async fn run_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<hvm::StatementInfo>> {
     self.req(Method::POST, "/run", Some(code)).await
   }
 
-  pub async fn post_code(&self, code: &str) -> ApiResult<String> {
-    self.req(Method::POST, "/post", Some(code)).await
+  // I'm not sure what the return type should be.
+  pub async fn publish_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<bool>> {
+    self.req(Method::POST, "/publish", Some(code)).await
   }
 }

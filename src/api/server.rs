@@ -2,6 +2,7 @@
 
 use std::sync::mpsc::SyncSender;
 
+use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -11,7 +12,8 @@ use warp::{body, path, post, Filter};
 use warp::{reject, Rejection};
 
 use super::NodeRequest;
-use crate::hvm::{self, Name, name_to_u128};
+use crate::api::HexStatement;
+use crate::hvm::{self, name_to_u128, Name, StatementErr, StatementInfo};
 use crate::util::U256;
 
 // Util
@@ -38,6 +40,14 @@ where
 {
   // let json_body = json!({ "status": "ok", "data": data });
   warp::reply::json(&data)
+}
+
+fn json_body<T>() -> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone
+where
+  T: DeserializeOwned + Send,
+{
+  // When accepting a body, we want a JSON body
+  warp::body::json()
 }
 
 // HVM
@@ -67,16 +77,35 @@ impl reject::Reject for InvalidParameter {}
 // API
 // ===
 
-async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+#[derive(Debug)]
+pub enum Error {
+  NotFound,
+}
+
+impl warp::reject::Reject for Error {}
+
+async fn handle_rejection(
+  err: Rejection,
+) -> Result<impl Reply, std::convert::Infallible> {
   if err.is_not_found() {
     Ok(reply::with_status("NOT_FOUND".into(), StatusCode::NOT_FOUND))
+  } else if let Some(e) = err.find::<Error>() {
+    match e {
+      // On rejection we force this custom branch, not err.is_not_foun()
+      Error::NotFound => {
+        Ok(reply::with_status("NOT_FOUND".into(), StatusCode::NOT_FOUND))
+      }
+    }
   } else if let Some(e) = err.find::<InvalidParameter>() {
     let name = e.name.as_ref().map(|n| format!(" '{}'", n)).unwrap_or_default();
-    let msg = format!("Parameter{} is invalid: {}", name, e.message);
+    let msg = format!("parameter {} is invalid: {}", name, e.message);
     Ok(reply::with_status(msg, StatusCode::BAD_REQUEST))
   } else {
     eprintln!("unhandled rejection: {:?}", err);
-    Ok(reply::with_status("INTERNAL_SERVER_ERROR".into(), StatusCode::INTERNAL_SERVER_ERROR))
+    Ok(reply::with_status(
+      "INTERNAL_SERVER_ERROR".into(),
+      StatusCode::INTERNAL_SERVER_ERROR,
+    ))
   }
 }
 
@@ -91,7 +120,7 @@ pub fn http_api_loop(node_query_sender: SyncSender<NodeRequest>) {
 async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   async fn ask<T>(
     node_query_tx: SyncSender<NodeRequest>,
-    f: impl Fn(oneshot::Sender<T>) -> NodeRequest,
+    f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest,
   ) -> T {
     let (tx, rx) = oneshot::channel();
     let request = f(tx);
@@ -101,8 +130,6 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   }
 
   let root = warp::path::end().map(|| "UP");
-
-  // TODO: macro to wrap those clones
 
   let query_tx = node_query_sender.clone();
   let get_stats = path!("stats").then(move || {
@@ -117,7 +144,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let get_count_stats = path!("count").then(move || {
     let query_tx = query_tx.clone();
     async move {
-      let count_stats = ask(query_tx, |tx| NodeRequest::GetCountStats { tx }).await;
+      let count_stats =
+        ask(query_tx, |tx| NodeRequest::GetCountStats { tx }).await;
       ok_json(count_stats)
     }
   });
@@ -129,7 +157,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     let query_tx = query_tx.clone();
     async move {
       let range = (-10, -1);
-      let blocks = ask(query_tx, |tx| NodeRequest::GetBlocks { range, tx }).await;
+      let blocks =
+        ask(query_tx, |tx| NodeRequest::GetBlocks { range, tx }).await;
       ok_json(blocks)
     }
   });
@@ -142,12 +171,14 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
         let hash_hex = hash_hex.strip_prefix("0x").unwrap_or(&hash_hex);
         match hex_to_u256(hash_hex) {
           Ok(hash) => {
-            let block = ask(query_tx, |tx| NodeRequest::GetBlock { hash, tx }).await;
+            let block =
+              ask(query_tx, |tx| NodeRequest::GetBlock { hash, tx }).await;
             Ok(block)
           }
-          Err(err) => {
-            Err(reject::custom(InvalidParameter::from(format!("Invalid block hash: '{}'", err))))
-          }
+          Err(err) => Err(reject::custom(InvalidParameter::from(format!(
+            "Invalid block hash: '{}'",
+            err
+          )))),
         }
       }
     })
@@ -164,15 +195,17 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let get_functions = path!("functions").then(move || {
     let query_tx = query_tx.clone();
     async move {
-      let functions = ask(query_tx, |tx| NodeRequest::GetFunctions { tx }).await;
-      let functions: Vec<u128> = functions.into_iter().map(|x| x as u128).collect();
+      let functions =
+        ask(query_tx, |tx| NodeRequest::GetFunctions { tx }).await;
+      let functions: Vec<u128> =
+        functions.into_iter().map(|x| x as u128).collect();
       let functions = u128_names_to_strings(&functions);
       ok_json(functions)
     }
   });
 
-  let get_function_base =
-    path!("functions" / String / ..).and_then(move |name_txt: String| async move {
+  let get_function_base = path!("functions" / String / ..).and_then(
+    move |name_txt: String| async move {
       match name_to_u128(&name_txt) {
         Ok(name) => Ok(name),
         Err(err) => {
@@ -180,99 +213,154 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
           Err(reject::custom(InvalidParameter::from(msg)))
         }
       }
+    },
+  );
+
+  let query_tx = node_query_sender.clone();
+  let get_function =
+    get_function_base.and(path!()).and_then(move |name: Name| {
+      let query_tx = query_tx.clone();
+      async move {
+        let function =
+          ask(query_tx, |tx| NodeRequest::GetFunction { name, tx }).await;
+        if let Some(function) = function {
+          Ok(ok_json(function))
+        } else {
+          Err(Rejection::from(Error::NotFound))
+        }
+      }
     });
 
   let query_tx = node_query_sender.clone();
-  let get_function = get_function_base.and(path!()).and_then(move |name: Name| {
-    let query_tx = query_tx.clone();
-    async move {
-      let function = ask(query_tx, |tx| NodeRequest::GetFunction { name, tx }).await;
-      if let Some(function) = function {
-        Ok(ok_json(function))
-      } else {
-        Err(reject::not_found())
+  let get_function_state =
+    get_function_base.and(path!("state")).and_then(move |name: Name| {
+      let query_tx = query_tx.clone();
+      async move {
+        let state =
+          ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;
+        if let Some(state) = state {
+          Ok(ok_json(state))
+        } else {
+          Err(Rejection::from(Error::NotFound))
+        }
       }
-    }
-  });
-
-  let query_tx = node_query_sender.clone();
-  let get_function_state = get_function_base.and(path!("state")).and_then(move |name: Name| {
-    let query_tx = query_tx.clone();
-    async move {
-      let state = ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;
-      if let Some(state) = state {
-        Ok(ok_json(state))
-      } else {
-        Err(reject::not_found())
-      }
-    }
-  });
+    });
 
   let functions_router = get_functions //
     .or(get_function) //
     .or(get_function_state);
 
   // == Interact ==
+
   let interact_base = path!("code" / ..);
 
   let query_tx = node_query_sender.clone();
-  let interact_test = post().and(interact_base).and(path!("test")).and(body::bytes()).and_then(
-    move |code: warp::hyper::body::Bytes| {
-      let query_tx = query_tx.clone();
-      async move {
-        let code = String::from_utf8(code.to_vec());
-        if let Ok(code) = code {
-          let res = ask(query_tx, |tx| NodeRequest::TestCode { code: code.clone(), tx }).await;
-          Ok(ok_json(res))
-        } else {
-          Err(reject::custom(InvalidParameter::from("Invalid code".to_string())))
-        }
-      }
-    },
-  );
-
-  let query_tx = node_query_sender.clone();
-  let interact_send = post().and(interact_base).and(path!("send")).and(body::bytes()).and_then(
-    move |code: warp::hyper::body::Bytes| {
-      let query_tx = query_tx.clone();
-      async move {
-        let code = String::from_utf8(code.to_vec());
-        if let Ok(code) = code {
-          let res = ask(query_tx, |tx| NodeRequest::PostCode { code: code.clone(), tx }).await;
-          match res {
-            Ok(res) => Ok(ok_json(res)),
-            Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
+  let interact_test =
+    post().and(interact_base).and(path!("test")).and(body::bytes()).and_then(
+      move |code: warp::hyper::body::Bytes| {
+        let query_tx = query_tx.clone();
+        async move {
+          let code = String::from_utf8(code.to_vec());
+          if let Ok(code) = code {
+            let res = ask(query_tx, |tx| NodeRequest::TestCode {
+              code: code.clone(),
+              tx,
+            })
+            .await;
+            Ok(ok_json(res))
+          } else {
+            Err(reject::custom(InvalidParameter::from(
+              "Invalid code".to_string(),
+            )))
           }
-        } else {
-          Err(reject::custom(InvalidParameter::from("Invalid code".to_string())))
+        }
+      },
+    );
+
+  let query_tx = node_query_sender.clone();
+  let interact_send =
+    post().and(interact_base).and(path!("send")).and(body::bytes()).and_then(
+      move |code: warp::hyper::body::Bytes| {
+        let query_tx = query_tx.clone();
+        async move {
+          let code = String::from_utf8(code.to_vec());
+          if let Ok(code) = code {
+            let res = ask(query_tx, |tx| NodeRequest::PostCode {
+              code: code.clone(),
+              tx,
+            })
+            .await;
+            match res {
+              Ok(res) => Ok(ok_json(res)),
+              Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
+            }
+          } else {
+            Err(reject::custom(InvalidParameter::from(
+              "Invalid code".to_string(),
+            )))
+          }
+        }
+      },
+    );
+
+  let query_tx = node_query_sender.clone();
+  let interact_run = post().and(path!("run")).and(json_body()).and_then(
+    move |code: Vec<HexStatement>| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code: Vec<hvm::Statement> =
+          code.into_iter().map(|x| x.into()).collect();
+        let results = ask(query_tx, |tx| NodeRequest::Run { code, tx }).await;
+        // TODO: resulte type will be different
+        let result: Result<Vec<StatementInfo>, StatementErr> =
+          results.into_iter().collect();
+        match result {
+          Ok(res) => Ok(ok_json(res)),
+          Err(err) => Err(reject::custom(InvalidParameter::from(format!(
+            "failed to run statement: {}",
+            err.err
+          )))), // TODO: create specific error
         }
       }
     },
   );
 
   let query_tx = node_query_sender.clone();
-  let interact_run = path!("run" / String).and_then(move |hex: String| {
-    let query_tx = query_tx.clone();
-    async move {
-      let result = ask(query_tx, |tx| NodeRequest::Run { hex: hex.clone(), tx }).await;
-      match result {
-        Ok(res) => Ok(ok_json(format!("Result: {:?}", res))),
-        Err(_err) => {
-          Err(reject::custom(InvalidParameter::from("Failed to execute statement".to_string())))
-        } // TODO: create specific error
+  let interact_publish = post()
+    .and(path!("publish"))
+    .and(json_body())
+    .and_then(move |code: Vec<HexStatement>| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code: Vec<hvm::Statement> =
+          code.into_iter().map(|x| x.into()).collect();
+        let results =
+          ask(query_tx, |tx| NodeRequest::Publish { code, tx }).await;
+        let result: Result<Vec<()>, ()> = results.into_iter().collect();
+        match result {
+          Ok(res) => Ok(ok_json(res)),
+          Err(_) => Err(reject::custom(InvalidParameter::from(
+            "failed to publish statement".to_string(),
+          ))), // TODO: create specific error
+        }
       }
-    }
-  });
+    });
 
-  // TODO: post code endpoint
-
-  let interact_router = interact_test.or(interact_send).or(interact_run);
+  let interact_router =
+    interact_test.or(interact_send).or(interact_run).or(interact_publish);
 
   // ==
 
-  let app = root.or(get_stats).or(get_count_stats).or(blocks_router).or(functions_router).or(interact_router);
+  let app = root
+    .or(get_stats)
+    .or(get_count_stats)
+    .or(blocks_router)
+    .or(functions_router)
+    .or(interact_router);
   let app = app.recover(handle_rejection);
-  let app = app.map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
+  let app = app.map(|reply| {
+    warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")
+  });
 
   let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
   // let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();

@@ -5,19 +5,20 @@
 #![warn(clippy::style)]
 #![allow(clippy::let_and_return)]
 
-pub mod server;
 pub mod client;
+pub mod server;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
-use serde_with::DisplayFromStr;
+use serde_with::{serde_as, DisplayFromStr};
 use tokio::sync::oneshot;
 
 use crate::hvm;
 use crate::node;
+use crate::{bits, util};
 
 pub use crate::hvm::Name;
 
@@ -66,7 +67,7 @@ impl From<U256> for Hash {
 
 impl From<Hash> for U256 {
   fn from(hash: Hash) -> Self {
-      hash.value
+    hash.value
   }
 }
 
@@ -99,8 +100,54 @@ impl From<Hash> for String {
   }
 }
 
-// mod U256_ser_hex {
-//   use crate::util::U256;
+// HexStatement decorator for Statement
+// ------------------------------------
+
+/// Decorator for Statement that serializes it as hexadecimal string of the
+/// protocol's serialization format.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HexStatement(hvm::Statement);
+
+impl std::ops::Deref for HexStatement {
+  type Target = hvm::Statement;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl From<HexStatement> for hvm::Statement {
+  fn from(hex_statement: HexStatement) -> Self {
+    hex_statement.0 
+  }
+}
+
+impl From<hvm::Statement> for HexStatement {
+  fn from(statement: hvm::Statement) -> Self {
+    HexStatement(statement)
+  }
+}
+
+impl Display for HexStatement {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let bytes = util::bitvec_to_bytes(&bits::serialized_statement(self));
+    let hex = hex::encode(bytes);
+    write!(f, "{}", hex)
+  }
+}
+
+impl TryFrom<&str> for HexStatement {
+  type Error = String;
+  fn try_from(value: &str) -> Result<Self, Self::Error> {
+    let bytes = hex::decode(&value).map_err(|e| e.to_string())?;
+    let bits = util::bytes_to_bitvec(&bytes);
+    let stmt = bits::deserialize_statement(&bits, &mut 0, &mut HashMap::new())
+      .ok_or_else(|| format!("invalid Statement serialization: {}", value))?;
+    Ok(HexStatement(stmt))
+  }
+}
+
+// mod statement_ser_hex {
+//   use crate::hvm::Statement;
 //   use serde::{Deserializer, Serializer};
 //   type T = U256;
 //   pub fn serialize<S>(v: &T, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
@@ -118,7 +165,7 @@ impl From<Hash> for String {
 pub struct Stats {
   pub tick: u64,
   pub mana: u64,
-  pub size: u64
+  pub size: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -134,18 +181,16 @@ impl From<&node::Transaction> for String {
   }
 }
 
-use serde_with::serde_as;
-
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockRepr {
   #[serde(with = "u128_time_ser")]
   pub time: u128, // block timestamp
-  // #[serde_as(as = "serde_with::hex::Hex")] // TODO
   #[serde_as(as = "DisplayFromStr")]
-  pub meta: u128,         // block metadata
-  pub prev: Hash,         // previous block hash (32 bytes)
-  pub body: Vec<String>,  // block contents (list of statements)
+  // TODO: serialize as Hex / refactor to array
+  pub meta: u128, // block metadata
+  pub prev: Hash,        // previous block hash (32 bytes)
+  pub body: Vec<String>, // block contents (list of statements)
 }
 
 mod u128_time_ser {
@@ -169,10 +214,14 @@ mod u128_time_ser {
       E: de::Error,
     {
       let dt = DateTime::parse_from_rfc3339(v);
-      let dt = dt.map_err(|e| de::Error::custom(format!("Invalid timestamp '{}': {}.", v, e)))?;
+      let dt = dt.map_err(|e| {
+        de::Error::custom(format!("invalid timestamp '{}': {}", v, e))
+      })?;
       let st: time::SystemTime = dt.into();
       let epoc = st.duration_since(time::UNIX_EPOCH);
-      let epoc = epoc.map_err(|e| de::Error::custom(format!("Invalid epoch '{}': {}.", dt, e)))?;
+      let epoc = epoc.map_err(|e| {
+        de::Error::custom(format!("invalid epoch '{}': {}", dt, e))
+      })?;
       Ok(epoc.as_millis())
     }
   }
@@ -182,8 +231,11 @@ mod u128_time_ser {
     S: Serializer,
   {
     let epoc = *v as u64;
-    let st = time::SystemTime::UNIX_EPOCH.checked_add(time::Duration::from_micros(epoc));
-    let st = st.ok_or_else(|| ser::Error::custom(format!("Invalid time value: '{:?}'.", epoc)))?;
+    let st = time::SystemTime::UNIX_EPOCH
+      .checked_add(time::Duration::from_micros(epoc));
+    let st = st.ok_or_else(|| {
+      ser::Error::custom(format!("invalid time value '{}': ", epoc,))
+    })?;
     let dt: DateTime<Utc> = st.into();
     s.serialize_str(&dt.format("%+").to_string())
   }
@@ -199,7 +251,12 @@ impl From<&node::Block> for BlockRepr {
   fn from(block: &node::Block) -> Self {
     let transactions = node::extract_transactions(&block.body);
     let hexes = transactions.iter().map(|t| t.into());
-    BlockRepr { time: block.time, meta: block.meta, prev: block.prev.into(), body: hexes.collect() }
+    BlockRepr {
+      time: block.time,
+      meta: block.meta,
+      prev: block.prev.into(),
+      body: hexes.collect(),
+    }
   }
 }
 
@@ -247,19 +304,23 @@ pub enum NodeRequest {
     name: Name,
     tx: RequestAnswer<Option<hvm::Term>>,
   },
-  /// deprecated
+  /// DEPRECATED
   TestCode {
     code: String,
     tx: RequestAnswer<Vec<hvm::StatementResult>>,
   },
-  /// deprecated
+  /// DEPRECATED
   PostCode {
     code: String,
     tx: RequestAnswer<Result<(), String>>,
   },
   Run {
-    hex: String,
-    tx: RequestAnswer<hvm::StatementResult>,
+    code: Vec<hvm::Statement>,
+    tx: RequestAnswer<Vec<hvm::StatementResult>>,
+  },
+  Publish {
+    code: Vec<hvm::Statement>,
+    tx: RequestAnswer<Vec<Result<(),()>>>,
   },
 }
 
