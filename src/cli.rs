@@ -147,7 +147,22 @@ pub enum CLICommand {
     /// Outputs JSON machine readable output.
     json: bool,
   },
-  /// Start a Kindelia node.
+  /// Access node commands.
+  Node {
+    /// Which command run.
+    #[clap(subcommand)]
+    command: NodeCommand,
+  },
+  /// Generate auto-completion for a shell.
+  Completion {
+    /// The shell to generate completion for.
+    shell: String,
+  },
+}
+
+#[derive(Subcommand)]
+pub enum NodeCommand {
+  Init,
   Start {
     /// Path to store the node's data in
     #[clap(short, long)]
@@ -158,11 +173,6 @@ pub enum CLICommand {
     /// Mine blocks
     #[clap(long)]
     mine: bool,
-  },
-  /// Generate auto-completion for a shell.
-  Completion {
-    /// The shell to generate completion for.
-    shell: String,
   },
 }
 
@@ -237,14 +247,22 @@ pub enum GetCtKind {
   Arity,
 }
 
-struct ConfigValueOption<'a, T: Clone, F: Fn() -> T> {
+struct ConfigValueOption<'a, T, F>
+where
+  T: Clone + Sized,
+  F: Fn() -> Result<T, String>,
+{
   value: Option<T>,
   env: Option<&'a str>,
   config: ConfigFileOptions<'a>,
   default: F,
 }
 
-impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
+impl<'a, T, F> ConfigValueOption<'a, T, F>
+where
+  T: Clone + Sized,
+  F: Fn() -> Result<T, String>,
+{
   /// Resolve config value.
   ///
   /// Priority is:
@@ -254,7 +272,7 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
   /// 4. Default value
   fn get_value_config(self) -> Result<T, String>
   where
-    T: ArgumentFrom<String> + serde::Deserialize<'a>,
+    T: ArgumentFrom<String> + ArgumentFrom<toml::Value>,
   {
     if let Some(value) = self.value {
       // read from var
@@ -264,19 +282,26 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
       T::arg_from(env_value)
     } else if let ConfigFileOptions {
       toml: Some(toml_value),
-      prop: Some(prop),
+      prop: Some(prop_path),
     } = self.config
     {
       // if config file is set and valid, read from config file
       // doing this way because of issue #469 toml-rs
-      let value = toml_value
-        .get(&prop)
-        .ok_or(format!("Could not found prop {} in config file.", prop))?;
-      value.clone().try_into::<T>().map_err(|_| {
+      let props: Vec<_> = prop_path.split('.').collect();
+      let mut value = toml_value
+        .get(&props[0])
+        .ok_or(format!("Could not found prop {} in config file.", prop_path))?;
+      for prop in &props[1..] {
+        value = value.get(&prop).ok_or(format!(
+          "Could not found prop {} in config file.",
+          prop_path
+        ))?;
+      }
+      T::arg_from(value.clone()).map_err(|_| {
         format!("Could not convert value {} into desired type.", value)
       })
     } else {
-      Ok((self.default)())
+      (self.default)()
     }
   }
 }
@@ -289,17 +314,24 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
 /// Parse Cli arguments and do an action
 pub fn run_cli() -> Result<(), String> {
   let parsed = Cli::parse();
-  let default_kindelia_path = || dirs::home_dir().unwrap().join(".kindelia");
+  let default_kindelia_path = || {
+    let home_dir = dirs::home_dir().ok_or("Could not find $HOME")?;
+    Ok(home_dir.join(".kindelia"))
+  };
+
+  let default_config_path = || {
+    let kindelia_path = default_kindelia_path()?;
+    Ok(kindelia_path.join("kindelia.toml"))
+  };
 
   // get possible config path and content
   let config_path = ConfigValueOption {
     value: parsed.config,
     env: Some("KINDELIA_CONFIG"),
     config: ConfigFileOptions::none(),
-    default: || PathBuf::from_str("config.toml").expect("config.toml"),
+    default: default_config_path,
   }
   .get_value_config()?;
-  let config = read_toml(&config_path);
 
   match parsed.command {
     CLICommand::Test { file } => {
@@ -334,38 +366,66 @@ pub fn run_cli() -> Result<(), String> {
       let prom = get_info(kind, json);
       run_async_blocking(prom)
     }
-    CLICommand::Start { kindelia_path, init_peers, mine } => {
-      // TODO: refactor config resolution out of command handling (how?)
+    CLICommand::Node { command } => {
+      match command {
+        NodeCommand::Start { kindelia_path, init_peers, mine } => {
+          // TODO: refactor config resolution out of command handling (how?)
 
-      // get arguments from cli, env or config
-      let path = ConfigValueOption {
-        value: kindelia_path,
-        env: Some("KINDELIA_PATH"),
-        config: ConfigFileOptions::new(&config, "path"),
-        default: default_kindelia_path,
+          let config = read_toml(&config_path).ok_or(
+            format!("No config file was found in {}. You can create a default one using `kindelia node init`", config_path.display())
+          )?;
+          let config = Some(config);
+
+          // get arguments from cli, env or config
+          let path = ConfigValueOption {
+            value: kindelia_path,
+            env: Some("KINDELIA_PATH"),
+            config: ConfigFileOptions::new(&config, "node.data.dir"),
+            default: default_kindelia_path,
+          }
+          .get_value_config()?;
+
+          let init_peers = ConfigValueOption {
+            value: init_peers,
+            env: Some("KINDELIA_INIT_PEERS"),
+            config: ConfigFileOptions::new(
+              &config,
+              "node.network.initial_peers",
+            ),
+            default: || Ok(Vec::new()),
+          }
+          .get_value_config()?;
+
+          let mine = ConfigValueOption {
+            value: Some(mine), // TODO: fix boolean resolution
+            env: Some("KINDELIA_MINE"),
+            config: ConfigFileOptions::new(&config, "node.data.mine"),
+            default: || Ok(true),
+          }
+          .get_value_config()?;
+
+          // start node
+          start(path, init_peers, mine);
+
+          Ok(())
+        }
+        NodeCommand::Init => {
+          println!(
+            "Writing default configuration in '$HOME$/.kindelia/kindelia.toml'"
+          );
+          let file_path = default_config_path()?;
+          let dir_path = file_path.parent().ok_or_else(|| {
+            "Error trying to create path for '$HOME$/.kindelia'".to_string()
+          })?;
+          let content = include_str!("../default.toml");
+          std::fs::create_dir_all(&dir_path).map_err(|_| {
+            "Could not create '$HOME$/.kindelia' directory".to_string()
+          })?;
+          std::fs::write(file_path, content).map_err(|_| {
+            "Could not save in $HOME$/.kindelia/kindelia.toml".to_string()
+          })
+        }
       }
-      .get_value_config()?;
-
-      let init_peers = ConfigValueOption {
-        value: init_peers,
-        env: Some("KINDELIA_INIT_PEERS"),
-        config: ConfigFileOptions::new(&config, "init_peers"),
-        default: Vec::new,
-      }
-      .get_value_config()?;
-
-      let mine = ConfigValueOption {
-        value: Some(mine), // TODO: fix boolean resolution
-        env: Some("KINDELIA_MINE"),
-        config: ConfigFileOptions::new(&config, "mine"),
-        default: || false,
-      }
-      .get_value_config()?;
-
-      // start node
-      start(path, init_peers, mine);
-
-      Ok(())
     }
     CLICommand::Completion { .. } => todo!(),
   }
@@ -534,9 +594,9 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
     init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
   let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
 
-  dbg!(init_peers.clone());
-  dbg!(kindelia_path.clone());
-  dbg!(mine);
+  // dbg!(init_peers.clone());
+  // dbg!(kindelia_path.clone());
+  // dbg!(mine);
 
   // Reads the file contents
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
@@ -677,6 +737,38 @@ impl ArgumentFrom<String> for bool {
 
 impl ArgumentFrom<String> for PathBuf {
   fn arg_from(t: String) -> Result<Self, String> {
-    PathBuf::from_str(&t).map_err(|_| format!("Invalid path: {}", t))
+    if let Some(path) = t.strip_prefix("~/") {
+      let home_dir =
+        dirs::home_dir().ok_or("Could not find $HOME$ directory.")?;
+      Ok(home_dir.join(path))
+    } else {
+      PathBuf::from_str(&t).map_err(|_| format!("Invalid path: {}", t))
+    }
+  }
+}
+
+impl ArgumentFrom<toml::Value> for PathBuf {
+  fn arg_from(value: toml::Value) -> Result<Self, String> {
+    let t: String =
+      value.try_into().map_err(|_| "Could not convert value to PahtBuf")?;
+    PathBuf::arg_from(t)
+  }
+}
+
+impl ArgumentFrom<toml::Value> for String {
+  fn arg_from(t: toml::Value) -> Result<Self, String> {
+    t.try_into().map_err(|_| "Could not convert value into String".to_string())
+  }
+}
+
+impl ArgumentFrom<toml::Value> for Vec<String> {
+  fn arg_from(t: toml::Value) -> Result<Self, String> {
+    t.try_into().map_err(|_| "Could not convert value into array".to_string())
+  }
+}
+
+impl ArgumentFrom<toml::Value> for bool {
+  fn arg_from(t: toml::Value) -> Result<Self, String> {
+    t.as_bool().ok_or(format!("Invalid boolean value: {}", t))
   }
 }

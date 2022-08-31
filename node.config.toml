@@ -1,3 +1,0 @@
-path = "~/.kindelia-custom"
-init_peers = ["127.0.0.1:42000", "127.0.0.1:42001"]
-mine = true
