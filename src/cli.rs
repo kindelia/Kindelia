@@ -1,7 +1,6 @@
 // TODO: `node clean` CLI command
 // TODO: refactor `space` counters to reflect nodes / cells instead of bits
 
-use core::panic;
 use std::path::Path;
 use std::{path::PathBuf, str::FromStr, thread};
 
@@ -253,13 +252,13 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
   /// 2. Environment variable
   /// 3. Config file
   /// 4. Default value
-  fn get_value_config(self) -> T
+  fn get_value_config(self) -> Result<T, String>
   where
     T: ArgumentFrom<String> + serde::Deserialize<'a>,
   {
     if let Some(value) = self.value {
       // read from var
-      value
+      Ok(value)
     } else if let Some(Ok(env_value)) = self.env.map(std::env::var) {
       // if env var is set and valid, read from env var
       T::arg_from(env_value)
@@ -270,9 +269,14 @@ impl<'a, T: Clone, F: Fn() -> T> ConfigValueOption<'a, T, F> {
     {
       // if config file is set and valid, read from config file
       // doing this way because of issue #469 toml-rs
-      toml_value.get(prop).unwrap().clone().try_into::<T>().unwrap()
+      let value = toml_value
+        .get(&prop)
+        .ok_or(format!("Could not found prop {} in config file.", prop))?;
+      value.clone().try_into::<T>().map_err(|_| {
+        format!("Could not convert value {} into desired type.", value)
+      })
     } else {
-      (self.default)()
+      Ok((self.default)())
     }
   }
 }
@@ -294,7 +298,7 @@ pub fn run_cli() -> Result<(), String> {
     config: ConfigFileOptions::none(),
     default: || PathBuf::from_str("config.toml").expect("config.toml"),
   }
-  .get_value_config();
+  .get_value_config()?;
   let config = read_toml(&config_path);
 
   match parsed.command {
@@ -307,12 +311,12 @@ pub fn run_cli() -> Result<(), String> {
       Ok(())
     }
     CLICommand::Deserialize { file } => {
-      let content = get_value_stdin::<String>(file);
+      let content = get_value_stdin::<String>(file)?;
       deserialize(&content)?;
       Ok(())
     }
     CLICommand::Sign { file, skey } => {
-      let content = get_value_stdin::<String>(file);
+      let content = get_value_stdin::<String>(file)?;
       sign(&content, &skey)?;
       Ok(())
     }
@@ -323,7 +327,7 @@ pub fn run_cli() -> Result<(), String> {
       todo!()
     }
     CLICommand::PostUdp { file, host } => {
-      let content = get_value_stdin::<String>(file);
+      let content = get_value_stdin::<String>(file)?;
       post_udp(&content, host)
     }
     CLICommand::Get { kind, json } => {
@@ -340,7 +344,7 @@ pub fn run_cli() -> Result<(), String> {
         config: ConfigFileOptions::new(&config, "path"),
         default: default_kindelia_path,
       }
-      .get_value_config();
+      .get_value_config()?;
 
       let init_peers = ConfigValueOption {
         value: init_peers,
@@ -348,7 +352,7 @@ pub fn run_cli() -> Result<(), String> {
         config: ConfigFileOptions::new(&config, "init_peers"),
         default: Vec::new,
       }
-      .get_value_config();
+      .get_value_config()?;
 
       let mine = ConfigValueOption {
         value: Some(mine), // TODO: fix boolean resolution
@@ -356,7 +360,7 @@ pub fn run_cli() -> Result<(), String> {
         config: ConfigFileOptions::new(&config, "mine"),
         default: || false,
       }
-      .get_value_config();
+      .get_value_config()?;
 
       // start node
       start(path, init_peers, mine);
@@ -609,17 +613,21 @@ fn get_statement(hex: &str) -> Result<Statement, String> {
     .ok_or(format!("Error when trying to deserialize {}", hex))
 }
 
-fn get_value_stdin<T: ArgumentFrom<String>>(file: Option<PathBuf>) -> T {
+fn get_value_stdin<T: ArgumentFrom<String>>(
+  file: Option<PathBuf>,
+) -> Result<T, String> {
   if let Some(file) = file {
     // read from file
-    T::arg_from(std::fs::read_to_string(file).unwrap()) // TODO: handle panic
+    let content = std::fs::read_to_string(&file)
+      .map_err(|_| format!("Cannot read from {} file", file.display()))?;
+    T::arg_from(content)
   } else {
     // read from stdin
     let mut input = String::new();
     if std::io::stdin().read_line(&mut input).is_ok() {
       T::arg_from(input.trim().to_string())
     } else {
-      panic!("Could not read file path or stdin"); // TODO: handle panic
+      Err("Could not read file path or stdin".into())
     }
   }
 }
@@ -639,36 +647,36 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
 /// As like From, the conversion must be perfect.
 ///
 /// TODO: should be like `TryFrom`, not `From`. see below.
-trait ArgumentFrom<T> {
-  fn arg_from(t: T) -> Self;
+pub trait ArgumentFrom<T>: Sized {
+  fn arg_from(value: T) -> Result<Self, String>;
 }
 
 impl ArgumentFrom<String> for String {
-  fn arg_from(t: String) -> Self {
-    t
+  fn arg_from(t: String) -> Result<Self, String> {
+    Ok(t)
   }
 }
 
 impl ArgumentFrom<String> for Vec<String> {
-  fn arg_from(t: String) -> Self {
-    t.split(',').map(|x| x.to_string()).collect()
+  fn arg_from(t: String) -> Result<Self, String> {
+    Ok(t.split(',').map(|x| x.to_string()).collect())
   }
 }
 
 impl ArgumentFrom<String> for bool {
-  fn arg_from(t: String) -> Self {
+  fn arg_from(t: String) -> Result<Self, String> {
     if t == "true" {
-      true
+      Ok(true)
     } else if t == "false" {
-      false
+      Ok(false)
     } else {
-      panic!("Invalid boolean value: {}", t); // TODO: should never panic on invalid external input
+      Err(format!("Invalid boolean value: {}", t))
     }
   }
 }
 
 impl ArgumentFrom<String> for PathBuf {
-  fn arg_from(t: String) -> Self {
-    PathBuf::from_str(&t).expect("Invalid path") // TODO: idem
+  fn arg_from(t: String) -> Result<Self, String> {
+    PathBuf::from_str(&t).map_err(|_| format!("Invalid path: {}", t))
   }
 }
