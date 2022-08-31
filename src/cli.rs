@@ -88,8 +88,12 @@ kindelia node clean [-f]       // asks confirmation
 pub struct Cli {
   #[clap(subcommand)]
   command: CLICommand,
+  #[clap(long)]
   /// Path to config file.
   config: Option<PathBuf>,
+  /// Url to server host
+  #[clap(long)]
+  host_url: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -333,6 +337,14 @@ pub fn run_cli() -> Result<(), String> {
   }
   .get_value_config()?;
 
+  let host_url = ConfigValueOption {
+    value: parsed.host_url,
+    env: Some("KINDELIA_URL"),
+    config: ConfigFileOptions::none(),
+    default: || Ok("http://localhost:8000".to_string()),
+  }
+  .get_value_config()?;
+
   match parsed.command {
     CLICommand::Test { file } => {
       run_file(&file);
@@ -363,7 +375,7 @@ pub fn run_cli() -> Result<(), String> {
       post_udp(&content, host)
     }
     CLICommand::Get { kind, json } => {
-      let prom = get_info(kind, json);
+      let prom = get_info(kind, json, &host_url);
       run_async_blocking(prom)
     }
     CLICommand::Node { command } => {
@@ -442,10 +454,13 @@ where
 // Main Actions
 // ============
 
-pub async fn get_info(kind: GetKind, json: bool) -> Result<(), String> {
-  // TODO: API URL from clap/config (e.g. --api on top level + [api.url])
-  let client = api_client::ApiClient::new("http://localhost:8000", None)
-    .map_err(|e| e.to_string())?;
+pub async fn get_info(
+  kind: GetKind,
+  json: bool,
+  host_url: &str,
+) -> Result<(), String> {
+  let client =
+    api_client::ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
   match kind {
     GetKind::Fun { name, stat } => match stat {
       GetFnKind::Code => {
