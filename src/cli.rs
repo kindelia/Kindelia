@@ -594,9 +594,9 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
     init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
   let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
 
-  dbg!(init_peers.clone());
-  dbg!(kindelia_path.clone());
-  dbg!(mine);
+  // dbg!(init_peers.clone());
+  // dbg!(kindelia_path.clone());
+  // dbg!(mine);
 
   // Reads the file contents
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
