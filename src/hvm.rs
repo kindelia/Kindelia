@@ -1524,6 +1524,15 @@ impl Heap {
     self.delete_buffer(self.uuid, "stat", path)?;
     return Ok(());
   }
+  pub fn get_fn_count(&self) -> u64 {
+    return self.file.funcs.len() as u64
+  }
+  pub fn get_ns_count(&self) -> u64 {
+    return self.ownr.ownrs.len() as u64
+  }
+  pub fn get_ct_count(&self) -> u64 {
+    return self.arit.arits.len() as u64 - self.get_fn_count()
+  }
 }
 
 pub fn init_heap() -> Heap {

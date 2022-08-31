@@ -121,6 +121,13 @@ pub struct Stats {
   pub size: u64
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CountStats {
+  pub fn_count: u64,
+  pub ct_count: u64,
+  pub ns_count: u64,
+}
+
 impl From<&node::Transaction> for String {
   fn from(transaction: &node::Transaction) -> Self {
     hex::encode(&transaction.data)
@@ -217,6 +224,9 @@ type RequestAnswer<T> = oneshot::Sender<T>;
 pub enum NodeRequest {
   GetStats {
     tx: RequestAnswer<Stats>,
+  },
+  GetCountStats {
+    tx: RequestAnswer<CountStats>,
   },
   GetBlock {
     hash: U256,
