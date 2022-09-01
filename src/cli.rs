@@ -194,7 +194,7 @@ pub enum NodeCommand {
     kindelia_path: Option<PathBuf>,
     /// Adds testnet nodes as initial peers
     #[clap(long)]
-    init_peers: Option<Vec<String>>,
+    initial_peers: Option<Vec<String>>,
     /// Mine blocks
     #[clap(long)]
     mine: bool,
@@ -232,18 +232,20 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetCtKind,
   },
-  /// Get the runtime tick.
+  // TODO: groups these commands under `kindelia get stats
+  /// Get the tick (tip block height).
   Tick,
-  /// Get the runtime mana.
+  /// Get the used mana.
   Mana,
-  /// Get the runtime space.
-  Size,
+  /// Get used space number.
+  // TODO: we should measure this as slots/nodes/cells, not bits
+  Space,
   /// Get the number of functions.
-  FnCount,
+  FunCount,
   /// Get the number of namespaces.
-  NsCount,
+  RegCount,
   /// Get the number of constructors.
-  CtCount,
+  CtrCount,
 }
 
 #[derive(Subcommand)]
@@ -409,9 +411,10 @@ pub fn run_cli() -> Result<(), String> {
     }
     CLICommand::Node { command } => {
       match command {
-        NodeCommand::Start { kindelia_path, init_peers, mine } => {
+        NodeCommand::Start { kindelia_path, initial_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
+          // TODO: create the file automatically, warn in color and sleep ~1 sec
           let config = read_toml(&config_path).ok_or(format!(
             "No config file was found in '{}'. \
              You can create a default one running `kindelia node init`",
@@ -428,8 +431,8 @@ pub fn run_cli() -> Result<(), String> {
           }
           .get_value_config()?;
 
-          let init_peers = ConfigValueOption {
-            value: init_peers,
+          let initial_peers = ConfigValueOption {
+            value: initial_peers,
             env: Some("KINDELIA_INIT_PEERS"),
             config: ConfigFileOptions::new(
               &config,
@@ -443,12 +446,12 @@ pub fn run_cli() -> Result<(), String> {
             value: Some(mine), // TODO: fix boolean resolution
             env: Some("KINDELIA_MINE"),
             config: ConfigFileOptions::new(&config, "node.data.mine"),
-            default: || Ok(true),
+            default: || Ok(false),
           }
           .get_value_config()?;
 
           // start node
-          start(path, init_peers, mine);
+          start(path, initial_peers, mine);
 
           Ok(())
         }
@@ -530,22 +533,22 @@ pub async fn get_info(
       println!("{}", stats.mana);
       Ok(())
     }
-    GetKind::Size => {
+    GetKind::Space => {
       let stats = client.get_stats().await?;
       println!("{}", stats.size);
       Ok(())
     }
-    GetKind::FnCount => {
+    GetKind::FunCount => {
       let stats_count = client.count_stats().await?;
       println!("{}", stats_count.fn_count);
       Ok(())
     }
-    GetKind::NsCount => {
+    GetKind::RegCount => {
       let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ns_count);
       Ok(())
     }
-    GetKind::CtCount => {
+    GetKind::CtrCount => {
       let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ct_count);
       Ok(())
