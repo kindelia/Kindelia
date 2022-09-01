@@ -388,7 +388,6 @@ pub fn run_cli() -> Result<(), String> {
     }
     CLICommand::RunRemote { file, hex } => {
       // TODO: client timeout
-      // TODO: Displat for StatementInfo + print each in one line
       let results = run_on_remote!(file, hex, run_code)?;
       for result in results {
         println!("{}", result);
