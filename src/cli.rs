@@ -493,7 +493,7 @@ pub async fn get_info(
     GetKind::Fun { name, stat } => match stat {
       GetFnKind::Code => {
         let func_info =
-          client.get_function(name).await.map_err(|e| e.to_string())?;
+          client.get_function(name).await?;
         if json {
           println!("{}", serde_json::to_string(&func_info).unwrap());
         } else {
@@ -511,7 +511,7 @@ pub async fn get_info(
       }
       GetFnKind::State => {
         let state =
-          client.get_function_state(name).await.map_err(|e| e.to_string())?;
+          client.get_function_state(name).await?;
         if json {
           println!("{}", serde_json::to_string_pretty(&state).unwrap());
         } else {
@@ -525,35 +525,35 @@ pub async fn get_info(
     GetKind::Block { hash: _ } => todo!(),
     GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Tick => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.tick);
       Ok(())
     }
     GetKind::Mana => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.mana);
       Ok(())
     }
     GetKind::Size => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.size);
       Ok(())
     }
     GetKind::FnCount => {
       let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+        client.count_stats().await?;
       println!("{}", stats_count.fn_count);
       Ok(())
     }
     GetKind::NsCount => {
       let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+        client.count_stats().await?;
       println!("{}", stats_count.ns_count);
       Ok(())
     }
     GetKind::CtCount => {
       let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+        client.count_stats().await?;
       println!("{}", stats_count.ct_count);
       Ok(())
     }
