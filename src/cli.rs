@@ -79,6 +79,23 @@ kindelia account ...
 
 */
 
+// Macros
+// ==================
+
+macro_rules! run_on_remote {
+  ($file:expr, $hex:expr, $F:ident) => {
+    {
+      let code = from_file_or_stdin::<String>($file)?;
+      let client = api_client::ApiClient::new("http://localhost:8000", None)
+        .map_err(|e| e.to_string())?;
+      let stmts =
+        if $hex { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
+      let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
+      run_async_blocking(client.$F(stmts))
+    }
+  };
+}
+
 // Clap CLI definitions
 // ====================
 
@@ -125,13 +142,19 @@ pub enum CLICommand {
   },
   /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
   RunRemote {
-    /// Input file
+    /// Input file.
     file: Option<PathBuf>,
+    /// In case the code is in hex.
+    #[clap(long)]
+    hex: bool,
   },
   /// Post a Kindelia code file.
   Publish {
     /// The path to the file to post.
     file: Option<PathBuf>,
+    /// In case the code is in hex.
+    #[clap(long)]
+    hex: bool,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
@@ -363,33 +386,17 @@ pub fn run_cli() -> Result<(), String> {
       let code: String = from_file_or_stdin(file)?;
       sign_code(&code, &skey)
     }
-    CLICommand::RunRemote { file } => {
-      // TODO: extract code repetition with branch below
-      // TODO: `--hex` flag to read statement hexes instead of code
-      let code = from_file_or_stdin::<String>(file)?;
-      let stmts = parse_code(&code)?;
-      let stmts: Vec<HexStatement> =
-        stmts.into_iter().map(|s| s.into()).collect();
+    CLICommand::RunRemote { file, hex } => {
       // TODO: client timeout
-      let client = api_client::ApiClient::new("http://localhost:8000", None) // TODO: timeout
-        .map_err(|e| e.to_string())?;
-      let res = run_async_blocking(client.run_code(stmts));
-      let val = res?;
       // TODO: Displat for StatementInfo + print each in one line
-      println!("{:?}", val);
+      let res = run_on_remote!(file, hex, run_code)?;
+      println!("{:?}", res);
       Ok(())
     }
-    CLICommand::Publish { file } => {
-      let code = from_file_or_stdin::<String>(file)?;
-      let client = api_client::ApiClient::new("http://localhost:8000", None)
-        .map_err(|e| e.to_string())?;
-      let stmts = parse_code(&code)?;
-      let stmts: Vec<HexStatement> =
-        stmts.into_iter().map(|s| s.into()).collect();
+    CLICommand::Publish { file, hex } => {
       // TODO: implement on server. return value will be different from Run-Remote, like "this transaction was included"
-      let res = run_async_blocking(client.publish_code(stmts));
-      let val = res?;
-      println!("{:?}", val);
+      let res = run_on_remote!(file, hex, publish_code)?;
+      println!("{:?}", res);
       Ok(())
     }
     CLICommand::PostUdp { file, host } => {
@@ -745,8 +752,6 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
 /// It is equal to standard From trait, but
 /// it has the From<String> for Vec<String> implementation.
 /// As like From, the conversion must be perfect.
-///
-/// TODO: should be like `TryFrom`, not `From`. see below.
 pub trait ArgumentFrom<T>: Sized {
   fn arg_from(value: T) -> Result<Self, String>;
 }
