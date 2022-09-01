@@ -1,6 +1,5 @@
 // TODO: `node clean` CLI command
 
-use std::path::Path;
 use std::{path::PathBuf, str::FromStr, thread};
 
 use clap::{Parser, Subcommand};
@@ -80,6 +79,22 @@ kindelia account ...
 
 */
 
+// Macros
+// ==================
+
+macro_rules! run_on_remote {
+  ($file:expr, $hex:expr, $F:ident) => {{
+    let code = from_file_or_stdin::<String>($file)?;
+    let client = api_client::ApiClient::new("http://localhost:8000", None)
+      .map_err(|e| e.to_string())?;
+    let stmts =
+      if $hex { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
+    let stmts: Vec<HexStatement> =
+      stmts.into_iter().map(|s| s.into()).collect();
+    run_async_blocking(client.$F(stmts))
+  }};
+}
+
 // Clap CLI definitions
 // ====================
 
@@ -101,12 +116,15 @@ pub enum CLICommand {
   /// Test a Kindelia code file (.kdl), running locally.
   Test {
     /// The path to the file to test.
-    file: PathBuf,
+    file: Option<PathBuf>,
+    /// Whether to consider size and mana in the execution.
+    #[clap(long)]
+    debug: bool,
   },
   /// Serialize a code file.
   Serialize {
     /// The path to the file to serialize.
-    file: PathBuf,
+    file: Option<PathBuf>,
   },
   /// Deserialize a code file.
   Deserialize {
@@ -123,13 +141,19 @@ pub enum CLICommand {
   },
   /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
   RunRemote {
-    /// Input file
+    /// Input file.
     file: Option<PathBuf>,
+    /// In case the code is in hex.
+    #[clap(long)]
+    hex: bool,
   },
   /// Post a Kindelia code file.
   Publish {
     /// The path to the file to post.
     file: Option<PathBuf>,
+    /// In case the code is in hex.
+    #[clap(long)]
+    hex: bool,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
@@ -343,49 +367,36 @@ pub fn run_cli() -> Result<(), String> {
   .get_value_config()?;
 
   match parsed.command {
-    CLICommand::Test { file } => {
-      test_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
+    CLICommand::Test { file, debug } => {
+      let code: String = from_file_or_stdin(file)?;
+      test_code(&code, debug);
       Ok(())
     }
     CLICommand::Serialize { file } => {
-      serialize_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
+      let code: String = from_file_or_stdin(file)?;
+      serialize_code(&code);
       Ok(())
     }
     CLICommand::Deserialize { file } => {
-      let content = from_file_or_stdin::<String>(file)?;
-      deserialize_code(&content)
+      let code: String = from_file_or_stdin(file)?;
+      deserialize_code(&code)
     }
     CLICommand::Sign { file, skey } => {
-      let content = from_file_or_stdin::<String>(file)?;
-      sign_code(&content, &skey)
+      let code: String = from_file_or_stdin(file)?;
+      sign_code(&code, &skey)
     }
-    CLICommand::RunRemote { file } => {
-      // TODO: extract code repetition with branch below
-      // TODO: `--hex` flag to read statement hexes instead of code
-      let code = from_file_or_stdin::<String>(file)?;
-      let stmts = parse_code(&code)?;
-      let stmts: Vec<HexStatement> =
-        stmts.into_iter().map(|s| s.into()).collect();
+    CLICommand::RunRemote { file, hex } => {
       // TODO: client timeout
-      let client = api_client::ApiClient::new("http://localhost:8000", None) // TODO: timeout
-        .map_err(|e| e.to_string())?;
-      let res = run_async_blocking(client.run_code(stmts));
-      let val = res?;
-      // TODO: Displat for StatementInfo + print each in one line
-      println!("{:?}", val);
+      let results = run_on_remote!(file, hex, run_code)?;
+      for result in results {
+        println!("{}", result);
+      }
       Ok(())
     }
-    CLICommand::Publish { file } => {
-      let code = from_file_or_stdin::<String>(file)?;
-      let client = api_client::ApiClient::new("http://localhost:8000", None)
-        .map_err(|e| e.to_string())?;
-      let stmts = parse_code(&code)?;
-      let stmts: Vec<HexStatement> =
-        stmts.into_iter().map(|s| s.into()).collect();
+    CLICommand::Publish { file, hex } => {
       // TODO: implement on server. return value will be different from Run-Remote, like "this transaction was included"
-      let res = run_async_blocking(client.publish_code(stmts));
-      let val = res?;
-      println!("{:?}", val);
+      let res = run_on_remote!(file, hex, publish_code)?;
+      println!("{:?}", res);
       Ok(())
     }
     CLICommand::PostUdp { file, host } => {
@@ -454,7 +465,10 @@ pub fn run_cli() -> Result<(), String> {
             format!("Could not create '$HOME/.kindelia' directory: {}", err)
           })?;
           std::fs::write(file_path, content).map_err(|err| {
-            format!("Could not write to '$HOME/.kindelia/kindelia.toml': {}", err)
+            format!(
+              "Could not write to '$HOME/.kindelia/kindelia.toml': {}",
+              err
+            )
           })
         }
       }
@@ -476,8 +490,7 @@ pub async fn get_info(
   match kind {
     GetKind::Fun { name, stat } => match stat {
       GetFnKind::Code => {
-        let func_info =
-          client.get_function(name).await.map_err(|e| e.to_string())?;
+        let func_info = client.get_function(name).await?;
         if json {
           println!("{}", serde_json::to_string(&func_info).unwrap());
         } else {
@@ -494,8 +507,7 @@ pub async fn get_info(
         Ok(())
       }
       GetFnKind::State => {
-        let state =
-          client.get_function_state(name).await.map_err(|e| e.to_string())?;
+        let state = client.get_function_state(name).await?;
         if json {
           println!("{}", serde_json::to_string_pretty(&state).unwrap());
         } else {
@@ -509,50 +521,43 @@ pub async fn get_info(
     GetKind::Block { hash: _ } => todo!(),
     GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Tick => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.tick);
       Ok(())
     }
     GetKind::Mana => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.mana);
       Ok(())
     }
     GetKind::Size => {
-      let stats = client.get_stats().await.map_err(|e| e.to_string())?;
+      let stats = client.get_stats().await?;
       println!("{}", stats.size);
       Ok(())
     }
     GetKind::FnCount => {
-      let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.fn_count);
       Ok(())
     }
     GetKind::NsCount => {
-      let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ns_count);
       Ok(())
     }
     GetKind::CtCount => {
-      let stats_count =
-        client.count_stats().await.map_err(|e| e.to_string())?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ct_count);
       Ok(())
     }
   }
 }
 
-pub fn serialize_code(file: &PathBuf) {
-  if let Ok(code) = std::fs::read_to_string(file) {
-    let statements =
-      hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
-    for statement in statements {
-      println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
-    }
-  } else {
-    println!("Couldn't load file.");
+pub fn serialize_code(code: &str) {
+  let statements =
+    hvm::read_statements(code).map_err(|err| err.erro).unwrap().1;
+  for statement in statements {
+    println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
   }
 }
 
@@ -602,17 +607,8 @@ pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
   Ok(())
 }
 
-pub fn test_code(file: &Path) {
-  let file = std::fs::read_to_string(file);
-  match file {
-    Err(err) => {
-      eprintln!("{}", err);
-    }
-    Ok(code) => {
-      // TODO: flag to disable size limit / debug
-      hvm::test_statements_from_code(&code);
-    }
-  }
+pub fn test_code(code: &str, debug: bool) {
+  hvm::test_statements_from_code(code, debug);
 }
 
 fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
@@ -699,13 +695,23 @@ impl<'a> ConfigFileOptions<'a> {
 fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
   let stataments = hvm::read_statements(code);
   match stataments {
-    Ok((_, statements)) => Ok(statements), // TODO: should _ be handled better?
-    Err(hvm::ParseErr { erro , .. }) => Err(erro)
+    Ok((code, statements)) => {
+      if code.is_empty() {
+        Ok(statements)
+      } else {
+        Err(format!("Your code was not parsed entirely: {}", code))
+      }
+    }
+    Err(hvm::ParseErr { erro, .. }) => Err(erro),
   }
 }
 
 fn statments_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
-  txt.trim().split(|c: char| c.is_whitespace()).map(statement_from_hex).collect()
+  txt
+    .trim()
+    .split(|c: char| c.is_whitespace())
+    .map(statement_from_hex)
+    .collect()
 }
 
 fn statement_from_hex(hex: &str) -> Result<Statement, String> {
@@ -747,8 +753,6 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
 /// It is equal to standard From trait, but
 /// it has the From<String> for Vec<String> implementation.
 /// As like From, the conversion must be perfect.
-///
-/// TODO: should be like `TryFrom`, not `From`. see below.
 pub trait ArgumentFrom<T>: Sized {
   fn arg_from(value: T) -> Result<Self, String>;
 }
