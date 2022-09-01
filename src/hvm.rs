@@ -1201,6 +1201,21 @@ pub fn set_sign(statement: &Statement, new_sign: crypto::Signature) -> Statement
   }
 }
 
+// StatementInfo
+// =============
+
+impl fmt::Display for StatementInfo {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      StatementInfo::Ctr { name, args } => write!(f, "[ctr] {}", name),
+      StatementInfo::Fun { name, args } => write!(f, "[fun] {}", name),
+      StatementInfo::Reg { name, .. } => write!(f, "[reg] {}", name),
+      StatementInfo::Run { done_term, used_mana, size_diff, .. } =>
+        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&done_term), used_mana, size_diff)
+    }
+  }
+}
+
 // Rollback
 // --------
 
@@ -2029,7 +2044,7 @@ impl Runtime {
       return Err(StatementErr { err });
     }
     let hash = hash_statement(statement);
-    match statement {
+    let res = match statement {
       Statement::Fun { name, args, func, init, sign } => {
         if self.exists(name) {
           return error(self, "fun", format!("Can't redefine '{}'.", name));
@@ -2046,15 +2061,12 @@ impl Runtime {
           return error(self, "fun", format!("Invalid function {}.", name));
         }
         let func = func.unwrap();
-        if !silent {
-          println!("[fun] {}", name);
-        }
         self.set_arity(*name, args.len() as u128);
         self.define_function(*name, func);
         let state = self.create_term(init, 0, &mut init_map());
         self.write_disk(*name, state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
-        Ok(StatementInfo::Fun { name: *name, args })
+        StatementInfo::Fun { name: *name, args }
       }
       Statement::Ctr { name, args, sign } => {
         if self.exists(name) {
@@ -2067,13 +2079,10 @@ impl Runtime {
         if args.len() > 16 {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
         }
-        if !silent {
-          println!("[ctr] {}", name);
-        }
         let name = *name;
         self.set_arity(name, args.len() as u128);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
-        Ok(StatementInfo::Ctr { name, args })
+        StatementInfo::Ctr { name, args }
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana(); 
@@ -2103,15 +2112,12 @@ impl Runtime {
         if size_end > size_lim && !debug {
           return error(self, "run", format!("Not enough space."));
         }
-        if !silent {
-          println!("[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&term), mana_dif, size_dif);
-        }
-        Ok(StatementInfo::Run {
+        StatementInfo::Run {
           done_term: term,
           used_mana: mana_dif,
           size_diff: size_dif,
           end_size: size_end as u128, // TODO: rename to done_size for consistency?
-        })
+        }
       }
       Statement::Reg { name, ownr, sign } => {
         let ownr = **ownr;
@@ -2125,12 +2131,13 @@ impl Runtime {
         }
         let name = *name;
         self.set_owner(name, ownr);
-        if !silent {
-          println!("[reg] #x{:0>30x} {}", ownr, name);
-        }
-        Ok(StatementInfo::Reg { name, ownr })
+        StatementInfo::Reg { name, ownr }
       }
+    };
+    if !silent {
+      println!("{}", res);
     }
+    Ok(res)
   }
 
   pub fn check_term(&self, term: &Term) -> bool {
