@@ -1,6 +1,5 @@
 // TODO: `node clean` CLI command
 
-use std::path::Path;
 use std::{path::PathBuf, str::FromStr, thread};
 
 use clap::{Parser, Subcommand};
@@ -101,15 +100,15 @@ pub enum CLICommand {
   /// Test a Kindelia code file (.kdl), running locally.
   Test {
     /// The path to the file to test.
-    file: PathBuf,
+    file: Option<PathBuf>,
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
-    debug: bool
+    debug: bool,
   },
   /// Serialize a code file.
   Serialize {
     /// The path to the file to serialize.
-    file: PathBuf,
+    file: Option<PathBuf>,
   },
   /// Deserialize a code file.
   Deserialize {
@@ -347,20 +346,22 @@ pub fn run_cli() -> Result<(), String> {
 
   match parsed.command {
     CLICommand::Test { file, debug } => {
-      test_code(&file, debug); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
+      let code: String = from_file_or_stdin(file)?;
+      test_code(&code, debug);
       Ok(())
     }
     CLICommand::Serialize { file } => {
-      serialize_code(&file); // TODO: should get string of code not file / use `from_file_or_stdin` + return Result
+      let code: String = from_file_or_stdin(file)?;
+      serialize_code(&code);
       Ok(())
     }
     CLICommand::Deserialize { file } => {
-      let content = from_file_or_stdin::<String>(file)?;
-      deserialize_code(&content)
+      let code: String = from_file_or_stdin(file)?;
+      deserialize_code(&code)
     }
     CLICommand::Sign { file, skey } => {
-      let content = from_file_or_stdin::<String>(file)?;
-      sign_code(&content, &skey)
+      let code: String = from_file_or_stdin(file)?;
+      sign_code(&code, &skey)
     }
     CLICommand::RunRemote { file } => {
       // TODO: extract code repetition with branch below
@@ -457,7 +458,10 @@ pub fn run_cli() -> Result<(), String> {
             format!("Could not create '$HOME/.kindelia' directory: {}", err)
           })?;
           std::fs::write(file_path, content).map_err(|err| {
-            format!("Could not write to '$HOME/.kindelia/kindelia.toml': {}", err)
+            format!(
+              "Could not write to '$HOME/.kindelia/kindelia.toml': {}",
+              err
+            )
           })
         }
       }
@@ -547,15 +551,11 @@ pub async fn get_info(
   }
 }
 
-pub fn serialize_code(file: &PathBuf) {
-  if let Ok(code) = std::fs::read_to_string(file) {
-    let statements =
-      hvm::read_statements(&code).map_err(|err| err.erro).unwrap().1;
-    for statement in statements {
-      println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
-    }
-  } else {
-    println!("Couldn't load file.");
+pub fn serialize_code(code: &str) {
+  let statements =
+    hvm::read_statements(code).map_err(|err| err.erro).unwrap().1;
+  for statement in statements {
+    println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
   }
 }
 
@@ -605,16 +605,8 @@ pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
   Ok(())
 }
 
-pub fn test_code(file: &Path, debug: bool) {
-  let file = std::fs::read_to_string(file);
-  match file {
-    Err(err) => {
-      eprintln!("{}", err);
-    }
-    Ok(code) => {
-      hvm::test_statements_from_code(&code, debug);
-    }
-  }
+pub fn test_code(code: &str, debug: bool) {
+  hvm::test_statements_from_code(code, debug);
 }
 
 fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
@@ -702,12 +694,16 @@ fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
   let stataments = hvm::read_statements(code);
   match stataments {
     Ok((_, statements)) => Ok(statements), // TODO: should _ be handled better?
-    Err(hvm::ParseErr { erro , .. }) => Err(erro)
+    Err(hvm::ParseErr { erro, .. }) => Err(erro),
   }
 }
 
 fn statments_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
-  txt.trim().split(|c: char| c.is_whitespace()).map(statement_from_hex).collect()
+  txt
+    .trim()
+    .split(|c: char| c.is_whitespace())
+    .map(statement_from_hex)
+    .collect()
 }
 
 fn statement_from_hex(hex: &str) -> Result<Statement, String> {
