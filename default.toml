@@ -1,11 +1,11 @@
 [node.data]
 dir = "~/.kindelia/state"
-mine = true
+mine = false
 
 [node.network]
 network_id = "0xF000"
 initial_peers = [
-  "143.110.233.192",
-  "164.92.151.251",
-  "159.65.8.239",
+  "143.244.188.237",
+  "167.99.210.123",
+  "188.166.189.185",
 ]
