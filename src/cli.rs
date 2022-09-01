@@ -83,17 +83,16 @@ kindelia account ...
 // ==================
 
 macro_rules! run_on_remote {
-  ($file:expr, $hex:expr, $F:ident) => {
-    {
-      let code = from_file_or_stdin::<String>($file)?;
-      let client = api_client::ApiClient::new("http://localhost:8000", None)
-        .map_err(|e| e.to_string())?;
-      let stmts =
-        if $hex { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
-      let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
-      run_async_blocking(client.$F(stmts))
-    }
-  };
+  ($file:expr, $hex:expr, $F:ident) => {{
+    let code = from_file_or_stdin::<String>($file)?;
+    let client = api_client::ApiClient::new("http://localhost:8000", None)
+      .map_err(|e| e.to_string())?;
+    let stmts =
+      if $hex { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
+    let stmts: Vec<HexStatement> =
+      stmts.into_iter().map(|s| s.into()).collect();
+    run_async_blocking(client.$F(stmts))
+  }};
 }
 
 // Clap CLI definitions
@@ -491,8 +490,7 @@ pub async fn get_info(
   match kind {
     GetKind::Fun { name, stat } => match stat {
       GetFnKind::Code => {
-        let func_info =
-          client.get_function(name).await?;
+        let func_info = client.get_function(name).await?;
         if json {
           println!("{}", serde_json::to_string(&func_info).unwrap());
         } else {
@@ -509,8 +507,7 @@ pub async fn get_info(
         Ok(())
       }
       GetFnKind::State => {
-        let state =
-          client.get_function_state(name).await?;
+        let state = client.get_function_state(name).await?;
         if json {
           println!("{}", serde_json::to_string_pretty(&state).unwrap());
         } else {
@@ -539,20 +536,17 @@ pub async fn get_info(
       Ok(())
     }
     GetKind::FnCount => {
-      let stats_count =
-        client.count_stats().await?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.fn_count);
       Ok(())
     }
     GetKind::NsCount => {
-      let stats_count =
-        client.count_stats().await?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ns_count);
       Ok(())
     }
     GetKind::CtCount => {
-      let stats_count =
-        client.count_stats().await?;
+      let stats_count = client.count_stats().await?;
       println!("{}", stats_count.ct_count);
       Ok(())
     }
@@ -701,7 +695,13 @@ impl<'a> ConfigFileOptions<'a> {
 fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
   let stataments = hvm::read_statements(code);
   match stataments {
-    Ok((_, statements)) => Ok(statements), // TODO: should _ be handled better?
+    Ok((code, statements)) => {
+      if code.is_empty() {
+        Ok(statements)
+      } else {
+        Err(format!("Your code was not parsed entirely: {}", code))
+      }
+    }
     Err(hvm::ParseErr { erro, .. }) => Err(erro),
   }
 }
