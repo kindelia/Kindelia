@@ -86,9 +86,9 @@ kindelia account ...
 // ==================
 
 macro_rules! run_on_remote {
-  ($file:expr, $encoded:expr, $F:ident) => {{
+  ($api_url:expr, $file:expr, $encoded:expr, $F:ident) => {{
     let code = from_file_or_stdin::<String>($file)?;
-    let client = api_client::ApiClient::new("http://localhost:8000", None)
+    let client = api_client::ApiClient::new($api_url, None)
       .map_err(|e| e.to_string())?;
     let stmts =
       if $encoded { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
@@ -111,7 +111,7 @@ pub struct Cli {
   config: Option<PathBuf>,
   /// Url to server host
   #[clap(long)]
-  host_url: Option<String>,
+  api: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -363,9 +363,9 @@ pub fn run_cli() -> Result<(), String> {
   }
   .get_value_config()?;
 
-  let host_url = ConfigValueOption {
-    value: parsed.host_url,
-    env: Some("KINDELIA_URL"),
+  let api_url = ConfigValueOption {
+    value: parsed.api,
+    env: Some("KINDELIA_API_URL"),
     config: ConfigFileOptions::none(),
     default: || Ok("http://localhost:8000".to_string()),
   }
@@ -391,19 +391,24 @@ pub fn run_cli() -> Result<(), String> {
       let skey: String = from_file_or_stdin(secret_file.into())?;
       sign_code(&code, &skey)
     }
-    CliCommand::RunRemote { file, encoded: hex } => {
+    CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       // TODO: `--api` argument
-      let results = run_on_remote!(file, hex, run_code)?;
+      let results = run_on_remote!(api_url, file, encoded, run_code)?;
       for result in results {
         println!("{}", result);
       }
       Ok(())
     }
     CliCommand::Publish { file, encoded } => {
-      // TODO: implement on server. return value will be different from Run-Remote, like "this transaction was included"
-      let res = run_on_remote!(file, encoded, publish_code)?;
-      println!("{:?}", res);
+      let results = run_on_remote!(api_url, file, encoded, publish_code)?;
+      for (i, result) in results.iter().enumerate() {
+        print!("Transaction #{}: ", i);
+        match result {
+          Ok(_)  => println!("PUBLISHED"),
+          Err(_) => println!("NOT PUBLISHED [probably tx is already on mempool]"),
+        }
+      }
       Ok(())
     }
     CliCommand::PostUdp { file, host } => {
@@ -411,7 +416,7 @@ pub fn run_cli() -> Result<(), String> {
       post_udp(&content, host)
     }
     CliCommand::Get { kind, json } => {
-      let prom = get_info(kind, json, &host_url);
+      let prom = get_info(kind, json, &api_url);
       run_async_blocking(prom)
     }
     CliCommand::Node { command } => {
@@ -438,7 +443,7 @@ pub fn run_cli() -> Result<(), String> {
 
           let initial_peers = ConfigValueOption {
             value: initial_peers,
-            env: Some("KINDELIA_INIT_PEERS"),
+            env: Some("KINDELIA_INITIAL_PEERS"),
             config: ConfigFileOptions::new(
               &config,
               "node.network.initial_peers",
