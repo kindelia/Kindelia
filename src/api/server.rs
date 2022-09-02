@@ -329,20 +329,15 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let interact_publish = post()
     .and(path!("publish"))
     .and(json_body())
-    .and_then(move |code: Vec<HexStatement>| {
+    .then(move |code: Vec<HexStatement>| {
       let query_tx = query_tx.clone();
       async move {
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results =
           ask(query_tx, |tx| NodeRequest::Publish { code, tx }).await;
-        let result: Result<Vec<()>, ()> = results.into_iter().collect();
-        match result {
-          Ok(res) => Ok(ok_json(res)),
-          Err(_) => Err(reject::custom(InvalidParameter::from(
-            "failed to publish statement".to_string(),
-          ))), // TODO: create specific error
-        }
+        let result: Vec<Result<(), ()>> = results.into_iter().collect();
+        ok_json(result)
       }
     });
 

@@ -1,6 +1,9 @@
 // TODO: `node clean` CLI command
 
-use std::{path::PathBuf, str::FromStr, thread};
+use std::fmt;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::thread;
 
 use clap::{Parser, Subcommand};
 use hvm::Name;
@@ -83,12 +86,12 @@ kindelia account ...
 // ==================
 
 macro_rules! run_on_remote {
-  ($file:expr, $hex:expr, $F:ident) => {{
+  ($file:expr, $encoded:expr, $F:ident) => {{
     let code = from_file_or_stdin::<String>($file)?;
     let client = api_client::ApiClient::new("http://localhost:8000", None)
       .map_err(|e| e.to_string())?;
     let stmts =
-      if $hex { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
+      if $encoded { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
     let stmts: Vec<HexStatement> =
       stmts.into_iter().map(|s| s.into()).collect();
     run_async_blocking(client.$F(stmts))
@@ -102,7 +105,7 @@ macro_rules! run_on_remote {
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
   #[clap(subcommand)]
-  command: CLICommand,
+  command: CliCommand,
   #[clap(long)]
   /// Path to config file.
   config: Option<PathBuf>,
@@ -112,11 +115,11 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
-pub enum CLICommand {
+pub enum CliCommand {
   /// Test a Kindelia code file (.kdl), running locally.
   Test {
     /// The path to the file to test.
-    file: Option<PathBuf>,
+    file: PathOrStdin,
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
     debug: bool,
@@ -124,41 +127,41 @@ pub enum CLICommand {
   /// Serialize a code file.
   Serialize {
     /// The path to the file to serialize.
-    file: Option<PathBuf>,
+    file: PathOrStdin,
   },
   /// Deserialize a code file.
   Deserialize {
     /// The path to the file to deserialize.
-    file: Option<PathBuf>,
+    file: PathOrStdin,
   },
   /// Sign a code file.
   Sign {
     /// The path to the file to sign.
-    file: Option<PathBuf>,
+    file: PathOrStdin,
     /// File containing the 256-bit secret key, as a hex string
     #[clap(short, long)]
-    skey: String,
+    secret_file: PathBuf,
   },
   /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
   RunRemote {
     /// Input file.
-    file: Option<PathBuf>,
-    /// In case the code is in hex.
-    #[clap(long)]
-    hex: bool,
+    file: PathOrStdin,
+    /// In case the input code is serialized.
+    #[clap(long, short)]
+    encoded: bool,
   },
   /// Post a Kindelia code file.
   Publish {
     /// The path to the file to post.
-    file: Option<PathBuf>,
-    /// In case the code is in hex.
-    #[clap(long)]
-    hex: bool,
+    file: PathOrStdin,
+    /// In case the input code is serialized.
+    #[clap(long, short)]
+    encoded: bool,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
     /// The path to the file to post.
-    file: Option<PathBuf>,
+    file: PathOrStdin,
     /// Node address to post to.
     #[clap(long)]
     host: Option<String>,
@@ -369,47 +372,49 @@ pub fn run_cli() -> Result<(), String> {
   .get_value_config()?;
 
   match parsed.command {
-    CLICommand::Test { file, debug } => {
+    CliCommand::Test { file, debug } => {
       let code: String = from_file_or_stdin(file)?;
       test_code(&code, debug);
       Ok(())
     }
-    CLICommand::Serialize { file } => {
+    CliCommand::Serialize { file } => {
       let code: String = from_file_or_stdin(file)?;
       serialize_code(&code);
       Ok(())
     }
-    CLICommand::Deserialize { file } => {
+    CliCommand::Deserialize { file } => {
       let code: String = from_file_or_stdin(file)?;
       deserialize_code(&code)
     }
-    CLICommand::Sign { file, skey } => {
+    CliCommand::Sign { file, secret_file } => {
       let code: String = from_file_or_stdin(file)?;
+      let skey: String = from_file_or_stdin(secret_file.into())?;
       sign_code(&code, &skey)
     }
-    CLICommand::RunRemote { file, hex } => {
+    CliCommand::RunRemote { file, encoded: hex } => {
       // TODO: client timeout
+      // TODO: `--api` argument
       let results = run_on_remote!(file, hex, run_code)?;
       for result in results {
         println!("{}", result);
       }
       Ok(())
     }
-    CLICommand::Publish { file, hex } => {
+    CliCommand::Publish { file, encoded } => {
       // TODO: implement on server. return value will be different from Run-Remote, like "this transaction was included"
-      let res = run_on_remote!(file, hex, publish_code)?;
+      let res = run_on_remote!(file, encoded, publish_code)?;
       println!("{:?}", res);
       Ok(())
     }
-    CLICommand::PostUdp { file, host } => {
+    CliCommand::PostUdp { file, host } => {
       let content = from_file_or_stdin::<String>(file)?;
       post_udp(&content, host)
     }
-    CLICommand::Get { kind, json } => {
+    CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &host_url);
       run_async_blocking(prom)
     }
-    CLICommand::Node { command } => {
+    CliCommand::Node { command } => {
       match command {
         NodeCommand::Start { kindelia_path, initial_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
@@ -476,7 +481,7 @@ pub fn run_cli() -> Result<(), String> {
         }
       }
     }
-    CLICommand::Completion { .. } => todo!(),
+    CliCommand::Completion { .. } => todo!(),
   }
 }
 
@@ -572,8 +577,8 @@ pub fn deserialize_code(content: &str) -> Result<(), String> {
   Ok(())
 }
 
-pub fn sign_code(content: &str, skey_file: &str) -> Result<(), String> {
-  if let Ok(skey) = std::fs::read_to_string(skey_file) {
+// TODO: should not open file
+pub fn sign_code(content: &str, skey: &str) -> Result<(), String> {
     let statement = statement_from_hex(content)?;
     let skey = hex::decode(&skey[0..64]).expect("hex string");
     let user = crypto::Account::from_private_key(&skey);
@@ -582,9 +587,6 @@ pub fn sign_code(content: &str, skey_file: &str) -> Result<(), String> {
     let stat = hvm::set_sign(&statement, sign);
     println!("{}", hex::encode(serialized_statement(&stat).to_bytes()));
     Ok(())
-  } else {
-    Err("Couldn't load term and secret key files.".into())
-  }
 }
 
 pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
@@ -724,33 +726,75 @@ fn statement_from_hex(hex: &str) -> Result<Statement, String> {
     .ok_or(format!("Failed to deserialize '{}'", hex))
 }
 
-fn from_file_or_stdin<T: ArgumentFrom<String>>(
-  file: Option<PathBuf>,
-) -> Result<T, String> {
-  if let Some(file) = file {
-    // read from file
-    let content = std::fs::read_to_string(&file)
-      .map_err(|_| format!("Cannot read from {} file", file.display()))?;
-    T::arg_from(content)
-  } else {
-    // read from stdin
-    let mut input = String::new();
-    if std::io::stdin().read_line(&mut input).is_ok() {
-      T::arg_from(input.trim().to_string())
-    } else {
-      Err("Could not read file path or stdin".into())
-    }
-  }
-}
-
 fn read_toml(file: &PathBuf) -> Option<toml::Value> {
   std::fs::read_to_string(file)
     .ok()
     .and_then(|content| content.parse::<toml::Value>().ok())
 }
 
-// Auxiliar Traits
-// ===============
+// Auxiliar Types and Traits
+// =========================
+
+/// Represents input from a file or stdin.
+#[derive(Debug)]
+pub enum PathOrStdin {
+  Stdin,
+  Path { path: PathBuf },
+}
+
+impl From<PathBuf> for PathOrStdin {
+  fn from(path: PathBuf) -> Self {
+    PathOrStdin::Path { path }
+  }
+}
+
+impl FromStr for PathOrStdin {
+  type Err = std::convert::Infallible;
+  fn from_str(txt: &str) -> Result<Self, Self::Err> {
+    let val = if txt == "-" {
+      Self::Stdin
+    } else {
+      let path = txt.into();
+      Self::Path { path }
+    };
+    Ok(val)
+  }
+}
+
+impl fmt::Display for PathOrStdin {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Path { path } => write!(f, "{}", path.display()),
+      Self::Stdin => write!(f, "<stdin>"),
+    }
+  }
+}
+
+// TODO: this should not read the whole file immediately
+fn from_file_or_stdin<T: ArgumentFrom<String>>(
+  file: PathOrStdin,
+) -> Result<T, String> {
+  match file {
+    PathOrStdin::Path { path } => {
+      // read from file
+      let content = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Cannot read from '{:?}' file: {}", path, err))?;
+      T::arg_from(content)
+    }
+    PathOrStdin::Stdin => {
+      // read from stdin
+      let mut input = String::new();
+      if std::io::stdin().read_line(&mut input).is_ok() {
+        T::arg_from(input.trim().to_string())
+      } else {
+        Err("Could not read file path or stdin".into())
+      }
+    }
+  }
+}
+
+// ArgumentFrom
+// ------------
 
 /// A trait to convert from anything to a type T.
 /// It is equal to standard From trait, but
@@ -788,7 +832,7 @@ impl ArgumentFrom<String> for PathBuf {
   fn arg_from(t: String) -> Result<Self, String> {
     if let Some(path) = t.strip_prefix("~/") {
       let home_dir =
-        dirs::home_dir().ok_or("Could not find $HOME$ directory.")?;
+        dirs::home_dir().ok_or("Could not find $HOME directory.")?;
       Ok(home_dir.join(path))
     } else {
       PathBuf::from_str(&t).map_err(|_| format!("Invalid path: {}", t))

@@ -119,7 +119,7 @@ impl ApiClient {
   }
 
   // I'm not sure what the return type should be.
-  pub async fn publish_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<bool>> {
+  pub async fn publish_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<Result<(), ()>>> {
     self.req(Method::POST, "/publish", Some(code)).await
   }
 }

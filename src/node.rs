@@ -4,13 +4,6 @@
 #![allow(unused_variables)]
 #![allow(clippy::style)]
 
-use bit_vec::BitVec;
-use json::object;
-use primitive_types::U256;
-use priority_queue::PriorityQueue;
-use rand::seq::IteratorRandom;
-use sha3::Digest;
-
 use std::collections::{HashMap, HashSet};
 use std::net::*;
 use std::path::PathBuf;
@@ -18,8 +11,16 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender, Receiver};
 
-use std::hash::{BuildHasherDefault};
-use crate::{NoHashHasher as NHH, print_with_timestamp};
+use bit_vec::BitVec;
+use json::object;
+use primitive_types::U256;
+use priority_queue::PriorityQueue;
+use rand::seq::IteratorRandom;
+use sha3::Digest;
+
+use std::hash::BuildHasherDefault;
+use crate::NoHashHasher as NHH;
+use crate::print_with_timestamp;
 
 use crate::api;
 use crate::api::{NodeRequest, BlockInfo, FuncInfo};
@@ -28,7 +29,7 @@ use crate::bits::*;
 use crate::hvm::{self, *};
 
 // Types
-// -----
+// =====
 
 // Kindelia's block format is agnostic to HVM. A Transaction is just a vector of bytes. A Body
 // groups transactions in a single combined vector of bytes, using the following format:
@@ -102,11 +103,17 @@ pub struct Node {
   pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
   pub peers      : PeersStore,                       // peers store and state control
   pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest>,                // Receives an API request
+  pub receiver   : Receiver<NodeRequest>,            // Receives an API request
 }
 
 // Peers
-// =====
+// -----
+
+#[derive(Debug, Copy, Clone)]
+pub struct Peer {
+  pub seen_at: u128,
+  pub address: Address,
+}
 
 pub struct PeersStore {
   seen: HashMap<Address, Peer>,
@@ -180,6 +187,9 @@ impl PeersStore {
   }
 }
 
+// Communication with miner thread
+// -------------------------------
+
 #[derive(Debug, Clone)]
 pub enum MinerMessage {
   Request {
@@ -197,6 +207,9 @@ pub enum MinerMessage {
 pub struct MinerCommunication {
   message: Arc<Mutex<MinerMessage>>
 }
+
+// Protocol
+// --------
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
@@ -225,12 +238,6 @@ pub enum Address {
   }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Peer {
-  pub seen_at: u128,
-  pub address: Address,
-}
-
 // Constants
 // =========
 
@@ -251,6 +258,8 @@ pub const MAX_UDP_SIZE_FAST : usize = 1500;
 
 // Size of a block, in bytes
 //pub const BLOCK_SIZE : usize = HASH_SIZE + (U128_SIZE * 4) + BODY_SIZE;
+
+// TODO: enforce maximum block size on debug mode
 
 // Size of an IPv4 address, in bytes
 pub const IPV4_SIZE : usize = 4;
@@ -407,8 +416,18 @@ pub fn show_address_hostname(address: &Address) -> String {
   }
 }
 
+impl std::fmt::Display for Address {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Address::IPv4 { val0, val1, val2, val3, port } => {
+        f.write_fmt(format_args!("{}.{}.{}.{}:{}", val0, val1, val2, val3, port))
+      },
+    }
+  }
+}
+
 // Algorithms
-// ----------
+// ==========
 
 // Converts a target to a difficulty (see below)
 pub fn target_to_difficulty(target: U256) -> U256 {
@@ -549,8 +568,6 @@ pub fn GENESIS_BLOCK() -> Block {
   //);
 //}
 
-
-
 impl Transaction {
   pub fn new(mut data: Vec<u8>) -> Self {
     // Transaction length is always a non-zero multiple of 5
@@ -683,6 +700,16 @@ impl Node {
     }
 
     (query_sender, node)
+  }
+
+  pub fn add_transaction(&mut self, transaction: Transaction) -> Result<(), ()> {
+    let t_score = transaction.hash.low_u64();
+    if self.pool.get(&transaction).is_none() {
+      self.pool.push(transaction, t_score);
+      Ok(())
+    } else {
+      Err(())
+    }
   }
 
   // Registers a block on the node's database. This performs several actions:
@@ -1019,8 +1046,12 @@ impl Node {
         answer.send(result).unwrap();
       },
       NodeRequest::Publish { code, tx } => {
-        // TODO
-        todo!()
+        let result: Vec<_> = code.into_iter().map(|stmt| {
+          let bytes = bitvec_to_bytes(&serialized_statement(&stmt));
+          let t = Transaction::new(bytes);
+          self.add_transaction(t)
+        }).collect();
+        tx.send(result).unwrap();
       }
     }
   }
@@ -1185,7 +1216,7 @@ impl Node {
     });
   }
 
-  fn add_mined_block(&mut self, miner_communication: &MinerCommunication) {
+  fn handle_mined_block(&mut self, miner_communication: &MinerCommunication) {
     if let MinerMessage::Answer { block } = miner_communication.read() {
       self.add_block(&block);
       self.broadcast_tip_block();
@@ -1197,7 +1228,7 @@ impl Node {
   pub fn build_body(&self) -> Body {
     let mut body_vec = vec![0]; 
     let mut tx_count = 0;
-    for (transaction, score) in self.pool.iter() {
+    for (transaction, _score) in self.pool.iter() {
       let tx_len = transaction.data.len();
       if tx_len == 0 { continue; }
       let len_info = transaction.encode_length(); // number we will store as the length
@@ -1331,7 +1362,7 @@ impl Node {
         // If the miner mined a block, adds it
         Task {
           delay: 5,
-          action: |node, mc| { node.add_mined_block(mc); },
+          action: |node, mc| { node.handle_mined_block(mc); },
         },
       ];
       tasks.extend(miner_tasks);
@@ -1355,16 +1386,6 @@ impl Node {
       if let Some(extra) = extra {
         std::thread::sleep(extra);
       }
-    }
-  }
-}
-
-impl std::fmt::Display for Address {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Address::IPv4 { val0, val1, val2, val3, port } => {
-        f.write_fmt(format_args!("{}.{}.{}.{}:{}", val0, val1, val2, val3, port))
-      },
     }
   }
 }
