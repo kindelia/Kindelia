@@ -1,0 +1,22 @@
+// This block executes a simple signed statement.
+
+// Statements can be signed with:
+//
+//   kindelia sign --secret-file private_key_file block_file.kdl
+//
+// This will sign the last block statement, and output the signature. You can
+// then send that statement to miners, ending it with "sign { signature_here }".
+// This will change the subject to your name, which is a number containing the
+// first 30 hex chars (120 bits) of your Ethereum address.
+
+// The statement below was signed with the private key:
+//   0x0000000000000000000000000000000000000000000000000000000000000001
+// Its corresponding Ethereum address is:
+//   0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+// It will output the subject's name, which is:
+//   #x7e5f4552091a69125d5dfcb7b8c265 (note: it will be printed in decimal)
+
+run {
+  ask x = (Subj);
+  (Done x)
+}

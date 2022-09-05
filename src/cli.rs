@@ -1,10 +1,14 @@
-// TODO: `node clean` CLI command
+// TODO: `kindelia node clean` CLI command
+// TODO: `kindelia get (ctr|reg|block) commands
+// TODO: flag to enable printing events (heartbeat)
+// TODO: some way to pretty-print events (heartbeat)
 
 use std::fmt;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use hvm::Name;
@@ -58,8 +62,6 @@ kindelia get ctr Pair arity
 
 kindelia get run <BLOCK_IDX> <STM_IDX>
 
-TODO aggregate stats in one sub-command as in:
-
 kindelia get stats
 
 kindelia get stats tick
@@ -102,19 +104,6 @@ where
   run_async_blocking(f(client, stmts))
 }
 
-fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
-  if encoded {
-    statments_from_hex_seq(code)
-  } else {
-    parse_code(code)
-  }
-}
-
-fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
-  let code = file.read_to_string()?;
-  handle_code(&code, encoded)
-}
-
 // Clap CLI definitions
 // ====================
 
@@ -123,7 +112,7 @@ fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
 pub struct Cli {
   #[clap(subcommand)]
   command: CliCommand,
-  #[clap(long)]
+  #[clap(long, short = 'c')]
   /// Path to config file.
   config: Option<PathBuf>,
   /// Url to server host
@@ -168,7 +157,7 @@ pub enum CliCommand {
     /// Input file.
     file: FileInput,
     /// In case the input code is serialized.
-    #[clap(long, short)]
+    #[clap(long, short = 'e')]
     encoded: bool,
   },
   /// Post a Kindelia code file.
@@ -176,7 +165,7 @@ pub enum CliCommand {
     /// The path to the file to post.
     file: FileInput,
     /// In case the input code is serialized.
-    #[clap(long, short)]
+    #[clap(long, short = 'e')]
     encoded: bool,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
@@ -192,11 +181,13 @@ pub enum CliCommand {
     /// The kind of information to get.
     #[clap(subcommand)]
     kind: GetKind,
-    #[clap(short, long)]
+    #[clap(long, short)]
     /// Outputs JSON machine readable output.
     json: bool,
   },
-  /// Access node commands.
+  /// Initialize the configuration file.
+  Init,
+  /// Node commands.
   Node {
     /// Which command run.
     #[clap(subcommand)]
@@ -211,22 +202,37 @@ pub enum CliCommand {
 
 #[derive(Subcommand)]
 pub enum NodeCommand {
-  Init,
+  /// [NOT IMPLEMENTED] Clean the node's data.
+  Clean,
+  /// Starts a Kindelia node.
   Start {
-    /// Path to store the node's data in
-    #[clap(short, long)]
-    kindelia_path: Option<PathBuf>,
-    /// Adds testnet nodes as initial peers
+    /// Base path to store the node's data in.
     #[clap(long)]
+    base_path: Option<PathBuf>,
+    /// Initial peer nodes.
+    #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
-    /// Mine blocks
-    #[clap(long)]
+    /// Mine blocks.
+    #[clap(long, short = 'm')]
     mine: bool,
   },
 }
 
 #[derive(Subcommand)]
 pub enum GetKind {
+  /// [NOT IMPLEMENTED] Get a constructor by name.
+  Ctr {
+    /// The name of the constructor to get.
+    name: Name,
+    /// The stat of the constructor to get.
+    #[clap(subcommand)]
+    stat: GetCtrKind,
+  },
+  /// [NOT IMPLEMENTED] Get a block by hash.
+  Block {
+    /// The hash of the block to get.
+    hash: String,
+  },
   /// Get a function by name.
   Fun {
     /// The name of the function to get.
@@ -235,7 +241,7 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetFunKind,
   },
-  /// Get a namespace by name.
+  /// [NOT IMPLEMENTED] Get a registered namespace by name.
   Reg {
     /// The name of the namespace to get.
     name: String, // ASK: use Name here too?
@@ -243,33 +249,12 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetRegKind,
   },
-  /// Get a block by hash.
-  Block {
-    /// The hash of the block to get.
-    hash: String,
-  },
-  /// Get a constructor by name.
-  Ctr {
-    /// The name of the constructor to get.
-    name: Name,
-    /// The stat of the constructor to get.
+  /// Get node stats.
+  Stats {
+    /// The stat of the node to get.
     #[clap(subcommand)]
-    stat: GetCtrKind,
+    stat_kind: Option<GetStatsKind>,
   },
-  // TODO: groups these commands under `kindelia get stats
-  /// Get the tick (tip block height).
-  Tick,
-  /// Get the used mana.
-  Mana,
-  /// Get used space number.
-  // TODO: we should measure this as slots/nodes/cells, not bits
-  Space,
-  /// Get the number of functions.
-  FunCount,
-  /// Get the number of namespaces.
-  RegCount,
-  /// Get the number of constructors.
-  CtrCount,
 }
 
 #[derive(Subcommand)]
@@ -296,6 +281,23 @@ pub enum GetCtrKind {
   Code,
   /// Get the arity of a constructor.
   Arity,
+}
+
+#[derive(Subcommand)]
+pub enum GetStatsKind {
+  /// Get the tick (tip block height).
+  Tick,
+  /// Get the used mana.
+  Mana,
+  /// Get the quantity of used space.
+  // TODO: we should measure this as slots/nodes/cells, not bits
+  Space,
+  /// Get the number of functions.
+  FunCount,
+  /// Get the number of constructors.
+  CtrCount,
+  /// Get the number of namespaces.
+  RegCount,
 }
 
 struct ConfigValueOption<'a, T, F>
@@ -434,7 +436,6 @@ pub fn run_cli() -> Result<(), String> {
     }
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
-      // TODO: `--api` argument
       let f = |client: api_client::ApiClient, stmts| async move {
         client.run_code(stmts).await
       };
@@ -468,18 +469,21 @@ pub fn run_cli() -> Result<(), String> {
       let prom = get_info(kind, json, &api_url);
       run_async_blocking(prom)
     }
+    CliCommand::Init => {
+      let path = default_config_path()?;
+      eprintln!("Writing default configuration to '{}'...", path.display());
+      init_config_file(&path)?;
+      Ok(())
+    }
     CliCommand::Node { command } => {
       match command {
-        NodeCommand::Start { kindelia_path, initial_peers, mine } => {
+        NodeCommand::Clean => todo!("`kindelia node clean`"),
+        NodeCommand::Start { base_path: kindelia_path, initial_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // TODO: create the file automatically, warn in color and sleep ~1 sec
-          let config = read_toml(&config_path).ok_or(format!(
-            "No config file was found in '{}'. \
-             You can create a default one running `kindelia node init`",
-            config_path.display()
-          ))?;
-          let config = Some(config);
+
+          let config = Some(handle_config_file(&config_path)?);
 
           // get arguments from cli, env or config
           let path = ConfigValueOption {
@@ -514,25 +518,6 @@ pub fn run_cli() -> Result<(), String> {
 
           Ok(())
         }
-        NodeCommand::Init => {
-          println!(
-            "Writing default configuration to '$HOME/.kindelia/kindelia.toml'..."
-          );
-          let file_path = default_config_path()?;
-          let dir_path = file_path.parent().ok_or_else(|| {
-            "Failed to resolve path for '$HOME/.kindelia'".to_string()
-          })?;
-          let content = include_str!("../default.toml");
-          std::fs::create_dir_all(&dir_path).map_err(|err| {
-            format!("Could not create '$HOME/.kindelia' directory: {}", err)
-          })?;
-          std::fs::write(file_path, content).map_err(|err| {
-            format!(
-              "Could not write to '$HOME/.kindelia/kindelia.toml': {}",
-              err
-            )
-          })
-        }
       }
     }
     CliCommand::Completion { .. } => todo!(),
@@ -550,6 +535,8 @@ pub async fn get_info(
   let client =
     api_client::ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
   match kind {
+    GetKind::Block { hash: _ } => todo!(),
+    GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
@@ -580,36 +567,28 @@ pub async fn get_info(
       GetFunKind::Slots => todo!(),
     },
     GetKind::Reg { name: _, stat: _ } => todo!(),
-    GetKind::Block { hash: _ } => todo!(),
-    GetKind::Ctr { name: _, stat: _ } => todo!(),
-    GetKind::Tick => {
+    GetKind::Stats { stat_kind } => {
       let stats = client.get_stats().await?;
-      println!("{}", stats.tick);
-      Ok(())
-    }
-    GetKind::Mana => {
-      let stats = client.get_stats().await?;
-      println!("{}", stats.mana);
-      Ok(())
-    }
-    GetKind::Space => {
-      let stats = client.get_stats().await?;
-      println!("{}", stats.size);
-      Ok(())
-    }
-    GetKind::FunCount => {
-      let stats_count = client.count_stats().await?;
-      println!("{}", stats_count.fn_count);
-      Ok(())
-    }
-    GetKind::RegCount => {
-      let stats_count = client.count_stats().await?;
-      println!("{}", stats_count.ns_count);
-      Ok(())
-    }
-    GetKind::CtrCount => {
-      let stats_count = client.count_stats().await?;
-      println!("{}", stats_count.ct_count);
+      match stat_kind {
+        None => {
+          if json {
+            println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+          } else {
+            println!("{:#?}", stats);
+          }
+        }
+        Some(stat_kind) => {
+          let val = match stat_kind {
+            GetStatsKind::Tick => stats.tick,
+            GetStatsKind::Mana => stats.mana,
+            GetStatsKind::Space => stats.space,
+            GetStatsKind::FunCount => stats.fun_count,
+            GetStatsKind::CtrCount => stats.ctr_count,
+            GetStatsKind::RegCount => stats.reg_count,
+          };
+          println!("{}", val);
+        },
+      };
       Ok(())
     }
   }
@@ -767,8 +746,48 @@ impl<'a> ConfigFileOptions<'a> {
   }
 }
 
+fn handle_config_file(path: &Path) -> Result<toml::Value, String> {
+  if !path.exists() {
+    eprintln!("WARNING: Config file not found. Default config file will be created on '{}'...\n", path.display());
+    init_config_file(path)?;
+    thread::sleep(Duration::from_millis(5000));
+  }
+  let content = std::fs::read_to_string(path).map_err(|e| {
+    format!("Error reading config file from '{}': {}", path.display(), e)
+  })?;
+  let config = content.parse::<toml::Value>().map_err(|e| {
+    format!("Error parsing config file from '{}': {}", path.display(), e)
+  })?;
+  Ok(config)
+}
+
+fn init_config_file(path: &Path) -> Result<(), String> {
+  let dir_path = path.parent().ok_or_else(|| {
+    format!("Failed to resolve parent directory for '{}'", path.display())
+  })?;
+  let default_content = include_str!("../default.toml");
+  std::fs::create_dir_all(&dir_path).map_err(|e| {
+    format!("Could not create '{}' directory: {}", dir_path.display(), e)
+  })?;
+  std::fs::write(path, default_content)
+    .map_err(|e| format!("Could not write to '{}': {}", path.display(), e))
+}
+
 // Code
 // ----
+
+fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
+  let code = file.read_to_string()?;
+  handle_code(&code, encoded)
+}
+
+fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
+  if encoded {
+    statments_from_hex_seq(code)
+  } else {
+    parse_code(code)
+  }
+}
 
 fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
   let statements = hvm::read_statements(code);
@@ -799,13 +818,6 @@ fn statement_from_hex(hex: &str) -> Result<Statement, String> {
     .ok_or(format!("Failed to deserialize '{}'", hex))
 }
 
-fn read_toml(file: &PathBuf) -> Option<toml::Value> {
-  std::fs::read_to_string(file)
-    .ok()
-    .and_then(|content| content.parse::<toml::Value>().ok())
-}
-
-// TODO: alternative that do not read the whole file immediately
 fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
   file: FileInput,
 ) -> Result<T, String> {
@@ -869,20 +881,21 @@ impl fmt::Display for FileInput {
   }
 }
 
+// TODO: alternative that do not read the whole file immediately
 impl FileInput {
   fn read_to_string(&self) -> Result<String, String> {
     match self {
       FileInput::Path { path } => {
         // read from file
         std::fs::read_to_string(&path)
-          .map_err(|err| format!("Cannot read from '{:?}' file: {}", path, err))
+          .map_err(|e| format!("Cannot read from '{:?}' file: {}", path, e))
       }
       FileInput::Stdin => {
         // read from stdin
         let mut buff = String::new();
         std::io::stdin()
           .read_to_string(&mut buff)
-          .map_err(|err| format!("Could not read from stdin: {}", err))?;
+          .map_err(|e| format!("Could not read from stdin: {}", e))?;
         Ok(buff)
       }
     }

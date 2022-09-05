@@ -165,14 +165,10 @@ impl TryFrom<&str> for HexStatement {
 pub struct Stats {
   pub tick: u64,
   pub mana: u64,
-  pub size: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CountStats {
-  pub fn_count: u64,
-  pub ct_count: u64,
-  pub ns_count: u64,
+  pub space: u64,
+  pub fun_count: u64,
+  pub ctr_count: u64,
+  pub reg_count: u64,
 }
 
 impl From<&node::Transaction> for String {
@@ -281,9 +277,6 @@ type RequestAnswer<T> = oneshot::Sender<T>;
 pub enum NodeRequest {
   GetStats {
     tx: RequestAnswer<Stats>,
-  },
-  GetCountStats {
-    tx: RequestAnswer<CountStats>,
   },
   GetBlock {
     hash: U256,

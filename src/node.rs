@@ -954,32 +954,27 @@ impl Node {
         let tick = self.runtime.get_tick().try_into().unwrap();
         let mana = self.runtime.get_mana().try_into().unwrap();
         let size = self.runtime.get_size().try_into().unwrap();
+        let mut fun_count = 0;
+        self.runtime.reduce_with(&mut fun_count, |acc, heap| {
+          *acc += heap.get_fn_count();
+        });
+        let mut ctr_count = 0;
+        self.runtime.reduce_with(&mut ctr_count, |acc, heap| {
+          *acc += heap.get_ct_count();
+        });
+        let mut reg_count = 0; 
+        self.runtime.reduce_with(&mut reg_count, |acc, heap| {
+          *acc += heap.get_ns_count();
+        });
         let stats = api::Stats { 
           tick,
           mana,
-          size,
+          space: size,
+          fun_count,
+          ctr_count,
+          reg_count,
         };
         answer.send(stats).unwrap();
-      }
-      NodeRequest::GetCountStats { tx: answer } => {
-        let mut fn_count = 0;
-        self.runtime.reduce_with(&mut fn_count, |acc, heap| {
-          *acc += heap.get_fn_count();
-        });
-        let mut ns_count = 0; 
-        self.runtime.reduce_with(&mut ns_count, |acc, heap| {
-          *acc += heap.get_ns_count();
-        });
-        let mut ct_count = 0;
-        self.runtime.reduce_with(&mut ct_count, |acc, heap| {
-          *acc += heap.get_ct_count();
-        });
-        let count_stats = api::CountStats { 
-          fn_count,
-          ns_count,
-          ct_count
-        };
-        answer.send(count_stats).unwrap();
       }
       NodeRequest::GetBlocks { range, tx: answer } => {
         let (start, end) = range;

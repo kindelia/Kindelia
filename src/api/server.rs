@@ -140,16 +140,6 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     }
   });
 
-  let query_tx = node_query_sender.clone();
-  let get_count_stats = path!("count").then(move || {
-    let query_tx = query_tx.clone();
-    async move {
-      let count_stats =
-        ask(query_tx, |tx| NodeRequest::GetCountStats { tx }).await;
-      ok_json(count_stats)
-    }
-  });
-
   // == Blocks ==
 
   let query_tx = node_query_sender.clone();
@@ -348,7 +338,6 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let app = root
     .or(get_stats)
-    .or(get_count_stats)
     .or(blocks_router)
     .or(functions_router)
     .or(interact_router);

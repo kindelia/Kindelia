@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::hvm::{Term, self};
 
-use super::{BlockInfo, FuncInfo, Hash, Name, Stats, CountStats, HexStatement};
+use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement};
 
 pub struct ApiClient {
   client: reqwest::Client,
@@ -88,10 +88,6 @@ impl ApiClient {
 
   pub async fn get_stats(&self) -> ApiResult<Stats> {
     self.get::<Stats>("/stats").await
-  }
-
-  pub async fn count_stats(&self) -> ApiResult<CountStats> {
-    self.get::<CountStats>("/count").await
   }
 
   pub async fn get_blocks(&self) -> ApiResult<Vec<BlockInfo>> {
