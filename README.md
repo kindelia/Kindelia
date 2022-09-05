@@ -27,7 +27,7 @@ Installation
 
 Clone this repository, navigate to its root directory, and enter:
 
-```bash
+```sh
 cargo install --path .
 ```
 
@@ -36,19 +36,18 @@ Usage
 
 1. Starting a node:
 
+```sh
+kindelia node start
 ```
-kindelia start
-```
-
 
 2. Running a block (offline):
 
-```
-kindelia run example/example.kdl
+```sh
+kindelia test example/example.kdl
 ```
 
 3. Posting a transaction:
 
-```
-kindelia post example/post.kdl 127.0.0.1:42000
+```sh
+kindelia post-udp --host 127.0.0.1:42000 example/post.kdl 
 ```
