@@ -112,7 +112,7 @@ impl Account {
     keccak256(&pubk.serialize_uncompressed()[1..65])
   }
 
-  pub fn from_private_key(key: &[u8]) -> Self {
+  pub fn from_private_key(key: &[u8; 32]) -> Self {
     Account::from_secret_key(SecretKey::from_slice(key).expect("32 bytes private key"))
   }
 

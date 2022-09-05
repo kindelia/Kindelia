@@ -1347,7 +1347,7 @@ impl Node {
       },
       // Prints stats
       Task {
-        delay: 1_000,
+        delay: 5_000,
         action: |node, mc| { node.log_heartbeat(); },
       },
     ];

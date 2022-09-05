@@ -1,6 +1,7 @@
 // TODO: `node clean` CLI command
 
 use std::fmt;
+use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread;
@@ -82,20 +83,36 @@ kindelia account ...
 
 */
 
-// Macros
-// ==================
+fn run_on_remote<T, P, F>(
+  api_url: &str,
+  file: FileInput,
+  encoded: bool,
+  f: F,
+) -> Result<T, String>
+where
+  F: FnOnce(api_client::ApiClient, Vec<HexStatement>) -> P,
+  P: Future<Output = Result<T, String>>,
+{
+  let code = arg_from_file_or_stdin::<String>(file)?;
+  let stmts =
+    if encoded { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
+  let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
+  let client =
+    api_client::ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+  run_async_blocking(f(client, stmts))
+}
 
-macro_rules! run_on_remote {
-  ($api_url:expr, $file:expr, $encoded:expr, $F:ident) => {{
-    let code = from_file_or_stdin::<String>($file)?;
-    let client = api_client::ApiClient::new($api_url, None)
-      .map_err(|e| e.to_string())?;
-    let stmts =
-      if $encoded { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
-    let stmts: Vec<HexStatement> =
-      stmts.into_iter().map(|s| s.into()).collect();
-    run_async_blocking(client.$F(stmts))
-  }};
+fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
+  if encoded {
+    statments_from_hex_seq(code)
+  } else {
+    parse_code(code)
+  }
+}
+
+fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
+  let code = file.read_to_string()?;
+  handle_code(&code, encoded)
 }
 
 // Clap CLI definitions
@@ -119,7 +136,7 @@ pub enum CliCommand {
   /// Test a Kindelia code file (.kdl), running locally.
   Test {
     /// The path to the file to test.
-    file: PathOrStdin,
+    file: FileInput,
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
     debug: bool,
@@ -127,25 +144,29 @@ pub enum CliCommand {
   /// Serialize a code file.
   Serialize {
     /// The path to the file to serialize.
-    file: PathOrStdin,
+    file: FileInput,
   },
   /// Deserialize a code file.
   Deserialize {
     /// The path to the file to deserialize.
-    file: PathOrStdin,
+    file: FileInput,
   },
   /// Sign a code file.
   Sign {
     /// The path to the file to sign.
-    file: PathOrStdin,
+    file: FileInput,
     /// File containing the 256-bit secret key, as a hex string
-    #[clap(short, long)]
+    #[clap(long, short = 's')]
     secret_file: PathBuf,
+    #[clap(long, short = 'e')]
+    encoded: bool,
+    #[clap(long, short = 'E')]
+    encoded_output: bool,
   },
   /// Test a Kindelia (.kdl) file, dry-running it on the current remote KVM state.
   RunRemote {
     /// Input file.
-    file: PathOrStdin,
+    file: FileInput,
     /// In case the input code is serialized.
     #[clap(long, short)]
     encoded: bool,
@@ -153,7 +174,7 @@ pub enum CliCommand {
   /// Post a Kindelia code file.
   Publish {
     /// The path to the file to post.
-    file: PathOrStdin,
+    file: FileInput,
     /// In case the input code is serialized.
     #[clap(long, short)]
     encoded: bool,
@@ -161,7 +182,7 @@ pub enum CliCommand {
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
     /// The path to the file to post.
-    file: PathOrStdin,
+    file: FileInput,
     /// Node address to post to.
     #[clap(long)]
     host: Option<String>,
@@ -212,7 +233,7 @@ pub enum GetKind {
     name: Name,
     /// The stat of the function to get.
     #[clap(subcommand)]
-    stat: GetFnKind,
+    stat: GetFunKind,
   },
   /// Get a namespace by name.
   Reg {
@@ -220,7 +241,7 @@ pub enum GetKind {
     name: String, // ASK: use Name here too?
     /// The stat of the namespace to get.
     #[clap(subcommand)]
-    stat: GetNsKind,
+    stat: GetRegKind,
   },
   /// Get a block by hash.
   Block {
@@ -233,7 +254,7 @@ pub enum GetKind {
     name: Name,
     /// The stat of the constructor to get.
     #[clap(subcommand)]
-    stat: GetCtKind,
+    stat: GetCtrKind,
   },
   // TODO: groups these commands under `kindelia get stats
   /// Get the tick (tip block height).
@@ -252,7 +273,7 @@ pub enum GetKind {
 }
 
 #[derive(Subcommand)]
-pub enum GetFnKind {
+pub enum GetFunKind {
   /// Get the code of a function.
   Code,
   /// Get the state of a function.
@@ -262,7 +283,7 @@ pub enum GetFnKind {
 }
 
 #[derive(Subcommand)]
-pub enum GetNsKind {
+pub enum GetRegKind {
   /// Get the owner of a namespace.
   Owner,
   /// Get the list of statements in a namespace.
@@ -270,7 +291,7 @@ pub enum GetNsKind {
 }
 
 #[derive(Subcommand)]
-pub enum GetCtKind {
+pub enum GetCtrKind {
   /// Get the code of a constructor.
   Code,
   /// Get the arity of a constructor.
@@ -300,7 +321,7 @@ where
   /// 2. Environment variable
   /// 3. Config file
   /// 4. Default value
-  fn get_value_config(self) -> Result<T, String>
+  fn get_config_value(self) -> Result<T, String>
   where
     T: ArgumentFrom<String> + ArgumentFrom<toml::Value>,
   {
@@ -318,9 +339,10 @@ where
       // if config file is set and valid, read from config file
       // doing this way because of issue #469 toml-rs
       let props: Vec<_> = prop_path.split('.').collect();
-      let mut value = toml_value
-        .get(&props[0])
-        .ok_or(format!("Could not found prop {} in config file.", prop_path))?;
+      let mut value = toml_value.get(&props[0]).ok_or(format!(
+        "Could not found prop '{}' in config file.",
+        prop_path
+      ))?;
       for prop in &props[1..] {
         value = value.get(&prop).ok_or(format!(
           "Could not found prop {} in config file.",
@@ -328,7 +350,7 @@ where
         ))?;
       }
       T::arg_from(value.clone()).map_err(|_| {
-        format!("Could not convert value {} into desired type.", value)
+        format!("Could not convert value '{}' into desired type.", value)
       })
     } else {
       (self.default)()
@@ -361,7 +383,7 @@ pub fn run_cli() -> Result<(), String> {
     config: ConfigFileOptions::none(),
     default: default_config_path,
   }
-  .get_value_config()?;
+  .get_config_value()?;
 
   let api_url = ConfigValueOption {
     value: parsed.api,
@@ -369,50 +391,77 @@ pub fn run_cli() -> Result<(), String> {
     config: ConfigFileOptions::none(),
     default: || Ok("http://localhost:8000".to_string()),
   }
-  .get_value_config()?;
+  .get_config_value()?;
 
   match parsed.command {
     CliCommand::Test { file, debug } => {
-      let code: String = from_file_or_stdin(file)?;
+      let code: String = file.read_to_string()?;
       test_code(&code, debug);
       Ok(())
     }
     CliCommand::Serialize { file } => {
-      let code: String = from_file_or_stdin(file)?;
+      let code: String = file.read_to_string()?;
       serialize_code(&code);
       Ok(())
     }
     CliCommand::Deserialize { file } => {
-      let code: String = from_file_or_stdin(file)?;
+      let code: String = file.read_to_string()?;
       deserialize_code(&code)
     }
-    CliCommand::Sign { file, secret_file } => {
-      let code: String = from_file_or_stdin(file)?;
-      let skey: String = from_file_or_stdin(secret_file.into())?;
-      sign_code(&code, &skey)
+    CliCommand::Sign { file, secret_file, encoded, encoded_output } => {
+      let skey: String = arg_from_file_or_stdin(secret_file.into())?;
+      let skey = skey.trim();
+      let skey = hex::decode(skey).map_err(|err| {
+        format!("Secret key should be valid hex string: {}", err)
+      })?;
+      let skey: [u8; 32] = skey
+        .try_into()
+        .map_err(|_| "Secret key should have exactly 64 bytes".to_string())?;
+      let code = load_code(file, encoded)?;
+      let statement = match &code[..] {
+        [stmt] => sign_code(stmt, &skey),
+        _ => Err("Input file should contain exactly one statement".to_string()),
+      }?;
+      if encoded_output {
+        println!(
+          "{}",
+          hex::encode(serialized_statement(&statement).to_bytes())
+        );
+      } else {
+        println!("{}", view_statement(&statement));
+      };
+      Ok(())
     }
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       // TODO: `--api` argument
-      let results = run_on_remote!(api_url, file, encoded, run_code)?;
+      let f = |client: api_client::ApiClient, stmts| async move {
+        client.run_code(stmts).await
+      };
+      let results = run_on_remote(&api_url, file, encoded, f)?;
       for result in results {
         println!("{}", result);
       }
       Ok(())
     }
     CliCommand::Publish { file, encoded } => {
-      let results = run_on_remote!(api_url, file, encoded, publish_code)?;
+      let f = |client: api_client::ApiClient, stmts| async move {
+        client.publish_code(stmts).await
+      };
+      let results = run_on_remote(&api_url, file, encoded, f)?;
       for (i, result) in results.iter().enumerate() {
         print!("Transaction #{}: ", i);
         match result {
-          Ok(_)  => println!("PUBLISHED"),
-          Err(_) => println!("NOT PUBLISHED [probably tx is already on mempool]"),
+          Ok(_) => println!("PUBLISHED (tx added to mempool)"),
+          Err(_) => {
+            println!("NOT PUBLISHED [tx is probably already on mempool]")
+          }
         }
       }
       Ok(())
     }
     CliCommand::PostUdp { file, host } => {
-      let content = from_file_or_stdin::<String>(file)?;
+      let content = arg_from_file_or_stdin::<String>(file)?;
       post_udp(&content, host)
     }
     CliCommand::Get { kind, json } => {
@@ -439,7 +488,7 @@ pub fn run_cli() -> Result<(), String> {
             config: ConfigFileOptions::new(&config, "node.data.dir"),
             default: default_kindelia_path,
           }
-          .get_value_config()?;
+          .get_config_value()?;
 
           let initial_peers = ConfigValueOption {
             value: initial_peers,
@@ -450,7 +499,7 @@ pub fn run_cli() -> Result<(), String> {
             ),
             default: || Ok(Vec::new()),
           }
-          .get_value_config()?;
+          .get_config_value()?;
 
           let mine = ConfigValueOption {
             value: Some(mine), // TODO: fix boolean resolution
@@ -458,7 +507,7 @@ pub fn run_cli() -> Result<(), String> {
             config: ConfigFileOptions::new(&config, "node.data.mine"),
             default: || Ok(false),
           }
-          .get_value_config()?;
+          .get_config_value()?;
 
           // start node
           start(path, initial_peers, mine);
@@ -502,7 +551,7 @@ pub async fn get_info(
     api_client::ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
   match kind {
     GetKind::Fun { name, stat } => match stat {
-      GetFnKind::Code => {
+      GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
         if json {
           println!("{}", serde_json::to_string(&func_info).unwrap());
@@ -519,7 +568,7 @@ pub async fn get_info(
         }
         Ok(())
       }
-      GetFnKind::State => {
+      GetFunKind::State => {
         let state = client.get_function_state(name).await?;
         if json {
           println!("{}", serde_json::to_string_pretty(&state).unwrap());
@@ -528,7 +577,7 @@ pub async fn get_info(
         }
         Ok(())
       }
-      GetFnKind::Slots => todo!(),
+      GetFunKind::Slots => todo!(),
     },
     GetKind::Reg { name: _, stat: _ } => todo!(),
     GetKind::Block { hash: _ } => todo!(),
@@ -583,15 +632,25 @@ pub fn deserialize_code(content: &str) -> Result<(), String> {
 }
 
 // TODO: should not open file
-pub fn sign_code(content: &str, skey: &str) -> Result<(), String> {
-    let statement = statement_from_hex(content)?;
-    let skey = hex::decode(&skey[0..64]).expect("hex string");
-    let user = crypto::Account::from_private_key(&skey);
-    let hash = hvm::hash_statement(&statement);
-    let sign = user.sign(&hash);
-    let stat = hvm::set_sign(&statement, sign);
-    println!("{}", hex::encode(serialized_statement(&stat).to_bytes()));
-    Ok(())
+pub fn sign_code(
+  statement: &Statement,
+  skey: &[u8; 32],
+) -> Result<Statement, String> {
+  let user = crypto::Account::from_private_key(skey);
+  let hash = hvm::hash_statement(statement);
+  let sign = user.sign(&hash);
+  match statement {
+    Statement::Fun { sign, .. }
+    | Statement::Ctr { sign, .. }
+    | Statement::Run { sign, .. }
+    | Statement::Reg { sign, .. } => {
+      if sign.is_some() {
+        return Err("Statement already has a signature.".to_string());
+      }
+    }
+  };
+  let stat = hvm::set_sign(statement, sign);
+  Ok(stat)
 }
 
 pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
@@ -670,8 +729,11 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   }
 }
 
-// Auxiliar Functions and Structs
-// ==============================
+// Auxiliar
+// ========
+
+// Async
+// -----
 
 fn run_async_blocking<T, E: ToString, P>(prom: P) -> Result<T, E>
 where
@@ -680,6 +742,9 @@ where
   let runtime = tokio::runtime::Runtime::new().unwrap();
   runtime.block_on(prom)
 }
+
+// Config
+// ------
 
 #[derive(Debug, Clone)]
 struct ConfigFileOptions<'a> {
@@ -702,9 +767,12 @@ impl<'a> ConfigFileOptions<'a> {
   }
 }
 
+// Code
+// ----
+
 fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
-  let stataments = hvm::read_statements(code);
-  match stataments {
+  let statements = hvm::read_statements(code);
+  match statements {
     Ok((code, statements)) => {
       if code.is_empty() {
         Ok(statements)
@@ -737,23 +805,49 @@ fn read_toml(file: &PathBuf) -> Option<toml::Value> {
     .and_then(|content| content.parse::<toml::Value>().ok())
 }
 
-// Auxiliar Types and Traits
+// TODO: alternative that do not read the whole file immediately
+fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
+  file: FileInput,
+) -> Result<T, String> {
+  match file {
+    FileInput::Path { path } => {
+      // read from file
+      let content = std::fs::read_to_string(&path).map_err(|err| {
+        format!("Cannot read from '{:?}' file: {}", path, err)
+      })?;
+      T::arg_from(content)
+    }
+    FileInput::Stdin => {
+      // read from stdin
+      let mut input = String::new();
+      match std::io::stdin().read_line(&mut input) {
+        Ok(_) => T::arg_from(input.trim().to_string()),
+        Err(err) => Err(format!("Could not read from stdin: {}", err)),
+      }
+    }
+  }
+}
+
+// Auxiliar traits and types
 // =========================
+
+// FileInput
+// ---------
 
 /// Represents input from a file or stdin.
 #[derive(Debug)]
-pub enum PathOrStdin {
+pub enum FileInput {
   Stdin,
   Path { path: PathBuf },
 }
 
-impl From<PathBuf> for PathOrStdin {
+impl From<PathBuf> for FileInput {
   fn from(path: PathBuf) -> Self {
-    PathOrStdin::Path { path }
+    FileInput::Path { path }
   }
 }
 
-impl FromStr for PathOrStdin {
+impl FromStr for FileInput {
   type Err = std::convert::Infallible;
   fn from_str(txt: &str) -> Result<Self, Self::Err> {
     let val = if txt == "-" {
@@ -766,7 +860,7 @@ impl FromStr for PathOrStdin {
   }
 }
 
-impl fmt::Display for PathOrStdin {
+impl fmt::Display for FileInput {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::Path { path } => write!(f, "{}", path.display()),
@@ -775,24 +869,21 @@ impl fmt::Display for PathOrStdin {
   }
 }
 
-// TODO: this should not read the whole file immediately
-fn from_file_or_stdin<T: ArgumentFrom<String>>(
-  file: PathOrStdin,
-) -> Result<T, String> {
-  match file {
-    PathOrStdin::Path { path } => {
-      // read from file
-      let content = std::fs::read_to_string(&path)
-        .map_err(|err| format!("Cannot read from '{:?}' file: {}", path, err))?;
-      T::arg_from(content)
-    }
-    PathOrStdin::Stdin => {
-      // read from stdin
-      let mut input = String::new();
-      if std::io::stdin().read_line(&mut input).is_ok() {
-        T::arg_from(input.trim().to_string())
-      } else {
-        Err("Could not read file path or stdin".into())
+impl FileInput {
+  fn read_to_string(&self) -> Result<String, String> {
+    match self {
+      FileInput::Path { path } => {
+        // read from file
+        std::fs::read_to_string(&path)
+          .map_err(|err| format!("Cannot read from '{:?}' file: {}", path, err))
+      }
+      FileInput::Stdin => {
+        // read from stdin
+        let mut buff = String::new();
+        std::io::stdin()
+          .read_to_string(&mut buff)
+          .map_err(|err| format!("Could not read from stdin: {}", err))?;
+        Ok(buff)
       }
     }
   }
