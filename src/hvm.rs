@@ -2034,7 +2034,7 @@ impl Runtime {
   }
 
   /// Run statement in the `draw` heap.
-  /// 
+  ///
   /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
   pub fn run_statement(&mut self, statement: &Statement, silent: bool, debug: bool) -> StatementResult {
@@ -2104,7 +2104,16 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
-        // let term = readback_term(self, done); // Done term
+        // The term return by Done is only read and stored in debug mode for
+        // testing purpouses. In the future, the Done return value will be
+        // limited to `Term::Num`s and the U120s will be stored as part of the
+        // protocol. Also, a `Log` primitive should be added.
+        let done_term =
+          if debug {
+            readback_term(self, done)
+          } else {
+            Term::num(U120::ZERO)
+          };
         self.collect(done);
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
@@ -2113,7 +2122,7 @@ impl Runtime {
           return error(self, "run", format!("Not enough space."));
         }
         StatementInfo::Run {
-          done_term: Term::num(U120::ZERO), // term,
+          done_term,
           used_mana: mana_dif,
           size_diff: size_dif,
           end_size: size_end as u128, // TODO: rename to done_size for consistency?
