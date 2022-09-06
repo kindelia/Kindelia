@@ -556,12 +556,11 @@ pub async fn get_info(
       Ok(())
     },
     GetKind::Block { hash } => {
-      let hash = Hash::try_from(hash.as_str()).map_err(|_| "".to_string())?;
+      let hash = Hash::try_from(hash.as_str()).map_err(|err| format!("{}", err))?;
       let block = client.get_block(hash).await?;
-      println!("{:?}", block);
+      println!("{:#?}", block);
       Ok(())
     },
-    GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Ctr { name, stat } => {
       let ctr_info = client.get_constructor(name).await?;
       match stat {

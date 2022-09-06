@@ -176,7 +176,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   };
 
   let query_tx = node_query_sender.clone();
-  let get_block_hash = path!("block_hash" / u64).and_then(
+  let get_block_hash = path!("block-hash" / u64).and_then(
     move |index: u64| {
       let query_tx = query_tx.clone();
       async move {

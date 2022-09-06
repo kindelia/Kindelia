@@ -98,8 +98,8 @@ impl ApiClient {
     self.get::<String>(&format!("/block-hash/{}", index)).await
   }
 
-  pub async fn get_block(&self, id: Hash) -> ApiResult<BlockInfo> {
-    self.get::<BlockInfo>(&format!("/blocks/{}", id)).await
+  pub async fn get_block(&self, id: Hash) -> ApiResult<Option<BlockInfo>> {
+    self.get::<Option<BlockInfo>>(&format!("/blocks/{}", id)).await
   }
 
   pub async fn get_functions(&self) -> ApiResult<Vec<Name>> {

@@ -85,10 +85,10 @@ impl TryFrom<&str> for Hash {
     let rest = value.strip_prefix("0x");
     let hex_str = rest.ok_or("Missing `0x` prefix from hash hex string.")?;
     let bytes = hex::decode(hex_str).map_err(|e| e.to_string())?;
-    if bytes.len() != 64 {
+    if bytes.len() != 32 {
       return Err("Hash hex string must be 64 hex digits long.".to_string());
     }
-    let bytes = &bytes[0..64];
+    let bytes = &bytes[0..32];
     let value = U256::from_big_endian(bytes);
     Ok(Hash { value })
   }
