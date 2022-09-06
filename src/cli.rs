@@ -220,7 +220,7 @@ pub enum NodeCommand {
 
 #[derive(Subcommand)]
 pub enum GetKind {
-  /// [NOT IMPLEMENTED] Get a constructor by name.
+  /// Get a constructor by name.
   Ctr {
     /// The name of the constructor to get.
     name: Name,
@@ -483,7 +483,11 @@ pub fn run_cli() -> Result<(), String> {
     CliCommand::Node { command } => {
       match command {
         NodeCommand::Clean => todo!("`kindelia node clean`"),
-        NodeCommand::Start { base_path: kindelia_path, initial_peers, mine } => {
+        NodeCommand::Start {
+          base_path: kindelia_path,
+          initial_peers,
+          mine,
+        } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           let config = Some(handle_config_file(&config_path)?);
@@ -539,7 +543,22 @@ pub async fn get_info(
     api_client::ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
   match kind {
     GetKind::Block { hash: _ } => todo!(),
-    GetKind::Ctr { name: _, stat: _ } => todo!(),
+    GetKind::Ctr { name, stat } => {
+      let ctr_info = client.get_constructor(name).await?;
+      match stat {
+        GetCtrKind::Arity => {
+          println!("{}", ctr_info.arit)
+        }
+        GetCtrKind::Code => {
+          let args = (0..ctr_info.arit)
+            .map(|x| format!("x{}", x))
+            .collect::<Vec<_>>()
+            .join(" ");
+          println!("{{{} {}}}", name, args)
+        }
+      }
+      Ok(())
+    }
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
@@ -590,7 +609,7 @@ pub async fn get_info(
             GetStatsKind::RegCount => stats.reg_count,
           };
           println!("{}", val);
-        },
+        }
       };
       Ok(())
     }

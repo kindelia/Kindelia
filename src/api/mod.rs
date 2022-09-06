@@ -269,6 +269,11 @@ pub struct FuncInfo {
   pub func: hvm::Func,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CtrInfo {
+  pub arit: u64
+}
+
 type RequestAnswer<T> = oneshot::Sender<T>;
 
 // Node Internal API
@@ -300,6 +305,10 @@ pub enum NodeRequest {
   GetPeers {
     all: bool,
     tx: RequestAnswer<Vec<node::Peer>>,
+  },
+  GetConstructor {
+    name: Name,
+    tx: RequestAnswer<Option<CtrInfo>>,
   },
   /// DEPRECATED
   TestCode {
