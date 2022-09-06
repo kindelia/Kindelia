@@ -1,7 +1,11 @@
+// TODO: flag enable logging statements results (disabled by default)
+// TODO: limit readback computational resources on aforementioned log and API calls
+
 // TODO: `kindelia node clean` CLI command
-// TODO: `kindelia get (ctr|reg|block) commands
-// TODO: flag to enable printing events (heartbeat)
-// TODO: some way to pretty-print events (heartbeat)
+// TODO: `kindelia get (reg|block) commands
+
+// TODO: flag to enable printing events (heartbeat) ?
+// TODO: some way to pretty-print events (heartbeat) ?
 
 use std::fmt;
 use std::io::Read;
