@@ -2259,7 +2259,7 @@ impl Runtime {
   pub fn rollback(&mut self, tick: u128) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
-      //println!("- rolling back from {} to {}", self.get_tick(), tick);
+      eprintln!("- rolling back from {} to {}", self.get_tick(), tick);
       self.clear_heap(self.curr);
       self.nuls.push(self.curr);
       let mut cuts = 0;
