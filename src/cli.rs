@@ -1,8 +1,6 @@
 // TODO: flag enable logging statements results (disabled by default)
 // TODO: limit readback computational resources on aforementioned log and API calls
 
-// TODO: `kindelia get (reg|block) commands
-
 // TODO: flag to enable printing events (heartbeat) ?
 // TODO: some way to pretty-print events (heartbeat) ?
 
