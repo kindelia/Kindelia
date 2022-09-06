@@ -2109,7 +2109,9 @@ impl Runtime {
         // limited to `Term::Num`s and the U120s will be stored as part of the
         // protocol. Also, a `Log` primitive should be added.
         let done_term =
-          if debug {
+          // if debug {
+          if true {
+            // TODO: limit readback computational resources
             readback_term(self, done)
           } else {
             Term::num(U120::ZERO)
