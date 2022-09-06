@@ -2472,6 +2472,7 @@ impl Runtime {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
+  // TODO: refactor return to Option
   pub fn get_arity(&self, name: &Name) -> u128 {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
       return arity;
