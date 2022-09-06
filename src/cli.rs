@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use hvm::Name;
 use warp::Future;
 
-use crate::api::{client as api_client, HexStatement};
+use crate::api::{client as api_client, HexStatement, Hash};
 use crate::bits::{deserialized_statement, serialized_statement};
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
@@ -228,11 +228,6 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetCtrKind,
   },
-  /// [NOT IMPLEMENTED] Get a block by hash.
-  Block {
-    /// The hash of the block to get.
-    hash: String,
-  },
   /// Get a function by name.
   Fun {
     /// The name of the function to get.
@@ -248,6 +243,15 @@ pub enum GetKind {
     /// The stat of the namespace to get.
     #[clap(subcommand)]
     stat: GetRegKind,
+  },
+  /// Get a block hash by index
+  BlockHash {
+    index: u64,
+  },
+  /// [NOT IMPLEMENTED] Get a block by hash.
+  Block {
+    /// The hash of the block to get.
+    hash: String,
   },
   /// Get node stats.
   Stats {
@@ -538,7 +542,19 @@ pub async fn get_info(
   let client =
     api_client::ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
   match kind {
-    GetKind::Block { hash: _ } => todo!(),
+    GetKind::BlockHash { index } => {
+      let block_hash = client.get_block_hash(index).await?;
+      println!("{}", block_hash);
+      Ok(())
+    },
+    GetKind::Block { hash } => {
+      let hash = Hash::try_from(hash.as_str()).map_err(|_| "".to_string())?;
+      let block = client.get_block(hash).await?;
+      println!("{:?}", block);
+      Ok(())
+    },
+    //GetKind::Block { hash: _ } => {
+    //},
     GetKind::Ctr { name: _, stat: _ } => todo!(),
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {

@@ -12,6 +12,7 @@ use warp::{body, path, post, Filter};
 use warp::{reject, Rejection};
 
 use super::NodeRequest;
+use super::u256_to_hex;
 use crate::api::HexStatement;
 use crate::hvm::{self, name_to_u128, Name, StatementErr, StatementInfo};
 use crate::util::U256;
@@ -174,10 +175,25 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     })
   };
 
+  let query_tx = node_query_sender.clone();
+  let get_block_hash = path!("block_hash" / u64).and_then(
+    move |index: u64| {
+      let query_tx = query_tx.clone();
+      async move {
+        let block_hash = ask(query_tx, |tx| NodeRequest::GetBlockHash { index, tx }).await;
+        match block_hash {
+          None             => Err(Rejection::from(Error::NotFound)),
+          Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
+        }
+      }
+    });
+
+
   let get_block_go = get_block().and(path!()).map(ok_json);
 
   let blocks_router = get_blocks //
-    .or(get_block_go);
+    .or(get_block_go)
+    .or(get_block_hash);
 
   // == Functions ==
 
