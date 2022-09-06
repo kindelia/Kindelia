@@ -255,6 +255,11 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat_kind: Option<GetStatsKind>,
   },
+  Peers {
+    /// Get all seen peers, including inactive ones
+    #[clap(long)]
+    all: bool
+  },
 }
 
 #[derive(Subcommand)]
@@ -589,6 +594,13 @@ pub async fn get_info(
           println!("{}", val);
         },
       };
+      Ok(())
+    }
+    GetKind::Peers { all } => {
+      let peers = client.get_peers(all).await?;
+      for peer in peers {
+        println!("{}", peer.address)
+      }
       Ok(())
     }
   }
