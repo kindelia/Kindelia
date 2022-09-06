@@ -22,7 +22,7 @@ use std::hash::BuildHasherDefault;
 use crate::NoHashHasher as NHH;
 use crate::print_with_timestamp;
 
-use crate::api;
+use crate::api::{self, CtrInfo};
 use crate::api::{NodeRequest, BlockInfo, FuncInfo};
 use crate::util::*;
 use crate::bits::*;
@@ -963,6 +963,14 @@ impl Node {
     let func = comp_func.func;
     Some(FuncInfo { func })
   }
+  pub fn get_ctr_info(&self, name: &Name) -> Option<CtrInfo> {
+    let arit = self.runtime.get_arity(name);
+    if arit == U128_NONE {
+      None
+    } else {
+      Some(CtrInfo { arit: arit as u64 }) 
+    }
+  }
 
   pub fn handle_request(&mut self, request: NodeRequest) {
     // TODO: handle unwraps
@@ -1037,7 +1045,11 @@ impl Node {
           } else {
             self.peers.get_all_active()
           };
-        answer.send(peers).unwrap()
+        answer.send(peers).unwrap();
+      },
+      NodeRequest::GetConstructor { name, tx: answer } => {
+        let info = self.get_ctr_info(&name);
+        answer.send(info).unwrap();
       },
       NodeRequest::TestCode { code, tx: answer } => {
         let result = self.runtime.test_statements_from_code(&code);
