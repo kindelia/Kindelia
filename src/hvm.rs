@@ -2104,7 +2104,7 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
-        let term = readback_term(self, done);
+        // let term = readback_term(self, done); // Done term
         self.collect(done);
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
@@ -2113,7 +2113,7 @@ impl Runtime {
           return error(self, "run", format!("Not enough space."));
         }
         StatementInfo::Run {
-          done_term: term,
+          done_term: Term::num(U120::ZERO), // term,
           used_mana: mana_dif,
           size_diff: size_dif,
           end_size: size_end as u128, // TODO: rename to done_size for consistency?
