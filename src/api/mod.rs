@@ -297,6 +297,10 @@ pub enum NodeRequest {
     name: Name,
     tx: RequestAnswer<Option<hvm::Term>>,
   },
+  GetPeers {
+    all: bool,
+    tx: RequestAnswer<Vec<node::Peer>>,
+  },
   /// DEPRECATED
   TestCode {
     code: String,

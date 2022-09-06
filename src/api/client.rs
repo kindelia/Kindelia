@@ -6,7 +6,7 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::hvm::{Term, self};
+use crate::{hvm::{Term, self}, node};
 
 use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement};
 
@@ -117,5 +117,13 @@ impl ApiClient {
   // I'm not sure what the return type should be.
   pub async fn publish_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<Result<(), ()>>> {
     self.req(Method::POST, "/publish", Some(code)).await
+  }
+
+  pub async fn get_peers(&self, all: bool) -> ApiResult<Vec<node::Peer>> {
+    if all {
+      self.get::<Vec<node::Peer>>("/peers/all").await
+    } else {
+      self.get::<Vec<node::Peer>>("/peers").await
+    }
   }
 }

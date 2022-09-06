@@ -334,13 +334,42 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let interact_router =
     interact_test.or(interact_send).or(interact_run).or(interact_publish);
 
+  // == Peers ==
+
+  let get_peers_base = path!("peers" / ..);
+
+  let query_tx = node_query_sender.clone();
+  let get_peers =
+    get_peers_base.and(path!()).then(move || {
+      let query_tx = query_tx.clone();
+      async move {
+        let peers_store =
+          ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
+        ok_json(peers_store)
+      }
+    });
+  
+  let query_tx = node_query_sender.clone();
+  let get_all_peers =
+    get_peers_base.and(path!("all")).then(move || {
+      let query_tx = query_tx.clone();
+      async move {
+        let peers_store =
+          ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
+        ok_json(peers_store)
+      }
+    });
+
+  let peers_router = get_peers.or(get_all_peers);
+  
   // ==
 
   let app = root
     .or(get_stats)
     .or(blocks_router)
     .or(functions_router)
-    .or(interact_router);
+    .or(interact_router)
+    .or(peers_router);
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")

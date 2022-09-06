@@ -109,7 +109,7 @@ pub struct Node {
 // Peers
 // -----
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Peer {
   pub seen_at: u128,
   pub address: Address,
@@ -178,6 +178,10 @@ impl PeersStore {
     self.active.values().cloned().collect()
   }
 
+  pub fn get_all(&self) -> Vec<Peer> {
+    self.seen.values().cloned().collect()
+  }
+
   pub fn get_random_active(&self, amount: u128) -> Vec<Peer> {
     let amount = amount as usize;
     let mut rng = rand::thread_rng();
@@ -227,7 +231,7 @@ pub enum Message {
   }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Address {
   IPv4 {
     val0: u8,
@@ -1008,6 +1012,15 @@ impl Node {
       NodeRequest::GetState { name, tx: answer } => {
         let state = self.runtime.read_disk_as_term(name);
         answer.send(state).unwrap();
+      },
+      NodeRequest::GetPeers { all, tx: answer } => {
+        let peers = 
+          if all {
+            self.peers.get_all()
+          } else {
+            self.peers.get_all_active()
+          };
+        answer.send(peers).unwrap()
       },
       NodeRequest::TestCode { code, tx: answer } => {
         let result = self.runtime.test_statements_from_code(&code);
