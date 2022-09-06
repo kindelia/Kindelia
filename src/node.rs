@@ -929,6 +929,19 @@ impl Node {
     }
   }
 
+  pub fn get_block_hash_by_index(&self, index: u64) -> Option<U256> {
+    let mut hsh = self.tip;
+    let mut idx = self.height[&hsh] as u64;
+    if index > idx {
+      return None;
+    }
+    while index < idx {
+      hsh = self.block[&hsh].prev;
+      idx = idx - 1;
+    }
+    return Some(hsh);
+  }
+
   pub fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
     // TODO: cache
     let block = self.block.get(hash)?;
@@ -1002,6 +1015,10 @@ impl Node {
       },
       NodeRequest::GetBlock { hash, tx: answer } => {
         let info = self.get_block_info(&hash);
+        answer.send(info).unwrap();
+      },
+      NodeRequest::GetBlockHash { index, tx: answer } => {
+        let info = self.get_block_hash_by_index(index);
         answer.send(info).unwrap();
       },
       NodeRequest::GetFunctions { tx } => {

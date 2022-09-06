@@ -283,6 +283,10 @@ pub enum NodeRequest {
   GetStats {
     tx: RequestAnswer<Stats>,
   },
+  GetBlockHash {
+    index: u64,
+    tx: RequestAnswer<Option<U256>>,
+  },
   GetBlock {
     hash: U256,
     tx: RequestAnswer<Option<BlockInfo>>,

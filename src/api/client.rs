@@ -94,6 +94,10 @@ impl ApiClient {
     self.get::<Vec<BlockInfo>>("/blocks").await
   }
 
+  pub async fn get_block_hash(&self, index: u64) -> ApiResult<String> {
+    self.get::<String>(&format!("/block-hash/{}", index)).await
+  }
+
   pub async fn get_block(&self, id: Hash) -> ApiResult<BlockInfo> {
     self.get::<BlockInfo>(&format!("/blocks/{}", id)).await
   }
