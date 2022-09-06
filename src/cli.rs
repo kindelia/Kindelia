@@ -1,7 +1,6 @@
 // TODO: flag enable logging statements results (disabled by default)
 // TODO: limit readback computational resources on aforementioned log and API calls
 
-// TODO: `kindelia node clean` CLI command
 // TODO: `kindelia get (reg|block) commands
 
 // TODO: flag to enable printing events (heartbeat) ?
@@ -196,6 +195,9 @@ pub enum CliCommand {
     /// Which command run.
     #[clap(subcommand)]
     command: NodeCommand,
+    /// Base path to store the node's data in.
+    #[clap(long)]
+    base_path: Option<PathBuf>,
   },
   /// Generate auto-completion for a shell.
   Completion {
@@ -206,13 +208,10 @@ pub enum CliCommand {
 
 #[derive(Subcommand)]
 pub enum NodeCommand {
-  /// [NOT IMPLEMENTED] Clean the node's data.
+  /// Clean the node's data.
   Clean,
   /// Starts a Kindelia node.
   Start {
-    /// Base path to store the node's data in.
-    #[clap(long)]
-    base_path: Option<PathBuf>,
     /// Initial peer nodes.
     #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
@@ -232,6 +231,11 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetCtrKind,
   },
+  /// [NOT IMPLEMENTED] Get a block by hash.
+  Block {
+    /// The hash of the block to get.
+    hash: String,
+  },
   /// Get a function by name.
   Fun {
     /// The name of the function to get.
@@ -248,14 +252,8 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetRegKind,
   },
-  /// Get a block hash by index
   BlockHash {
     index: u64,
-  },
-  /// [NOT IMPLEMENTED] Get a block by hash.
-  Block {
-    /// The hash of the block to get.
-    hash: String,
   },
   /// Get node stats.
   Stats {
@@ -266,7 +264,7 @@ pub enum GetKind {
   Peers {
     /// Get all seen peers, including inactive ones
     #[clap(long)]
-    all: bool
+    all: bool,
   },
 }
 
@@ -488,27 +486,44 @@ pub fn run_cli() -> Result<(), String> {
       init_config_file(&path)?;
       Ok(())
     }
-    CliCommand::Node { command } => {
+    CliCommand::Node { command, base_path } => {
+      let config = Some(handle_config_file(&config_path)?);
+
+      let path = ConfigValueOption {
+        value: base_path,
+        env: Some("KINDELIA_PATH"),
+        config: ConfigFileOptions::new(&config, "node.data.dir"),
+        default: default_kindelia_path,
+      }
+      .get_config_value()?;
+
       match command {
-        NodeCommand::Clean => todo!("`kindelia node clean`"),
-        NodeCommand::Start {
-          base_path: kindelia_path,
-          initial_peers,
-          mine,
-        } => {
+        NodeCommand::Clean => {
+          // warning
+          println!(
+            "WARNING! This will delete all the files present in {}",
+            path.display()
+          );
+          // confirmation
+          println!("Do you want to continue? ['y' for YES/ anything for NO]");
+          let mut answer = String::new();
+          std::io::stdin()
+            .read_line(&mut answer)
+            .map_err(|err| format!("Could not read your answer: {}", err))?;
+          // only accept 'y' as positive answer, anything else will be ignored
+          if answer.trim() == "y" {
+            std::fs::remove_dir_all(path)
+              .map_err(|err| format!("Could not remove the files: {}", err))?;
+            println!("All items were removed.");
+          } else {
+            println!("Canceling operation.");
+          }
+          Ok(())
+        }
+        NodeCommand::Start { initial_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
-          let config = Some(handle_config_file(&config_path)?);
-
           // get arguments from cli, env or config
-          let path = ConfigValueOption {
-            value: kindelia_path,
-            env: Some("KINDELIA_PATH"),
-            config: ConfigFileOptions::new(&config, "node.data.dir"),
-            default: default_kindelia_path,
-          }
-          .get_config_value()?;
-
           let initial_peers = ConfigValueOption {
             value: initial_peers,
             env: Some("KINDELIA_INITIAL_PEERS"),
@@ -556,7 +571,7 @@ pub async fn get_info(
       Ok(())
     },
     GetKind::Block { hash } => {
-      let hash = Hash::try_from(hash.as_str()).map_err(|err| format!("{}", err))?;
+      let hash = Hash::try_from(hash.as_str())?;
       let block = client.get_block(hash).await?;
       println!("{:#?}", block);
       Ok(())
