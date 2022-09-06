@@ -21,7 +21,8 @@ kindelia deserialize /tmp/block_1.hex.txt
 
 kindelia test ./example/block_1.kdl
 
-kindelia serialize example/block_3.unsig.kdl | kindelia sign -eE -s /tmp/secret - >/tmp/block_3.sig.hex.txt
+kindelia serialize example/block_3.unsig.kdl \
+  | kindelia sign -eE -s /tmp/secret - >/tmp/block_3.sig.hex.txt
 
 cat /tmp/block_3.sig.hex.txt
 
@@ -38,6 +39,12 @@ kindelia get fun Count state
 kindelia get fun Count code
 
 kindelia get stats
+
+# ---------
+
+# kindelia get peers
+
+# ---------
 
 # kindelia run-remote ./example/block_2.kdl || true
 

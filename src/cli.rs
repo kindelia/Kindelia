@@ -486,8 +486,6 @@ pub fn run_cli() -> Result<(), String> {
         NodeCommand::Start { base_path: kindelia_path, initial_peers, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
-          // TODO: create the file automatically, warn in color and sleep ~1 sec
-
           let config = Some(handle_config_file(&config_path)?);
 
           // get arguments from cli, env or config
