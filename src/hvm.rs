@@ -2932,6 +2932,7 @@ pub fn is_linear(term: &Term) -> bool {
   // println!("{}", view_term(term));
   let res = match term {
     Term::Var { name: var_name } => {
+      // TODO: check unbound variables
       true
     }
     Term::Dup { nam0, nam1, expr, body } => {
@@ -2999,29 +3000,22 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       link(rt, loc, Era());
     }
   }
-  // println!("{}", term);
+
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", name, vars_data.len());
-      consume(rt, loc, **name, vars_data).unwrap_or_else(|| Num(0))
-      // match got {
-      //   Some(got) => {
-      //     vars_data.remove(name);
-      //     return got;
-      //   }
-      //   None => {
-      //     vars_data.insert(**name, loc);
-      //     return Num(0);
-      //   }
-      // }
+      consume(rt, loc, **name, vars_data).unwrap_or_else(|| Num(0)) // TODO: handle error / panic
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
       let dupk = rt.fresh_dups();
-      bind(rt, node + 0, **nam0, Dp0(dupk, node), vars_data);
-      bind(rt, node + 1, **nam1, Dp1(dupk, node), vars_data);
+      // TODO: Review: expr create_term was moved above the 2 below binds (Dp0
+      // and Dp1) to so it consumes variable names so they can be re-binded,
+      // allowing: `dup x y = x`
       let expr = create_term(rt, expr, node + 2, vars_data);
       link(rt, node + 2, expr);
+      bind(rt, node + 0, **nam0, Dp0(dupk, node), vars_data);
+      bind(rt, node + 1, **nam1, Dp1(dupk, node), vars_data);
       let body = create_term(rt, body, loc, vars_data);
       body
     }

@@ -1,0 +1,9 @@
+fun (Double x) {
+  (Double x) =
+    dup x y = x;
+    (+ x y)
+}
+
+run {
+  (Done (Double #7))
+}
