@@ -2,18 +2,23 @@
 
 use std::sync::mpsc::SyncSender;
 
+use bit_vec::BitVec;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::hyper::StatusCode;
+use warp::body;
 use warp::reply::{self, Reply};
-use warp::{body, path, post, Filter};
+use warp::{path, post, Filter};
 use warp::{reject, Rejection};
+use warp::query::query;
 
 use super::NodeRequest;
 use super::u256_to_hex;
 use crate::api::HexStatement;
+use crate::bits;
 use crate::hvm::{self, name_to_u128, Name, StatementErr, StatementInfo};
 use crate::util::U256;
 
@@ -56,6 +61,15 @@ where
 
 fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
   names.iter().copied().map(hvm::u128_to_name).collect::<Vec<_>>()
+}
+
+// Protocol Serialization
+// ======================
+
+fn bitvec_to_hex(bits: &BitVec) -> String {
+  let bytes = bits.to_bytes();
+  let hex = hex::encode(bytes);
+  hex
 }
 
 // Errors
@@ -237,15 +251,26 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
       }
     });
 
+  #[derive(Deserialize)]
+  struct GetStateQuery {
+    protocol: Option<bool>, // TODO: base64 ?
+  }
+
   let query_tx = node_query_sender.clone();
   let get_function_state =
-    get_function_base.and(path!("state")).and_then(move |name: Name| {
+    get_function_base.and(path!("state")).and(query::<GetStateQuery>()).and_then(move |name: Name, query: GetStateQuery| {
       let query_tx = query_tx.clone();
       async move {
         let state =
           ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;
         if let Some(state) = state {
-          Ok(ok_json(state))
+          if let Some(true) = query.protocol {
+            let encoded = bits::serialized_term(&state);
+            let hex = bitvec_to_hex(&encoded);
+            Ok(ok_json(hex))
+          } else {
+            Ok(ok_json(state))
+          }
         } else {
           Err(Rejection::from(Error::NotFound))
         }
