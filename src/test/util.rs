@@ -1,4 +1,5 @@
 use rstest::fixture;
+use tokio::runtime;
 
 use crate::hvm::{
   self, init_runtime, name_to_u128_unsafe, read_term, show_term, Name,
@@ -14,7 +15,8 @@ use std::{
 // ===========================================================
 // Aux types
 
-pub type Validator = (&'static str, fn(u128, &hvm::Term) -> bool);
+pub type Validator =
+  (&'static str, fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -267,15 +269,15 @@ where
 // ===========
 // validations
 
-fn validate<P: Fn(u128, &Term) -> bool>(
-  rt: &Runtime,
+fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
+  rt: &mut Runtime,
   name: &str,
   predicate: P,
 ) {
   let tick = rt.get_tick();
-  let counter_state = rt.read_disk(name.try_into().unwrap()).unwrap();
-  let counter_state = hvm::readback_term(rt, counter_state);
-  assert!(predicate(tick, &counter_state))
+  let state = rt.read_disk(name.try_into().unwrap()).unwrap();
+  let state = hvm::readback_term(rt, state);
+  assert!(predicate(tick, &state, rt))
 }
 
 fn tick_and_validate(rt: &mut Runtime, validators: &[Validator]) {

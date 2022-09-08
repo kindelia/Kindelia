@@ -25,8 +25,8 @@ use rstest_reuse::{apply, template};
 #[template]
 #[rstest]
 #[case(&["Count", "Store", "Sub", "Add"], PRE_COUNTER, COUNTER, &counter_validators())]
-#[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK, &[])] // TODO: validators
-#[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER, &[])] // TODO: validators
+#[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK, &bank_validators())]
+#[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER, &[])]
 fn hvm_cases(
   #[case] fn_names: &[&str],
   #[case] pre_code: &str,
@@ -43,7 +43,15 @@ pub fn simple_rollback(
   validators: &[util::Validator],
   temp_dir: TempDir,
 ) {
-  assert!(rollback_simple(pre_code, code, fn_names, 1000, 1, validators, &temp_dir.path));
+  assert!(rollback_simple(
+    pre_code,
+    code,
+    fn_names,
+    1000,
+    1,
+    validators,
+    &temp_dir.path
+  ));
 }
 
 #[apply(hvm_cases)]
@@ -55,7 +63,14 @@ pub fn advanced_rollback_in_random_state(
   temp_dir: TempDir,
 ) {
   let path = [1000, 12, 1000, 24, 1000, 36];
-  assert!(rollback_path(pre_code, code, fn_names, &path, validators, &temp_dir.path));
+  assert!(rollback_path(
+    pre_code,
+    code,
+    fn_names,
+    &path,
+    validators,
+    &temp_dir.path
+  ));
 }
 
 #[apply(hvm_cases)]
@@ -97,8 +112,8 @@ pub fn advanced_rollback_run_fail(
 ) {
   let path = [2, 1, 2, 1, 2, 1];
   assert!(rollback_path(
-    PRE_COUNTER,
-    COUNTER,
+    pre_code,
+    code,
     &fn_names,
     &path,
     validators,
@@ -487,10 +502,10 @@ pub const COUNTER: &'static str = "
 ";
 
 fn counter_validators() -> [util::Validator; 2] {
-  fn count_validator(tick: u128, term: &Term) -> bool {
+  fn count_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
     view_term(term) == format!("#{}", tick)
   }
-  fn store_validator(tick: u128, term: &Term) -> bool {
+  fn store_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
     view_term(term).matches("Succ").count() as u128 == tick
   }
   [("Count", count_validator), ("Store", store_validator)]
@@ -570,12 +585,19 @@ pub const BANK: &'static str = "
   run {
     ask (Call 'Random' {Random_Inc});
     ask acc = (Call 'Random' {Random_Get});
-    ask (Call 'Bank' {Bank_Add acc}]);
+    ask (Call 'Bank' {Bank_Add acc});
     ask b = (Call 'Bank' {Bank_Get});
     (Done b)
     // !done (AddAcc #1 {Leaf})
   }
 ";
+
+fn bank_validators() -> [util::Validator; 1] {
+  fn tree_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
+    view_term(term).matches("Node").count() as u128 == tick
+  }
+  [("Bank", tree_validator)]
+}
 
 pub const PRE_BIT_COUNTER: &'static str = "
 // The Scott-Encoded Bits type
@@ -637,6 +659,26 @@ run {
   (Done (ToNum x))
 }
 ";
+
+// TODO: this code generate stack overflow on the parser
+// fn bit_validators() -> [util::Validator; 1] {
+//   fn bit_validator(tick: u128, term: &Term, rt: &mut Runtime) -> bool {
+//     let term = view_term(term);
+//     let code = format!(" run {{ (Done (ToNum {})) }} ", term);
+//     let res = rt
+//       .run_statements_from_code(&code, true, true)
+//       .first()
+//       .unwrap()
+//       .clone()
+//       .unwrap();
+//     if let hvm::StatementInfo::Run { done_term, .. } = res {
+//       view_term(&done_term) == format!("#{}", tick)
+//     } else {
+//       panic!();
+//     }
+//   }
+//   [("CountBit", bit_validator)]
+// }
 
 pub fn keyword_fail_1(keyword: &str) -> String {
   format!(
