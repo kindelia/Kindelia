@@ -1,0 +1,31 @@
+fun (Test2 state) {
+  (Test2 state) = 
+    dup state2 state1 = state;
+    let state = state2;
+    let got = state1;
+    let state = (+ state #1);
+    let state = (+ state #1);
+    let got = (+ got #1);
+    (+ state got)
+}
+
+fun (Test state) {
+  (Test state) = 
+    let state = state;
+    let state = (+ state #1);
+    let state = (+ state #1);
+    (+ state got)
+}
+
+
+run {
+  (Done (Test #2))
+}
+
+run {
+  (Done (Test2 #2))
+}
+
+run {
+  (Done let state = #2; let state = (+ state #1); state)
+}
