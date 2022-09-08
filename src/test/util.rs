@@ -147,7 +147,7 @@ pub fn rollback_simple(
   rollback_tick: u128,
   dir_path: &PathBuf,
 ) -> bool {
-  let mut rt = init_runtime(Some(&dir_path));
+  let mut rt = init_runtime(dir_path.clone());
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -198,7 +198,7 @@ pub fn rollback_path(
     }
   };
 
-  let mut rt = init_runtime(Some(dir_path));
+  let mut rt = init_runtime(dir_path.clone());
   rt.run_statements_from_code(pre_code, true, true);
 
   for tick in path {
@@ -221,7 +221,7 @@ where
   A: Fn(&Term),
 {
   let temp_dir = temp_dir();
-  let mut rt = init_runtime(Some(&temp_dir.path));
+  let mut rt = init_runtime(temp_dir.path.clone());
 
   let term = Term::Fun { name: "Done".try_into().unwrap(), args: [term.clone()].to_vec() };
   let stmt = Statement::Run { expr: term, sign: None };

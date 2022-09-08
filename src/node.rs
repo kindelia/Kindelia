@@ -87,9 +87,11 @@ pub enum InclusionState {
 // re-submitted. FIXME: `was_mined` should be removed. Instead, we just need a priority-queue with
 // fast removal of mined transactions. An immutable map should suffice.
 pub struct Node {
-  pub path       : PathBuf,                          // path where files are saved
+  pub state_path : PathBuf,                          // path where files are saved
   pub socket     : UdpSocket,                        // UDP socket
   pub port       : u16,                              // UDP port
+  pub runtime    : Runtime,                          // Kindelia's runtime
+  pub receiver   : Receiver<NodeRequest>,            // Receives an API request
   pub tip        : U256,                             // current tip
   pub block      : U256Map<Block>,                   // block_hash -> block
   pub pending    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
@@ -102,8 +104,6 @@ pub struct Node {
   pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
   pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
   pub peers      : PeersStore,                       // peers store and state control
-  pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest>,            // Receives an API request
 }
 
 // Peers
@@ -661,16 +661,19 @@ pub fn miner_loop(mut miner_communication: MinerCommunication) {
 
 impl Node {
   pub fn new(
-    kindelia_path: PathBuf,
+    state_path: PathBuf,
     init_peers: &Option<Vec<Address>>,
   ) -> (SyncSender<NodeRequest>, Self) {
     let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
     let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
+    let runtime = init_runtime(state_path.join("heaps"));
     let mut node = Node {
-      path       : kindelia_path,
-      socket     : socket,
-      port       : port,
+      state_path,
+      socket,
+      port,
+      runtime,
+      receiver   : query_receiver,
       block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
       pending    : u256map_new(),
       ancestor   : u256map_new(),
@@ -683,8 +686,6 @@ impl Node {
       tip        : ZERO_HASH(),
       pool       : PriorityQueue::new(),
       peers      : PeersStore::new(),
-      runtime    : init_runtime(None),
-      receiver   : query_receiver,
     };
 
     let now = get_time();
@@ -1210,7 +1211,7 @@ impl Node {
   }
 
   pub fn get_blocks_path(&self) -> PathBuf {
-    self.path.join("state").join("blocks")
+    self.state_path.join("blocks")
   }
 
   fn broadcast_tip_block(&mut self) {

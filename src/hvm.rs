@@ -1669,11 +1669,9 @@ impl Ownrs {
   }
 }
 
-pub fn init_runtime(path: Option<&PathBuf>) -> Runtime {
+pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
   // Default runtime store path
-  let dflt = dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps");
-  let path = path.unwrap_or_else(|| &dflt);
-  std::fs::create_dir_all(&path).unwrap(); // TODO remove unwrap?
+  std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
   let mut heap = Vec::new();
   for i in 0 .. MAX_HEAPS {
     heap.push(init_heap());
@@ -1684,10 +1682,10 @@ pub fn init_runtime(path: Option<&PathBuf>) -> Runtime {
     curr: 1,
     nuls: (2 .. MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
-    path: path.clone(),
+    path: heaps_path,
   };
   rt.run_statements_from_code(GENESIS, true, false);
-  
+
   rt.snapshot();
   return rt;
 }
@@ -5080,7 +5078,9 @@ pub fn test_statements(statements: &[Statement], debug: bool) {
   println!("=====");
   println!();
 
-  let mut rt = init_runtime(None);
+  // TODO: code below does not need heaps_path at all
+  let heaps_path = dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps");
+  let mut rt = init_runtime(heaps_path);
   let init = Instant::now();
   rt.run_statements(&statements, false, debug);
   println!();

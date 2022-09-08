@@ -197,7 +197,7 @@ pub enum CliCommand {
     command: NodeCommand,
     /// Base path to store the node's data in.
     #[clap(long)]
-    base_path: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
   },
   /// Generate auto-completion for a shell.
   Completion {
@@ -486,12 +486,12 @@ pub fn run_cli() -> Result<(), String> {
       init_config_file(&path)?;
       Ok(())
     }
-    CliCommand::Node { command, base_path } => {
+    CliCommand::Node { command, data_dir } => {
       let config = Some(handle_config_file(&config_path)?);
 
-      let path = ConfigValueOption {
-        value: base_path,
-        env: Some("KINDELIA_PATH"),
+      let data_path = ConfigValueOption {
+        value: data_dir,
+        env: Some("KINDELIA_NODE_DATA_DIR"),
         config: ConfigFileOptions::new(&config, "node.data.dir"),
         default: default_kindelia_path,
       }
@@ -501,19 +501,19 @@ pub fn run_cli() -> Result<(), String> {
         NodeCommand::Clean => {
           // warning
           println!(
-            "WARNING! This will delete all the files present in {}",
-            path.display()
+            "WARNING! This will delete all the files present in '{}'...",
+            data_path.display()
           );
           // confirmation
-          println!("Do you want to continue? ['y' for YES/ anything for NO]");
+          println!("Do you want to continue? ['y' for YES / or else NO]");
           let mut answer = String::new();
           std::io::stdin()
             .read_line(&mut answer)
-            .map_err(|err| format!("Could not read your answer: {}", err))?;
+            .map_err(|err| format!("Could not read your answer: '{}'", err))?;
           // only accept 'y' as positive answer, anything else will be ignored
-          if answer.trim() == "y" {
-            std::fs::remove_dir_all(path)
-              .map_err(|err| format!("Could not remove the files: {}", err))?;
+          if answer.trim().to_lowercase() == "y" {
+            std::fs::remove_dir_all(data_path)
+              .map_err(|err| format!("Could not remove the files: '{}'", err))?;
             println!("All items were removed.");
           } else {
             println!("Canceling operation.");
@@ -543,8 +543,8 @@ pub fn run_cli() -> Result<(), String> {
           }
           .get_config_value()?;
 
-          // start node
-          start(path, initial_peers, mine);
+          // Start node
+          start(data_path, initial_peers, mine);
 
           Ok(())
         }
@@ -721,8 +721,8 @@ pub fn test_code(code: &str, debug: bool) {
   hvm::test_statements_from_code(code, debug);
 }
 
-fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
-  eprintln!("Starting Kindelia node. Store path: {:?}", kindelia_path);
+fn start(state_path: PathBuf, init_peers: Vec<String>, mine: bool) {
+  eprintln!("Starting Kindelia node. Store path: {:?}", state_path);
   let init_peers =
     init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
   let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
@@ -735,7 +735,7 @@ fn start(kindelia_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let (node_query_sender, node) = Node::new(kindelia_path, &init_peers);
+  let (node_query_sender, node) = Node::new(state_path, &init_peers);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();
