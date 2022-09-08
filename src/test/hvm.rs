@@ -1,14 +1,18 @@
+use std::convert::TryInto;
+
 use crate::{
   bits::{deserialized_func, serialized_func},
   hvm::{
-    init_map, init_runtime, name_to_u128_unsafe, read_statements, readback_term, show_term,
-    u128_to_name, view_statements, view_term, Name, Rollback, Runtime, StatementInfo, Term, U120,
+    self, init_map, init_runtime, name_to_u128_unsafe, read_statements,
+    readback_term, show_term, u128_to_name, view_statements, view_term, Name,
+    Rollback, Runtime, StatementInfo, Term, U120,
   },
   test::{
     strategies::{func, heap, name, op2, statement, term},
     util::{
-      advance, rollback, rollback_path, rollback_simple, run_term_and, run_term_from_code_and,
-      temp_dir, test_heap_checksum, view_rollback_ticks, RuntimeStateTest, TempDir,
+      self, advance, rollback, rollback_path, rollback_simple, run_term_and,
+      run_term_from_code_and, temp_dir, test_heap_checksum,
+      view_rollback_ticks, RuntimeStateTest, TempDir,
     },
   },
 };
@@ -20,14 +24,26 @@ use rstest_reuse::{apply, template};
 
 #[template]
 #[rstest]
-#[case(&["Count", "Store", "Sub", "Add"], PRE_COUNTER, COUNTER)]
-#[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK)]
-#[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER)]
-fn hvm_cases(#[case] fn_names: &[&str], #[case] pre_code: &str, #[case] code: &str) {}
+#[case(&["Count", "Store", "Sub", "Add"], PRE_COUNTER, COUNTER, &counter_validators())]
+#[case(&["Bank", "Random", "AddAcc", "AddEq", "AddChild"], PRE_BANK, BANK, &[])] // TODO: validators
+#[case(&["End", "B0", "B1", "IncBit", "ToNum", "CountBit"], PRE_BIT_COUNTER, BIT_COUNTER, &[])] // TODO: validators
+fn hvm_cases(
+  #[case] fn_names: &[&str],
+  #[case] pre_code: &str,
+  #[case] code: &str,
+  #[case] validators: &[util::Validator],
+) {
+}
 
 #[apply(hvm_cases)]
-pub fn simple_rollback(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: TempDir) {
-  assert!(rollback_simple(pre_code, code, fn_names, 1000, 1, &temp_dir.path));
+pub fn simple_rollback(
+  fn_names: &[&str],
+  pre_code: &str,
+  code: &str,
+  validators: &[util::Validator],
+  temp_dir: TempDir,
+) {
+  assert!(rollback_simple(pre_code, code, fn_names, 1000, 1, validators, &temp_dir.path));
 }
 
 #[apply(hvm_cases)]
@@ -35,10 +51,11 @@ pub fn advanced_rollback_in_random_state(
   fn_names: &[&str],
   pre_code: &str,
   code: &str,
+  validators: &[util::Validator],
   temp_dir: TempDir,
 ) {
   let path = [1000, 12, 1000, 24, 1000, 36];
-  assert!(rollback_path(pre_code, code, fn_names, &path, &temp_dir.path));
+  assert!(rollback_path(pre_code, code, fn_names, &path, validators, &temp_dir.path));
 }
 
 #[apply(hvm_cases)]
@@ -46,21 +63,22 @@ pub fn advanced_rollback_in_saved_state(
   fn_names: &[&str],
   pre_code: &str,
   code: &str,
+  validators: &[util::Validator],
   temp_dir: TempDir,
 ) {
   let mut rt = init_runtime(Some(&temp_dir.path));
   rt.run_statements_from_code(pre_code, true, true);
-  advance(&mut rt, 1000, Some(code));
+  advance(&mut rt, 1000, Some(code), validators);
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
   let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, 1000, Some(code));
+  advance(&mut rt, 1000, Some(code), validators);
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
   let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, 1000, Some(code));
+  advance(&mut rt, 1000, Some(code), validators);
   rt.rollback(900);
   println!(" - tick: {}", rt.get_tick());
   let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
@@ -74,18 +92,32 @@ pub fn advanced_rollback_run_fail(
   fn_names: &[&str],
   pre_code: &str,
   code: &str,
+  validators: &[util::Validator],
   temp_dir: TempDir,
 ) {
   let path = [2, 1, 2, 1, 2, 1];
-  assert!(rollback_path(PRE_COUNTER, COUNTER, &fn_names, &path, &temp_dir.path));
+  assert!(rollback_path(
+    PRE_COUNTER,
+    COUNTER,
+    &fn_names,
+    &path,
+    validators,
+    &temp_dir.path
+  ));
 }
 
 #[apply(hvm_cases)]
-pub fn stack_overflow(fn_names: &[&str], pre_code: &str, code: &str, temp_dir: TempDir) {
+pub fn stack_overflow(
+  fn_names: &[&str],
+  pre_code: &str,
+  code: &str,
+  validators: &[util::Validator],
+  temp_dir: TempDir,
+) {
   // caused by compute_at function
   let mut rt = init_runtime(Some(&temp_dir.path));
   rt.run_statements_from_code(pre_code, true, true);
-  advance(&mut rt, 1000, Some(code));
+  advance(&mut rt, 1000, Some(code), validators);
 }
 
 #[rstest]
@@ -103,13 +135,14 @@ pub fn persistence1(
   fn_names: &[&str],
   pre_code: &str,
   code: &str,
+  validators: &[util::Validator],
   #[values(1000, 1500, 2000)] tick: u128,
   temp_dir: TempDir,
 ) {
   let mut rt = init_runtime(Some(&temp_dir.path));
   rt.run_statements_from_code(pre_code, true, true);
 
-  advance(&mut rt, tick, Some(code));
+  advance(&mut rt, tick, Some(code), validators);
   let s1 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   let last = {
@@ -123,13 +156,13 @@ pub fn persistence1(
   rt.rollback(last); // rollback for the latest rollback saved
   let s2 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, tick, Some(code));
+  advance(&mut rt, tick, Some(code), validators);
   let s3 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   rt.restore_state().expect("Could not restore state"); // restore last rollback, must be equal to s2
   let s4 = RuntimeStateTest::new(&fn_names, &mut rt);
 
-  advance(&mut rt, tick, Some(code));
+  advance(&mut rt, tick, Some(code), validators);
   let s5 = RuntimeStateTest::new(&fn_names, &mut rt);
 
   assert_eq!(s1, s3);
@@ -144,7 +177,11 @@ fn one_hundred_snapshots(temp_dir: TempDir) {
   let mut rt = init_runtime(Some(&temp_dir.path));
   for i in 0..100000 {
     rt.tick();
-    println!(" - tick: {}, - rollback: {}", rt.get_tick(), view_rollback_ticks(&rt));
+    println!(
+      " - tick: {}, - rollback: {}",
+      rt.get_tick(),
+      view_rollback_ticks(&rt)
+    );
   }
 }
 
@@ -191,18 +228,28 @@ fn dupped_state_test(temp_dir: TempDir) {
     expected_original_readback: &str,
     expected_other_readback: &str,
   ) {
-    let original_state = rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
+    let original_state =
+      rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
     let other_state = rt.read_disk(Name::try_from("Other").unwrap()).unwrap();
     println!();
     println!("original ptr: {}", original_state);
     println!("original: {}", show_term(&rt, original_state, None));
-    println!("original readback: {}", view_term(&readback_term(&rt, original_state)));
-    assert_eq!(expected_original_readback, view_term(&readback_term(&rt, original_state)));
+    println!(
+      "original readback: {}",
+      view_term(&readback_term(&rt, original_state))
+    );
+    assert_eq!(
+      expected_original_readback,
+      view_term(&readback_term(&rt, original_state))
+    );
     println!();
     println!("other ptr: {}", other_state);
     println!("other: {}", show_term(&rt, other_state, None));
     println!("other readback: {}", view_term(&readback_term(&rt, other_state)));
-    assert_eq!(expected_other_readback, view_term(&readback_term(&rt, other_state)));
+    assert_eq!(
+      expected_other_readback,
+      view_term(&readback_term(&rt, other_state))
+    );
     println!();
   }
 
@@ -212,6 +259,34 @@ fn dupped_state_test(temp_dir: TempDir) {
   print_and_assert_states(&mut rt, "@x0 @x1 #7", "@x0 @x1 #7");
   rt.run_statements_from_code(&CHANGE_DUPPED_STATE, false, true);
   print_and_assert_states(&mut rt, "@x0 @x1 #8", "@x0 @x1 #7");
+}
+
+#[rstest]
+fn shadowing(temp_dir: TempDir) {
+  let code = "
+    fun (Test state) {
+      (Test state) = 
+        dup state2 state1 = state;
+        let state = state2;
+        let got = state1;
+        let state = (+ state #1);
+        let state = (+ state #1);
+        let got = (+ got #1);
+        (+ state got)
+    }
+      
+    run {
+      (Done (Test #2))
+    }
+  ";
+  let mut rt = init_runtime(Some(&temp_dir.path));
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#7", view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  }
 }
 
 #[rstest]
@@ -240,7 +315,12 @@ fn dupped_state_test(temp_dir: TempDir) {
 #[case("dup a ~ = @x dup ~ b = x; b; a", "@x0 x0")]
 #[case("dup a ~ = dup b ~ = @x (+ x #2); b; a", "@x0 (+ x0 #2)")]
 #[case("dup a ~ = dup b ~ = @x (+ #2 x); b; a", "@x0 (+ #2 x0)")]
-fn readback(#[case] code: &str, #[case] expected_readback: &str, temp_dir: TempDir) {
+#[case("let state = #2; let state = (+ state #1); state", "#3")]
+fn readback(
+  #[case] code: &str,
+  #[case] expected_readback: &str,
+  temp_dir: TempDir,
+) {
   // initialize runtime
   let mut rt = init_runtime(Some(&temp_dir.path));
   // declare used constructors
@@ -405,6 +485,16 @@ pub const COUNTER: &'static str = "
     (Done count)
   }
 ";
+
+fn counter_validators() -> [util::Validator; 2] {
+  fn count_validator(tick: u128, term: &Term) -> bool {
+    view_term(term) == format!("#{}", tick)
+  }
+  fn store_validator(tick: u128, term: &Term) -> bool {
+    view_term(term).matches("Succ").count() as u128 == tick
+  }
+  [("Count", count_validator), ("Store", store_validator)]
+}
 
 pub const SIMPLE_COUNT: &'static str = "
   run {
