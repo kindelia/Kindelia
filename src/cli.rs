@@ -90,17 +90,13 @@ kindelia account ...
 
 fn run_on_remote<T, P, F>(
   api_url: &str,
-  file: FileInput,
-  encoded: bool,
+  stmts: Vec<Statement>,
   f: F,
 ) -> Result<T, String>
 where
   F: FnOnce(api_client::ApiClient, Vec<HexStatement>) -> P,
   P: Future<Output = Result<T, String>>,
 {
-  let code = arg_from_file_or_stdin::<String>(file)?;
-  let stmts =
-    if encoded { statments_from_hex_seq(&code)? } else { parse_code(&code)? };
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
   let client =
     api_client::ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
@@ -143,6 +139,11 @@ pub enum CliCommand {
     /// The path to the file to deserialize.
     file: FileInput,
   },
+  /// Deserialize a hex string of a encoded statement.
+  Unserialize {
+    /// Hex string of the serialized statement.
+    stmt: String,
+  },
   /// Sign a code file.
   Sign {
     /// The path to the file to sign.
@@ -170,6 +171,11 @@ pub enum CliCommand {
     /// In case the input code is serialized.
     #[clap(long, short = 'e')]
     encoded: bool,
+  },
+  // Post a (serialized) statement
+  Post {
+    /// Hex string of the serialized statement.
+    stmt: String,
   },
   /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
   PostUdp {
@@ -421,6 +427,9 @@ pub fn run_cli() -> Result<(), String> {
       let code: String = file.read_to_string()?;
       deserialize_code(&code)
     }
+    CliCommand::Unserialize { stmt } => {
+      deserialize_code(&stmt)
+    }
     CliCommand::Sign { file, secret_file, encoded, encoded_output } => {
       let skey: String = arg_from_file_or_stdin(secret_file.into())?;
       let skey = skey.trim();
@@ -447,30 +456,27 @@ pub fn run_cli() -> Result<(), String> {
     }
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
+      let code = file.read_to_string()?;
       let f = |client: api_client::ApiClient, stmts| async move {
         client.run_code(stmts).await
       };
-      let results = run_on_remote(&api_url, file, encoded, f)?;
+      let stmts =
+        if encoded { statements_from_hex_seq(&code)? } else { parse_code(&code)? };
+      let results = run_on_remote(&api_url, stmts, f)?;
       for result in results {
         println!("{}", result);
       }
       Ok(())
     }
     CliCommand::Publish { file, encoded } => {
-      let f = |client: api_client::ApiClient, stmts| async move {
-        client.publish_code(stmts).await
-      };
-      let results = run_on_remote(&api_url, file, encoded, f)?;
-      for (i, result) in results.iter().enumerate() {
-        print!("Transaction #{}: ", i);
-        match result {
-          Ok(_) => println!("PUBLISHED (tx added to mempool)"),
-          Err(_) => {
-            println!("NOT PUBLISHED [tx is probably already on mempool]")
-          }
-        }
-      }
-      Ok(())
+      let code = file.read_to_string()?;
+      let stmts =
+        if encoded { statements_from_hex_seq(&code)? } else { parse_code(&code)? };
+      publish_code(&api_url, stmts)
+    }
+    CliCommand::Post { stmt } => {
+      let stmts = statements_from_hex_seq(&stmt)?;
+      publish_code(&api_url, stmts)
     }
     CliCommand::PostUdp { file, host } => {
       let content = arg_from_file_or_stdin::<String>(file)?;
@@ -665,7 +671,7 @@ pub fn serialize_code(code: &str) {
 }
 
 pub fn deserialize_code(content: &str) -> Result<(), String> {
-  let statements = statments_from_hex_seq(content)?;
+  let statements = statements_from_hex_seq(content)?;
   for statement in statements {
     println!("{}", view_statement(&statement))
   }
@@ -694,8 +700,25 @@ pub fn sign_code(
   Ok(stat)
 }
 
+pub fn publish_code(api_url: &str, stmts: Vec<Statement>) -> Result<(), String> {
+  let f = |client: api_client::ApiClient, stmts| async move {
+    client.publish_code(stmts).await
+  };
+  let results = run_on_remote(&api_url, stmts, f)?;
+  for (i, result) in results.iter().enumerate() {
+    print!("Transaction #{}: ", i);
+    match result {
+      Ok(_) => println!("PUBLISHED (tx added to mempool)"),
+      Err(_) => {
+        println!("NOT PUBLISHED (tx is probably already on mempool)")
+      }
+    }
+  }
+  Ok(())
+}
+
 pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
-  let statements = statments_from_hex_seq(content)?;
+  let statements = statements_from_hex_seq(content)?;
   for statement in statements {
     let tx =
       Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
@@ -845,7 +868,7 @@ fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
 
 fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
   if encoded {
-    statments_from_hex_seq(code)
+    statements_from_hex_seq(code)
   } else {
     parse_code(code)
   }
@@ -865,7 +888,7 @@ fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
   }
 }
 
-fn statments_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
+fn statements_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
   txt
     .trim()
     .split(|c: char| c.is_whitespace())
