@@ -1708,7 +1708,7 @@ impl Runtime {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Ptr {
     return create_term(self, term, loc, vars_data);
   }
 
@@ -1855,8 +1855,9 @@ impl Runtime {
   // --
 
   pub fn run_io(&mut self, subject: Name, caller: Name, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+    // eprintln!("-- {}", show_term(self, host, None));
     let term = reduce(self, host, mana)?;
-    //eprintln!("-- {}", show_term(self, term, None));
+    // eprintln!("-- {}", show_term(self, term, None));
     match get_tag(term) {
       CTR => {
         match get_ext(term) {
@@ -2981,39 +2982,38 @@ pub fn is_linear(term: &Term) -> bool {
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<u128>) -> Ptr {
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<u128>) {
-    //println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Ptr {
+  fn consume(rt: &mut Runtime, loc: u128, name: u128, vars_data: &mut Map<Vec<u128>>) -> Option<Ptr> {
+    let got = vars_data.get_mut(&name)?;
+    let got = got.pop()?;
+    Some(got)
+  }
+
+  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
+    // println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
     if name == VAR_NONE {
       link(rt, loc, Era());
     } else {
-      let got = vars_data.get(&name).map(|x| *x);
-      match got {
-        Some(got) => {
-          vars_data.remove(&name);
-          link(rt, got, lnk);
-        }
-        None => {
-          vars_data.insert(name, lnk);
-          link(rt, loc, Era());
-        }
-      }
+      let got = vars_data.entry(name).or_insert(Vec::new());
+      got.push(lnk);
+      link(rt, loc, Era());
     }
   }
+  // println!("{}", term);
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", name, vars_data.len());
-      let got = vars_data.get(name).map(|x| *x);
-      match got {
-        Some(got) => {
-          vars_data.remove(name);
-          return got;
-        }
-        None => {
-          vars_data.insert(**name, loc);
-          return Num(0);
-        }
-      }
+      consume(rt, loc, **name, vars_data).unwrap_or_else(|| Num(0))
+      // match got {
+      //   Some(got) => {
+      //     vars_data.remove(name);
+      //     return got;
+      //   }
+      //   None => {
+      //     vars_data.insert(**name, loc);
+      //     return Num(0);
+      //   }
+      // }
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
@@ -3274,7 +3274,7 @@ pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
 
 // TODO: document
 pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeError> {
-  let mut vars_data: Map<u128> = init_map();
+  let mut vars_data: Map<Vec<u128>> = init_map();
 
   let mut stack: Vec<u128> = Vec::new();
 
@@ -3605,7 +3605,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<u128>) -> bool {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<Vec<u128>>) -> bool {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -3693,7 +3693,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                   }
                   //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_lnk(var));
                   if !rule_var.erase {
-                    vars_data.insert(*rule_var.name, var);
+                    let arr = vars_data.entry(*rule_var.name).or_insert(Vec::new());
+                    arr.push(var);
                   } else {
                     // Collects unused argument
                     collect(rt, var);
@@ -4071,7 +4072,11 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
             ERA => {
               output.push(String::from("*"));
             }
-            _ => output.push(format!("?g({})", get_tag(term))),
+            _ => {
+              // println!("{}", show_lnk(term));
+              // println!("{}", show_term(rt,  ask_lnk(rt, term), None));
+              output.push(format!("?g({})", get_tag(term)))
+            },
           }
         }
       }
@@ -4178,7 +4183,40 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
     let mut output = Vec::new();
     let mut stack = vec![StackItem::Term(term)];
 
+    let print_stack = |stack: &Vec<StackItem>| {
+      println!("Stack: ");
+      for (i, item) in stack.iter().rev().enumerate() {
+        let (prefix, term) = match item {
+          StackItem::Term(term) => ("term", term),
+          StackItem::Resolver(term) => ("resolver", term),
+          StackItem::SUPResolverSome(term, ..) => ("sup some", term),
+          StackItem::SUPResolverNone(term) => ("sup none", term),
+        };
+        if i == 0 {
+          println!("{} {}", prefix, show_term(rt, *term, None));
+        } else {
+          println!("{} {}", prefix, term);
+        }
+      }
+    };
+
+    let print_output = |output: &Vec<Term>| {
+      println!("Output: ");
+      for item in output.iter().rev() {
+        println!("{}", item);
+      }
+    };
+
     while !stack.is_empty() {
+      // println!();
+      // println!();
+      // println!("-----------------------------");
+      // print_stack(&stack);
+      // println!();
+      // print_output(&output);
+      // println!("-----------------------------");
+      // println!();
+      // println!();
       let item = stack.pop().unwrap();
       match item {
         StackItem::Term(term) => {

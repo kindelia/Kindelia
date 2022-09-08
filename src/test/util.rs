@@ -1,8 +1,9 @@
 use rstest::fixture;
+use tokio::runtime;
 
 use crate::hvm::{
-  init_runtime, name_to_u128_unsafe, show_term, Name, Rollback, Runtime, Statement, StatementInfo,
-  Term, U128_NONE, read_term,
+  self, init_runtime, name_to_u128_unsafe, read_term, show_term, Name,
+  Rollback, Runtime, Statement, StatementInfo, Term, U128_NONE,
 };
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
@@ -10,6 +11,12 @@ use std::{
   path::PathBuf,
   sync::Arc,
 };
+
+// ===========================================================
+// Aux types
+
+pub type Validator =
+  (&'static str, fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -27,7 +34,10 @@ pub fn are_all_elemenets_equal<E: PartialEq>(vec: &[E]) -> bool {
 }
 
 pub fn view_rollback_ticks(rt: &Runtime) -> String {
-  fn view_rollback_ticks_go(rt: &Runtime, back: &Arc<Rollback>) -> Vec<Option<u128>> {
+  fn view_rollback_ticks_go(
+    rt: &Runtime,
+    back: &Arc<Rollback>,
+  ) -> Vec<Option<u128>> {
     match &**back {
       Rollback::Nil => return Vec::new(),
       Rollback::Cons { keep, head, tail, life } => {
@@ -99,7 +109,13 @@ pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
 
 // ===========================================================
 // RUNTIME ROLLBACK
-pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Option<&str>) {
+pub fn rollback(
+  rt: &mut Runtime,
+  tick: u128,
+  pre_code: Option<&str>,
+  code: Option<&str>,
+  validators: &[Validator],
+) {
   debug_assert!(tick < rt.get_tick());
   rt.rollback(tick);
   if rt.get_tick() == 0 {
@@ -112,12 +128,17 @@ pub fn rollback(rt: &mut Runtime, tick: u128, pre_code: Option<&str>, code: Opti
     if let Some(code) = code {
       rt.run_statements_from_code(code, true, true);
     }
-    rt.tick();
+    tick_and_validate(rt, validators);
   }
   // println!("- final rollback tick {}", rt.get_tick());
 }
 
-pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
+pub fn advance(
+  rt: &mut Runtime,
+  tick: u128,
+  code: Option<&str>,
+  validators: &[Validator],
+) {
   debug_assert!(tick >= rt.get_tick());
   // println!("- advancing from {} to {}", rt.get_tick(), tick);
   let actual_tick = rt.get_tick();
@@ -125,7 +146,7 @@ pub fn advance(rt: &mut Runtime, tick: u128, code: Option<&str>) {
     if let Some(code) = code {
       rt.run_statements_from_code(code, true, true);
     }
-    rt.tick();
+    tick_and_validate(rt, validators);
   }
 }
 
@@ -145,6 +166,7 @@ pub fn rollback_simple(
   fn_names: &[&str],
   total_tick: u128,
   rollback_tick: u128,
+  validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
   let mut rt = init_runtime(dir_path.clone());
@@ -154,7 +176,7 @@ pub fn rollback_simple(
   rt.run_statements_from_code(pre_code, true, true);
   for _ in 0..total_tick {
     rt.run_statements_from_code(code, true, true);
-    rt.tick();
+    tick_and_validate(&mut rt, validators);
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
       old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -169,7 +191,7 @@ pub fn rollback_simple(
   let tick_diff = rollback_tick - rt.get_tick();
   for _ in 0..tick_diff {
     rt.run_statements_from_code(code, true, true);
-    rt.tick();
+    tick_and_validate(&mut rt, validators);
   }
   // Calculates new checksum, after rollback
   let new_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -185,6 +207,7 @@ pub fn rollback_path(
   code: &str,
   fn_names: &[&str],
   path: &[u128],
+  validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
   let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
@@ -204,9 +227,9 @@ pub fn rollback_path(
   for tick in path {
     let tick = *tick;
     if tick < rt.get_tick() {
-      rollback(&mut rt, tick, Some(pre_code), Some(code));
+      rollback(&mut rt, tick, Some(pre_code), Some(code), validators);
     } else {
-      advance(&mut rt, tick, Some(code));
+      advance(&mut rt, tick, Some(code), validators);
     }
     insert_state(&mut rt);
   }
@@ -223,7 +246,10 @@ where
   let temp_dir = temp_dir();
   let mut rt = init_runtime(temp_dir.path.clone());
 
-  let term = Term::Fun { name: "Done".try_into().unwrap(), args: [term.clone()].to_vec() };
+  let term = Term::Fun {
+    name: "Done".try_into().unwrap(),
+    args: [term.clone()].to_vec(),
+  };
   let stmt = Statement::Run { expr: term, sign: None };
   let result = rt.run_statement(&stmt, false, true).unwrap();
 
@@ -233,11 +259,32 @@ where
 }
 
 pub fn run_term_from_code_and<A>(code: &str, action: A)
-where 
-  A: Fn(&Term)
+where
+  A: Fn(&Term),
 {
   let (_, term) = read_term(code).unwrap();
   run_term_and(&term, action)
+}
+
+// ===========
+// validations
+
+fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
+  rt: &mut Runtime,
+  name: &str,
+  predicate: P,
+) {
+  let tick = rt.get_tick();
+  let state = rt.read_disk(name.try_into().unwrap()).unwrap();
+  let state = hvm::readback_term(rt, state);
+  assert!(predicate(tick, &state, rt))
+}
+
+fn tick_and_validate(rt: &mut Runtime, validators: &[Validator]) {
+  rt.tick();
+  for (fn_name, predicate) in validators {
+    validate(rt, fn_name, predicate)
+  }
 }
 
 // ===========================================================
@@ -262,7 +309,8 @@ impl Drop for TempDir {
 // before each test that uses it as a parameter
 #[fixture]
 pub fn temp_dir() -> TempDir {
-  let path = std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
+  let path =
+    std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
   let temp_dir = TempDir { path };
   temp_dir
 }
