@@ -294,7 +294,7 @@ fn shadowing(temp_dir: TempDir) {
       (Done (Test #2))
     }
   ";
-  let mut rt = init_runtime(Some(&temp_dir.path));
+  let mut rt = init_runtime(temp_dir.path.clone());
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
