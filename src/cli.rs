@@ -127,7 +127,7 @@ pub enum CliCommand {
     file: FileInput,
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
-    debug: bool,
+    sudo: bool,
   },
   /// Serialize a code file.
   Serialize {
@@ -413,9 +413,9 @@ pub fn run_cli() -> Result<(), String> {
   .get_config_value()?;
 
   match parsed.command {
-    CliCommand::Test { file, debug } => {
+    CliCommand::Test { file, sudo } => {
       let code: String = file.read_to_string()?;
-      test_code(&code, debug);
+      test_code(&code, sudo);
       Ok(())
     }
     CliCommand::Serialize { file } => {
@@ -740,8 +740,8 @@ pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
   Ok(())
 }
 
-pub fn test_code(code: &str, debug: bool) {
-  hvm::test_statements_from_code(code, debug);
+pub fn test_code(code: &str, sudo: bool) {
+  hvm::test_statements_from_code(code, sudo);
 }
 
 fn start(state_path: PathBuf, init_peers: Vec<String>, mine: bool) {

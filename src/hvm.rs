@@ -1115,12 +1115,14 @@ impl ParseErr {
   }
 }
 
+// TODO: this should not use strings
 pub fn split_names(name: Name) -> Vec<String> {
   name.to_string().split('.').map(|x| x.to_string()).collect()
 }
 
 pub fn get_namespace(name: Name) -> Option<Name> {
   let names = split_names(name);
+  // TODO: pattern match
   if names.len() > 1 {
     let name = name_to_u128_unsafe(&names[0 .. names.len() - 1].join("."));
     return Some(Name(name));
@@ -2006,16 +2008,16 @@ impl Runtime {
   pub fn can_deploy(&mut self, subj: u128, name: &Name) -> bool {
     if name.is_empty() {
       // No one can deploy the empty name
-      return false;
+      false
     } else {
       match get_namespace(*name) {
         None => {
           // Anyone can deploy a namespace-less name
-          return true;
+          true
         }
         Some(namespace) => {
           // Only owner can deploy on its namespace
-          return subj == self.get_owner(&namespace);
+          Some(subj) == self.get_owner(&namespace)
         }
       }
     }
@@ -2025,10 +2027,11 @@ impl Runtime {
   pub fn can_register(&mut self, subj: u128, name: &Name) -> bool {
     if name.is_empty() {
       // Anyone can register the empty namespace (should happen on Genesis Block)
-      return true;
+      true
     } else {
-      // only namespace owner can register a sub-namespace
-      return subj == self.get_owner(&get_namespace(*name).unwrap_or(Name(0)));
+      // Only namespace owner can register a sub-namespace
+      let namespace = get_namespace(*name).unwrap_or(Name(0));
+      Some(subj) == self.get_owner(&namespace)
     }
   }
 
@@ -2036,10 +2039,10 @@ impl Runtime {
   ///
   /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
-  pub fn run_statement(&mut self, statement: &Statement, silent: bool, debug: bool) -> StatementResult {
+  pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo();
-      println!("[{}] Error. {}", tag, err);
+      println!("[{}] Error: {}", tag, err);
       return Err(StatementErr { err });
     }
     let hash = hash_statement(statement);
@@ -2049,7 +2052,7 @@ impl Runtime {
           return error(self, "fun", format!("Can't redefine '{}'.", name));
         }
         let subj = self.get_subject(&sign, hash);
-        if !self.can_deploy(subj, name) {
+        if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
         if !self.check_func(&func) {
@@ -2072,7 +2075,7 @@ impl Runtime {
           return error(self, "ctr", format!("Can't redefine '{}'.", name));
         }
         let subj = self.get_subject(&sign, hash);
-        if !self.can_deploy(subj, name) {
+        if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
         if args.len() > 16 {
@@ -2119,7 +2122,7 @@ impl Runtime {
         let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
         let size_dif = size_end - size_ini;
-        if size_end > size_lim && !debug {
+        if size_end > size_lim && !sudo {
           return error(self, "run", format!("Not enough space."));
         }
         StatementInfo::Run {
@@ -2131,12 +2134,12 @@ impl Runtime {
       }
       Statement::Reg { name, ownr, sign } => {
         let ownr = **ownr;
-        
+
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
         let subj = self.get_subject(sign, hash);
-        if !self.can_register(subj, name) {
+        if !(self.can_register(subj, name) || sudo) {
           return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, name));
         }
         let name = *name;
@@ -2484,12 +2487,8 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(name, arity);
   }
 
-  pub fn get_owner(&self, name: &Name) -> u128 {
-    if let Some(owner) = self.get_with(None, None, |heap| heap.read_ownr(name)) {
-      return owner;
-    } else {
-      return U128_NONE;
-    }
+  pub fn get_owner(&self, name: &Name) -> Option<u128> {
+    self.get_with(None, None, |heap| heap.read_ownr(name))
   }
 
   pub fn set_owner(&mut self, name: Name, owner: u128) {
