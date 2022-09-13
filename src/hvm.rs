@@ -2042,7 +2042,7 @@ impl Runtime {
   pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo();
-      println!("[{}] Error: {}", tag, err);
+      println!("{:03$} [{}] Error: {}", rt.get_tick(), tag, err, 10);
       return Err(StatementErr { err });
     }
     let hash = hash_statement(statement);
@@ -2148,7 +2148,7 @@ impl Runtime {
       }
     };
     if !silent {
-      println!("{}", res);
+      println!("{:02$} {}", self.get_tick(), res, 10);
     }
     Ok(res)
   }
