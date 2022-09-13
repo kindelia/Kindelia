@@ -281,7 +281,7 @@ pub const GOSSIP_FACTOR : u128 = 16;
 pub const MINE_ATTEMPTS : u128 = 1024;
 
 // Desired average time between mined blocks, in milliseconds
-pub const TIME_PER_BLOCK : u128 = 3000;
+pub const TIME_PER_BLOCK : u128 = 1000;
 
 // Don't accept blocks from N milliseconds in the future
 pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
