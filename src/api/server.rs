@@ -407,6 +407,37 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let interact_router =
     interact_test.or(interact_send).or(interact_run).or(interact_publish);
 
+  // == Reg ==
+
+  let get_reg_base = path!("reg" / String / ..).and_then(
+    move |name_txt: String| async move {
+      match name_to_u128(&name_txt) {
+        Ok(name) => Ok(name),
+        Err(err) => {
+          let msg = format!("Invalid constructor name '{}': {}", name_txt, err);
+          Err(reject::custom(InvalidParameter::from(msg)))
+        }
+      }
+    },
+  );
+
+  let query_tx = node_query_sender.clone();
+  let get_reg =
+    get_reg_base.and(path!()).and_then(move |name: Name| {
+      let query_tx = query_tx.clone();
+      async move {
+        let reg =
+          ask(query_tx, |tx| NodeRequest::GetReg { name, tx }).await;
+        if let Some(reg) = reg {
+          Ok(ok_json(reg))
+        } else {
+          Err(Rejection::from(Error::NotFound))
+        }
+      }
+    });
+  
+  let reg_router = get_reg;
+
   // == Peers ==
 
   let get_peers_base = path!("peers" / ..);
@@ -443,7 +474,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     .or(functions_router)
     .or(interact_router)
     .or(peers_router)
-    .or(constructor_router);
+    .or(constructor_router)
+    .or(reg_router);
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")

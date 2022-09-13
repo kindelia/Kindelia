@@ -248,10 +248,10 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat: GetFunKind,
   },
-  /// [NOT IMPLEMENTED] Get a registered namespace by name.
+  /// Get a registered namespace by name.
   Reg {
     /// The name of the namespace to get.
-    name: String, // ASK: use Name here too?
+    name: String,
     /// The stat of the namespace to get.
     #[clap(subcommand)]
     stat: GetRegKind,
@@ -625,7 +625,20 @@ pub async fn get_info(
       }
       GetFunKind::Slots => todo!(),
     },
-    GetKind::Reg { name: _, stat: _ } => todo!(),
+    GetKind::Reg { name, stat } => {
+      let reg_info = client.get_reg_info(&name).await?;
+      match stat {
+        GetRegKind::Owner => {
+          println!("{:x}", *(reg_info.ownr))
+        },
+        GetRegKind::List => {
+          for name in reg_info.stmt {
+            println!("{}", name)
+          }
+        }
+      }
+      Ok(())
+    },
     GetKind::Stats { stat_kind } => {
       let stats = client.get_stats().await?;
       match stat_kind {
@@ -702,7 +715,7 @@ pub fn publish_code(api_url: &str, stmts: Vec<Statement>) -> Result<(), String> 
   let f = |client: api_client::ApiClient, stmts| async move {
     client.publish_code(stmts).await
   };
-  let results = run_on_remote(&api_url, stmts, f)?;
+  let results = run_on_remote(api_url, stmts, f)?;
   for (i, result) in results.iter().enumerate() {
     print!("Transaction #{}: ", i);
     match result {

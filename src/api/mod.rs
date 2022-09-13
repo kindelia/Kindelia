@@ -274,6 +274,12 @@ pub struct CtrInfo {
   pub arit: u64
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegInfo {
+  pub ownr: Name,
+  pub stmt: Vec<Name>
+}
+
 type RequestAnswer<T> = oneshot::Sender<T>;
 
 // Node Internal API
@@ -313,6 +319,10 @@ pub enum NodeRequest {
   GetConstructor {
     name: Name,
     tx: RequestAnswer<Option<CtrInfo>>,
+  },
+  GetReg {
+    name: Name,
+    tx: RequestAnswer<Option<RegInfo>>,
   },
   /// DEPRECATED
   TestCode {

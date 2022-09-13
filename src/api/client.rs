@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{hvm::{Term, self}, node};
 
-use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement, CtrInfo};
+use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement, CtrInfo, RegInfo};
 
 pub struct ApiClient {
   client: reqwest::Client,
@@ -133,5 +133,9 @@ impl ApiClient {
     } else {
       self.get::<Vec<node::Peer>>("/peers").await
     }
+  }
+
+  pub async fn get_reg_info(&self, name: &str) -> ApiResult<RegInfo> {
+    self.get::<RegInfo>(&format!("/reg/{}", name)).await
   }
 }
