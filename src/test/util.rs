@@ -292,25 +292,54 @@ fn tick_and_validate(rt: &mut Runtime, validators: &[Validator]) {
 
 // This struct is created just to wrap Pathbuf and
 // be able to remove the dir when it is dropped
-pub struct TempDir {
+pub struct TempPath {
   pub path: PathBuf,
 }
 
-impl Drop for TempDir {
+impl Drop for TempPath {
   fn drop(&mut self) {
-    if let Err(e) = std::fs::remove_dir_all(&self.path) {
-      eprintln!("Error removing temp dir: {:?}", e);
+    if self.path.is_file() {
+      if let Err(e) = std::fs::remove_file(&self.path) {
+        eprintln!("Error removing temp file {}: {}", self.path.display(), e);
+      };
+      if let Some(parent) = self.path.parent() {
+        if let Err(e) = std::fs::remove_dir_all(&parent) {
+          eprintln!(
+            "Error removing temp dir of file {}: {}",
+            self.path.display(),
+            e
+          );
+        }
+      }
+    } else {
+      if let Err(e) = std::fs::remove_dir_all(&self.path) {
+        eprintln!("Error removing temp dir {}: {}", self.path.display(), e);
+      }
     }
   }
 }
 
 // fixture from rstest library
-// Creates a temporary dir and returns a TempDir struct
-// before each test that uses it as a parameter
+/// Creates a temporary dir and returns a TempDir struct
+/// before each test that uses it as a parameter
 #[fixture]
-pub fn temp_dir() -> TempDir {
+pub fn temp_dir() -> TempPath {
   let path =
     std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
-  let temp_dir = TempDir { path };
+  let temp_dir = TempPath { path };
   temp_dir
+}
+
+// fixture from rstest library
+/// Creates a temporary `.txt` file and returns a TempDir struct
+/// before each test that uses it as a parameter
+#[fixture]
+pub fn temp_file() -> TempPath {
+  let path = std::env::temp_dir()
+    .join(format!("kindelia.{:x}", fastrand::u128(..)))
+    .join(format!("kindelia.{:x}.txt", fastrand::u128(..)));
+  std::fs::create_dir_all(&path.parent().unwrap()).unwrap();
+  std::fs::write(&path, "").unwrap();
+  let temp_file = TempPath { path };
+  temp_file
 }

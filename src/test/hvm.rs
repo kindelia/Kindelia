@@ -12,7 +12,7 @@ use crate::{
     util::{
       self, advance, rollback, rollback_path, rollback_simple, run_term_and,
       run_term_from_code_and, temp_dir, test_heap_checksum,
-      view_rollback_ticks, RuntimeStateTest, TempDir,
+      view_rollback_ticks, RuntimeStateTest, TempPath,
     },
   },
 };
@@ -41,7 +41,7 @@ pub fn simple_rollback(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   assert!(rollback_simple(
     pre_code,
@@ -60,7 +60,7 @@ pub fn advanced_rollback_in_random_state(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   let path = [1000, 12, 1000, 24, 1000, 36];
   assert!(rollback_path(
@@ -79,7 +79,7 @@ pub fn advanced_rollback_in_saved_state(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   let mut rt = init_runtime(temp_dir.path.clone());
   rt.run_statements_from_code(pre_code, true, true);
@@ -108,7 +108,7 @@ pub fn advanced_rollback_run_fail(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   let path = [2, 1, 2, 1, 2, 1];
   assert!(rollback_path(
@@ -127,7 +127,7 @@ pub fn stack_overflow(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   // caused by compute_at function
   let mut rt = init_runtime(temp_dir.path.clone());
@@ -138,7 +138,7 @@ pub fn stack_overflow(
 #[rstest]
 #[ignore = "fix not done"]
 // TODO: fix drop stack overflow
-pub fn stack_overflow2(temp_dir: TempDir) {
+pub fn stack_overflow2(temp_dir: TempPath) {
   // caused by drop of term
   let mut rt = init_runtime(temp_dir.path.clone());
   rt.run_statements_from_code(PRE_COUNTER, false, true);
@@ -152,7 +152,7 @@ pub fn persistence1(
   code: &str,
   validators: &[util::Validator],
   #[values(1000, 1500, 2000)] tick: u128,
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   let mut rt = init_runtime(temp_dir.path.clone());
   rt.run_statements_from_code(pre_code, true, true);
@@ -186,7 +186,7 @@ pub fn persistence1(
 }
 
 #[rstest]
-fn one_hundred_snapshots(temp_dir: TempDir) {
+fn one_hundred_snapshots(temp_dir: TempPath) {
   // run this with rollback in each 4th snapshot
   // note: this test has no state
   let mut rt = init_runtime(temp_dir.path.clone());
@@ -214,7 +214,7 @@ fn parse_ask_fail1(
 }
 
 #[rstest]
-fn compute_at_funs(temp_dir: TempDir) {
+fn compute_at_funs(temp_dir: TempPath) {
   let code = "
     fun (Add a b) {
       (Add #256 #256) = #512
@@ -237,7 +237,7 @@ fn compute_at_funs(temp_dir: TempDir) {
 }
 
 #[rstest]
-fn dupped_state_test(temp_dir: TempDir) {
+fn dupped_state_test(temp_dir: TempPath) {
   fn print_and_assert_states(
     rt: &mut Runtime,
     expected_original_readback: &str,
@@ -277,7 +277,7 @@ fn dupped_state_test(temp_dir: TempDir) {
 }
 
 #[rstest]
-fn shadowing(temp_dir: TempDir) {
+fn shadowing(temp_dir: TempPath) {
   let code = "
     fun (Test state) {
       (Test state) = 
@@ -334,7 +334,7 @@ fn shadowing(temp_dir: TempDir) {
 fn readback(
   #[case] code: &str,
   #[case] expected_readback: &str,
-  temp_dir: TempDir,
+  temp_dir: TempPath,
 ) {
   // initialize runtime
   let mut rt = init_runtime(temp_dir.path.clone());

@@ -14,3 +14,4 @@ mod util;
 mod bits;
 mod hasher;
 mod hvm;
+mod cli;
