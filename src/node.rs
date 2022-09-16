@@ -128,6 +128,16 @@ impl PeersStore {
     }
   }
 
+  /// This function checks and puts
+  /// a peer as active on `PeerStore`.
+  pub fn activate(&mut self, addr: &Address, peer: Peer) {
+    let now = get_time();
+    // only activate if its `seen_at` is newer than `now - TIMEOUT` 
+    if peer.seen_at >= now - PEER_TIMEOUT {
+      self.active.insert(*addr, peer);
+    }
+  }
+
   pub fn see_peer(&mut self, peer: Peer) {
     let addr = peer.address;
     // print_with_timestamp!("- see peer {}", addr);
@@ -135,7 +145,7 @@ impl PeersStore {
       None => { // New peer, not seen before
         // print_with_timestamp!("- new peer {}", addr);
         self.seen.insert(addr, peer);
-        self.active.insert(addr, peer);
+        self.activate(&addr, peer);
       }
       Some(index) => { // Peer seen before, but maybe not active
         // print_with_timestamp!("- peer {} already seen", addr);
@@ -143,7 +153,7 @@ impl PeersStore {
         match old_peer {
           None => { // Peer not active, so activate it
             // print_with_timestamp!("- activating peer {}", addr);
-            self.active.insert(addr, peer);
+            self.activate(&addr, peer);
           }
           Some(old_peer) => { // Peer already active, so update it
             // print_with_timestamp!("\t- old peer {:?}", old_peer);
