@@ -13,6 +13,8 @@ Kindelia is a peer-to-peer functional computer capable of hosting decentralized 
 
 - It is **maximally decentralized**, not just tech-wise. Political and economical centralization are addressed.
 
+- It is **PoW-based**, forever. In fact, PoS isn't even possible, since there is no built-in currency.
+
 Resources
 ---------
 
