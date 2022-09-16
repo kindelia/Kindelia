@@ -22,7 +22,7 @@ use std::hash::BuildHasherDefault;
 use crate::NoHashHasher as NHH;
 use crate::print_with_timestamp;
 
-use crate::api::{self, CtrInfo};
+use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{NodeRequest, BlockInfo, FuncInfo};
 use crate::util::*;
 use crate::bits::*;
@@ -983,6 +983,29 @@ impl Node {
     }
   }
 
+  pub fn get_reg_info(&self, name: Name) -> Option<RegInfo> {
+    let ownr = self.runtime.get_owner(&name)?;
+    let ownr = Name::from_u128_unchecked(ownr);
+    let pred = |c: &Name| c.to_string().starts_with(&format!("{}.", name));
+    let ctrs: Vec<Name> = 
+      self.runtime.get_all_ctr()
+        .into_iter()
+        .filter(pred)
+        .collect();
+    let funs: Vec<Name> = 
+      self.runtime.get_all_funs()
+        .into_iter()
+        .filter(pred)
+        .collect();
+    let ns: Vec<Name> = 
+        self.runtime.get_all_ns()
+          .into_iter()
+          .filter(pred)
+          .collect();
+    let stmt = [ctrs, funs, ns].concat();
+    Some(RegInfo { ownr, stmt })
+  }
+
   pub fn handle_request(&mut self, request: NodeRequest) {
     // TODO: handle unwraps
     match request {
@@ -1060,6 +1083,10 @@ impl Node {
       },
       NodeRequest::GetConstructor { name, tx: answer } => {
         let info = self.get_ctr_info(&name);
+        answer.send(info).unwrap();
+      },
+      NodeRequest::GetReg { name, tx: answer } => {
+        let info = self.get_reg_info(name);
         answer.send(info).unwrap();
       },
       NodeRequest::TestCode { code, tx: answer } => {

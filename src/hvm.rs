@@ -2474,7 +2474,7 @@ impl Runtime {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
-  // TODO: refactor return to Option
+  // TODO: refactor to return Option
   pub fn get_arity(&self, name: &Name) -> u128 {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
       return arity;
@@ -2596,6 +2596,50 @@ impl Runtime {
     let dups = self.get_dups();
     self.get_heap_mut(self.draw).set_dups(dups + 1);
     return dups & 0x3FFFFFFF;
+  }
+
+  pub fn get_all_funs(&self) -> Vec<Name> {
+    let mut funcs: Vec<Name> = Vec::new();
+    self.reduce_with(&mut funcs, |acc, heap| {
+      let mut heap_funcs: Vec<Name> = 
+        heap.file.funcs
+          .keys()
+          .map(|f| Name::from_u128_unchecked(*f))
+          .collect();
+      acc.append(&mut heap_funcs);
+    });
+    funcs
+  }
+
+  pub fn get_all_ctr(&self) -> Vec<Name> {
+    let mut ctrs: Vec<Name> = Vec::new();
+    self.reduce_with(&mut ctrs, |acc, heap| {
+      let heap_funs: Vec<_> = 
+        heap.file.funcs
+          .keys()
+          .collect();
+      let mut heap_ctrs = 
+        heap.arit.arits
+          .keys()
+          .filter(|s| !heap_funs.contains(s))
+          .map(|c| Name::from_u128_unchecked(*c))
+          .collect();
+      acc.append(&mut heap_ctrs);
+    });
+    ctrs
+  }
+
+  pub fn get_all_ns(&self) -> Vec<Name> {
+    let mut ns: Vec<Name> = Vec::new();
+    self.reduce_with(&mut ns, |acc, heap| {
+      let mut heap_ns: Vec<Name> = 
+        heap.ownr.ownrs
+          .keys()
+          .map(|n| Name::from_u128_unchecked(*n))
+          .collect();
+      acc.append(&mut heap_ns);
+    });
+    ns
   }
 }
 
