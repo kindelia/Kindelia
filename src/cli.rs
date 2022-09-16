@@ -1,3 +1,11 @@
+// TODO: list names inside of .kdl file
+// TODO: kindelia get name
+
+// TODO: command to get number of txs on mempool
+
+// TODO: way to check if transaction fits in a block
+// TODO: publish to multiple nodes
+
 // TODO: flag enable logging statements results (disabled by default)
 // TODO: limit readback computational resources on aforementioned log and API calls
 

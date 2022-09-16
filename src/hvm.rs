@@ -2056,7 +2056,7 @@ impl Runtime {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
         if !self.check_func(&func) {
-          return error(self, "fun", format!("Invalid function {}.", name));
+          return error(self, "fun", format!("Invalid function '{}'.", name));
         }
         let func = compile_func(func, true);
         if func.is_none() {
