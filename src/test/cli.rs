@@ -1,11 +1,14 @@
 use proptest::collection::vec;
 use proptest::proptest;
 use rstest::rstest;
+use std::convert::TryInto;
 use std::io::Write;
 use std::{fmt::Debug, process::Command, process::Stdio};
 
+use crate::api;
 use crate::bits;
 use crate::hvm;
+use crate::node::{self, read_address};
 use crate::util;
 
 use crate::test::strategies::statement;
@@ -130,6 +133,119 @@ fn signing(#[case] private_key: &str, #[case] expected_result: &str) {
     .unwrap();
   let output = get_stdout(&output);
   assert_eq!(output, expected_result)
+}
+
+#[rstest]
+#[case("/constructor/*", Some("T3"), ctr_response_1(), "ctr arity", "3")]
+#[case(
+  "/constructor/*",
+  Some("T3"),
+  ctr_response_1(),
+  "ctr code",
+  "{T3 x0 x1 x2}"
+)]
+#[case("/reg/*", Some("Foo"), reg_response_1(), "reg owner", "400")]
+#[case(
+  "/reg/*",
+  Some("Foo"),
+  reg_response_1(),
+  "reg list",
+  "Foo\nFoo.Bar\nFoo.Bar.cats"
+)]
+#[case("/stats", None, stats_response_1(), "stats ctr-count", "3")]
+#[case("/stats", None, stats_response_1(), "stats fun-count", "4")]
+#[case("/stats", None, stats_response_1(), "stats reg-count", "5")]
+#[case("/stats", None, stats_response_1(), "stats mana", "400")]
+#[case("/stats", None, stats_response_1(), "stats space", "500")]
+#[case("/stats", None, stats_response_1(), "stats tick", "700")]
+// not working because the lack of u128 deserialzation support
+// #[case("/peers/",None,peers_response_1(),"peers","0.0.0.1:42000\n0.0.0.1:42001")]
+// not working because the `with { ~ }` syntax
+// #[case("/functions/*", "Test", fun_response_1().0, "fun code", FUN_CODE)]
+#[case("/functions/*/state", Some("Test"), fun_response_1().1, "fun state", "#42")]
+fn test_get_mock<T: serde::Serialize>(
+  #[case] path: &str,
+  #[case] name: Option<&str>,
+  #[case] response: T,
+  #[case] command: &str,
+  #[case] expected_result: &str,
+) {
+  // separate command and subcommand
+  let command: Vec<_> = command.split(' ').collect();
+  let subcommand = command.last();
+  let command = command.first().unwrap();
+
+  let mut path: String = path.into();
+  // change path wildcard to name
+  if let Some(name) = name {
+    path = path.replace('*', name);
+  }
+
+  // create mock server
+  let server = httpmock::MockServer::start();
+  let get_mock = server.mock(|when, then| {
+    when.method(httpmock::Method::GET).path(path);
+    then.status(200).json_body_obj(&response);
+  });
+  let mock_url = format!("http://127.0.0.1:{}/", server.port());
+
+  // execute a get
+  let mut args = vec!["--api", &mock_url, "get", command];
+  if let Some(name) = name {
+    args.push(name);
+  }
+  if let Some(subcommand) = subcommand {
+    args.push(subcommand);
+  }
+  let output = kindelia!().args(&args).output().unwrap();
+  let output = get_stdout(&output);
+  assert_eq!(output, expected_result)
+}
+
+fn ctr_response_1() -> api::CtrInfo {
+  api::CtrInfo { arit: 3 }
+}
+
+fn reg_response_1() -> api::RegInfo {
+  let names: Vec<hvm::Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
+    .iter()
+    .map(|s| (*s).try_into().unwrap())
+    .collect();
+  api::RegInfo { ownr: hvm::Name::from_u128_unchecked(1024), stmt: names }
+}
+
+fn peers_response_1() -> Vec<node::Peer> {
+  vec![
+    node::Peer { address: read_address("0.0.0.1:42000"), seen_at: 1 },
+    node::Peer { address: read_address("0.0.0.1:42001"), seen_at: 2 },
+  ]
+}
+
+pub const FUN_CODE: &str = "fun (Test ___) {
+  (Test a #0) = #0
+  (Test #0 b) = #0
+  (Test a b) = #1
+} with { #42 }";
+
+fn fun_response_1() -> (api::FuncInfo, hvm::Term) {
+  let code = FUN_CODE;
+  let func = hvm::read_statement(code).unwrap().1;
+  if let hvm::Statement::Fun { name, args, func, init, sign } = func {
+    (api::FuncInfo { func }, init)
+  } else {
+    panic!("Not a function")
+  }
+}
+
+fn stats_response_1() -> api::Stats {
+  api::Stats {
+    ctr_count: 3,
+    fun_count: 4,
+    reg_count: 5,
+    mana: 400,
+    space: 500,
+    tick: 700,
+  }
 }
 
 // #[test]
