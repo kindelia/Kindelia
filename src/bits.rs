@@ -316,17 +316,20 @@ pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128, names: &mu
 pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names) {
   match message {
     // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
-    Message::NoticeTheseBlocks { gossip, blocks, peers } => {
+    Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
+      serialize_fixlen(64, &u256(*magic as u128), bits, names);
       serialize_fixlen(4, &u256(0), bits, names);
       serialize_fixlen(1, &u256(*gossip as u128), bits, names);
       serialize_list(serialize_block, &blocks, bits, names);
       serialize_list(serialize_peer, peers, bits, names);
     }
-    Message::GiveMeThatBlock { bhash } => {
+    Message::GiveMeThatBlock { magic, bhash } => {
+      serialize_fixlen(64, &u256(*magic as u128), bits, names);
       serialize_fixlen(4, &u256(1), bits, names);
       serialize_hash(bhash, bits, names);
     }
-    Message::PleaseMineThisTransaction { trans } => {
+    Message::PleaseMineThisTransaction { magic, trans } => {
+      serialize_fixlen(64, &u256(*magic as u128), bits, names);
       if trans.data.len() == 0 {
         panic!("Invalid transaction length.");
       } else {
@@ -339,22 +342,23 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names
 }
 
 pub fn deserialize_message(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Message> {
+  let magic = deserialize_fixlen(64, bits, index, names)?.low_u128() as u64;
   let code = deserialize_fixlen(4, bits, index, names)?.low_u128();
   match code {
     0 => {
       let gossip = deserialize_fixlen(1, bits, index, names)?.low_u128() != 0;
       let blocks = deserialize_list(deserialize_block, bits, index, names)?;
       let peers  = deserialize_list(deserialize_peer, bits, index, names)?;
-      Some(Message::NoticeTheseBlocks { gossip, blocks, peers })
+      Some(Message::NoticeTheseBlocks { magic, gossip, blocks, peers })
     }
     1 => {
       let bhash = deserialize_hash(bits, index, names)?;
-      Some(Message::GiveMeThatBlock { bhash })
+      Some(Message::GiveMeThatBlock { magic, bhash })
     }
     2 => {
       let size = deserialize_fixlen(16, bits, index, names)?.low_u128();
       let data = deserialize_bytes(size, bits, index, names)?;
-      Some(Message::PleaseMineThisTransaction { trans: Transaction::new(data) })
+      Some(Message::PleaseMineThisTransaction { magic, trans: Transaction::new(data) })
     }
     _ => None
   }

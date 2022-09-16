@@ -23,7 +23,7 @@ use clap::{Parser, Subcommand};
 use hvm::Name;
 use warp::Future;
 
-use crate::api::{client as api_client, HexStatement, Hash};
+use crate::api::{client as api_client, Hash, HexStatement};
 use crate::bits::{deserialized_statement, serialized_statement};
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
@@ -183,14 +183,14 @@ pub enum CliCommand {
     /// Hex string of the serialized statement.
     stmt: String,
   },
-  /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
-  PostUdp {
-    /// The path to the file to post.
-    file: FileInput,
-    /// Node address to post to.
-    #[clap(long)]
-    host: Option<String>,
-  },
+  // /// Post a Kindelia code file, using the UDP interface. [DEPRECATED]
+  // PostUdp {
+  //   /// The path to the file to post.
+  //   file: FileInput,
+  //   /// Node address to post to.
+  //   #[clap(long)]
+  //   host: Option<String>,
+  // },
   /// Get remote information.
   Get {
     /// The kind of information to get.
@@ -227,6 +227,9 @@ pub enum NodeCommand {
     /// Initial peer nodes.
     #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
+    /// Network id / magic number.
+    #[clap(long)]
+    network_id: Option<u64>,
     /// Mine blocks.
     #[clap(long, short = 'm')]
     mine: bool,
@@ -374,8 +377,8 @@ where
           prop_path
         ))?;
       }
-      T::arg_from(value.clone()).map_err(|_| {
-        format!("Could not convert value '{}' into desired type.", value)
+      T::arg_from(value.clone()).map_err(|e| {
+        format!("Could not convert value '{}' into desired type: {}", value, e)
       })
     } else {
       (self.default)()
@@ -433,9 +436,7 @@ pub fn run_cli() -> Result<(), String> {
       let code: String = file.read_to_string()?;
       deserialize_code(&code)
     }
-    CliCommand::Unserialize { stmt } => {
-      deserialize_code(&stmt)
-    }
+    CliCommand::Unserialize { stmt } => deserialize_code(&stmt),
     CliCommand::Sign { file, secret_file, encoded, encoded_output } => {
       let skey: String = arg_from_file_or_stdin(secret_file.into())?;
       let skey = skey.trim();
@@ -466,8 +467,11 @@ pub fn run_cli() -> Result<(), String> {
       let f = |client: api_client::ApiClient, stmts| async move {
         client.run_code(stmts).await
       };
-      let stmts =
-        if encoded { statements_from_hex_seq(&code)? } else { parse_code(&code)? };
+      let stmts = if encoded {
+        statements_from_hex_seq(&code)?
+      } else {
+        parse_code(&code)?
+      };
       let results = run_on_remote(&api_url, stmts, f)?;
       for result in results {
         println!("{}", result);
@@ -476,18 +480,21 @@ pub fn run_cli() -> Result<(), String> {
     }
     CliCommand::Publish { file, encoded } => {
       let code = file.read_to_string()?;
-      let stmts =
-        if encoded { statements_from_hex_seq(&code)? } else { parse_code(&code)? };
+      let stmts = if encoded {
+        statements_from_hex_seq(&code)?
+      } else {
+        parse_code(&code)?
+      };
       publish_code(&api_url, stmts)
     }
     CliCommand::Post { stmt } => {
       let stmts = statements_from_hex_seq(&stmt)?;
       publish_code(&api_url, stmts)
     }
-    CliCommand::PostUdp { file, host } => {
-      let content = arg_from_file_or_stdin::<String>(file)?;
-      post_udp(&content, host)
-    }
+    // CliCommand::PostUdp { file, host } => {
+    //   let content = arg_from_file_or_stdin::<String>(file)?;
+    //   post_udp(&content, host)
+    // }
     CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &api_url);
       run_async_blocking(prom)
@@ -524,18 +531,20 @@ pub fn run_cli() -> Result<(), String> {
             .map_err(|err| format!("Could not read your answer: '{}'", err))?;
           // only accept 'y' as positive answer, anything else will be ignored
           if answer.trim().to_lowercase() == "y" {
-            std::fs::remove_dir_all(data_path)
-              .map_err(|err| format!("Could not remove the files: '{}'", err))?;
+            std::fs::remove_dir_all(data_path).map_err(|err| {
+              format!("Could not remove the files: '{}'", err)
+            })?;
             println!("All items were removed.");
           } else {
             println!("Canceling operation.");
           }
           Ok(())
         }
-        NodeCommand::Start { initial_peers, mine } => {
+        NodeCommand::Start { initial_peers, network_id, mine } => {
           // TODO: refactor config resolution out of command handling (how?)
 
-          // get arguments from cli, env or config
+          // Get arguments from cli, env or config
+
           let initial_peers = ConfigValueOption {
             value: initial_peers,
             env: Some("KINDELIA_INITIAL_PEERS"),
@@ -544,6 +553,14 @@ pub fn run_cli() -> Result<(), String> {
               "node.network.initial_peers",
             ),
             default: || Ok(Vec::new()),
+          }
+          .get_config_value()?;
+
+          let network_id = ConfigValueOption {
+            value: network_id,
+            env: Some("KINDELIA_NETWORK_ID"),
+            config: ConfigFileOptions::new(&config, "node.network.network_id"),
+            default: || Err("Missing `network_id` paramenter.".to_string()),
           }
           .get_config_value()?;
 
@@ -556,7 +573,7 @@ pub fn run_cli() -> Result<(), String> {
           .get_config_value()?;
 
           // Start node
-          start(data_path, initial_peers, mine);
+          start(data_path, initial_peers, network_id, mine);
 
           Ok(())
         }
@@ -581,13 +598,13 @@ pub async fn get_info(
       let block_hash = client.get_block_hash(index).await?;
       println!("{}", block_hash);
       Ok(())
-    },
+    }
     GetKind::Block { hash } => {
       let hash = Hash::try_from(hash.as_str())?;
       let block = client.get_block(hash).await?;
       println!("{:#?}", block);
       Ok(())
-    },
+    }
     GetKind::Ctr { name, stat } => {
       let ctr_info = client.get_constructor(name).await?;
       match stat {
@@ -638,7 +655,7 @@ pub async fn get_info(
       match stat {
         GetRegKind::Owner => {
           println!("{:x}", *(reg_info.ownr))
-        },
+        }
         GetRegKind::List => {
           for name in reg_info.stmt {
             println!("{}", name)
@@ -646,7 +663,7 @@ pub async fn get_info(
         }
       }
       Ok(())
-    },
+    }
     GetKind::Stats { stat_kind } => {
       let stats = client.get_stats().await?;
       match stat_kind {
@@ -719,7 +736,10 @@ pub fn sign_code(
   Ok(stat)
 }
 
-pub fn publish_code(api_url: &str, stmts: Vec<Statement>) -> Result<(), String> {
+pub fn publish_code(
+  api_url: &str,
+  stmts: Vec<Statement>,
+) -> Result<(), String> {
   let f = |client: api_client::ApiClient, stmts| async move {
     client.publish_code(stmts).await
   };
@@ -736,35 +756,42 @@ pub fn publish_code(api_url: &str, stmts: Vec<Statement>) -> Result<(), String> 
   Ok(())
 }
 
-pub fn post_udp(content: &str, host: Option<String>) -> Result<(), String> {
-  let statements = statements_from_hex_seq(content)?;
-  for statement in statements {
-    let tx =
-      Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
-    let ms = Message::PleaseMineThisTransaction { trans: tx };
-    let ports =
-      [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
-    if let Some((mut socket, _)) = udp_init(&ports) {
-      let addrs = if let Some(ref host) = host {
-        vec![read_address(host)]
-      } else {
-        ENTRY_PEERS.iter().map(|x| read_address(x)).collect()
-      };
-      udp_send(&mut socket, addrs, &ms);
-      println!("Published statement:\n\n{}", view_statement(&statement));
-    } else {
-      return Err(format!("Couldn't open UDP socket on ports: {:?}.", ports));
-    }
-  }
-  Ok(())
-}
+// pub fn post_udp(content: &str, host: Option<String>, network_id: u64) -> Result<(), String> {
+//   let statements = statements_from_hex_seq(content)?;
+//   for statement in statements {
+//     let tx =
+//       Transaction::new(bitvec_to_bytes(&serialized_statement(&statement)));
+//     let ms = Message::PleaseMineThisTransaction { magic: network_id, trans: tx };
+//     let ports =
+//       [UDP_PORT + 100, UDP_PORT + 101, UDP_PORT + 102, UDP_PORT + 103];
+//     if let Some((mut socket, _)) = udp_init(&ports) {
+//       let addrs = if let Some(ref host) = host {
+//         vec![read_address(host)]
+//       } else {
+//         ENTRY_PEERS.iter().map(|x| read_address(x)).collect()
+//       };
+//       udp_send(&mut socket, addrs, &ms);
+//       println!("Published statement:\n\n{}", view_statement(&statement));
+//     } else {
+//       return Err(format!("Couldn't open UDP socket on ports: {:?}.", ports));
+//     }
+//   }
+//   Ok(())
+// }
 
 pub fn test_code(code: &str, sudo: bool) {
   hvm::test_statements_from_code(code, sudo);
 }
 
-fn start(state_path: PathBuf, init_peers: Vec<String>, mine: bool) {
-  eprintln!("Starting Kindelia node. Store path: {:?}", state_path);
+fn start(
+  state_path: PathBuf,
+  init_peers: Vec<String>,
+  network_id: u64,
+  mine: bool,
+) {
+  eprintln!("Starting Kindelia node...");
+  eprintln!("Store path: {:?}", state_path);
+
   let init_peers =
     init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
   let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
@@ -777,7 +804,8 @@ fn start(state_path: PathBuf, init_peers: Vec<String>, mine: bool) {
   //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
 
   // Node state object
-  let (node_query_sender, node) = Node::new(state_path, &init_peers);
+  let (node_query_sender, node) =
+    Node::new(state_path, &init_peers, network_id);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();
@@ -1020,6 +1048,27 @@ pub trait ArgumentFrom<T>: Sized {
 impl ArgumentFrom<String> for String {
   fn arg_from(t: String) -> Result<Self, String> {
     Ok(t)
+  }
+}
+
+impl ArgumentFrom<String> for u64 {
+  fn arg_from(t: String) -> Result<Self, String> {
+    t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  }
+}
+
+impl ArgumentFrom<toml::Value> for u64 {
+  fn arg_from(value: toml::Value) -> Result<Self, String> {
+    match value {
+      toml::Value::Integer(i) => Ok(i as u64),
+      toml::Value::String(s) => {
+        let s = s.trim_start_matches("0x");
+        let num = u64::from_str_radix(s, 16)
+          .map_err(|e| format!("Invalid hexadecimal '{}': {}", s, e))?;
+        Ok(num)
+      }
+      _ => Err(format!("Invalid integer '{}'", value)),
+    }
   }
 }
 
