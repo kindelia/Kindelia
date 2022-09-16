@@ -269,11 +269,17 @@ pub fn transaction() -> impl Strategy<Value = Transaction> {
 
 pub fn message() -> impl Strategy<Value = Message> {
   prop_oneof![
-    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10)).prop_map(
-      |(g, b, p)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p }
-    ),
-    (u256()).prop_map(|h| Message::GiveMeThatBlock { bhash: h }),
-    (transaction())
-      .prop_map(|t| Message::PleaseMineThisTransaction { trans: t })
+    (any::<u64>(), any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10))
+      .prop_map(|(magic, gossip, blocks, peers)| Message::NoticeTheseBlocks {
+        magic,
+        gossip,
+        blocks,
+        peers,
+      }),
+    (any::<u64>(), u256())
+      .prop_map(|(magic, bhash)| Message::GiveMeThatBlock { magic, bhash }),
+    (any::<u64>(), transaction()).prop_map(|(magic, trans)| {
+      Message::PleaseMineThisTransaction { magic, trans }
+    })
   ]
 }

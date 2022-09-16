@@ -90,6 +90,7 @@ pub struct Node {
   pub state_path : PathBuf,                          // path where files are saved
   pub socket     : UdpSocket,                        // UDP socket
   pub port       : u16,                              // UDP port
+  pub network_id : u64,                              // Network ID / magic number
   pub runtime    : Runtime,                          // Kindelia's runtime
   pub receiver   : Receiver<NodeRequest>,            // Receives an API request
   pub tip        : U256,                             // current tip
@@ -229,14 +230,17 @@ pub struct MinerCommunication {
 #[derive(Debug, Clone)]
 pub enum Message {
   NoticeTheseBlocks {
+    magic: u64,
     gossip: bool,
     blocks: Vec<Block>,
     peers: Vec<Peer>,
   },
   GiveMeThatBlock {
+    magic: u64,
     bhash: Hash
   },
   PleaseMineThisTransaction {
+    magic: u64,
     trans: Transaction
   }
 }
@@ -673,6 +677,7 @@ impl Node {
   pub fn new(
     state_path: PathBuf,
     init_peers: &Option<Vec<Address>>,
+    network_id: u64,
   ) -> (SyncSender<NodeRequest>, Self) {
     let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
     let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
@@ -682,6 +687,7 @@ impl Node {
       state_path,
       socket,
       port,
+      network_id,
       runtime,
       receiver   : query_receiver,
       block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
@@ -1135,9 +1141,10 @@ impl Node {
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
   pub fn send_blocks_to(&mut self, addrs: Vec<Address>, gossip: bool, blocks: Vec<Block>, share_peers: u128) {
+    let magic = self.network_id;
     //print_with_timestamp!("- sending block: {:?}", block);
     let peers = self.peers.get_random_active(share_peers);
-    let msg = Message::NoticeTheseBlocks { gossip, blocks, peers };
+    let msg = Message::NoticeTheseBlocks { magic, gossip, blocks, peers };
     // print_with_timestamp!("- sending block: {:?}", msg);
     udp_send(&mut self.socket, addrs, &msg);
   }
@@ -1183,17 +1190,30 @@ impl Node {
   // Requests the most recent missing ancestor
   pub fn request_missing_ancestor(&mut self, addr: Address, bhash: &U256) {
     if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
-      udp_send(&mut self.socket, vec![addr], &Message::GiveMeThatBlock { bhash: missing_ancestor })
+      let magic = self.network_id;
+      let msg = &Message::GiveMeThatBlock { magic, bhash: missing_ancestor };
+      udp_send(&mut self.socket, vec![addr], msg);
     }
   }
 
   pub fn handle_message(&mut self, miner_communication: &mut MinerCommunication, addr: Address, msg: &Message) {
     if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: self.port }) {
       // print_with_timestamp!("- received message from {:?}: {:?}", addr, msg);
+      match msg {
+        Message::GiveMeThatBlock { magic, .. }
+        | Message::NoticeTheseBlocks { magic, .. }
+        | Message::PleaseMineThisTransaction { magic, .. } => {
+          if magic != &self.network_id {
+            return;
+          }
+        }
+      }
+
       self.peers.see_peer(Peer { address: addr, seen_at: get_time() });
+
       match msg {
         // Someone asked a block
-        Message::GiveMeThatBlock { bhash } => {
+        Message::GiveMeThatBlock { magic: _, bhash } => {
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
           let mut chunk = vec![];
@@ -1211,7 +1231,7 @@ impl Node {
           self.send_blocks_to(vec![addr], false, chunk, 0);
         }
         // Someone sent us some blocks
-        Message::NoticeTheseBlocks { gossip, blocks, peers } => {
+        Message::NoticeTheseBlocks { magic: _, gossip, blocks, peers } => {
           // TODO: validate if blocks are sorted by age?
 
           // Notice received peers
@@ -1230,7 +1250,7 @@ impl Node {
           }
         }
         // Someone sent us a transaction to mine
-        Message::PleaseMineThisTransaction { trans } => {
+        Message::PleaseMineThisTransaction { magic: _, trans } => {
           //print_with_timestamp!("- Transaction added to pool:");
           //print_with_timestamp!("-- {:?}", trans.data);
           //print_with_timestamp!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });

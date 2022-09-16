@@ -2087,10 +2087,10 @@ impl Runtime {
         StatementInfo::Ctr { name, args }
       }
       Statement::Run { expr, sign } => {
-        let mana_ini = self.get_mana(); 
+        let mana_ini = self.get_mana();
         let mana_lim = self.get_mana_limit();
         let size_ini = self.get_size();
-        let size_lim = self.get_size_limit(); 
+        let size_lim = self.get_size_limit();
         if !self.check_term(expr) {
           return error(self, "run", format!("Invalid term."));
         }
