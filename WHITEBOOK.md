@@ -1265,11 +1265,11 @@ serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 0100111
 
 This is an anonymous function that adds two numbers. It only uses 55 bits, or
 less than 7 bytes. Notice, though, how names use most of the space. In a future
-update, compressed names will shorten that to 27 bits, or about 3 bytes:
+update, compressed names will shorten that to 43 bits, or about 5 bytes:
 
 ```
-                                Lam   Lam   Op2 Add  Var 1    Var 0
-serialize_term(@x @y (+ x y)) = 010 1 010 1 111 0000 000 1101 000 10
+                                Lam 'x'(=0)   Lam 'y'(=1)   Op2 Add  Var 0  Var 1
+serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 10 000 1110
 ```
 
 Here, the compressed-name flag is used to both make anonymous functions with no
