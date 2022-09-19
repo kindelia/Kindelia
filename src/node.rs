@@ -738,7 +738,7 @@ impl Node {
   //     - In case of a reorg, rollback to the block before it
   //     - Run that block's code, updating the HVM state
   //     - Updates the longest chain saved on disk
-  pub fn add_block(&mut self, block: &Block) {
+  pub fn add_block(&mut self, miner_communication: &mut MinerCommunication, block: &Block) {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
     let mut must_include = vec![block.clone()]; // blocks to be added
@@ -806,6 +806,7 @@ impl Node {
           let old_tip = self.tip;
           let new_tip = bhash;
           if self.work[&new_tip] > self.work[&old_tip] {
+            miner_communication.write(MinerMessage::Stop);
             self.tip = bhash;
             //print_with_timestamp!("- hash: {:x}", bhash);
             //print_with_timestamp!("- work: {}", self.work[&new_tip]);
@@ -924,11 +925,11 @@ impl Node {
     return longest;
   }
 
-  pub fn receive_message(&mut self) {
+  pub fn receive_message(&mut self, miner_communication: &mut MinerCommunication) {
     let mut count = 0;
     for (addr, msg) in udp_recv(&mut self.socket) {
       //if count < HANDLE_MESSAGE_LIMIT {
-      self.handle_message(addr, &msg);
+      self.handle_message(miner_communication, addr, &msg);
       count = count + 1;
       //}
     }
@@ -1186,7 +1187,7 @@ impl Node {
     }
   }
 
-  pub fn handle_message(&mut self, addr: Address, msg: &Message) {
+  pub fn handle_message(&mut self, miner_communication: &mut MinerCommunication, addr: Address, msg: &Message) {
     if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: self.port }) {
       // print_with_timestamp!("- received message from {:?}: {:?}", addr, msg);
       self.peers.see_peer(Peer { address: addr, seen_at: get_time() });
@@ -1220,7 +1221,7 @@ impl Node {
 
           // Adds the block to the database
           for block in blocks {
-            self.add_block(block);
+            self.add_block(miner_communication, block);
           }
 
           // Requests missing ancestors
@@ -1263,7 +1264,7 @@ impl Node {
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
-  fn load_blocks(&mut self) {
+  fn load_blocks(&mut self, miner_communication: &mut MinerCommunication) {
     let blocks_dir = self.get_blocks_path();
     std::fs::create_dir_all(&blocks_dir).ok();
     let mut file_paths : Vec<PathBuf> = vec![];
@@ -1275,7 +1276,7 @@ impl Node {
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
       let block = deserialized_block(&bytes_to_bitvec(&buffer)).unwrap();
-      self.add_block(&block);
+      self.add_block(miner_communication, &block);
     }
   }
 
@@ -1291,9 +1292,9 @@ impl Node {
     });
   }
 
-  fn handle_mined_block(&mut self, miner_communication: &MinerCommunication) {
+  fn handle_mined_block(&mut self, miner_communication: &mut MinerCommunication) {
     if let MinerMessage::Answer { block } = miner_communication.read() {
-      self.add_block(&block);
+      self.add_block(miner_communication, &block);
       self.broadcast_tip_block();
     }
   }
@@ -1389,7 +1390,7 @@ impl Node {
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
     if self.port == UDP_PORT {
-      self.load_blocks();
+      self.load_blocks(&mut miner_communication);
     }
 
    // A task that is executed continuously on the main loop
@@ -1408,7 +1409,7 @@ impl Node {
       // Receives and handles incoming network messages
       Task {
         delay: HANDLE_MESSAGE_DELAY,
-        action: |node, mc| { node.receive_message(); },
+        action: |node, mc| { node.receive_message(mc); },
       },
       // Receives and handles incoming API requests
       Task {
