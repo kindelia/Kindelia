@@ -276,7 +276,7 @@ fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
 ) {
   let tick = rt.get_tick();
   let state = rt.read_disk(name.try_into().unwrap()).unwrap();
-  let state = hvm::readback_term(rt, state);
+  let state = hvm::readback_term(rt, state, None).unwrap();
   assert!(predicate(tick, &state, rt))
 }
 

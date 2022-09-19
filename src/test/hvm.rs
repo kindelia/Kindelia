@@ -251,19 +251,19 @@ fn dupped_state_test(temp_dir: TempPath) {
     println!("original: {}", show_term(&rt, original_state, None));
     println!(
       "original readback: {}",
-      view_term(&readback_term(&rt, original_state))
+      view_term(&readback_term(&rt, original_state, None).unwrap())
     );
     assert_eq!(
       expected_original_readback,
-      view_term(&readback_term(&rt, original_state))
+      view_term(&readback_term(&rt, original_state, None).unwrap())
     );
     println!();
     println!("other ptr: {}", other_state);
     println!("other: {}", show_term(&rt, other_state, None));
-    println!("other readback: {}", view_term(&readback_term(&rt, other_state)));
+    println!("other readback: {}", view_term(&readback_term(&rt, other_state, None).unwrap()));
     assert_eq!(
       expected_other_readback,
-      view_term(&readback_term(&rt, other_state))
+      view_term(&readback_term(&rt, other_state, None).unwrap())
     );
     println!();
   }

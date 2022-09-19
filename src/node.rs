@@ -1070,7 +1070,7 @@ impl Node {
         answer.send(info).unwrap();
       },
       NodeRequest::GetState { name, tx: answer } => {
-        let state = self.runtime.read_disk_as_term(name);
+        let state = self.runtime.read_disk_as_term(name, Some(2 << 16));
         answer.send(state).unwrap();
       },
       NodeRequest::GetPeers { all, tx: answer } => {

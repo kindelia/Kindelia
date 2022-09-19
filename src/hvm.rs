@@ -2112,10 +2112,10 @@ impl Runtime {
         // protocol. Also, a `Log` primitive should be added.
         let done_term =
           // if debug {
-          if true {
+          if let Some(term) = readback_term(self, done, Some(2 << 16)) {
             // TODO: limit readback computational resources
-            readback_term(self, done)
-          } else {
+            term // unwrap!!!
+           } else {
             Term::num(U120::ZERO)
           };
         self.collect(done);
@@ -2464,17 +2464,17 @@ impl Runtime {
     return self.get_with(None, None, |heap| heap.read_disk(name));
   }
 
-  pub fn read_disk_as_term(&mut self, name: Name) -> Option<Term> {
+  pub fn read_disk_as_term(&mut self, name: Name, limit: Option<usize>) -> Option<Term> {
     let host = self.read_disk(name)?;
-    let term = readback_term(self, host);
-    Some(term)
+    let term = readback_term(self, host, limit);
+    term
   }
 
   pub fn read_file(&self, name: &Name) -> Option<CompFunc> {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
-  // TODO: refactor to return Option
+
   pub fn get_arity(&self, name: &Name) -> u128 {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
       return arity;
@@ -4137,7 +4137,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
   }).to_string()
 }
 
-pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
+pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Term> {
   fn find_names(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>) {
     let mut stack = vec![term];
     while !stack.is_empty() {
@@ -4209,7 +4209,14 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
     }
   }
 
-  fn readback(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>, seen: &mut HashSet<Ptr>, dup_store: &mut DupStore) -> Term {
+  fn readback(
+			rt: &Runtime,
+			term: Ptr,
+			names: &mut HashMap<Ptr, String>,
+			seen: &mut HashSet<Ptr>,
+		  dup_store: &mut DupStore,
+		  limit: Option<usize>
+	) -> Option<Term> {
     enum StackItem {
       Term(Ptr),
       Resolver(Ptr),
@@ -4219,7 +4226,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
 
     let mut output = Vec::new();
     let mut stack = vec![StackItem::Term(term)];
-
+      
     let print_stack = |stack: &Vec<StackItem>| {
       println!("Stack: ");
       for (i, item) in stack.iter().rev().enumerate() {
@@ -4244,17 +4251,16 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
       }
     };
 
-    while !stack.is_empty() {
-      // println!();
-      // println!();
-      // println!("-----------------------------");
-      // print_stack(&stack);
-      // println!();
-      // print_output(&output);
-      // println!("-----------------------------");
-      // println!();
-      // println!();
-      let item = stack.pop().unwrap();
+		let mut count = 0;
+    while let Some(item) = stack.pop()  {
+      if let Some(limit) = limit {
+				if count == limit {
+					return None;
+				}
+			  else {
+					count += 1;
+				}
+      }
       match item {
         StackItem::Term(term) => {
           debug_assert!(term != 0);
@@ -4333,12 +4339,13 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
           dup_store.push(col, old);
         }
         StackItem::SUPResolverNone(term) => {
+					// TODO: check if this should really be here. is it necessary?
           let name = "HVM.sup"; // lang::Term doesn't have a Sup variant
           let name = name.try_into().unwrap();
           let val0 = output.pop().unwrap();
           let val1 = output.pop().unwrap();
           let args = vec![val0, val1];
-          return Term::ctr(name, args).unwrap();
+          return Some(Term::ctr(name, args).unwrap());
         }
         StackItem::Resolver(term) => {
           match get_tag(term) {
@@ -4382,15 +4389,19 @@ pub fn readback_term(rt: &Runtime, term: Ptr) -> Term {
         }
       }
     }
-    let name = Name::try_from("None").unwrap(); // FIXME: "None" ?
-    output.pop().unwrap_or_else(|| Term::ctr(name, [].to_vec()).unwrap())
+    if let Some(item) = output.pop() {
+		  Some(item)
+    }
+    else {
+			panic!("Readback output is empty")
+    }
   }
 
   let mut names: HashMap<Ptr, String> = HashMap::new();
   let mut seen: HashSet<Ptr> = HashSet::new();
   let mut dup_store = DupStore::new();
   find_names(rt, term, &mut names);
-  readback(rt, term, &mut names, &mut seen, &mut dup_store)
+  readback(rt, term, &mut names, &mut seen, &mut dup_store, limit)
 }
 
 // Parsing
