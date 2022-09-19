@@ -590,12 +590,12 @@ quotes, containing a list of 6-bit letters, as follows:
 
       | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F | 
     --|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-    0 | . | A | B | C | D | E | F | G | H | I | J | K | L | M | N | O | 
-    1 | P | Q | R | S | T | U | V | W | X | Y | Z | a | b | c | d | e | 
-    2 | f | g | h | i | j | k | l | m | n | o | p | q | r | s | t | u | 
-    3 | v | w | x | y | z | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | _ | 
+    0 | . | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E |
+    1 | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U |
+    2 | V | W | X | Y | Z | a | b | c | d | e | f | g | h | i | j | k |
+    3 | l | m | n | o | p | q | r | s | t | u | v | w | x | y | z | _ |
 
-So, for example, `'Bar'` denotes the number `(0x02 << 12) | (0x1B << 6) | 0x2C`.
+So, for example, `'Bar'` denotes the number `(0x0C << 12) | (0x25 << 6) | 0x36`.
 That naming convention can be used to give Kindelia-hosted applications
 human-readable source codes.
 
@@ -1182,19 +1182,18 @@ It uses the letter table shown earlier to represent names tersely.
 ```
 serialize_name('Dog') = 0 1 110101 1 110011 1 011100 0
                             '----'   '----'   '----'
-                             'D'      'o'      'g'
+                             'g'      'o'      'D'
 ```
 
 Since all names are smaller than 64 characters, using `serialize_list` is more
 efficient than encoding the length of the name, followed by the character.
 
-Note this encoding starts with a `0` bit that isn't used yet. That is a
+Note this encoding starts with a `0` bit. That is a
 compressed-name flag. Names are the most data-hungry part of Kindelia's
 serialization, yet, there are many instances where names can be compressed
 considerably. For example, variable names can be compressed using De Bruijn
 indices, and constructor/function names can be compressed by local name aliases
-when these are used repeatedly. These optimizations aren't implemented yet, but,
-in order to make that possible in a future, we reserve a bit for this flag.
+when these are used repeatedly.
 
 Note also that, while the serialization of a name allows for an arbitrary number
 of letters, HVM pointers can only address function and constructor names of up
@@ -1265,11 +1264,13 @@ serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 0100111
 
 This is an anonymous function that adds two numbers. It only uses 55 bits, or
 less than 7 bytes. Notice, though, how names use most of the space. In a future
-update, compressed names will shorten that to 43 bits, or about 5 bytes:
+update, compressed names will shorten that using the above mentioned indices in name serialization.
+As an example, the same term used with previous compressed variables would only use 
+31 bits, or about 4 bytes:
 
 ```
-                                Lam 'x'(=0)   Lam 'y'(=1)   Op2 Add  Var 0  Var 1
-serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 10 000 1110
+                                Lam 'x'(=0) Lam 'y'(=1)   Op2 Add  Var 0  Var 1
+serialize_term(@x @y (+ x y)) = 010  10     010  1110     111 0000 000 10 000 1110
 ```
 
 Here, the compressed-name flag is used to both make anonymous functions with no
