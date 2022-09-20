@@ -1263,8 +1263,7 @@ serialize_term(@x @y (+ x y)) = 010 010011110 010 011011110 111 0000 000 0100111
 ```
 
 This is an anonymous function that adds two numbers. It only uses 55 bits, or
-less than 7 bytes. Notice, though, how names use most of the space. In a future
-update, compressed names will shorten that using the above mentioned indices in name serialization.
+less than 7 bytes. Notice, though, how names use most of the space. Compressed names shorten that using the above mentioned indices in name serialization.
 As an example, the same term used with previous compressed variables would only use 
 31 bits, or about 4 bytes:
 
