@@ -484,7 +484,8 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-  EffectFailure
+  EffectFailure,
+  DivisionByZero
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -982,6 +983,61 @@ impl FromStr for Name {
 impl U120 {
   pub const ZERO: U120 = U120(0);
   pub const MAX: U120 = U120(2_u128.pow(120) - 1);
+
+  pub fn wrapping_add(self, other:U120) -> U120 {
+    let res = self.0 + other.0;
+    U120(res & U120::MAX.0)
+  }
+  
+  pub fn wrapping_sub(self, other: U120) -> U120 {
+    let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
+    U120::wrapping_add(self, other_complement)
+  }
+
+  // based off of this answer https://stackoverflow.com/a/1815371
+  // maybe this is too much work for an easy function?
+  // idk, maybe there's a better way to do this
+  pub fn wrapping_mul(self, other: U120) -> U120 {
+    const LO_MASK : u128  =  (1 << 60) - 1;
+    let a = self.0;
+    let b = other.0;
+    let x = (a & LO_MASK) * (b & LO_MASK);
+    
+    let s0 = x & LO_MASK;
+    let x = (a >> 60) * (b & LO_MASK) + (x >> 60);
+    
+    let s1 = x & LO_MASK;
+    let s2 = x >> 60;
+    
+    let x = s2 + (a >> 60) * (b >> 60) + (x >> 60);
+    U120(s1 << 60 | s0)
+  }
+
+  // Wrapping div is just normal division, since
+  // self / other is always smaller than self.
+  // warning: this will panic when other is 0.
+  pub fn wrapping_div(self, other: U120) -> U120 {
+    U120(self.0 / other.0)
+  }
+
+  // Wrapping remainder is just normal remainder
+  // given that self % other is always smaller than other
+  // by definition of the other.
+  pub fn wrapping_rem(self, other: U120) -> U120 {
+    U120(self.0 % other.0)
+  }
+
+  // Wrapping shift left is only defined for
+  // values `other` between 0 and 127. For values bigger than
+  // that, it will wrap the value module 120 before doing the shift.
+  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
+  pub fn wrapping_shl(self, other: U120) -> U120 {
+    U120((self.0 << (other.0 % 120)) & *U120::MAX)
+  }
+
+  pub fn wrapping_shr(self, other: U120) -> U120 {
+    U120(self.0 >> (other.0 % 120))
+  }
 }
 
 impl std::ops::Deref for U120 {
@@ -1014,6 +1070,7 @@ impl From<U120> for String {
   }
 }
 
+
 impl TryFrom<&str> for U120 {
   type Error = String;
   fn try_from(numb: &str) -> Result<Self, Self::Error> {
@@ -1042,7 +1099,7 @@ impl TryFrom<u128> for Oper {
         DIV => Ok(Oper::Div),
         MOD => Ok(Oper::Mod),
         AND => Ok(Oper::And),
-        OR => Ok(Oper::Or),
+        OR  => Ok(Oper::Or),
         XOR => Ok(Oper::Xor),
         SHL => Ok(Oper::Shl),
         SHR => Ok(Oper::Shr),
@@ -3570,22 +3627,24 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           // add(a, b)
           if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
             //eprintln!("op2-num");
-            rt.set_mana(rt.get_mana() + Op2NumMana());
             let op  = get_ext(term).try_into().expect("Invalid operation coming from HVM");
             let a_u = get_num(arg0);
             let b_u = get_num(arg1);
+            if op == Oper::Div && *b_u == 0 {
+              return Err(RuntimeError::DivisionByZero)
+            }
+            rt.set_mana(rt.get_mana() + Op2NumMana());
             let res = match op {
-              // TODO: implement U120 operations
-              Oper::Add => (*a_u).wrapping_add(*b_u) & NUM_MASK,
-              Oper::Sub => (*a_u).wrapping_sub(*b_u) & NUM_MASK,
-              Oper::Mul => (*a_u).wrapping_mul(*b_u) & NUM_MASK,
-              Oper::Div => (*a_u).wrapping_div(*b_u) & NUM_MASK,
-              Oper::Mod => (*a_u).wrapping_rem(*b_u) & NUM_MASK,
-              Oper::And => (*a_u &  *b_u) & NUM_MASK,
-              Oper::Or  => (*a_u |  *b_u) & NUM_MASK,
-              Oper::Xor => (*a_u ^  *b_u) & NUM_MASK,
-              Oper::Shl => (*a_u).wrapping_shl(*b_u as u32) & NUM_MASK,
-              Oper::Shr => (*a_u).wrapping_shr(*b_u as u32) & NUM_MASK,
+              Oper::Add => a_u.wrapping_add(b_u).0,
+              Oper::Sub => a_u.wrapping_sub(b_u).0,
+              Oper::Mul => a_u.wrapping_mul(b_u).0,
+              Oper::Div => a_u.wrapping_div(b_u).0,
+              Oper::Mod => a_u.wrapping_rem(b_u).0,
+              Oper::Shl => a_u.wrapping_shl(b_u).0,
+              Oper::Shr => a_u.wrapping_shr(b_u).0,
+              Oper::And => (*a_u & *b_u),
+              Oper::Or  => (*a_u | *b_u),
+              Oper::Xor => (*a_u ^ *b_u),
               Oper::Ltn => u128::from(*a_u <  *b_u),
               Oper::Lte => u128::from(*a_u <= *b_u),
               Oper::Eql => u128::from(*a_u == *b_u),
@@ -4134,6 +4193,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::NotEnoughMana => "Not enough mana.",
     RuntimeError::NotEnoughSpace => "Not enough space.",
     RuntimeError::EffectFailure => "Runtime effect failure.",
+    RuntimeError::DivisionByZero => "Tried to divide by zero.",
   }).to_string()
 }
 
@@ -4210,13 +4270,13 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
   }
 
   fn readback(
-			rt: &Runtime,
-			term: Ptr,
-			names: &mut HashMap<Ptr, String>,
-			seen: &mut HashSet<Ptr>,
-		  dup_store: &mut DupStore,
-		  limit: Option<usize>
-	) -> Option<Term> {
+    rt: &Runtime,
+    term: Ptr,
+    names: &mut HashMap<Ptr, String>,
+    seen: &mut HashSet<Ptr>,
+    dup_store: &mut DupStore,
+    limit: Option<usize>
+  ) -> Option<Term> {
     enum StackItem {
       Term(Ptr),
       Resolver(Ptr),
@@ -4251,15 +4311,15 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
       }
     };
 
-		let mut count = 0;
+    let mut count = 0;
     while let Some(item) = stack.pop()  {
       if let Some(limit) = limit {
-				if count == limit {
-					return None;
-				}
-			  else {
-					count += 1;
-				}
+        if count == limit {
+          return None;
+        }
+        else {
+          count += 1;
+        }
       }
       match item {
         StackItem::Term(term) => {
@@ -4339,7 +4399,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
           dup_store.push(col, old);
         }
         StackItem::SUPResolverNone(term) => {
-					// TODO: check if this should really be here. is it necessary?
+                    // TODO: check if this should really be here. is it necessary?
           let name = "HVM.sup"; // lang::Term doesn't have a Sup variant
           let name = name.try_into().unwrap();
           let val0 = output.pop().unwrap();
@@ -4390,10 +4450,10 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
       }
     }
     if let Some(item) = output.pop() {
-		  Some(item)
+          Some(item)
     }
     else {
-			panic!("Readback output is empty")
+            panic!("Readback output is empty")
     }
   }
 
