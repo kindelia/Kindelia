@@ -644,6 +644,7 @@ const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
 const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
 const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
 const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
+// TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block

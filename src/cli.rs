@@ -27,12 +27,8 @@ use crate::api::{client as api_client, Hash, HexStatement};
 use crate::bits::{deserialized_statement, serialized_statement};
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
-use crate::node::{
-  self, read_address, udp_init, udp_send, Message, MinerCommunication, Node,
-  Transaction, UDP_PORT,
-};
-use crate::util::{bitvec_to_bytes, bytes_to_bitvec};
-use crate::ENTRY_PEERS;
+use crate::node::{self, read_address, MinerCommunication, Node};
+use crate::util::bytes_to_bitvec;
 
 /*
 

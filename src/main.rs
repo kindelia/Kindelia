@@ -17,16 +17,9 @@ mod util;
 
 pub use clap::{Parser, Subcommand};
 
-// TODO: move to config file
-/// Testnet nodes
-const ENTRY_PEERS: [&str; 3] =
-  ["143.110.233.192", "164.92.151.251", "159.65.8.239"];
-
 // Starts the node process
 fn main() -> Result<(), String> {
   cli::run_cli()?;
-  //start_node(dirs::home_dir().unwrap().join(".kindelia"), false);
-  //hvm::test_statements_from_file("./example/block_1.kdl");
   Ok(())
 }
 
