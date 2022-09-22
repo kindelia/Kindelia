@@ -1,3 +1,5 @@
+// TODO: `subject` command
+
 // TODO: list names inside of .kdl file
 // TODO: kindelia get name
 
