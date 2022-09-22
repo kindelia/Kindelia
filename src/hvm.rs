@@ -1010,7 +1010,14 @@ impl U120 {
     let s2 = x >> 60;
     
     let x = s2 + (a >> 60) * (b >> 60) + (x >> 60);
-    U120(s1 << 60 | s0)
+    let a_lo = a & LO_MASK;
+    let a_hi = a >> 60;
+    let b_lo = b & LO_MASK;
+    let b_hi = b >> 60;
+    s0 = a_lo * b_lo;
+    s1 = ((a_hi * b_lo) & LO_MASK) << 60;
+    s2 = ((b_hi * a_lo) & LO_MASK) << 60);
+    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2));
   }
 
   // Wrapping div is just normal division, since
