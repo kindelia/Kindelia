@@ -257,28 +257,22 @@ pub fn address() -> impl Strategy<Value = Address> {
   )
 }
 
-pub fn peer() -> impl Strategy<Value = Peer> {
-  (any::<u32>(), address())
-    .prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
-}
+// pub fn peer() -> impl Strategy<Value = Peer> {
+//   (any::<u32>(), address())
+//     .prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
+// }
 
 pub fn transaction() -> impl Strategy<Value = Transaction> {
   vec(any::<u8>(), 1..128).prop_map(|d| Transaction::new(d))
 }
 
-pub fn message() -> impl Strategy<Value = Message> {
-  prop_oneof![
-    (any::<u64>(), any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10))
-      .prop_map(|(magic, gossip, blocks, peers)| Message::NoticeTheseBlocks {
-        magic,
-        gossip,
-        blocks,
-        peers,
-      }),
-    (any::<u64>(), u256())
-      .prop_map(|(magic, bhash)| Message::GiveMeThatBlock { magic, bhash }),
-    (any::<u64>(), transaction()).prop_map(|(magic, trans)| {
-      Message::PleaseMineThisTransaction { magic, trans }
-    })
-  ]
-}
+// pub fn message() -> impl Strategy<Value = Message> {
+//   prop_oneof![
+//     (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10)).prop_map(
+//       |(g, b, p)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p }
+//     ),
+//     (u256()).prop_map(|h| Message::GiveMeThatBlock { bhash: h }),
+//     (transaction())
+//       .prop_map(|t| Message::PleaseMineThisTransaction { trans: t })
+//   ]
+// }

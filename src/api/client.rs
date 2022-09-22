@@ -6,7 +6,8 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{hvm::{Term, self}, node};
+// use crate::node;
+use crate::hvm::{Term, self};
 
 use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement, CtrInfo, RegInfo};
 
@@ -127,13 +128,13 @@ impl ApiClient {
     self.req(Method::POST, "/publish", Some(code)).await
   }
 
-  pub async fn get_peers(&self, all: bool) -> ApiResult<Vec<node::Peer>> {
-    if all {
-      self.get::<Vec<node::Peer>>("/peers/all").await
-    } else {
-      self.get::<Vec<node::Peer>>("/peers").await
-    }
-  }
+  // pub async fn get_peers(&self, all: bool) -> ApiResult<Vec<node::Peer>> {
+  //   if all {
+  //     self.get::<Vec<node::Peer>>("/peers/all").await
+  //   } else {
+  //     self.get::<Vec<node::Peer>>("/peers").await
+  //   }
+  // }
 
   pub async fn get_reg_info(&self, name: &str) -> ApiResult<RegInfo> {
     self.get::<RegInfo>(&format!("/reg/{}", name)).await

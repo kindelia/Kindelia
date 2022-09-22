@@ -225,12 +225,12 @@ fn reg_response_1() -> api::RegInfo {
   api::RegInfo { ownr: common::Name::from_u128_unchecked(1024), stmt: names }
 }
 
-fn peers_response_1() -> Vec<node::Peer> {
-  vec![
-    node::Peer { address: read_address("0.0.0.1:42000"), seen_at: 1 },
-    node::Peer { address: read_address("0.0.0.1:42001"), seen_at: 2 },
-  ]
-}
+// fn peers_response_1() -> Vec<node::Peer> {
+//   vec![
+//     node::Peer { address: read_address("0.0.0.1:42000"), seen_at: 1 },
+//     node::Peer { address: read_address("0.0.0.1:42001"), seen_at: 2 },
+//   ]
+// }
 
 pub const FUN_CODE: &str = "fun (Test ___) {
   (Test a #0) = #0

@@ -8,7 +8,7 @@ use crate::{
   },
   hvm::{view_statements, Term},
   node::Message,
-  test::strategies::{message, statement, u256 as u256_strategy},
+  test::strategies::{statement, u256 as u256_strategy},
   util::u256,
 };
 use bit_vec::BitVec;
@@ -24,12 +24,12 @@ proptest! {
     assert_eq!(s1, s2);
   }
 
-  #[test]
-  fn serialize_deserialize_message(message in message()) {
-    let bits = serialized_message(&message);
-    let message2 = deserialized_message(&bits).unwrap();
-    assert_eq!(format!("{:?}", message), format!("{:?}", message2));
-  }
+  // #[test]
+  // fn serialize_deserialize_message(message in message()) {
+  //   let bits = serialized_message(&message);
+  //   let message2 = deserialized_message(&bits).unwrap();
+  //   assert_eq!(format!("{:?}", message), format!("{:?}", message2));
+  // }
 }
 
 #[test]

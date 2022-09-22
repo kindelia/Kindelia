@@ -443,29 +443,29 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   // == Peers ==
 
-  let get_peers_base = path!("peers" / ..);
+  // let get_peers_base = path!("peers" / ..);
 
-  let query_tx = node_query_sender.clone();
-  let get_peers = get_peers_base.and(path!()).then(move || {
-    let query_tx = query_tx.clone();
-    async move {
-      let peers_store =
-        ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
-      ok_json(peers_store)
-    }
-  });
+  // let query_tx = node_query_sender.clone();
+  // let get_peers = get_peers_base.and(path!()).then(move || {
+  //   let query_tx = query_tx.clone();
+  //   async move {
+  //     let peers_store =
+  //       ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
+  //     ok_json(peers_store)
+  //   }
+  // });
 
-  let query_tx = node_query_sender.clone();
-  let get_all_peers = get_peers_base.and(path!("all")).then(move || {
-    let query_tx = query_tx.clone();
-    async move {
-      let peers_store =
-        ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
-      ok_json(peers_store)
-    }
-  });
+  // let query_tx = node_query_sender.clone();
+  // let get_all_peers = get_peers_base.and(path!("all")).then(move || {
+  //   let query_tx = query_tx.clone();
+  //   async move {
+  //     let peers_store =
+  //       ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
+  //     ok_json(peers_store)
+  //   }
+  // });
 
-  let peers_router = get_peers.or(get_all_peers);
+  // let peers_router = get_peers.or(get_all_peers);
 
   // ==
 
@@ -474,16 +474,13 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     .or(blocks_router)
     .or(functions_router)
     .or(interact_router)
-    .or(peers_router)
+    // .or(peers_router)
     .or(constructor_router)
     .or(reg_router);
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")
   });
-
-  // let cors = warp::cors().allow_any_origin();
-  // let app = app.with(cors);
 
   let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
   // let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();

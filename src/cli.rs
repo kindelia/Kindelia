@@ -16,6 +16,7 @@
 
 use std::fmt;
 use std::io::Read;
+use std::net::UdpSocket;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread;
@@ -29,7 +30,7 @@ use crate::bits::{deserialized_statement, serialized_statement};
 use crate::common::Name;
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
-use crate::node::{self, read_address, MinerCommunication, Node};
+use crate::node::{self, read_address, MinerCommunication, Node, UDP_PORT};
 use crate::util::bytes_to_bitvec;
 
 /*
@@ -711,11 +712,11 @@ pub async fn get_info(
       };
       Ok(())
     }
-    GetKind::Peers { all } => {
-      let peers = client.get_peers(all).await?;
-      for peer in peers {
-        println!("{}", peer.address)
-      }
+    GetKind::Peers { .. } => {
+      // let peers = client.get_peers(all).await?;
+      // for peer in peers {
+      //   println!("{}", peer.address)
+      // }
       Ok(())
     }
   }
@@ -783,6 +784,20 @@ pub fn test_code(code: &str, sudo: bool) {
   hvm::test_statements_from_code(code, sudo);
 }
 
+fn init_socket() -> Option<(UdpSocket, node::Address)> {
+  let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
+  for port in try_ports {
+    if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}", port)) {
+      socket.set_nonblocking(true).ok();
+      return Some((
+        socket,
+        node::Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port },
+      ));
+    }
+  }
+  return None;
+}
+
 fn start(
   state_path: PathBuf,
   init_peers: Vec<String>,
@@ -797,9 +812,19 @@ fn start(
     init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
   let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
 
+  // dbg!(init_peers.clone());
+  // dbg!(kindelia_path.clone());
+  // dbg!(mine);
+
+  // Reads the file contents
+  //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
+
+  let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
+  let (socket, port) = init_socket().expect("Couldn't open UDP socket ports");
+
   // Node state object
   let (node_query_sender, node) =
-    Node::new(state_path, &init_peers, network_id);
+    Node::new(state_path, &init_peers, network_id, port, socket);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();

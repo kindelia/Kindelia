@@ -7,12 +7,13 @@ use std::collections::HashMap;
 use crate::common::Name;
 use crate::crypto;
 use crate::hvm::*;
+use crate::net::ProtoCommAddress;
 use crate::node::*;
 use crate::util::*;
 
 use primitive_types::U256;
 
-type Names = HashMap<u128, u128>;
+pub type Names = HashMap<u128, u128>;
 
 // Serializers
 // ===========
@@ -20,22 +21,31 @@ type Names = HashMap<u128, u128>;
 // A number with a known amount of bits
 
 #[allow(unused_variables)]
-pub fn serialize_fixlen(size: u128, value: &U256, bits: &mut BitVec, names: &mut Names) {
-  for i in 0 .. size {
+pub fn serialize_fixlen(
+  size: u128,
+  value: &U256,
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
+  for i in 0..size {
     bits.push((value >> i).low_u128() & 1 == 1);
   }
 }
 
 #[allow(unused_variables)]
-pub fn deserialize_fixlen(size: u128, bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
+pub fn deserialize_fixlen(
+  size: u128,
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<U256> {
   let mut result = u256(0);
-  for i in 0 .. size {
+  for i in 0..size {
     let index = (*index + size - i - 1) as usize;
     if index >= bits.len() {
       return None;
     }
-    result = result * u256(2) + u256(bits[index] as u128); 
-
+    result = result * u256(2) + u256(bits[index] as u128);
   }
   *index = *index + size;
   Some(result)
@@ -45,7 +55,7 @@ pub fn deserialize_fixlen(size: u128, bits: &BitVec, index: &mut u128, names: &m
 
 #[allow(unused_variables)]
 pub fn serialize_varlen(value: &U256, bits: &mut BitVec, names: &mut Names) {
-  let mut value : U256 = *value;
+  let mut value: U256 = *value;
   while value > u256(0) {
     bits.push(true);
     bits.push(value.low_u128() & 1 == 1);
@@ -55,9 +65,13 @@ pub fn serialize_varlen(value: &U256, bits: &mut BitVec, names: &mut Names) {
 }
 
 #[allow(unused_variables)]
-pub fn deserialize_varlen(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
-  let mut val : U256 = u256(0);
-  let mut add : U256 = u256(1);
+pub fn deserialize_varlen(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<U256> {
+  let mut val: U256 = u256(0);
+  let mut add: U256 = u256(1);
   while bits.get(*index as usize)? {
     val = val + if bits.get(*index as usize + 1)? { add } else { u256(0) };
     add = add.saturating_mul(u256(2));
@@ -75,7 +89,11 @@ pub fn serialize_number(value: &U256, bits: &mut BitVec, names: &mut Names) {
   serialize_fixlen(size, value, bits, names);
 }
 
-pub fn deserialize_number(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<U256> {
+pub fn deserialize_number(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<U256> {
   let size = deserialize_varlen(&bits, index, names)?.low_u128();
   let numb = deserialize_fixlen(size, &bits, index, names)?;
   Some(numb)
@@ -93,7 +111,11 @@ pub fn serialize_bits(data: &BitVec, bits: &mut BitVec, names: &mut Names) {
 }
 
 #[allow(unused_variables)]
-pub fn deserialize_bits(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<BitVec> {
+pub fn deserialize_bits(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<BitVec> {
   let mut result = BitVec::new();
   while bits.get(*index as usize)? {
     result.push(bits.get(*index as usize + 1)?);
@@ -122,9 +144,13 @@ pub fn serialize_name(name: &Name, bits: &mut BitVec, names: &mut Names) {
   }
 }
 
-pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Name> {
-  let mut nam : u128 = 0;
-  let mut add : u128 = 1;
+pub fn deserialize_name(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Name> {
+  let mut nam: u128 = 0;
+  let mut add: u128 = 1;
   let compressed = bits.get(*index as usize)?;
   *index += 1;
   if compressed {
@@ -150,7 +176,12 @@ pub fn deserialize_name(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
 
 // Many elements, unknown length
 
-pub fn serialize_list<T>(serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -> (), values: &[T], bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_list<T>(
+  serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -> (),
+  values: &[T],
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   for x in values {
     bits.push(true);
     serialize_one(x, bits, names);
@@ -158,7 +189,12 @@ pub fn serialize_list<T>(serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -> 
   bits.push(false);
 }
 
-pub fn deserialize_list<T>(deserialize_one: impl Fn(&BitVec, &mut u128, &mut Names) -> Option<T>, bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Vec<T>> {
+pub fn deserialize_list<T>(
+  deserialize_one: impl Fn(&BitVec, &mut u128, &mut Names) -> Option<T>,
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Vec<T>> {
   let mut result = Vec::new();
   while bits.get(*index as usize)? {
     *index = *index + 1;
@@ -170,7 +206,13 @@ pub fn deserialize_list<T>(deserialize_one: impl Fn(&BitVec, &mut u128, &mut Nam
 
 // Many elements, known length
 
-pub fn serialize_vector<T>(serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -> (), size: u128, data: &[T], bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_vector<T>(
+  serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -> (),
+  size: u128,
+  data: &[T],
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   if data.len() as u128 != size {
     panic!("Incorrect serialization vector size.");
   }
@@ -179,73 +221,60 @@ pub fn serialize_vector<T>(serialize_one: impl Fn(&T, &mut BitVec, &mut Names) -
   }
 }
 
-pub fn deserialize_vector<T>(deserialize_one: impl Fn(&BitVec, &mut u128, &mut Names) -> Option<T>, size: u128, bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Vec<T>> {
+pub fn deserialize_vector<T>(
+  deserialize_one: impl Fn(&BitVec, &mut u128, &mut Names) -> Option<T>,
+  size: u128,
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Vec<T>> {
   let mut result = Vec::new();
-  for _ in 0 .. size {
+  for _ in 0..size {
     result.push(deserialize_one(bits, index, names)?);
   }
   Some(result)
 }
 
-// An address
-
-pub fn serialize_address(address: &Address, bits: &mut BitVec, names: &mut Names) {
-  match address {
-    Address::IPv4 { val0, val1, val2, val3, port } => {
-      bits.push(false);
-      serialize_fixlen(8, &u256(*val0 as u128), bits, names);
-      serialize_fixlen(8, &u256(*val1 as u128), bits, names);
-      serialize_fixlen(8, &u256(*val2 as u128), bits, names);
-      serialize_fixlen(8, &u256(*val3 as u128), bits, names);
-      serialize_fixlen(16, &u256(*port as u128), bits, names);
-    }
-  }
-}
-
-pub fn deserialize_address(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Address> {
-  if bits[*index as usize] as u128 == 0 {
-    *index = *index + 1;
-    let val0 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
-    let val1 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
-    let val2 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
-    let val3 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
-    let port = deserialize_fixlen(16, bits, index, names)?.low_u128() as u16;
-    return Some(Address::IPv4 { val0, val1, val2, val3, port });
-  } else {
-    return None;
-  }
-}
-
 pub fn serialized_address(address: &Address) -> BitVec {
   let mut bits = BitVec::new();
-  serialize_address(address, &mut bits, &mut HashMap::new());
+  address.serialize(&mut bits, &mut HashMap::new());
   return bits;
 }
 
 pub fn deserialized_address(bits: &BitVec) -> Option<Address> {
-  deserialize_address(bits, &mut 0, &mut HashMap::new())
+  Address::deserialize(bits, &mut 0, &mut HashMap::new())
 }
 
 // A peer
 
-pub fn serialize_peer(peer: &Peer, bits: &mut BitVec, names: &mut Names) {
-  serialize_address(&peer.address, bits, names);
+pub fn serialize_peer<A: ProtoCommAddress>(
+  peer: &Peer<A>,
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
+  peer.address.serialize(bits, names);
   serialize_fixlen(48, &u256(peer.seen_at as u128), bits, names);
 }
 
-pub fn deserialize_peer(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Peer> {
-  let address = deserialize_address(bits, index, names)?;
+pub fn deserialize_peer<A: ProtoCommAddress>(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Peer<A>> {
+  let address = A::deserialize(bits, index, names)?;
   let seen_at = deserialize_fixlen(48, bits, index, names)?.low_u128();
   return Some(Peer { address, seen_at });
 }
 
-pub fn serialized_peer(peer: &Peer) -> BitVec {
+pub fn serialized_peer<A: ProtoCommAddress>(peer: &Peer<A>) -> BitVec {
   let mut bits = BitVec::new();
   serialize_peer(peer, &mut bits, &mut HashMap::new());
   return bits;
 }
 
-pub fn deserialized_peer(bits: &BitVec) -> Option<Peer> {
+pub fn deserialized_peer<A: ProtoCommAddress>(
+  bits: &BitVec,
+) -> Option<Peer<A>> {
   deserialize_peer(bits, &mut 0, &mut HashMap::new())
 }
 
@@ -263,7 +292,11 @@ pub fn serialize_block(block: &Block, bits: &mut BitVec, names: &mut Names) {
   serialize_bytes(block.body.data.len() as u128, &block.body.data, bits, names);
 }
 
-pub fn deserialize_block(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Block> {
+pub fn deserialize_block(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Block> {
   let prev = deserialize_fixlen(256, bits, index, names)?;
   let time = deserialize_fixlen(128, bits, index, names)?.low_u128();
   let meta = deserialize_fixlen(128, bits, index, names)?.low_u128();
@@ -289,13 +322,22 @@ pub fn serialize_hash(hash: &Hash, bits: &mut BitVec, names: &mut Names) {
   serialize_fixlen(256, hash, bits, names);
 }
 
-pub fn deserialize_hash(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Hash> {
+pub fn deserialize_hash(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Hash> {
   deserialize_fixlen(256, bits, index, names)
 }
 
 // Bytes
 
-pub fn serialize_bytes(size: u128, bytes: &[u8], bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_bytes(
+  size: u128,
+  bytes: &[u8],
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   if size as usize != bytes.len() {
     panic!("Incorrect serialize_bytes size.");
   }
@@ -304,9 +346,14 @@ pub fn serialize_bytes(size: u128, bytes: &[u8], bits: &mut BitVec, names: &mut 
   }
 }
 
-pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Vec<u8>> {
+pub fn deserialize_bytes(
+  size: u128,
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Vec<u8>> {
   let mut result = Vec::new();
-  for _ in 0 .. size {
+  for _ in 0..size {
     result.push(deserialize_fixlen(8, bits, index, names)?.low_u128() as u8);
   }
   Some(result)
@@ -314,7 +361,11 @@ pub fn deserialize_bytes(size: u128, bits: &BitVec, index: &mut u128, names: &mu
 
 // A message
 
-pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_message<A: ProtoCommAddress>(
+  message: &Message<A>,
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   match message {
     // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
     Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
@@ -342,14 +393,18 @@ pub fn serialize_message(message: &Message, bits: &mut BitVec, names: &mut Names
   }
 }
 
-pub fn deserialize_message(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Message> {
+pub fn deserialize_message<A: ProtoCommAddress>(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Message<A>> {
   let magic = deserialize_fixlen(64, bits, index, names)?.low_u128() as u64;
   let code = deserialize_fixlen(4, bits, index, names)?.low_u128();
   match code {
     0 => {
       let gossip = deserialize_fixlen(1, bits, index, names)?.low_u128() != 0;
       let blocks = deserialize_list(deserialize_block, bits, index, names)?;
-      let peers  = deserialize_list(deserialize_peer, bits, index, names)?;
+      let peers = deserialize_list(deserialize_peer, bits, index, names)?;
       Some(Message::NoticeTheseBlocks { magic, gossip, blocks, peers })
     }
     1 => {
@@ -359,19 +414,24 @@ pub fn deserialize_message(bits: &BitVec, index: &mut u128, names: &mut Names) -
     2 => {
       let size = deserialize_fixlen(16, bits, index, names)?.low_u128();
       let data = deserialize_bytes(size, bits, index, names)?;
-      Some(Message::PleaseMineThisTransaction { magic, trans: Transaction::new(data) })
+      Some(Message::PleaseMineThisTransaction {
+        magic,
+        trans: Transaction::new(data),
+      })
     }
-    _ => None
+    _ => None,
   }
 }
 
-pub fn serialized_message(message: &Message) -> BitVec {
+pub fn serialized_message<A: ProtoCommAddress>(message: &Message<A>) -> BitVec {
   let mut bits = BitVec::new();
   serialize_message(message, &mut bits, &mut HashMap::new());
   return bits;
 }
 
-pub fn deserialized_message(bits: &BitVec) -> Option<Message> {
+pub fn deserialized_message<A: ProtoCommAddress>(
+  bits: &BitVec,
+) -> Option<Message<A>> {
   deserialize_message(bits, &mut 0, &mut HashMap::new())
 }
 
@@ -424,7 +484,11 @@ pub fn serialize_term(term: &Term, bits: &mut BitVec, names: &mut Names) {
   }
 }
 
-pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Term> {
+pub fn deserialize_term(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Term> {
   let tag = deserialize_fixlen(3, bits, index, names)?;
   //println!("- tag.: {} {:?}", tag, bits.clone().split_off(*index as usize));
   match tag.low_u128() {
@@ -454,10 +518,15 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
     }
     4 => {
       let name = deserialize_name(bits, index, names)?;
-      let args = deserialize_list(|bits, index, names| {
-        let term = deserialize_term(bits, index, names)?;
-        return Some(term);
-      }, bits, index, names)?;
+      let args = deserialize_list(
+        |bits, index, names| {
+          let term = deserialize_term(bits, index, names)?;
+          return Some(term);
+        },
+        bits,
+        index,
+        names,
+      )?;
       let term = Term::ctr(name, args);
       Some(term)
     }
@@ -481,9 +550,7 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
       let term = Term::op2(oper, val0, val1);
       Some(term)
     }
-    _ => {
-      None
-    }
+    _ => None,
   }
 }
 
@@ -504,10 +571,14 @@ pub fn serialize_rule(rule: &Rule, bits: &mut BitVec, names: &mut Names) {
   serialize_term(&rule.rhs, bits, names);
 }
 
-pub fn deserialize_rule(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Rule> {
-  let lhs  = deserialize_term(bits, index, names)?;
-  let rhs  = deserialize_term(bits, index, names)?;
-  Some(Rule{lhs, rhs})
+pub fn deserialize_rule(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Rule> {
+  let lhs = deserialize_term(bits, index, names)?;
+  let rhs = deserialize_term(bits, index, names)?;
+  Some(Rule { lhs, rhs })
 }
 
 // A Func
@@ -516,7 +587,11 @@ pub fn serialize_func(func: &Func, bits: &mut BitVec, names: &mut Names) {
   serialize_list(serialize_rule, &func.rules, bits, names);
 }
 
-pub fn deserialize_func(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Func> {
+pub fn deserialize_func(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Func> {
   let rules = deserialize_list(deserialize_rule, bits, index, names)?;
   Some(Func { rules })
 }
@@ -533,7 +608,11 @@ pub fn deserialized_func(bits: &BitVec) -> Option<Func> {
 
 // A signature
 
-pub fn serialize_sign(sign: &Option<crypto::Signature>, bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_sign(
+  sign: &Option<crypto::Signature>,
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   if let Some(sign) = sign {
     serialize_fixlen(1, &u256(1), bits, names);
     serialize_bytes(65, &sign.0, bits, names);
@@ -543,23 +622,32 @@ pub fn serialize_sign(sign: &Option<crypto::Signature>, bits: &mut BitVec, names
 }
 
 // The double Option layer keeps it consistent, since the returned value IS an Option
-pub fn deserialize_sign(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Option<crypto::Signature>> {
+pub fn deserialize_sign(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Option<crypto::Signature>> {
   match deserialize_fixlen(1, bits, index, names)?.low_u128() {
     1 => {
-      let data : Option<[u8; 65]> = deserialize_bytes(65, bits, index, names)?.try_into().ok();
+      let data: Option<[u8; 65]> =
+        deserialize_bytes(65, bits, index, names)?.try_into().ok();
       if let Some(data) = data {
         Some(Some(crypto::Signature(data)))
       } else {
         None
       }
     }
-    _ => Some(None)
+    _ => Some(None),
   }
 }
 
 // A Statement
 
-pub fn serialize_statement(statement: &Statement, bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_statement(
+  statement: &Statement,
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   match statement {
     Statement::Fun { name, args, func, init, sign } => {
       serialize_fixlen(4, &u256(0), bits, names);
@@ -589,7 +677,11 @@ pub fn serialize_statement(statement: &Statement, bits: &mut BitVec, names: &mut
   }
 }
 
-pub fn deserialize_statement(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Statement> {
+pub fn deserialize_statement(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Statement> {
   let tag = deserialize_fixlen(4, bits, index, names)?.low_u128();
   match tag {
     0 => {
@@ -634,11 +726,19 @@ pub fn deserialized_statement(bits: &BitVec) -> Option<Statement> {
 
 // Many statements
 
-pub fn serialize_statements(statements: &[Statement], bits: &mut BitVec, names: &mut Names) {
+pub fn serialize_statements(
+  statements: &[Statement],
+  bits: &mut BitVec,
+  names: &mut Names,
+) {
   serialize_list(serialize_statement, statements, bits, names);
 }
 
-pub fn deserialize_statements(bits: &BitVec, index: &mut u128, names: &mut Names) -> Option<Vec<Statement>> {
+pub fn deserialize_statements(
+  bits: &BitVec,
+  index: &mut u128,
+  names: &mut Names,
+) -> Option<Vec<Statement>> {
   deserialize_list(deserialize_statement, bits, index, names)
 }
 
@@ -650,4 +750,49 @@ pub fn serialized_statements(statements: &[Statement]) -> BitVec {
 
 pub fn deserialized_statements(bits: &BitVec) -> Option<Vec<Statement>> {
   deserialize_statements(bits, &mut 0, &mut HashMap::new())
+}
+
+pub trait ProtoSerialize
+where
+  Self: Sized,
+{
+  fn serialize(&self, bits: &mut BitVec, names: &mut Names);
+  fn deserialize(
+    bits: &BitVec,
+    index: &mut u128,
+    names: &mut Names,
+  ) -> Option<Self>;
+}
+
+impl ProtoSerialize for Address {
+  fn serialize(&self, bits: &mut BitVec, names: &mut Names) {
+    match self {
+      Address::IPv4 { val0, val1, val2, val3, port } => {
+        bits.push(false);
+        serialize_fixlen(8, &u256(*val0 as u128), bits, names);
+        serialize_fixlen(8, &u256(*val1 as u128), bits, names);
+        serialize_fixlen(8, &u256(*val2 as u128), bits, names);
+        serialize_fixlen(8, &u256(*val3 as u128), bits, names);
+        serialize_fixlen(16, &u256(*port as u128), bits, names);
+      }
+    }
+  }
+
+  fn deserialize(
+    bits: &BitVec,
+    index: &mut u128,
+    names: &mut Names,
+  ) -> Option<Address> {
+    if bits[*index as usize] as u128 == 0 {
+      *index = *index + 1;
+      let val0 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
+      let val1 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
+      let val2 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
+      let val3 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
+      let port = deserialize_fixlen(16, bits, index, names)?.low_u128() as u16;
+      return Some(Address::IPv4 { val0, val1, val2, val3, port });
+    } else {
+      return None;
+    }
+  }
 }

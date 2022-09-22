@@ -5,7 +5,6 @@
 #![allow(clippy::style)]
 
 use std::collections::{HashMap, HashSet};
-use std::net::*;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
@@ -20,6 +19,7 @@ use sha3::Digest;
 
 use std::hash::BuildHasherDefault;
 use crate::NoHashHasher as NHH;
+use crate::net::{ProtoComm, ProtoCommAddress};
 use crate::print_with_timestamp;
 
 use crate::api::{self, CtrInfo, RegInfo};
@@ -87,11 +87,11 @@ pub enum InclusionState {
 // drops it, then this node will NOT try to mine it again. It can still be mined by other nodes, or
 // re-submitted. FIXME: `was_mined` should be removed. Instead, we just need a priority-queue with
 // fast removal of mined transactions. An immutable map should suffice.
-pub struct Node {
+pub struct Node<C: ProtoComm> {
   pub state_path : PathBuf,                          // path where files are saved
-  pub socket     : UdpSocket,                        // UDP socket
-  pub port       : u16,                              // UDP port
   pub network_id : u64,                              // Network ID / magic number
+  pub comm       : C,                                // UDP socket
+  pub addr       : C::Address,                       // UDP port
   pub runtime    : Runtime,                          // Kindelia's runtime
   pub receiver   : Receiver<NodeRequest>,            // Receives an API request
   pub tip        : U256,                             // current tip
@@ -105,25 +105,25 @@ pub struct Node {
   pub height     : U256Map<u128>,                    // block_hash -> cached height
   pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
   pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
-  pub peers      : PeersStore,                       // peers store and state control
+  pub peers      : PeersStore<C::Address>,           // peers store and state control
 }
 
 // Peers
 // -----
 
 #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Peer {
+pub struct Peer<A: ProtoCommAddress> {
   pub seen_at: u128,
-  pub address: Address,
+  pub address: A,
 }
 
-pub struct PeersStore {
-  seen: HashMap<Address, Peer>,
-  active: HashMap<Address, Peer>,
+pub struct PeersStore<A: ProtoCommAddress> {
+  seen: HashMap<A, Peer<A>>,
+  active: HashMap<A, Peer<A>>,
 }
 
-impl PeersStore {
-  pub fn new() -> PeersStore {
+impl <A: ProtoCommAddress> PeersStore<A> {
+  pub fn new() -> PeersStore<A> {
     PeersStore {
       seen: HashMap::new(),
       active: HashMap::new(),
@@ -132,7 +132,7 @@ impl PeersStore {
 
   /// This function checks and puts
   /// a peer as active on `PeerStore`.
-  pub fn activate(&mut self, addr: &Address, peer: Peer) {
+  pub fn activate(&mut self, addr: &A, peer: Peer<A>) {
     let now = get_time();
     // only activate if its `seen_at` is newer than `now - TIMEOUT` 
     if peer.seen_at >= now - PEER_TIMEOUT {
@@ -140,7 +140,7 @@ impl PeersStore {
     }
   }
 
-  pub fn see_peer(&mut self, peer: Peer) {
+  pub fn see_peer(&mut self, peer: Peer<A>) {
     let addr = peer.address;
     // print_with_timestamp!("- see peer {}", addr);
     match self.seen.get(&addr) {
@@ -182,19 +182,19 @@ impl PeersStore {
     }
   }
 
-  pub fn inactivate_peer(&mut self, addr: &Address) {
+  pub fn inactivate_peer(&mut self, addr: &A) {
     self.active.remove(addr);
   }
 
-  pub fn get_all_active(&self) -> Vec<Peer> {
+  pub fn get_all_active(&self) -> Vec<Peer<A>> {
     self.active.values().cloned().collect()
   }
 
-  pub fn get_all(&self) -> Vec<Peer> {
+  pub fn get_all(&self) -> Vec<Peer<A>> {
     self.seen.values().cloned().collect()
   }
 
-  pub fn get_random_active(&self, amount: u128) -> Vec<Peer> {
+  pub fn get_random_active(&self, amount: u128) -> Vec<Peer<A>> {
     let amount = amount as usize;
     let mut rng = rand::thread_rng();
     let peers = self.active.values().cloned().choose_multiple(&mut rng, amount);
@@ -229,12 +229,12 @@ pub struct MinerCommunication {
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum Message<A: ProtoCommAddress> {
   NoticeTheseBlocks {
     magic: u64,
     gossip: bool,
     blocks: Vec<Block>,
-    peers: Vec<Peer>,
+    peers: Vec<Peer<A>>,
   },
   GiveMeThatBlock {
     magic: u64,
@@ -363,51 +363,51 @@ pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
 }
 
 /// Starts listening to UDP messages on one port of a set of ports
-pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
-  for port in ports {
-    if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
-      socket.set_nonblocking(true).ok();
-      return Some((socket, *port));
-    }
-  }
-  return None;
-}
+// pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
+//   for port in ports {
+//     if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
+//       socket.set_nonblocking(true).ok();
+//       return Some((socket, *port));
+//     }
+//   }
+//   return None;
+// }
 
 /// Sends an UDP message to many addresses
-pub fn udp_send(socket: &mut UdpSocket, addresses: Vec<Address>, message: &Message) {
-  let bytes = bitvec_to_bytes(&serialized_message(message));
-  for address in addresses {
-    match address {
-      Address::IPv4 { val0, val1, val2, val3, port } => {
-        let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
-        socket.send_to(bytes.as_slice(), addr).ok();
-      }
-    }
-  }
-}
+// pub fn udp_send(socket: &mut UdpSocket, addresses: Vec<Address>, message: &Message) {
+//   let bytes = bitvec_to_bytes(&serialized_message(message));
+//   for address in addresses {
+//     match address {
+//       Address::IPv4 { val0, val1, val2, val3, port } => {
+//         let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
+//         socket.send_to(bytes.as_slice(), addr).ok();
+//       }
+//     }
+//   }
+// }
 
 // Receives an UDP messages
 // Non-blocking, returns a vector of received messages on buffer
-pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
-  let mut buffer = [0; 65536];
-  let mut messages = Vec::new();
-  while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
-    let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
-    if let Some(msge) = deserialized_message(&bits) {
-      let addr = match sender_addr.ip() {
-        std::net::IpAddr::V4(v4addr) => {
-          let [val0, val1, val2, val3] = v4addr.octets();
-          Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
-        }
-        _ => {
-          panic!("TODO: IPv6")
-        }
-      };
-      messages.push((addr, msge));
-    }
-  }
-  return messages;
-}
+// pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
+//   let mut buffer = [0; 65536];
+//   let mut messages = Vec::new();
+//   while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
+//     let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
+//     if let Some(msge) = deserialized_message(&bits) {
+//       let addr = match sender_addr.ip() {
+//         std::net::IpAddr::V4(v4addr) => {
+//           let [val0, val1, val2, val3] = v4addr.octets();
+//           Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
+//         }
+//         _ => {
+//           panic!("TODO: IPv6")
+//         }
+//       };
+//       messages.push((addr, msge));
+//     }
+//   }
+//   return messages;
+// }
 
 // Stringification
 // ===============
@@ -674,21 +674,21 @@ pub fn miner_loop(mut miner_communication: MinerCommunication) {
 // Node
 // ----
 
-impl Node {
+impl <C: ProtoComm> Node<C> {
   pub fn new(
     state_path: PathBuf,
-    init_peers: &Option<Vec<Address>>,
+    init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
+    self_addr: C::Address, // FIXME
+    comm: C
   ) -> (SyncSender<NodeRequest>, Self) {
-    let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
-    let (socket, port) = udp_init(&try_ports).expect("Couldn't open UDP socket.");
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
     let mut node = Node {
       state_path,
-      socket,
-      port,
       network_id,
+      comm,
+      addr: self_addr,
       runtime,
       receiver   : query_receiver,
       block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
@@ -714,12 +714,12 @@ impl Node {
     }
 
     // TODO: For testing purposes. Remove later.
-    for &peer_port in try_ports.iter() {
-      if peer_port != port {
-        let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
-        node.peers.see_peer(Peer { address: address, seen_at: now })
-      }
-    }
+    // for &peer_port in try_ports.iter() {
+    //   if peer_port != port {
+    //     let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
+    //     node.peers.see_peer(Peer { address: address, seen_at: now })
+    //   }
+    // }
 
     (query_sender, node)
   }
@@ -749,7 +749,7 @@ impl Node {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
     let mut must_include = vec![block.clone()]; // blocks to be added
-    //print_with_timestamp!("- add_block");
+    print_with_timestamp!("- add_block on {}: {:x}", self.addr, block.hash);
     // While there is a block to add...
     while let Some(block) = must_include.pop() {
       let btime = block.time; // the block timestamp
@@ -783,7 +783,7 @@ impl Node {
         let advances_time = btime > self.block[&phash].time;
         // If the PoW hits the target and the block's timestamp is valid...
         if has_enough_work && advances_time {
-          //print_with_timestamp!("# new_block: enough work & advances_time");
+          // print_with_timestamp!("# new_block: enough work & advances_time");
           self.work.insert(bhash, self.work[&phash] + work); // sets this block accumulated work
           self.height.insert(bhash, self.height[&phash] + 1); // sets this block accumulated height
           // If this block starts a new period, computes the new target
@@ -934,9 +934,10 @@ impl Node {
 
   pub fn receive_message(&mut self, miner_communication: &mut MinerCommunication) {
     let mut count = 0;
-    for (addr, msg) in udp_recv(&mut self.socket) {
+    for (addr, msg) in  self.comm.recv() {
       //if count < HANDLE_MESSAGE_LIMIT {
       self.handle_message(miner_communication, addr, &msg);
+      // println!("count {}", count);
       count = count + 1;
       //}
     }
@@ -1079,15 +1080,15 @@ impl Node {
         let state = self.runtime.read_disk_as_term(name.into(), Some(2 << 16));
         answer.send(state).unwrap();
       },
-      NodeRequest::GetPeers { all, tx: answer } => {
-        let peers = 
-          if all {
-            self.peers.get_all()
-          } else {
-            self.peers.get_all_active()
-          };
-        answer.send(peers).unwrap();
-      },
+      // NodeRequest::GetPeers { all, tx: answer } => {
+      //   let peers = 
+      //     if all {
+      //       self.peers.get_all()
+      //     } else {
+      //       self.peers.get_all_active()
+      //     };
+      //   answer.send(peers).unwrap();
+      // },
       NodeRequest::GetConstructor { name, tx: answer } => {
         let info = self.get_ctr_info(&name);
         answer.send(info).unwrap();
@@ -1140,13 +1141,13 @@ impl Node {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(&mut self, addrs: Vec<Address>, gossip: bool, blocks: Vec<Block>, share_peers: u128) {
+  pub fn send_blocks_to(&mut self, addrs: Vec<C::Address>, gossip: bool, blocks: Vec<Block>, share_peers: u128) {
     let magic = self.network_id;
     //print_with_timestamp!("- sending block: {:?}", block);
     let peers = self.peers.get_random_active(share_peers);
     let msg = Message::NoticeTheseBlocks { magic, gossip, blocks, peers };
     // print_with_timestamp!("- sending block: {:?}", msg);
-    udp_send(&mut self.socket, addrs, &msg);
+    self.comm.send(addrs, &msg);
   }
 
   // Returns the block inclusion state
@@ -1188,16 +1189,16 @@ impl Node {
   }
 
   // Requests the most recent missing ancestor
-  pub fn request_missing_ancestor(&mut self, addr: Address, bhash: &U256) {
+  pub fn request_missing_ancestor(&mut self, addr: C::Address, bhash: &U256) {
     if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
       let magic = self.network_id;
       let msg = &Message::GiveMeThatBlock { magic, bhash: missing_ancestor };
-      udp_send(&mut self.socket, vec![addr], msg);
+      self.comm.send(vec![addr], msg);
     }
   }
 
-  pub fn handle_message(&mut self, miner_communication: &mut MinerCommunication, addr: Address, msg: &Message) {
-    if addr != (Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: self.port }) {
+  pub fn handle_message(&mut self, miner_communication: &mut MinerCommunication, addr: C::Address, msg: &Message<C::Address>) {
+    if addr != self.addr {
       // print_with_timestamp!("- received message from {:?}: {:?}", addr, msg);
       match msg {
         Message::GiveMeThatBlock { magic, .. }
@@ -1263,9 +1264,9 @@ impl Node {
     }
   }
 
-  pub fn gossip(&mut self, peer_count: u128, message: &Message) {
+  pub fn gossip(&mut self, peer_count: u128, message: &Message<C::Address>) {
     let addrs = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
-    udp_send(&mut self.socket, addrs, message);
+    self.comm.send(addrs, message);
   }
 
   pub fn get_blocks_path(&self) -> PathBuf {
@@ -1273,14 +1274,16 @@ impl Node {
   }
 
   fn broadcast_tip_block(&mut self) {
-    let addrs  = self.peers.get_all_active().iter().map(|x| x.address).collect();
+    let addrs: Vec<C::Address>  = self.peers.get_all_active().iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
+    println!("socket {} broadcasting block {:x} to {}", self.addr, self.tip, addrs.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
   fn gossip_tip_block(&mut self, peer_count: u128) {
-    let addrs  = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
+    let addrs: Vec<C::Address>  = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
+    println!("socket {} gossiping block {:x} to {}", self.addr, self.tip, addrs.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
@@ -1369,6 +1372,8 @@ impl Node {
 
     let peers_num = self.peers.get_all_active().len();
 
+    
+
     let log = object!{
       event: "heartbeat",
       peers: { num: peers_num },
@@ -1397,26 +1402,35 @@ impl Node {
       }
     };
 
+    let mut block = &self.block[&self.tip];
+    loop  {
+      if block.prev == ZERO_HASH() {
+        break
+      }
+      println!("socket {} - height {} - block {:x}", self.addr, self.height[&block.hash], block.hash);
+      block = &self.block[&block.prev];
+    }
+
     println!("{}", log);
   }
 
   pub fn main(mut self, mut miner_communication: MinerCommunication, mine: bool) -> ! {
 
-    eprintln!("Port: {}", self.port);
+    eprintln!("Port: {:?}", self.addr);
     eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {
-      eprintln!("- {}", peer.address);
+      eprintln!("- {:?}", peer.address);
     }
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
-    if self.port == UDP_PORT {
+    // if self.port == UDP_PORT {
       self.load_blocks(&mut miner_communication);
-    }
+    // }
 
    // A task that is executed continuously on the main loop
-    struct Task {
+    struct Task<C: ProtoComm> {
       pub delay : u128,
-      pub action : fn (&mut Node, &mut MinerCommunication) -> (),
+      pub action : fn (&mut Node<C>, &mut MinerCommunication) -> (),
     }
 
     // The vector of tasks

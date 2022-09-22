@@ -312,10 +312,10 @@ pub enum NodeRequest {
     name: Name,
     tx: RequestAnswer<Option<hvm::Term>>,
   },
-  GetPeers {
-    all: bool,
-    tx: RequestAnswer<Vec<node::Peer>>,
-  },
+  // GetPeers {
+  //   all: bool,
+  //   tx: RequestAnswer<Vec<node::Peer<C>>>,
+  // },
   GetConstructor {
     name: Name,
     tx: RequestAnswer<Option<CtrInfo>>,

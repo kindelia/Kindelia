@@ -15,3 +15,4 @@ mod bits;
 mod hasher;
 mod hvm;
 mod cli;
+mod network;

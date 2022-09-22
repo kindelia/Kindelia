@@ -13,6 +13,7 @@ mod cli;
 mod common;
 mod crypto;
 mod hvm;
+mod net;
 mod node;
 mod util;
 
