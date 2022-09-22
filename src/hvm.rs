@@ -1001,23 +1001,14 @@ impl U120 {
     const LO_MASK : u128  =  (1 << 60) - 1;
     let a = self.0;
     let b = other.0;
-    let x = (a & LO_MASK) * (b & LO_MASK);
-    
-    let s0 = x & LO_MASK;
-    let x = (a >> 60) * (b & LO_MASK) + (x >> 60);
-    
-    let s1 = x & LO_MASK;
-    let s2 = x >> 60;
-    
-    let x = s2 + (a >> 60) * (b >> 60) + (x >> 60);
     let a_lo = a & LO_MASK;
     let a_hi = a >> 60;
     let b_lo = b & LO_MASK;
     let b_hi = b >> 60;
-    s0 = a_lo * b_lo;
-    s1 = ((a_hi * b_lo) & LO_MASK) << 60;
-    s2 = ((b_hi * a_lo) & LO_MASK) << 60);
-    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2));
+    let s0 = a_lo * b_lo;
+    let s1 = ((a_hi * b_lo) & LO_MASK) << 60;
+    let s2 = ((b_hi * a_lo) & LO_MASK) << 60;
+    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2))
   }
 
   // Wrapping div is just normal division, since
@@ -1029,17 +1020,17 @@ impl U120 {
 
   // Wrapping remainder is just normal remainder
   // given that self % other is always smaller than other
-  // by definition of the other.
+  // by definition of the modulo operation.
   pub fn wrapping_rem(self, other: U120) -> U120 {
     U120(self.0 % other.0)
   }
 
   // Wrapping shift left is only defined for
-  // values `other` between 0 and 127. For values bigger than
+  // values `other` between 0 and 120. For values bigger than
   // that, it will wrap the value module 120 before doing the shift.
   // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
   pub fn wrapping_shl(self, other: U120) -> U120 {
-    U120((self.0 << (other.0 % 120)) & *U120::MAX)
+    U120((self.0 << (other.0 % 120)) & U120::MAX.0)
   }
 
   pub fn wrapping_shr(self, other: U120) -> U120 {
