@@ -19,7 +19,7 @@ use sha3::Digest;
 
 use std::hash::BuildHasherDefault;
 use crate::NoHashHasher as NHH;
-use crate::net::{ProtoComm, ProtoCommAddress};
+use crate::net::{ProtoComm, ProtoCommAddress, Address};
 use crate::print_with_timestamp;
 
 use crate::api::{self, CtrInfo, RegInfo};
@@ -246,22 +246,8 @@ pub enum Message<A: ProtoCommAddress> {
   }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum Address {
-  IPv4 {
-    val0: u8,
-    val1: u8,
-    val2: u8,
-    val3: u8,
-    port: u16,
-  }
-}
-
 // Constants
 // =========
-
-// UDP port to listen to
-pub const UDP_PORT : u16 = 42000;
 
 // Size of a hash, in bytes
 pub const HASH_SIZE : usize = 32;
@@ -408,42 +394,6 @@ pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
 //   }
 //   return messages;
 // }
-
-// Stringification
-// ===============
-
-// Converts a string to an address
-pub fn read_address(code: &str) -> Address {
-  let strs = code.split(':').collect::<Vec<&str>>();
-  let vals = strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
-  let port = strs.get(1).map(|s| s.parse::<u16>().unwrap()).unwrap_or(UDP_PORT);
-  Address::IPv4 {
-    val0: vals[0],
-    val1: vals[1],
-    val2: vals[2],
-    val3: vals[3],
-    port: port,
-  }
-}
-
-// Shows an address's hostname
-pub fn show_address_hostname(address: &Address) -> String {
-  match address {
-    Address::IPv4{ val0, val1, val2, val3, port } => {
-      return format!("{}.{}.{}.{}", val0, val1, val2, val3);
-    }
-  }
-}
-
-impl std::fmt::Display for Address {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Address::IPv4 { val0, val1, val2, val3, port } => {
-        f.write_fmt(format_args!("{}.{}.{}.{}:{}", val0, val1, val2, val3, port))
-      },
-    }
-  }
-}
 
 // Algorithms
 // ==========
@@ -679,7 +629,6 @@ impl <C: ProtoComm> Node<C> {
     state_path: PathBuf,
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
-    self_addr: C::Address, // FIXME
     comm: C
   ) -> (SyncSender<NodeRequest>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -687,8 +636,8 @@ impl <C: ProtoComm> Node<C> {
     let mut node = Node {
       state_path,
       network_id,
+      addr       : comm.get_addr(),
       comm,
-      addr: self_addr,
       runtime,
       receiver   : query_receiver,
       block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
@@ -749,7 +698,6 @@ impl <C: ProtoComm> Node<C> {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
     let mut must_include = vec![block.clone()]; // blocks to be added
-    print_with_timestamp!("- add_block on {}: {:x}", self.addr, block.hash);
     // While there is a block to add...
     while let Some(block) = must_include.pop() {
       let btime = block.time; // the block timestamp
@@ -934,10 +882,9 @@ impl <C: ProtoComm> Node<C> {
 
   pub fn receive_message(&mut self, miner_communication: &mut MinerCommunication) {
     let mut count = 0;
-    for (addr, msg) in  self.comm.recv() {
+    for (addr, msg) in  self.comm.proto_recv() {
       //if count < HANDLE_MESSAGE_LIMIT {
       self.handle_message(miner_communication, addr, &msg);
-      // println!("count {}", count);
       count = count + 1;
       //}
     }
@@ -1080,6 +1027,7 @@ impl <C: ProtoComm> Node<C> {
         let state = self.runtime.read_disk_as_term(name.into(), Some(2 << 16));
         answer.send(state).unwrap();
       },
+      // TODO
       // NodeRequest::GetPeers { all, tx: answer } => {
       //   let peers = 
       //     if all {
@@ -1147,7 +1095,7 @@ impl <C: ProtoComm> Node<C> {
     let peers = self.peers.get_random_active(share_peers);
     let msg = Message::NoticeTheseBlocks { magic, gossip, blocks, peers };
     // print_with_timestamp!("- sending block: {:?}", msg);
-    self.comm.send(addrs, &msg);
+    self.comm.proto_send(addrs, &msg);
   }
 
   // Returns the block inclusion state
@@ -1193,7 +1141,7 @@ impl <C: ProtoComm> Node<C> {
     if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
       let magic = self.network_id;
       let msg = &Message::GiveMeThatBlock { magic, bhash: missing_ancestor };
-      self.comm.send(vec![addr], msg);
+      self.comm.proto_send(vec![addr], msg);
     }
   }
 
@@ -1266,7 +1214,7 @@ impl <C: ProtoComm> Node<C> {
 
   pub fn gossip(&mut self, peer_count: u128, message: &Message<C::Address>) {
     let addrs = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
-    self.comm.send(addrs, message);
+    self.comm.proto_send(addrs, message);
   }
 
   pub fn get_blocks_path(&self) -> PathBuf {
@@ -1276,14 +1224,12 @@ impl <C: ProtoComm> Node<C> {
   fn broadcast_tip_block(&mut self) {
     let addrs: Vec<C::Address>  = self.peers.get_all_active().iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
-    println!("socket {} broadcasting block {:x} to {}", self.addr, self.tip, addrs.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
   fn gossip_tip_block(&mut self, peer_count: u128) {
     let addrs: Vec<C::Address>  = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
-    println!("socket {} gossiping block {:x} to {}", self.addr, self.tip, addrs.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
@@ -1402,15 +1348,6 @@ impl <C: ProtoComm> Node<C> {
       }
     };
 
-    let mut block = &self.block[&self.tip];
-    loop  {
-      if block.prev == ZERO_HASH() {
-        break
-      }
-      println!("socket {} - height {} - block {:x}", self.addr, self.height[&block.hash], block.hash);
-      block = &self.block[&block.prev];
-    }
-
     println!("{}", log);
   }
 
@@ -1497,5 +1434,55 @@ impl <C: ProtoComm> Node<C> {
         std::thread::sleep(extra);
       }
     }
+  }
+}
+
+ // TODO: move this paramenters to a struct `NodeStartOptions<C>`?
+ pub fn start<C: ProtoComm + 'static>(
+  state_path: PathBuf,
+  network_id: u64,
+  comm: C,
+  init_peers: &Option<Vec<C::Address>>,
+  mine: bool,
+  api: bool
+) {
+  eprintln!("Starting Kindelia node. Store path: {:?}", state_path);
+
+  // Node state object
+  let (node_query_sender, node) =
+    Node::new(state_path, &init_peers, network_id, comm);
+
+  // Node to Miner communication object
+  let miner_comm_0 = MinerCommunication::new();
+  let miner_comm_1 = miner_comm_0.clone();
+
+  // Threads
+  let mut threads = vec![];
+
+  // Spawns the node thread
+  let node_thread = std::thread::spawn(move || {
+    node.main(miner_comm_0, mine);
+  });
+  threads.push(node_thread);
+
+  // Spawns the miner thread
+  if mine {
+    let miner_thread = std::thread::spawn(move || {
+      miner_loop(miner_comm_1);
+    });
+    threads.push(miner_thread);
+  }
+
+  // Spawns the API thread
+  if api {
+    let api_thread = std::thread::spawn(move || {
+      crate::api::server::http_api_loop(node_query_sender);
+    });
+    threads.push(api_thread);
+  }
+
+  // Joins all threads
+  for thread in threads {
+    thread.join().unwrap();
   }
 }

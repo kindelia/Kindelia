@@ -1,50 +1,96 @@
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::{
+  fmt::{Debug, Display},
+  hash::Hash,
+  net::{Ipv4Addr, SocketAddrV4, UdpSocket},
+};
 
 use bit_vec::BitVec;
 
 use crate::{
   bits::{deserialized_message, serialized_message, ProtoSerialize},
-  node::{Address, Message},
+  node::Message,
   util::bitvec_to_bytes,
 };
 
-// Addresses
+// Traits
+// =======================
+
+/// A representation of a ProtoComm address
 pub trait ProtoCommAddress
 where
   Self: ProtoSerialize
     + Eq
-    + std::hash::Hash
-    + std::fmt::Debug
-    + std::fmt::Display
+    + Hash
+    + Debug
+    + Display
     + Copy
     + Clone
     + PartialEq
-    + Eq,
+    + Send,
 {
 }
 
-// Addresses impl
-impl ProtoCommAddress for Address {}
-
-// Communication
+/// Defines how the messages will be sent and received
+/// by the chain nodes.
 pub trait ProtoComm
 where
-  Self: Sized,
+  Self: Sized + Send,
 {
   type Address: ProtoCommAddress;
-  fn send(
+  fn proto_send(
     &mut self,
     addresses: Vec<Self::Address>,
     message: &Message<Self::Address>,
   );
-  fn recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)>;
-  // fn get_addr(&self) -> Self::Address;
+  fn proto_recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)>;
+  fn get_addr(&self) -> Self::Address;
 }
 
-// Communication impl
+// UDP Implementation
+// ==============================
+
+/// Default UDP port to listen to
+pub const UDP_PORT: u16 = 42000;
+
+#[derive(
+  Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+/// An UDP address representation
+pub enum Address {
+  IPv4 { val0: u8, val1: u8, val2: u8, val3: u8, port: u16 },
+}
+
+impl ProtoCommAddress for Address {}
+
+impl std::fmt::Display for Address {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Address::IPv4 { val0, val1, val2, val3, port } => f.write_fmt(
+        format_args!("{}.{}.{}.{}:{}", val0, val1, val2, val3, port),
+      ),
+    }
+  }
+}
+
+/// Converts a string to an UDP Address
+pub fn read_address(code: &str) -> Address {
+  let strs = code.split(':').collect::<Vec<&str>>();
+  let vals =
+    strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
+  let port = strs.get(1).map(|s| s.parse::<u16>().unwrap()).unwrap_or(UDP_PORT);
+  Address::IPv4 {
+    val0: vals[0],
+    val1: vals[1],
+    val2: vals[2],
+    val3: vals[3],
+    port,
+  }
+}
+
+/// The UDP implementation based on `std::netUdpSocket` struct
 impl ProtoComm for UdpSocket {
   type Address = Address;
-  fn send(
+  fn proto_send(
     &mut self,
     addresses: Vec<Self::Address>,
     message: &Message<Self::Address>,
@@ -60,7 +106,7 @@ impl ProtoComm for UdpSocket {
       }
     }
   }
-  fn recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)> {
+  fn proto_recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)> {
     let mut buffer = [0; 65536];
     let mut messages = Vec::new();
     while let Ok((msg_len, sender_addr)) = self.recv_from(&mut buffer) {
@@ -79,5 +125,15 @@ impl ProtoComm for UdpSocket {
       }
     }
     messages
+  }
+  fn get_addr(&self) -> Self::Address {
+    // TODO: remove unwrap and panic
+    let addr = self.local_addr().unwrap();
+    if let std::net::IpAddr::V4(v4addr) = addr.ip() {
+      let [val0, val1, val2, val3] = v4addr.octets();
+      Address::IPv4 { val0, val1, val2, val3, port: addr.port() }
+    } else {
+      panic!("TODO: IPv6")
+    }
   }
 }

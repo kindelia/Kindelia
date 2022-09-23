@@ -128,6 +128,7 @@ impl ApiClient {
     self.req(Method::POST, "/publish", Some(code)).await
   }
 
+  // TODO
   // pub async fn get_peers(&self, all: bool) -> ApiResult<Vec<node::Peer>> {
   //   if all {
   //     self.get::<Vec<node::Peer>>("/peers/all").await

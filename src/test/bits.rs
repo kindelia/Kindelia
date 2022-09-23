@@ -2,13 +2,15 @@ use std::collections::HashMap;
 
 use crate::{
   bits::{
-    deserialize_fixlen, deserialize_list, deserialize_varlen, deserialized_message,
-    deserialized_statements, serialize_fixlen, serialize_list, serialize_varlen,
-    serialized_message, serialized_statements,
+    deserialize_fixlen, deserialize_list, deserialize_varlen,
+    deserialized_message, deserialized_statements, serialize_fixlen,
+    serialize_list, serialize_varlen, serialized_message,
+    serialized_statements,
   },
   hvm::{view_statements, Term},
+  net,
   node::Message,
-  test::strategies::{statement, u256 as u256_strategy},
+  test::strategies::{message, statement, u256 as u256_strategy},
   util::u256,
 };
 use bit_vec::BitVec;
@@ -24,12 +26,12 @@ proptest! {
     assert_eq!(s1, s2);
   }
 
-  // #[test]
-  // fn serialize_deserialize_message(message in message()) {
-  //   let bits = serialized_message(&message);
-  //   let message2 = deserialized_message(&bits).unwrap();
-  //   assert_eq!(format!("{:?}", message), format!("{:?}", message2));
-  // }
+  #[test]
+  fn serialize_deserialize_message(message in message()) {
+    let bits = serialized_message(&message);
+    let message2: Message<net::Address> = deserialized_message(&bits).unwrap();
+    assert_eq!(format!("{:?}", message), format!("{:?}", message2));
+  }
 }
 
 #[test]

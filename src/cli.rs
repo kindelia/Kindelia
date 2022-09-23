@@ -30,7 +30,8 @@ use crate::bits::{deserialized_statement, serialized_statement};
 use crate::common::Name;
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
-use crate::node::{self, read_address, MinerCommunication, Node, UDP_PORT};
+use crate::net;
+use crate::node;
 use crate::util::bytes_to_bitvec;
 
 /*
@@ -572,8 +573,16 @@ pub fn run_cli() -> Result<(), String> {
           }
           .get_config_value()?;
 
-          // Start node
-          start(data_path, initial_peers, network_id, mine);
+          // Start
+          let comm = init_socket().expect("Could not open a UDP socket");
+          let initial_peers = initial_peers
+            .iter()
+            .map(|x| net::read_address(x))
+            .collect::<Vec<_>>();
+          let initial_peers =
+            if !initial_peers.is_empty() { Some(initial_peers) } else { None };
+          node::start(data_path, network_id, comm, &initial_peers, mine, true);
+          // start(data_path, initial_peers, mine);
 
           Ok(())
         }
@@ -784,79 +793,16 @@ pub fn test_code(code: &str, sudo: bool) {
   hvm::test_statements_from_code(code, sudo);
 }
 
-fn init_socket() -> Option<(UdpSocket, node::Address)> {
-  let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
+fn init_socket() -> Option<UdpSocket> {
+  let try_ports =
+    [net::UDP_PORT, net::UDP_PORT + 1, net::UDP_PORT + 2, net::UDP_PORT + 3];
   for port in try_ports {
     if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}", port)) {
       socket.set_nonblocking(true).ok();
-      return Some((
-        socket,
-        node::Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port },
-      ));
+      return Some(socket);
     }
   }
   return None;
-}
-
-fn start(
-  state_path: PathBuf,
-  init_peers: Vec<String>,
-  network_id: u64,
-  mine: bool,
-) {
-  eprintln!("Starting Kindelia node...");
-  eprintln!("Store path: {:?}", state_path);
-  eprintln!("Network ID: {:#18X}", network_id);
-
-  let init_peers =
-    init_peers.iter().map(|x| read_address(x)).collect::<Vec<_>>();
-  let init_peers = if !init_peers.is_empty() { Some(init_peers) } else { None };
-
-  // dbg!(init_peers.clone());
-  // dbg!(kindelia_path.clone());
-  // dbg!(mine);
-
-  // Reads the file contents
-  //let file = file.map(|file| std::fs::read_to_string(file).expect("Block file not found."));
-
-  let try_ports = [UDP_PORT, UDP_PORT + 1, UDP_PORT + 2, UDP_PORT + 3];
-  let (socket, port) = init_socket().expect("Couldn't open UDP socket ports");
-
-  // Node state object
-  let (node_query_sender, node) =
-    Node::new(state_path, &init_peers, network_id, port, socket);
-
-  // Node to Miner communication object
-  let miner_comm_0 = MinerCommunication::new();
-  let miner_comm_1 = miner_comm_0.clone();
-
-  // Threads
-  let mut threads = vec![];
-
-  // Spawns the node thread
-  let node_thread = thread::spawn(move || {
-    node.main(miner_comm_0, mine);
-  });
-  threads.push(node_thread);
-
-  // Spawns the miner thread
-  if mine {
-    let miner_thread = thread::spawn(move || {
-      node::miner_loop(miner_comm_1);
-    });
-    threads.push(miner_thread);
-  }
-
-  // Spawns the API thread
-  let api_thread = thread::spawn(move || {
-    crate::api::server::http_api_loop(node_query_sender);
-  });
-  threads.push(api_thread);
-
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
-  }
 }
 
 // Auxiliar

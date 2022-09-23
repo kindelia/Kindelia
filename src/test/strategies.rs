@@ -8,7 +8,8 @@ use crate::{
     Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
     SerializedHeap, Statement, Store, Term, Var, U120,
   },
-  node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
+  net::Address,
+  node::{hash_bytes, Block, Body, Message, Peer, Transaction},
 };
 use primitive_types::U256;
 use proptest::{
@@ -257,22 +258,22 @@ pub fn address() -> impl Strategy<Value = Address> {
   )
 }
 
-// pub fn peer() -> impl Strategy<Value = Peer> {
-//   (any::<u32>(), address())
-//     .prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
-// }
+pub fn peer() -> impl Strategy<Value = Peer<Address>> {
+  (any::<u32>(), address())
+    .prop_map(|(s, a)| Peer { seen_at: s as u128, address: a })
+}
 
 pub fn transaction() -> impl Strategy<Value = Transaction> {
   vec(any::<u8>(), 1..128).prop_map(|d| Transaction::new(d))
 }
 
-// pub fn message() -> impl Strategy<Value = Message> {
-//   prop_oneof![
-//     (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10)).prop_map(
-//       |(g, b, p)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p }
-//     ),
-//     (u256()).prop_map(|h| Message::GiveMeThatBlock { bhash: h }),
-//     (transaction())
-//       .prop_map(|t| Message::PleaseMineThisTransaction { trans: t })
-//   ]
-// }
+pub fn message() -> impl Strategy<Value = Message<Address>> {
+  prop_oneof![
+    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10), any::<u64>()).prop_map(
+      |(g, b, p, m)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p, magic: m },
+    ),
+    (u256(), any::<u64>()).prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
+    (transaction(), any::<u64>())
+      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { trans: t, magic: m })
+  ]
+}

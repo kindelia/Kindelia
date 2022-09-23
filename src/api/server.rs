@@ -443,6 +443,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   // == Peers ==
 
+  // TODO
+
   // let get_peers_base = path!("peers" / ..);
 
   // let query_tx = node_query_sender.clone();

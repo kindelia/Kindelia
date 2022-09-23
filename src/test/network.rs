@@ -1,50 +1,3 @@
-// use std::time::Duration;
-
-// use turmoil::Builder;
-
-// #[derive(Debug)]
-// struct Echo(String);
-
-// impl turmoil::Message for Echo {
-//   fn write_json(&self, dst: &mut dyn std::io::Write) {
-//     unimplemented!()
-//   }
-// }
-
-// #[test]
-// fn simulation() {
-//   let mut sim = Builder::new()
-//     .simulation_duration(Duration::from_secs(600))
-//     // .tick_duration(Duration::from_secs(1))
-//     .max_message_latency(Duration::from_secs(60))
-//     .build();
-//   // .build_with_rng(Box::new(rand::rngs::OsRng::default()));
-
-//   // register a host
-//   sim.register("vasco1", |server| async move {
-//     loop {
-//       let (msg, src) = server.recv().await;
-//       let msg: Echo = msg;
-//       println!("vasco");
-//       server.send(src, msg);
-//     }
-//   });
-
-//   let clients: Vec<_> =
-//     (0..10).map(|i| sim.client(format!("vasco{}", i + 2))).collect();
-
-//   // register a client (this is the test code)
-//   sim.run_until(async {
-//     for client in clients {
-//       println!("rapaz");
-//       client.send("vasco1", Echo("hello, server!".to_string()));
-//       let (echo, _) = client.recv().await;
-//       println!("{}", echo.0);
-//       assert_eq!("hello, server!", echo.0);
-//     }
-//   });
-// }
-
 use std::{
   collections::HashMap,
   path::PathBuf,
@@ -57,71 +10,155 @@ use std::sync::mpsc::Sender;
 
 use crate::{
   bits::{self, deserialize_number, serialize_number},
-  net,
+  net::{self, ProtoComm},
   node::{self, Message, MinerCommunication},
   util::u256,
 };
 
-impl bits::ProtoSerialize for u32 {
-  fn serialize(&self, bits: &mut bit_vec::BitVec, names: &mut bits::Names) {
-    serialize_number(&u256(*self as u128), bits, names);
+use super::util::temp_dir;
+
+#[test]
+#[ignore = "network simulation"]
+fn network() {
+  // creates the router
+  let mut router_mock = RouterMock::new();
+
+  // create three sockets mock
+  let socket_mock1 = router_mock.ask_sock();
+  let socket_mock2 = router_mock.ask_sock();
+  let socket_mock3 = router_mock.ask_sock();
+
+  let sockets = vec![socket_mock1, socket_mock2, socket_mock3];
+
+  let mut threads = vec![];
+
+  // Spawns the router thread
+  let router_thread = thread::spawn(move || loop {
+    while let Ok(router_message) = router_mock.rx.try_recv() {
+      router_mock.send(&router_message)
+    }
+  });
+  threads.push(router_thread);
+
+  // Spawns the nodes threads
+
+  for socket in sockets {
+    let socket_thread = thread::spawn(move || {
+      let state_path = temp_dir()
+        .path
+        .join(".kindelia")
+        .join(format!(".test-{}", socket.addr));
+      node::start(
+        state_path,
+        socket.get_addr() as u64,
+        socket,
+        &Some(vec![1_u32]),
+        true,
+        false,
+      );
+    });
+    threads.push(socket_thread);
   }
-  fn deserialize(
+
+  // Joins all threads
+  for thread in threads {
+    thread.join().unwrap();
+  }
+}
+
+// Simulation implementation
+// ================================
+
+// Simulation address
+
+/// The address of the simulation will be a simple `u32` value.
+impl net::ProtoCommAddress for u32 {}
+
+/// `ProtoSerialize` implementation of `u32`, necessary to satisfy
+/// the ProtoCommAddress trait.
+impl bits::ProtoSerialize for u32 {
+  fn proto_serialize(
+    &self,
+    bits: &mut bit_vec::BitVec,
+    names: &mut bits::Names,
+  ) {
+    bits::serialize_number(&u256(*self as u128), bits, names);
+  }
+  fn proto_deserialize(
     bits: &bit_vec::BitVec,
     index: &mut u128,
     names: &mut bits::Names,
   ) -> Option<Self> {
-    deserialize_number(bits, index, names).map(|n| n.low_u32())
+    bits::deserialize_number(bits, index, names).map(|n| n.low_u32())
   }
 }
 
-impl net::ProtoCommAddress for u32 {}
-
-struct SocketMock {
+// Simulation socket
+/// This struct represents a Socket.
+///
+/// It has
+/// - an `u32` address to identify itself
+/// - a `tx` `Sender` that is capable of send `RouterMessage`'s to the `RouterMock`
+/// - a `rx` `Receiver` that is capable of receive `RouterMessage`'s from the `RouterMock`
+pub struct SocketMock {
   tx: Sender<RouterMessage>,
   rx: Receiver<RouterMessage>,
   addr: u32,
 }
 
-impl SocketMock {
-  fn get_addr(&self) -> u32 {
-    self.addr
-  }
-}
-
+/// Implementation of the `ProtoComm` for the `SocketMock`
 impl net::ProtoComm for SocketMock {
   type Address = u32;
-  fn recv(&mut self) -> Vec<(Self::Address, node::Message<Self::Address>)> {
+  fn proto_recv(
+    &mut self,
+  ) -> Vec<(Self::Address, node::Message<Self::Address>)> {
     let mut messages = Vec::new();
-    while let Ok(RouterMessage(to_addr, from_addr, msg)) = self.rx.try_recv() {
-      // println!(
-      //   "socket {}: received message from router, from addr {}",
-      //   self.addr, from_addr
-      // );
+    while let Ok(RouterMessage { to_addr, from_addr, msg }) = self.rx.try_recv()
+    {
       messages.push((from_addr, msg))
     }
     messages
   }
 
-  fn send(
+  fn proto_send(
     &mut self,
     addresses: Vec<Self::Address>,
     message: &node::Message<Self::Address>,
   ) {
     for addr in addresses {
-      // println!(
-      //   "socket {}: sending message to router, to addr {}",
-      //   self.addr, addr
-      // );
-      self.tx.send(RouterMessage(addr, self.addr, message.to_owned())).unwrap()
-      // addr.tx.send(message).unwrap()
+      self
+        .tx
+        .send(RouterMessage {
+          to_addr: addr,
+          from_addr: self.addr,
+          msg: message.to_owned(),
+        })
+        .unwrap()
     }
+  }
+
+  fn get_addr(&self) -> Self::Address {
+    self.addr
   }
 }
 
-#[derive(Debug)]
-struct RouterMessage(u32, u32, node::Message<u32>);
+// Simulation router
 
+/// A representation of a message that the `RouterMock`
+/// expects to receive.
+#[derive(Debug)]
+struct RouterMessage {
+  to_addr: u32,
+  from_addr: u32,
+  msg: node::Message<u32>,
+}
+
+/// This struct represents a Router.
+///
+/// It has
+/// - all the sockets `Sender`'s created by itself stored in `sockets`
+/// - a `tx` `Sender` that is passed for the `sockets`
+/// - a `rx` `Receiver` that is capable of receiving `RouterMessage`'s from the all the sockets
 struct RouterMock {
   sockets: HashMap<u32, Sender<RouterMessage>>,
   rx: Receiver<RouterMessage>,
@@ -144,58 +181,14 @@ impl RouterMock {
   }
 
   fn send(&self, router_message: &RouterMessage) {
-    let RouterMessage(to_addr, from_addr, msg) = router_message;
-    // println!("router sending: from {} to {}", from_addr, to_addr);
+    let RouterMessage { to_addr, from_addr, msg } = router_message;
     let tx = self.sockets.get(&to_addr).unwrap();
-    tx.send(RouterMessage(*to_addr, *from_addr, msg.to_owned())).unwrap()
-  }
-}
-
-#[test]
-#[ignore]
-fn network() {
-  let mut router_mock = RouterMock::new();
-
-  let socket_mock1 = router_mock.ask_sock();
-  let socket_mock2 = router_mock.ask_sock();
-  let socket_mock3 = router_mock.ask_sock();
-
-  let mut threads = vec![];
-
-  // Spawns the router thread
-  let router_thread = thread::spawn(move || loop {
-    while let Ok(router_message) = router_mock.rx.try_recv() {
-      // println!("vasco");
-      // println!("{:?}", router_message);
-      // println!(
-      //   "router receiving: repassing message from {} to {}",
-      //   router_message.1, router_message.0
-      // );
-      router_mock.send(&router_message)
-    }
-  });
-  threads.push(router_thread);
-
-  // Spawns the nodes thread
-
-  let socket_thread1 = thread::spawn(move || {
-    start(&Some(vec![1_u32]), socket_mock1);
-  });
-  threads.push(socket_thread1);
-
-  let socket_thread2 = thread::spawn(move || {
-    start(&Some(vec![]), socket_mock2);
-  });
-  threads.push(socket_thread2);
-
-  let socket_thread3 = thread::spawn(move || {
-    start(&Some(vec![1_u32]), socket_mock3);
-  });
-  threads.push(socket_thread3);
-
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
+    tx.send(RouterMessage {
+      to_addr: *to_addr,
+      from_addr: *from_addr,
+      msg: msg.to_owned(),
+    })
+    .unwrap()
   }
 }
 
@@ -207,7 +200,7 @@ fn start(init_peers: &Option<Vec<u32>>, socket_mock: SocketMock) {
 
   // Node state object
   let (node_query_sender, node) =
-    node::Node::new(state_path, init_peers, port as u64, port, socket_mock);
+    node::Node::new(state_path, init_peers, port as u64, socket_mock);
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();

@@ -9,7 +9,7 @@ use crate::api;
 use crate::bits;
 use crate::common;
 use crate::hvm;
-use crate::node::{self, read_address};
+use crate::node;
 use crate::util;
 
 use crate::test::strategies::statement;

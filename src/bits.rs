@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::common::Name;
 use crate::crypto;
 use crate::hvm::*;
+use crate::net;
 use crate::net::ProtoCommAddress;
 use crate::node::*;
 use crate::util::*;
@@ -235,14 +236,14 @@ pub fn deserialize_vector<T>(
   Some(result)
 }
 
-pub fn serialized_address(address: &Address) -> BitVec {
+pub fn serialized_address(address: &net::Address) -> BitVec {
   let mut bits = BitVec::new();
-  address.serialize(&mut bits, &mut HashMap::new());
+  address.proto_serialize(&mut bits, &mut HashMap::new());
   return bits;
 }
 
-pub fn deserialized_address(bits: &BitVec) -> Option<Address> {
-  Address::deserialize(bits, &mut 0, &mut HashMap::new())
+pub fn deserialized_address(bits: &BitVec) -> Option<net::Address> {
+  net::Address::proto_deserialize(bits, &mut 0, &mut HashMap::new())
 }
 
 // A peer
@@ -252,7 +253,7 @@ pub fn serialize_peer<A: ProtoCommAddress>(
   bits: &mut BitVec,
   names: &mut Names,
 ) {
-  peer.address.serialize(bits, names);
+  peer.address.proto_serialize(bits, names);
   serialize_fixlen(48, &u256(peer.seen_at as u128), bits, names);
 }
 
@@ -261,7 +262,7 @@ pub fn deserialize_peer<A: ProtoCommAddress>(
   index: &mut u128,
   names: &mut Names,
 ) -> Option<Peer<A>> {
-  let address = A::deserialize(bits, index, names)?;
+  let address = A::proto_deserialize(bits, index, names)?;
   let seen_at = deserialize_fixlen(48, bits, index, names)?.low_u128();
   return Some(Peer { address, seen_at });
 }
@@ -756,18 +757,18 @@ pub trait ProtoSerialize
 where
   Self: Sized,
 {
-  fn serialize(&self, bits: &mut BitVec, names: &mut Names);
-  fn deserialize(
+  fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names);
+  fn proto_deserialize(
     bits: &BitVec,
     index: &mut u128,
     names: &mut Names,
   ) -> Option<Self>;
 }
 
-impl ProtoSerialize for Address {
-  fn serialize(&self, bits: &mut BitVec, names: &mut Names) {
+impl ProtoSerialize for net::Address {
+  fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
     match self {
-      Address::IPv4 { val0, val1, val2, val3, port } => {
+      net::Address::IPv4 { val0, val1, val2, val3, port } => {
         bits.push(false);
         serialize_fixlen(8, &u256(*val0 as u128), bits, names);
         serialize_fixlen(8, &u256(*val1 as u128), bits, names);
@@ -778,11 +779,11 @@ impl ProtoSerialize for Address {
     }
   }
 
-  fn deserialize(
+  fn proto_deserialize(
     bits: &BitVec,
     index: &mut u128,
     names: &mut Names,
-  ) -> Option<Address> {
+  ) -> Option<net::Address> {
     if bits[*index as usize] as u128 == 0 {
       *index = *index + 1;
       let val0 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
@@ -790,7 +791,7 @@ impl ProtoSerialize for Address {
       let val2 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
       let val3 = deserialize_fixlen(8, bits, index, names)?.low_u128() as u8;
       let port = deserialize_fixlen(16, bits, index, names)?.low_u128() as u16;
-      return Some(Address::IPv4 { val0, val1, val2, val3, port });
+      return Some(net::Address::IPv4 { val0, val1, val2, val3, port });
     } else {
       return None;
     }
