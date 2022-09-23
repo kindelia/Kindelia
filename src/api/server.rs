@@ -18,9 +18,9 @@ use warp::{reject, Rejection};
 use super::u256_to_hex;
 use super::NodeRequest;
 use crate::api::HexStatement;
-use crate::bits;
 use crate::common::Name;
 use crate::hvm::{self, StatementErr, StatementInfo};
+use crate::bits::ProtoSerialize;
 use crate::util::U256;
 
 // Util
@@ -273,7 +273,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
           ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;
         if let Some(state) = state {
           if let Some(true) = query.protocol {
-            let encoded = bits::serialized_term(&state);
+            let encoded = state.proto_serialized();
             let hex = bitvec_to_hex(&encoded);
             Ok(ok_json(hex))
           } else {

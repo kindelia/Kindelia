@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
   bits::{
-    deserialize_fixlen, deserialize_list, deserialize_varlen,
-    deserialized_message, deserialized_statements, serialize_fixlen,
-    serialize_list, serialize_varlen, serialized_message,
-    serialized_statements,
+    deserialize_fixlen, deserialize_list, deserialize_varlen, serialize_fixlen,
+    serialize_list, serialize_varlen, ProtoSerialize,
   },
   hvm::{view_statements, Term},
   net,
@@ -20,16 +18,16 @@ proptest! {
   #[test]
   fn serialize_deserialize_statements(statements in vec(statement(), 0..20)) {
     let s1 = view_statements(&statements);
-    let bits = serialized_statements(&statements);
-    let statements2 = deserialized_statements(&bits).unwrap();
+    let bits = statements.proto_serialized();
+    let statements2 = Vec::proto_deserialized(&bits).unwrap();
     let s2 = view_statements(&statements2);
     assert_eq!(s1, s2);
   }
 
   #[test]
   fn serialize_deserialize_message(message in message()) {
-    let bits = serialized_message(&message);
-    let message2: Message<net::Address> = deserialized_message(&bits).unwrap();
+    let bits = message.proto_serialized();
+    let message2: Message<net::Address> = Message::proto_deserialized(&bits).unwrap();
     assert_eq!(format!("{:?}", message), format!("{:?}", message2));
   }
 }
@@ -72,19 +70,8 @@ pub fn test_serializer_2() {
   let c = u256(1000);
   let mut g_names = HashMap::new();
   let vals = vec![a, b, c];
-  serialize_list(
-    |x, bits, names| serialize_fixlen(10, x, bits, names),
-    &vals,
-    &mut bits,
-    &mut g_names,
-  );
+  serialize_list(&vals, &mut bits, &mut g_names);
   let mut index = 0;
-  let gots = deserialize_list(
-    |bits, ix, names| deserialize_fixlen(10, bits, ix, names),
-    &bits,
-    &mut index,
-    &mut g_names,
-  )
-  .unwrap();
+  let gots = deserialize_list(&bits, &mut index, &mut g_names).unwrap();
   assert_eq!(vals, gots);
 }

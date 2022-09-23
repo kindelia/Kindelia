@@ -26,9 +26,9 @@ use clap::{Parser, Subcommand};
 use warp::Future;
 
 use crate::api::{client as api_client, Hash, HexStatement};
-use crate::bits::{deserialized_statement, serialized_statement};
 use crate::common::Name;
 use crate::crypto;
+use crate::bits::ProtoSerialize;
 use crate::hvm::{self, view_statement, Statement};
 use crate::net;
 use crate::node;
@@ -457,10 +457,7 @@ pub fn run_cli() -> Result<(), String> {
         _ => Err("Input file should contain exactly one statement".to_string()),
       }?;
       if encoded_output {
-        println!(
-          "{}",
-          hex::encode(serialized_statement(&statement).to_bytes())
-        );
+        println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
       } else {
         println!("{}", view_statement(&statement));
       };
@@ -735,7 +732,7 @@ pub fn serialize_code(code: &str) {
   let statements =
     hvm::read_statements(code).map_err(|err| err.erro).unwrap().1;
   for statement in statements {
-    println!("{}", hex::encode(serialized_statement(&statement).to_bytes()));
+    println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
   }
 }
 
@@ -911,7 +908,7 @@ fn statements_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
 fn statement_from_hex(hex: &str) -> Result<Statement, String> {
   let bytes = hex::decode(hex)
     .map_err(|err| format!("Invalid hexadecimal '{}': {}", hex, err))?;
-  deserialized_statement(&bytes_to_bitvec(&bytes))
+  hvm::Statement::proto_deserialized(&bytes_to_bitvec(&bytes))
     .ok_or(format!("Failed to deserialize '{}'", hex))
 }
 

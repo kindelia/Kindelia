@@ -476,7 +476,7 @@ pub fn bytes_to_body(bytes: &[u8]) -> Body {
 // TODO: remove
 pub fn code_to_body(code: &str) -> Body {
   let (_rest, acts) = crate::hvm::read_statements(code).unwrap(); // TODO: handle error
-  let bits = serialized_statements(&acts);
+  let bits = acts.proto_serialized();
   let body = bytes_to_body(&bitvec_to_bytes(&bits));
   return body;
 }
@@ -552,7 +552,7 @@ impl Transaction {
   }
 
   pub fn to_statement(&self) -> Option<Statement> {
-    return deserialized_statement(&BitVec::from_bytes(&self.data));
+    return hvm::Statement::proto_deserialized(&BitVec::from_bytes(&self.data));
   }
 }
 
@@ -794,7 +794,7 @@ impl <C: ProtoComm> Node<C> {
               // 3. Saves overwritten blocks to disk
               for bhash in must_compute.iter().rev() {
                 let file_path = self.get_blocks_path().join(format!("{:0>32x}.kindelia_block.bin", self.height[bhash]));
-                let file_buff = bitvec_to_bytes(&serialized_block(&self.block[bhash]));
+                let file_buff = bitvec_to_bytes(&self.block[bhash].proto_serialized());
                 std::fs::write(file_path, file_buff).expect("Couldn't save block to disk.");
               }
               // 4. Reverts the runtime to a state older than that block
@@ -1061,7 +1061,7 @@ impl <C: ProtoComm> Node<C> {
           Ok(statements) => {
             statements
               .iter()
-              .map(|s| Transaction::new(bitvec_to_bytes(&serialized_statement(s))))
+              .map(|s| Transaction::new(bitvec_to_bytes(&s.proto_serialized())))
               .into_iter()
               .for_each(|t| {
                 let hash = t.hash.low_u64();
@@ -1078,7 +1078,7 @@ impl <C: ProtoComm> Node<C> {
       },
       NodeRequest::Publish { code, tx } => {
         let result: Vec<_> = code.into_iter().map(|stmt| {
-          let bytes = bitvec_to_bytes(&serialized_statement(&stmt));
+          let bytes = bitvec_to_bytes(&stmt.proto_serialized());
           let t = Transaction::new(bytes);
           self.add_transaction(t)
         }).collect();
@@ -1244,7 +1244,7 @@ impl <C: ProtoComm> Node<C> {
     eprintln!("Loading {} blocks from disk...", file_paths.len());
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
-      let block = deserialized_block(&bytes_to_bitvec(&buffer)).unwrap();
+      let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer)).unwrap();
       self.add_block(miner_communication, &block);
     }
   }

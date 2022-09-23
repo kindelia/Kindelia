@@ -7,7 +7,7 @@ use std::{
 use bit_vec::BitVec;
 
 use crate::{
-  bits::{deserialized_message, serialized_message, ProtoSerialize},
+  bits::{ProtoSerialize},
   node::Message,
   util::bitvec_to_bytes,
 };
@@ -95,7 +95,7 @@ impl ProtoComm for UdpSocket {
     addresses: Vec<Self::Address>,
     message: &Message<Self::Address>,
   ) {
-    let bytes = bitvec_to_bytes(&serialized_message(message));
+    let bytes = bitvec_to_bytes(&message.proto_serialized());
     for address in addresses {
       match address {
         Address::IPv4 { val0, val1, val2, val3, port } => {
@@ -111,7 +111,7 @@ impl ProtoComm for UdpSocket {
     let mut messages = Vec::new();
     while let Ok((msg_len, sender_addr)) = self.recv_from(&mut buffer) {
       let bits = BitVec::from_bytes(&buffer[0..msg_len]);
-      if let Some(msge) = deserialized_message(&bits) {
+      if let Some(msge) = Message::proto_deserialized(&bits) {
         let addr = match sender_addr.ip() {
           std::net::IpAddr::V4(v4addr) => {
             let [val0, val1, val2, val3] = v4addr.octets();

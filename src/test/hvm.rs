@@ -1,7 +1,6 @@
 use std::convert::TryInto;
 
 use crate::{
-  bits::{deserialized_func, serialized_func},
   common::Name,
   hvm::{
     self, init_map, init_runtime, read_statements,

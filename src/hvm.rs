@@ -251,7 +251,7 @@ use std::time::Instant;
 use serde::{Serialize, Deserialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::bits;
+use crate::bits::ProtoSerialize;
 use crate::crypto;
 use crate::util::{U128_SIZE, mask};
 use crate::util;
@@ -1381,7 +1381,7 @@ impl Heap {
     // Serializes Funcs
     let mut file_buff : Vec<u128> = vec![];
     for (fnid, func) in &self.file.funcs {
-      let mut func_buff = util::u8s_to_u128s(&mut bits::serialized_func(&func.func).to_bytes());
+      let mut func_buff = util::u8s_to_u128s(&mut func.func.proto_serialized().to_bytes());
       file_buff.push(*fnid as u128);
       file_buff.push(func_buff.len() as u128);
       file_buff.append(&mut func_buff);
@@ -1462,7 +1462,7 @@ impl Heap {
       let fnid = serial.file[i + 0];
       let size = serial.file[i + 1];
       let buff = &serial.file[i + 2 .. i + 2 + size as usize];
-      let func = &bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
+      let func = &Func::proto_deserialized(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
       let func = compile_func(func, false).unwrap();
       self.write_file(Name::new_unsafe(fnid), Arc::new(func));
       i = i + 2 + size as usize;
@@ -5114,11 +5114,11 @@ impl fmt::Display for Statement {
 // -------
 
 pub fn hash_term(term: &Term) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_term(&term)))
+  crypto::keccak256(&util::bitvec_to_bytes(&term.proto_serialized()))
 }
 
 pub fn hash_statement(statement: &Statement) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&bits::serialized_statement(&remove_sign(&statement))))
+  crypto::keccak256(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
 }
 
 // Tests
@@ -5141,9 +5141,9 @@ pub fn print_io_consts() {
 }
 
 // Serializes, deserializes and evaluates statements
-pub fn test_statements(statements: &[Statement], debug: bool) {
+pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
   let str_0 = view_statements(statements);
-  let str_1 = view_statements(&crate::bits::deserialized_statements(&crate::bits::serialized_statements(&statements)).unwrap());
+  let str_1 = view_statements(&Vec::proto_deserialized(&statements.proto_serialized()).unwrap());
 
   println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   println!("=====");

@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use tokio::sync::oneshot;
 
+use crate::bits::ProtoSerialize;
 use crate::hvm;
 use crate::node;
-use crate::{bits, util};
+use crate::util;
 
 pub use crate::common::Name;
 
@@ -129,7 +130,7 @@ impl From<hvm::Statement> for HexStatement {
 
 impl Display for HexStatement {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let bytes = util::bitvec_to_bytes(&bits::serialized_statement(self));
+    let bytes = util::bitvec_to_bytes(&self.proto_serialized());
     let hex = hex::encode(bytes);
     write!(f, "{}", hex)
   }
@@ -140,7 +141,7 @@ impl TryFrom<&str> for HexStatement {
   fn try_from(value: &str) -> Result<Self, Self::Error> {
     let bytes = hex::decode(&value).map_err(|e| e.to_string())?;
     let bits = util::bytes_to_bitvec(&bytes);
-    let stmt = bits::deserialize_statement(&bits, &mut 0, &mut HashMap::new())
+    let stmt = hvm::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())
       .ok_or_else(|| format!("invalid Statement serialization: {}", value))?;
     Ok(HexStatement(stmt))
   }
