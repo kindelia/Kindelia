@@ -1217,6 +1217,7 @@ dependencies = [
  "httpmock",
  "im",
  "json",
+ "petgraph",
  "primitive-types",
  "priority-queue",
  "proptest",
