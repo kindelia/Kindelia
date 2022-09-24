@@ -480,12 +480,20 @@ pub struct Runtime {
   path: PathBuf,        // where to save runtime state
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-  EffectFailure,
+  EffectFailure(EffectFailure),
   DivisionByZero
+}
+
+#[derive(Debug, Clone)]
+pub enum EffectFailure {
+  NonExistantState(Name),
+  InvalidCallArg {caller: Name, callee: Name, arg: Ptr},
+  InvalidIOCtr(Name),
+  InvalidIONonCtr(Ptr)
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -1918,7 +1926,8 @@ impl Runtime {
     // eprintln!("-- {}", show_term(self, term, None));
     match get_tag(term) {
       CTR => {
-        match get_ext(term) {
+        let ext = get_ext(term);
+        match ext {
           IO_DONE => {
             // TODO: should allow only Num
             let retr = ask_arg(self, term, 0);
@@ -1939,7 +1948,7 @@ impl Runtime {
                 return done;
               }
             }
-            return Err(RuntimeError::EffectFailure);
+            return Err(RuntimeError::EffectFailure(EffectFailure::NonExistantState(subject)));
           }
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
@@ -1968,7 +1977,7 @@ impl Runtime {
             for i in 0 .. arit {
               let argm = reduce(self, get_loc(argm, 0), mana)?;
               if get_tag(argm) != NUM {
-                return Err(RuntimeError::EffectFailure);
+                return Err(RuntimeError::EffectFailure(EffectFailure::InvalidCallArg { caller: subject, callee: Name(fnid), arg: argm }));
               }
             }
             // Calls called function IO, changing the subject
@@ -2042,12 +2051,12 @@ impl Runtime {
             return done;
           }
           _ => {
-            return Err(RuntimeError::EffectFailure);
+            return Err(RuntimeError::EffectFailure(EffectFailure::InvalidIOCtr(Name(ext))));
           }
         }
       }
       _ => {
-        return Err(RuntimeError::EffectFailure);
+        return Err(RuntimeError::EffectFailure(EffectFailure::InvalidIONonCtr(term)));
       }
     }
   }
@@ -4188,12 +4197,18 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
 }
 
 fn show_runtime_error(err: RuntimeError) -> String {
-  (match err {
-    RuntimeError::NotEnoughMana => "Not enough mana.",
-    RuntimeError::NotEnoughSpace => "Not enough space.",
-    RuntimeError::EffectFailure => "Runtime effect failure.",
-    RuntimeError::DivisionByZero => "Tried to divide by zero.",
-  }).to_string()
+  match err {
+    RuntimeError::NotEnoughMana => "Not enough mana.".to_string(),
+    RuntimeError::NotEnoughSpace => "Not enough space.".to_string(),
+    RuntimeError::DivisionByZero => "Tried to divide by zero.".to_string(),
+    RuntimeError::EffectFailure(effect_failure) =>
+      match effect_failure {
+        EffectFailure::NonExistantState(state) => format!("Tried to read state of {} but did not exist.", state),
+        EffectFailure::InvalidCallArg { caller, callee, arg } => format!("{} tried to call {} with invalid argument {}", caller, callee, arg),
+        EffectFailure::InvalidIOCtr(name) => format!("{} is not an IO constructor.", name),
+        EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", term),
+    }
+  }
 }
 
 pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Term> {
