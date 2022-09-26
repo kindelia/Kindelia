@@ -799,7 +799,7 @@ fn init_socket() -> Option<UdpSocket> {
       return Some(socket);
     }
   }
-  return None;
+  None
 }
 
 // Auxiliar
