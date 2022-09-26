@@ -46,23 +46,14 @@ fn network() {
 
   // Spawns the nodes threads
   for (socket, idx) in sockets {
-    let initial_peers = g
-      .neighbors(idx)
-      .map(|node| *g.node_weight(node).unwrap())
-      .collect::<Vec<_>>();
+    let initial_peers =
+      g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
     let socket_thread = thread::spawn(move || {
       let state_path = temp_dir()
         .path
         .join(".kindelia")
         .join(format!(".test-{}", socket.addr));
-      node::start(
-        state_path,
-        socket.get_addr() as u64,
-        socket,
-        &Some(vec![1_u32]),
-        true,
-        false,
-      );
+      node::start(state_path, 0, socket, &Some(initial_peers), true, false);
     });
     threads.push(socket_thread);
   }
