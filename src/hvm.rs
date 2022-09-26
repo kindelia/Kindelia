@@ -2167,12 +2167,12 @@ impl Runtime {
         let host = self.alloc_term(expr);
         let done = self.run_io(Name(subj), Name(0), host, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(err));
+          return error(self, "run", show_runtime_error(self, err));
         }
         let done = done.unwrap();
         let done = self.compute(done, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(err));
+          return error(self, "run", show_runtime_error(self, err));
         }
         let done = done.unwrap();
         // The term return by Done is only read and stored in debug mode for
@@ -3103,7 +3103,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   }
 
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
-    // println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
+    // println!("~~ bind {} {}", u128_to_name(name), show_ptr(lnk));
     if name == VAR_NONE {
       link(rt, loc, Era());
     } else {
@@ -3799,7 +3799,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                   if let Some(field) = rule_var.field {
                     var = ask_arg(rt, var, field);
                   }
-                  //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_lnk(var));
+                  //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_ptr(var));
                   if !rule_var.erase {
                     let arr = vars_data.entry(*rule_var.name).or_insert(Vec::new());
                     arr.push(var);
@@ -3947,7 +3947,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
 // Debug
 // -----
 
-pub fn show_lnk(x: Ptr) -> String {
+pub fn show_ptr(x: Ptr) -> String {
   if x == 0 {
     String::from("~")
   } else {
@@ -3978,7 +3978,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   for i in 0..32 {
     // pushes to the string
     write!(s, "{:x} | ", i).unwrap();
-    s.push_str(&show_lnk(rt.read(i)));
+    s.push_str(&show_ptr(rt.read(i)));
     s.push('\n');
   }
   s
@@ -4181,7 +4181,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               output.push(String::from("*"));
             }
             _ => {
-              // println!("{}", show_lnk(term));
+              // println!("{}", show_ptr(term));
               // println!("{}", show_term(rt,  ask_lnk(rt, term), None));
               output.push(format!("?g({})", get_tag(term)))
             },
@@ -4200,7 +4200,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   text
 }
 
-fn show_runtime_error(err: RuntimeError) -> String {
+fn show_runtime_error(rt: &Runtime, err: RuntimeError) -> String {
   match err {
     RuntimeError::NotEnoughMana => "Not enough mana.".to_string(),
     RuntimeError::NotEnoughSpace => "Not enough space.".to_string(),
@@ -4211,7 +4211,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
         EffectFailure::StateIsZero(state) => format!("Tried to read state that was taken {}", state),
         EffectFailure::InvalidCallArg { caller, callee, arg } => format!("{} tried to call {} with invalid argument {}", caller, callee, arg),
         EffectFailure::InvalidIOCtr(name) => format!("{} is not an IO constructor.", name),
-        EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", term),
+        EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", show_ptr(term)), // READBACK? NOT?
     }
   }
 }
