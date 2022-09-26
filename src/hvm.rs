@@ -491,6 +491,7 @@ pub enum RuntimeError {
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NonExistantState(Name),
+  StateIsZero(Name),
   InvalidCallArg {caller: Name, callee: Name, arg: Ptr},
   InvalidIOCtr(Name),
   InvalidIONonCtr(Ptr)
@@ -1946,6 +1947,9 @@ impl Runtime {
                 clear(self, host, 1);
                 clear(self, get_loc(term, 0), 1);
                 return done;
+              }
+              else {
+                return Err(RuntimeError::EffectFailure(EffectFailure::StateIsZero(subject)));
               }
             }
             return Err(RuntimeError::EffectFailure(EffectFailure::NonExistantState(subject)));
@@ -4204,6 +4208,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NonExistantState(state) => format!("Tried to read state of {} but did not exist.", state),
+        EffectFailure::StateIsZero(state) => format!("Tried to read state that was taken {}", state),
         EffectFailure::InvalidCallArg { caller, callee, arg } => format!("{} tried to call {} with invalid argument {}", caller, callee, arg),
         EffectFailure::InvalidIOCtr(name) => format!("{} is not an IO constructor.", name),
         EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", term),
