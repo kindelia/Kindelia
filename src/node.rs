@@ -24,6 +24,7 @@ use crate::print_with_timestamp;
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{NodeRequest, BlockInfo, FuncInfo};
+use crate::common::Name;
 use crate::util::*;
 use crate::bits::*;
 use crate::hvm::{self, *};
@@ -61,7 +62,7 @@ pub struct Block {
   pub time: u128, // block timestamp
   pub meta: u128, // block metadata
   pub prev: U256, // previous block (32 bytes)
-  pub body: Body, // block contents (1280 bytes) 
+  pub body: Body, // block contents (1280 bytes)
   pub hash: U256, // cached block hash // TODO: refactor out
 }
 
@@ -1076,7 +1077,7 @@ impl Node {
         answer.send(info).unwrap();
       },
       NodeRequest::GetState { name, tx: answer } => {
-        let state = self.runtime.read_disk_as_term(name, Some(2 << 16));
+        let state = self.runtime.read_disk_as_term(name.into(), Some(2 << 16));
         answer.send(state).unwrap();
       },
       NodeRequest::GetPeers { all, tx: answer } => {

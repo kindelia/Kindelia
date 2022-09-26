@@ -106,7 +106,7 @@
 //   5. Function and Constructor arities depends on the user-provided definition.
 //
 // Example 0:
-// 
+//
 //   Term:
 //
 //    {T2 #7 #8}
@@ -118,7 +118,7 @@
 //     0x01 | Ptr(NUM, 0x000000000000000000, 0x000000000008) // the tuple's 2nd field
 //
 //   Notes:
-//     
+//
 //     1. This is just a pair with two numbers.
 //     2. The root pointer is not stored on memory.
 //     3. The '0x0000000007b9d30a43' constant encodes the 'T2' name.
@@ -144,11 +144,11 @@
 //     2. The 1st lambda's argument not used, thus, an ERA pointer.
 //     3. The 2nd lambda's argument points to its variable, and vice-versa.
 //     4. Each lambda uses 2 memory slots. This term uses 64 bytes in total.
-//     
+//
 // Example 2:
 //
 //   Term:
-//     
+//
 //     λx dup x0 x1 = x; (* x0 x1)
 //
 //   Memory:
@@ -163,7 +163,7 @@
 //     0x06 | Ptr(DP1, 0x7b93e8d2b9ba31fb21, 0x000000000002) // the operator's 2st operand
 //
 //   Notes:
-//     
+//
 //     1. This is a lambda function that squares a number.
 //     2. Notice how every ARGs point to a VAR/DP0/DP1, that points back its source node.
 //     3. DP1 does not point to its ARG. It points to the duplication node, which is at 0x02.
@@ -236,7 +236,6 @@
 // little aspect, from the HVM's memory model to interaction net rewrite rules.
 
 #![allow(dead_code)]
-#![allow(unused_imports)]
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
@@ -246,30 +245,21 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::NoHashHasher as NHH;
+use serde::{Serialize, Deserialize};
+use serde_with::{serde_as, DisplayFromStr};
 
 use crate::bits;
 use crate::crypto;
-use crate::dbg_println;
-use crate::util::U128_SIZE;
+use crate::util::{U128_SIZE, mask};
 use crate::util;
 
-// TODO: refactor out
-use serde::{Serialize, Deserialize};
-use serde_with::{serde_as, DisplayFromStr};
-use crate::api;
+use crate::common::Name;
 
 // Types
 // -----
-
-/// A name stored as as 20 6-bit letters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "&str")]
-pub struct Name(u128);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "&str")]
@@ -278,7 +268,7 @@ pub struct U120(u128);
 // This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 // rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
 // later on. Below is a description of each variant:
-// - Var: variable. Note an u128 is used instead of a string. It stores up to 20 6-bit letters.
+// - Var: variable. Note an u128 is used instead of a string. It stores up to 12 6-bit letters.
 // - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
 // - Lam: an affine lambda. Written as: `λvar body`.
 // - App: a lambda application. Written as: `(f x)`.
@@ -408,7 +398,7 @@ pub enum Statement {
   Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
-  Reg { name: Name, ownr: Name, sign: Option<crypto::Signature> },
+  Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
 }
 
 // An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
@@ -551,39 +541,40 @@ const U128_PER_KB: u128 = (1024 / U128_SIZE) as u128;
 const U128_PER_MB: u128 = U128_PER_KB << 10;
 const U128_PER_GB: u128 = U128_PER_MB << 10;
 
-// With the constants below, we alloc 4 GB per heap, which holds for the first 6 months. We
-// pre-alloc 6 heaps, which is enough for 4 snapshots: 16 seconds old, 4 minutes old, 1 hour old
-// and 1 day old, on average. That requires 24 GB RAM. As such, 32 GB RAM is needed to host a full
-// node, on the first 6 months. After that, we must increase the HEAP_SIZE to 8 GB, which will
-// demand 64 GB RAM, increasing by an additional 64 GB RAM every year. Note that most of this is
-// empty space, so, future optimizations should reduce this to closer to the actual 8 GB per year
-// that the network actually uses.
+// With the constants below, we pre-alloc 6 heaps, which is enough for
+// 4 snapshots: 16 seconds old, 4 minutes old, 1 hour old and 1 day old, on
+// average.
 
-//#[cfg(not(debug_assertions))]
-//const HEAP_SIZE: u128 = 4096 * U128_PER_MB; // total size per heap, in 128-bit words
-const MAX_HEAPS: u64 = 6; // total heaps to pre-alloc (2 are used for draw/curr, rest for rollbacks)
-const MAX_ROLLBACK: u64 = MAX_HEAPS - 2; // total heaps to pre-alloc for snapshots
-
-// Use smaller heaps for debug/development builds
-//#[cfg(debug_assertions)]
-//const HEAP_SIZE: u128 = 64 * U128_PER_MB; // total size per heap, in 128-bit words
+/// Number of heaps (2 are used for draw/curr, the rest for rollbacks)
+const MAX_HEAPS: u64 = 6;
+// Number of heaps for snapshots
+const MAX_ROLLBACK: u64 = MAX_HEAPS - 2;
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
+// Size of each Ptr field in bits
 pub const VAL_SIZE: usize = 48;
 pub const EXT_SIZE: usize = 72;
 pub const TAG_SIZE: usize = 8;
+pub const NUM_SIZE: usize = EXT_SIZE + VAL_SIZE;
 
-pub const VAL_POS: u128 = 1 << 0;
-pub const EXT_POS: u128 = 1 << VAL_SIZE;
-pub const TAG_POS: u128 = 1 << (EXT_SIZE + VAL_SIZE);
+// Position of each Ptr field
+pub const VAL_POS: usize = 0;
+pub const EXT_POS: usize = VAL_POS + VAL_SIZE;
+pub const TAG_POS: usize = EXT_POS + EXT_SIZE;
+pub const NUM_POS: usize = 0;
 
-// FIXME: document and replace magic numbers on code
-//pub const VAL_MASK: u128 = EXT - 1;
-//pub const EXT_MASK: u128 = (TAG - 1)   ^ VAL_MASK;
-//pub const NUM_MASK: u128 = EXT_MASK | VAL_MASK;
-//pub const TAG_MASK: u128 = (u128::MAX) ^ NUM_MASK;
-pub const NUM_MASK: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+// First bit of each field
+pub const VAL_SHL: u128 = 1 << VAL_POS;
+pub const EXT_SHL: u128 = 1 << EXT_POS;
+pub const TAG_SHL: u128 = 1 << TAG_POS;
+pub const NUM_SHL: u128 = 1 << NUM_POS;
+
+// Bit mask for each field
+pub const VAL_MASK: u128 = mask(VAL_SIZE, VAL_POS);
+pub const EXT_MASK: u128 = mask(EXT_SIZE, EXT_POS);
+pub const TAG_MASK: u128 = mask(TAG_SIZE, TAG_POS);
+pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 
 // TODO: refactor to enums with u128 repr
 
@@ -618,7 +609,6 @@ pub const GTE : u128 = 0xD;
 pub const GTN : u128 = 0xE;
 pub const NEQ : u128 = 0xF;
 
-pub const VAR_NONE  : u128 = 0x3FFFF; // ?? '___'
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 
@@ -895,88 +885,6 @@ pub fn init_map<A>() -> Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
-// Names
-// -----
-
-impl Name {
-  pub const EMPTY: Name = Name(0);
-  pub const NONE: Name = Name(VAR_NONE);
-
-  pub fn is_empty(&self) -> bool {
-    self.0 == 0
-  }
-
-  pub fn is_none(&self) -> bool {
-    self.0 == VAR_NONE
-  }
-
-  /// Check if a name can be used directly (fits in the `EXT` field).
-  pub fn is_small(&self) -> bool {
-    self.0 >> EXT_SIZE == 0
-  }
-
-  pub fn from_u128_unchecked(numb: u128) -> Self {
-    Name(numb)
-  }
-}
-
-impl std::ops::Deref for Name {
-  type Target = u128;
-  fn deref(&self) -> &Self::Target {
-    &self.0
-  }
-}
-
-impl TryFrom<u128> for Name {
-  type Error = String;
-  fn try_from(name: u128) -> Result<Self, Self::Error> {
-    if name >> 120 != 0 {
-      Err("Name does not fit in 120-bits.".into())
-    } else {
-      Ok(Name(name))
-    }
-  }
-}
-
-impl fmt::Display for Name {
-  fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-    // TODO: optimize
-    write!(f, "{}", u128_to_name(self.0))
-  }
-}
-
-// Necessary for serialization to string.
-impl Into<String> for Name {
-  fn into(self) -> String {
-    self.to_string()
-  }
-}
-
-impl TryFrom<&str> for Name {
-  type Error = String;
-  fn try_from(name: &str) -> Result<Self, Self::Error> {
-    fn err_msg<E: fmt::Debug>(e: E) -> String {
-      format!("Invalid name: {:?}.", e)
-    }
-    let name = name_to_u128(name).map_err(err_msg)?;
-    Ok(name)
-  }
-}
-
-impl From<U120> for Name {
-  fn from(num: U120) -> Self {
-    Name(num.0)
-  }
-}
-
-// needed for `clap` parsing
-impl FromStr for Name {
-  type Err = String;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-      s.try_into()
-  }
-}
-
 // U120
 // ====
 
@@ -1003,6 +911,12 @@ impl TryFrom<u128> for U120 {
   }
 }
 
+impl From<Name> for U120 {
+  fn from(num: Name) -> Self {
+    U120(*num)
+  }
+}
+
 impl fmt::Display for U120 {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
       write!(f, "{}", self.0)
@@ -1019,7 +933,7 @@ impl TryFrom<&str> for U120 {
   type Error = String;
   fn try_from(numb: &str) -> Result<Self, Self::Error> {
     fn err_msg<E: fmt::Debug>(e: E) -> String {
-      format!("Invalid name: {:?}.", e)
+      format!("Invalid number string '{:?}'", e)
     }
     let (rest, result) = read_numb(numb).map_err(err_msg)?;
     if !rest.is_empty() {
@@ -1086,20 +1000,12 @@ impl Term {
     Term::App { func, argm }
   }
 
-  pub fn fun(name: Name, args: Vec<Term>) -> Result<Self, String> {
-    if name.is_small() {
-      Ok(Term::Fun { name, args })
-    } else {
-      Err(format!("Direct calling function with too long name: `{}`.", name))
-    }
+  pub fn fun(name: Name, args: Vec<Term>) -> Self {
+    Term::Fun { name, args }
   }
 
-  pub fn ctr(name: Name, args: Vec<Term>) -> Result<Self, String> {
-    if name.is_small() {
-      Ok(Term::Ctr { name, args })
-    } else {
-      Err(format!("Direct calling function with too long name: `{}`.", name))
-    }
+  pub fn ctr(name: Name, args: Vec<Term>) -> Self {
+    Term::Ctr { name, args }
   }
 }
 
@@ -1124,9 +1030,10 @@ pub fn split_names(name: Name) -> Vec<String> {
 pub fn get_namespace(name: Name) -> Option<Name> {
   let names = split_names(name);
   // TODO: pattern match
+  // TODO: operate on number instead of string
   if names.len() > 1 {
-    let name = name_to_u128_unsafe(&names[0 .. names.len() - 1].join("."));
-    return Some(Name(name));
+    let name = Name::from_str_unsafe(&names[0 .. names.len() - 1].join("."));
+    return Some(name);
   } else {
     return None;
   }
@@ -1237,10 +1144,10 @@ impl Heap {
   fn read(&self, idx: u128) -> u128 {
     return self.memo.read(idx);
   }
-  fn write_disk(&mut self, name: Name, val: Ptr) {
+  fn write_disk(&mut self, name: U120, val: Ptr) {
     return self.disk.write(*name, val);
   }
-  fn read_disk(&self, name: Name) -> Option<Ptr> {
+  fn read_disk(&self, name: U120) -> Option<Ptr> {
     return self.disk.read(*name);
   }
   fn write_file(&mut self, name: Name, fun: Arc<CompFunc>) {
@@ -1461,7 +1368,7 @@ impl Heap {
     while i < serial.disk.len() {
       let fnid = serial.disk[i + 0];
       let lnk  = serial.disk[i + 1];
-      self.write_disk(Name(fnid), lnk);
+      self.write_disk(U120(fnid), lnk);
       i += 2;
     }
     // Deserializes Funcs
@@ -1472,20 +1379,20 @@ impl Heap {
       let buff = &serial.file[i + 2 .. i + 2 + size as usize];
       let func = &bits::deserialized_func(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
       let func = compile_func(func, false).unwrap();
-      self.write_file(Name(fnid), Arc::new(func));
+      self.write_file(Name::new_unsafe(fnid), Arc::new(func));
       i = i + 2 + size as usize;
     }
     // Deserializes Arits
     for i in 0 .. serial.arit.len() / 2 {
       let fnid = serial.arit[i * 2 + 0];
       let arit = serial.arit[i * 2 + 1];
-      self.write_arit(Name(fnid), arit);
+      self.write_arit(Name::new_unsafe(fnid), arit);
     }
     // Deserializes Ownrs
     for i in 0 .. serial.ownr.len() / 2 {
       let fnid = serial.ownr[i * 2 + 0];
       let ownr = serial.ownr[i * 2 + 1];
-      self.write_ownr(Name(fnid), ownr);
+      self.write_ownr(Name::new_unsafe(fnid), ownr);
     }
   }
   fn buffer_file_path(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
@@ -1628,7 +1535,7 @@ impl Funcs {
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.funcs.drain() {
       if overwrite || !self.funcs.contains_key(&fid) {
-        self.write(Name(fid), func.clone());
+        self.write(Name::new_unsafe(fid), func.clone());
       }
     }
   }
@@ -1857,7 +1764,7 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: Name, caller: Name, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn run_io(&mut self, subject: U120, caller: U120, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
     // eprintln!("-- {}", show_term(self, host, None));
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term, None));
@@ -1904,7 +1811,7 @@ impl Runtime {
             let cont = ask_arg(self, term, 2);
 
             // Builds the argument vector
-            let arit = self.get_arity(&Name(get_ext(argm)));
+            let arit = self.get_arity(&Name::new_unsafe(get_ext(argm)));
             // Checks if the argument is a constructor with numeric fields. This is needed since
             // Kindelia's language is untyped, yet contracts can call each other freely. That would
             // allow a contract to pass an argument with an unexpected type to another, corrupting
@@ -1919,7 +1826,7 @@ impl Runtime {
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
             let ioxp = alloc_fun(self, *get_num(fnid), &[argm]);
-            let fnid = get_num(fnid).into();
+            let fnid = get_num(fnid);
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
@@ -2001,7 +1908,7 @@ impl Runtime {
   pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: crypto::Hash) -> u128 {
     match sign {
       None       => 0,
-      Some(sign) => sign.signer_name(&hash).map(|x| x.0).unwrap_or(1),
+      Some(sign) => sign.signer_name(&hash).map(|x| *x).unwrap_or(1),
     }
   }
 
@@ -2031,7 +1938,7 @@ impl Runtime {
       true
     } else {
       // Only namespace owner can register a sub-namespace
-      let namespace = get_namespace(*name).unwrap_or(Name(0));
+      let namespace = get_namespace(*name).unwrap_or(Name::new_unsafe(0));
       Some(subj) == self.get_owner(&namespace)
     }
   }
@@ -2067,7 +1974,7 @@ impl Runtime {
         self.set_arity(*name, args.len() as u128);
         self.define_function(*name, func);
         let state = self.create_term(init, 0, &mut init_map());
-        self.write_disk(*name, state);
+        self.write_disk(U120::from(*name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Fun { name: *name, args }
       }
@@ -2097,7 +2004,7 @@ impl Runtime {
         }
         let subj = self.get_subject(&sign, hash);
         let host = self.alloc_term(expr);
-        let done = self.run_io(Name(subj), Name(0), host, mana_lim);
+        let done = self.run_io(U120(subj), U120(0), host, mana_lim);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
@@ -2457,15 +2364,15 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, name: Name, val: Ptr) {
+  pub fn write_disk(&mut self, name: U120, val: Ptr) {
     return self.get_heap_mut(self.draw).write_disk(name, val);
   }
 
-  pub fn read_disk(&self, name: Name) -> Option<Ptr> {
+  pub fn read_disk(&self, name: U120) -> Option<Ptr> {
     return self.get_with(None, None, |heap| heap.read_disk(name));
   }
 
-  pub fn read_disk_as_term(&mut self, name: Name, limit: Option<usize>) -> Option<Term> {
+  pub fn read_disk_as_term(&mut self, name: U120, limit: Option<usize>) -> Option<Term> {
     let host = self.read_disk(name)?;
     let term = readback_term(self, host, limit);
     term
@@ -2696,65 +2603,65 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // ------------
 
 pub fn Var(pos: u128) -> Ptr {
-  (VAR * TAG_POS) | pos
+  (VAR * TAG_SHL) | pos
 }
 
 pub fn Dp0(col: u128, pos: u128) -> Ptr {
-  (DP0 * TAG_POS) | (col * EXT_POS) | pos
+  (DP0 * TAG_SHL) | (col * EXT_SHL) | pos
 }
 
 pub fn Dp1(col: u128, pos: u128) -> Ptr {
-  (DP1 * TAG_POS) | (col * EXT_POS) | pos
+  (DP1 * TAG_SHL) | (col * EXT_SHL) | pos
 }
 
 pub fn Arg(pos: u128) -> Ptr {
-  (ARG * TAG_POS) | pos
+  (ARG * TAG_SHL) | pos
 }
 
 pub fn Era() -> Ptr {
-  ERA * TAG_POS
+  ERA * TAG_SHL
 }
 
 pub fn Lam(pos: u128) -> Ptr {
-  (LAM * TAG_POS) | pos
+  (LAM * TAG_SHL) | pos
 }
 
 pub fn App(pos: u128) -> Ptr {
-  (APP * TAG_POS) | pos
+  (APP * TAG_SHL) | pos
 }
 
 pub fn Par(col: u128, pos: u128) -> Ptr {
-  (SUP * TAG_POS) | (col * EXT_POS) | pos
+  (SUP * TAG_SHL) | (col * EXT_SHL) | pos
 }
 
 pub fn Op2(ope: u128, pos: u128) -> Ptr {
-  (OP2 * TAG_POS) | (ope * EXT_POS) | pos
+  (OP2 * TAG_SHL) | (ope * EXT_SHL) | pos
 }
 
 pub fn Num(val: u128) -> Ptr {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG_POS) | (val & NUM_MASK)
+  (NUM * TAG_SHL) | (val & NUM_MASK)
 }
 
 pub fn Ctr(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", u128_to_name(fun));
-  (CTR * TAG_POS) | (fun * EXT_POS) | pos
+  debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", Name::new_unsafe(fun));
+  (CTR * TAG_SHL) | (fun * EXT_SHL) | pos
 }
 
 pub fn Fun(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", u128_to_name(fun));
-  (FUN * TAG_POS) | (fun * EXT_POS) | pos
+  debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", Name::new_unsafe(fun));
+  (FUN * TAG_SHL) | (fun * EXT_SHL) | pos
 }
 
 // Getters
 // -------
 
 pub fn get_tag(lnk: Ptr) -> u128 {
-  lnk / TAG_POS
+  lnk / TAG_SHL
 }
 
 pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT_POS) & 0xFF_FFFF_FFFF_FFFF_FFFF
+  (lnk / EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
 }
 
 pub fn get_val(lnk: Ptr) -> u128 {
@@ -2891,7 +2798,7 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
       }
       NUM => {}
       CTR | FUN => {
-        let arity = rt.get_arity(&Name(get_ext(term)));
+        let arity = rt.get_arity(&Name::new_unsafe(get_ext(term)));
         for i in 0 .. arity {
           if i < arity - 1 {
             stack.push(ask_arg(rt, term, i));
@@ -3036,7 +2943,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
     // println!("~~ bind {} {}", u128_to_name(name), show_lnk(lnk));
-    if name == VAR_NONE {
+    if name == Name::_NONE {
       link(rt, loc, Era());
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
@@ -3158,11 +3065,11 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
       if seen.contains(&name) {
         return false;
-      } else if name == VAR_NONE {
+      } else if name == Name::_NONE {
         return true;
       } else {
         seen.insert(name);
-        return count_uses(body, Name(name)) == 1;
+        return count_uses(body, Name::new_unsafe(name)) == 1;
       }
     }
 
@@ -3355,7 +3262,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           continue;
         }
         FUN => {
-          let name = Name(get_ext(term));
+          let name = Name::new_unsafe(get_ext(term));
           let ari = rt.get_arity(&name);
           if let Some(func) = &rt.get_func(&name) {
             if ari == func.arity {
@@ -3519,7 +3426,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           } else if get_tag(arg0) == CTR {
             //println!("dup-ctr");
             let func = get_ext(arg0);
-            let arit = rt.get_arity(&Name(func));
+            let arit = rt.get_arity(&Name::new_unsafe(func));
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
@@ -3655,7 +3562,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               if get_tag(ask_arg(rt, term, *idx)) == SUP {
                 //println!("fun-sup");
                 let funx = get_ext(term);
-                let arit = rt.get_arity(&Name(funx));
+                let arit = rt.get_arity(&Name::new_unsafe(funx));
                 rt.set_mana(rt.get_mana() + FunSupMana(arit));
                 rt.set_rwts(rt.get_rwts() + 1);
                 let argn = ask_arg(rt, term, *idx);
@@ -3763,7 +3670,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           }
 
           let fid = get_ext(term);
-          if let Some(func) = rt.get_func(&Name(fid)) {
+          if let Some(func) = rt.get_func(&Name::new_unsafe(fid)) {
             if call_function(rt, func, host, term, mana, &mut vars_data) {
               init = 1;
               continue;
@@ -3847,7 +3754,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
               stack.push(StackItem::Host(loc_2, mana));
             }
             CTR | FUN => {
-              for i in (0..rt.get_arity(&Name(get_ext(norm)))).rev() {
+              for i in (0..rt.get_arity(&Name::new_unsafe(get_ext(norm)))).rev() {
                 let loc_i = get_loc(norm, i);
                 stack.push(StackItem::LinkResolver(loc_i));
                 stack.push(StackItem::Host(loc_i, mana));
@@ -3899,7 +3806,8 @@ pub fn show_lnk(x: Ptr) -> String {
       NUM => "NUM",
       _   => "?",
     };
-    format!("{}:{}:{:x}", tgs, u128_to_name(ext), val)
+    let name = Name::new_unsafe(ext);
+    format!("{}:{}:{:x}", tgs, name, val)
   }
 }
 
@@ -3979,7 +3887,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
           stack.push(ask_arg(rt, term, 0));
         }
         CTR | FUN => {
-          let arity = rt.get_arity(&Name(get_ext(term)));
+          let arity = rt.get_arity(&Name::new_unsafe(get_ext(term)));
           for i in (0..arity).rev() {
             stack.push(ask_arg(rt, term, i));
           }
@@ -4076,7 +3984,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               output.push(format!("#{}", numb));
             }
             CTR => {
-              let name = Name(get_ext(term));
+              let name = Name::new_unsafe(get_ext(term));
               let mut arit = rt.get_arity(&name);
               let mut name = view_name(name);
               // Pretty print names
@@ -4090,15 +3998,15 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               }
               output.push(format!("{{{}", name));
               stack.push(StackItem::Str("}".to_string()));
-              
+
               for i in (0..arit).rev() {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
                 stack.push(StackItem::Str(" ".to_string()));
-      
+
               }
             }
             FUN => {
-              let name = Name(get_ext(term));
+              let name = Name::new_unsafe(get_ext(term));
               output.push(format!("({}", name));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(&name);
@@ -4177,7 +4085,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
         }
         NUM => {}
         CTR | FUN => {
-          let name = Name(get_ext(term));
+          let name = Name::new_unsafe(get_ext(term));
           let arity = rt.get_arity(&name);
           for i in (0..arity).rev() {
             let arg = ask_arg(rt, term, i);
@@ -4316,7 +4224,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
             CTR | FUN => {
-              let name = Name(get_ext(term));
+              let name = Name::new_unsafe(get_ext(term));
               let arit = rt.get_arity(&name);
               stack.push(StackItem::Resolver(term));
               for i in 0..arit {
@@ -4346,7 +4254,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
           let val0 = output.pop().unwrap();
           let val1 = output.pop().unwrap();
           let args = vec![val0, val1];
-          return Some(Term::ctr(name, args).unwrap());
+          return Some(Term::ctr(name, args));
         }
         StackItem::Resolver(term) => {
           match get_tag(term) {
@@ -4355,21 +4263,21 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
               dup_store.pop(col);
             }
             CTR | FUN => {
-              let name = Name(get_ext(term));
+              let name = Name::new_unsafe(get_ext(term));
               let arit = rt.get_arity(&name);
               let mut args = Vec::new();
               for i in 0..arit {
                 args.push(output.pop().unwrap());
               }
               if get_tag(term) == CTR {
-                output.push(Term::ctr(name, args).unwrap());
+                output.push(Term::ctr(name, args));
               } else {
-                output.push(Term::fun(name, args).unwrap());
+                output.push(Term::fun(name, args));
               }
             },
             LAM => {
               let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
-              let name = Name(name_to_u128_unsafe(&name));
+              let name = Name::from_str(&name).unwrap();
               let body = Box::new(output.pop().unwrap());
               output.push(Term::lam(name, body));
             }
@@ -4543,13 +4451,6 @@ pub fn read_name(code: &str) -> ParseResult<Name> {
         erro: format!("Use of the keyword {} as a name for a term in `{}`.", name, code)
       });
     }
-    // TODO: check identifier size and propagate error
-    if name.len() > 20 {
-      return Err(ParseErr {
-        code: code.to_string(),
-        erro: format!("Identifier too long: {}", name)
-      });
-    }
     if ('0'..='9').contains(&name.chars().nth(0).unwrap_or(' ')) {
       // In most cases, an user writing 0-9 probably wants to make a number, not a name, so, to
       // avoid mistakes, we disable this syntax by default. But since names CAN start with 0-9 on
@@ -4559,7 +4460,18 @@ pub fn read_name(code: &str) -> ParseResult<Name> {
         erro: format!("Number must start with #, but '{}' doesn't.", name),
       });
     }
-    return Ok((code, Name(name_to_u128_unsafe(&name))));
+    let name = Name::from_str(&name);
+    let name =
+      match name {
+        Ok(name) => name,
+        Err(msg) => {
+          return Err(ParseErr {
+            code: code.to_string(),
+            erro: format!("Identifier too long: {}", msg),
+          });
+        }
+      };
+    return Ok((code, name));
   }
 }
 
@@ -4572,72 +4484,6 @@ pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
     code = skip(code);
   }
   return Ok((code, data));
-}
-
-/// Converts a name string to a u128 number, using the following table:
-/// ```
-/// '.'       =>  0
-/// '0' - '9' =>  1 to 10
-/// 'A' - 'Z' => 11 to 36
-/// 'a' - 'z' => 37 to 62
-/// '_'       => 63
-/// ```
-pub fn name_to_u128(name_txt: &str) -> Result<Name, String> {
-  if name_txt.len() > 20 {
-    Err(format!("Name '{}' exceeds 20 letters.", name_txt))
-  } else {
-    let mut num: u128 = 0;
-    for (i, chr) in name_txt.chars().enumerate() {
-      num = (num << 6) + char_to_u128(chr)?;
-    }
-    Ok(Name(num))
-  }
-}
-
-/// Converts a name string to a u128 number. Same as `name_to_u128`, but panics
-/// when name length > 20 or on invalid letter. **DEPRECATED**.
-// TODO: This should be removed.
-pub fn name_to_u128_unsafe(name_txt: &str) -> u128 {
-  let mut num: u128 = 0;
-  for (i, chr) in name_txt.chars().enumerate() {
-    debug_assert!(i < 20, "Name too big: `{}`.", name_txt);
-    num = (num << 6) + char_to_u128(chr).unwrap();
-  }
-  return num;
-}
-
-pub fn char_to_u128(chr: char) -> Result<u128, String> {
-  let num = 
-    match chr {
-      '.'       =>  0,
-      '0'..='9' =>  1 + chr as u128 - '0' as u128,
-      'A'..='Z' => 11 + chr as u128 - 'A' as u128,
-      'a'..='z' => 37 + chr as u128 - 'a' as u128,
-      '_'       => 63,
-      _         => { return Err(format!("Invalid name letter '{}'.", chr)); }
-    };
-  Ok(num)
-}
-
-/// Inverse of `name_to_u128`
-pub fn u128_to_name(num: u128) -> String {
-  let mut name = String::new();
-  let mut num = num;
-  while num > 0 {
-    let chr = (num % 64) as u8;
-    let chr =
-        match chr {
-            0         => '.',
-            1  ..= 10 => (chr -  1 + b'0') as char,
-            11 ..= 36 => (chr - 11 + b'A') as char,
-            37 ..= 62 => (chr - 37 + b'a') as char,
-            63        => '_',
-            64 ..     => panic!("Impossible letter value.")
-        };
-    name.push(chr);
-    num = num / 64;
-  }
-  name.chars().rev().collect()
 }
 
 pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -> ParseResult<Vec<A>> {
@@ -4681,7 +4527,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       } else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
-        let term = Term::fun(name, args).map_err(|erro| ParseErr::new(code, erro))?;
+        let term = Term::fun(name, args);
         return Ok((code, term));
       } else {
         let (code, func) = read_term(code)?;
@@ -4695,17 +4541,16 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let code = tail(code);
       let (code, name) = read_name(code)?;
       let (code, args) = read_until(code, '}', read_term)?;
-      let term = Term::ctr(name, args).map_err(|erro| ParseErr::new(code, erro))?;
+      let term = Term::ctr(name, args);
       return Ok((code, term));
     },
     '[' => {
       let code = tail(code);
       let (code, vals) = read_until(code, ']', read_term)?;
-      if vals.len() <= 12 { 
-        let term = Term::ctr(
-          Name(name_to_u128_unsafe(&format!("T{}", vals.len()))),
-          vals
-        ).map_err(|erro| ParseErr::new(code, erro))?;
+      let num_vals = vals.len();
+      if num_vals <= 12 {
+        let name = Name::from_str(&format!("T{}", num_vals)).unwrap();
+        let term = Term::ctr(name, vals);
         return Ok((code, term));
       } else {
         return Err(ParseErr { code: code.to_string(), erro: "Tuple too long".to_string() });
@@ -4903,7 +4748,12 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
     // reg Foo.Bar { #x123456 } sign { signature }
     ('r','e','g') => {
       let code = skip(drop(code, 3));
-      let (code, name) = if nth(code,0) == '{' { (code, Name(0)) } else { read_name(code)? };
+      let (code, name) =
+        if nth(code, 0) == '{' {
+          (code, Name::EMPTY)
+        } else {
+          read_name(code)?
+        };
       let (code, unit) = read_char(code, '{')?;
       let code = skip(code);
       let (code, ownr) = match head(code) {
@@ -4915,7 +4765,8 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
           let code = tail(code);
           let (code, name) = read_name(code)?;
           let (code, unit) = read_char(code, '\'')?;
-          (code, name)
+          let numb: U120 = name.into();
+          (code, numb)
         },
         _ => return Err(ParseErr::new(code, "Expected a number representation"))
       };
@@ -5147,12 +4998,14 @@ pub fn print_io_consts() {
   let names = ["done", "take", "save", "call", "subj", "from", "load"];
   for name in names {
     let name = name.to_uppercase();
-    let numb = name_to_u128_unsafe(&format!("IO_{}", name));
+    let name = Name::from_str(&format!("IO_{}", name)).unwrap();
+    let numb = *name;
     println!("const IO_{} : u128 = 0x{:x}; // name_to_u128(\"IO_{}\")", name, numb, name);
   }
   for name in names {
-    let numb = name_to_u128_unsafe(&name);
-    println!("const MC_{} : u128 = 0x{:x}; // name_to_u128(\"{}\")", name.to_uppercase(), numb, name);
+    let name = Name::from_str(&name).unwrap();
+    let numb = *name;
+    println!("const MC_{} : u128 = 0x{:x}; // name_to_u128(\"{}\")", name.to_string().to_uppercase(), numb, name);
   }
 }
 

@@ -2,9 +2,10 @@ use std::convert::TryInto;
 
 use crate::{
   bits::{deserialized_func, serialized_func},
+  common::Name,
   hvm::{
-    self, init_map, init_runtime, name_to_u128_unsafe, read_statements,
-    readback_term, show_term, u128_to_name, view_statements, view_term, Name,
+    self, init_map, init_runtime, read_statements,
+    readback_term, show_term, view_statements, view_term,
     Rollback, Runtime, StatementInfo, Term, U120,
   },
   test::{
@@ -244,8 +245,8 @@ fn dupped_state_test(temp_dir: TempPath) {
     expected_other_readback: &str,
   ) {
     let original_state =
-      rt.read_disk(Name::try_from("Original").unwrap()).unwrap();
-    let other_state = rt.read_disk(Name::try_from("Other").unwrap()).unwrap();
+      rt.read_disk(Name::try_from("Original").unwrap().into()).unwrap();
+    let other_state = rt.read_disk(Name::try_from("Other").unwrap().into()).unwrap();
     println!();
     println!("original ptr: {}", original_state);
     println!("original: {}", show_term(&rt, original_state, None));
@@ -359,10 +360,9 @@ fn readback(
 proptest! {
   #[test]
   fn name_conversion(name in name()) {
-    let name = *name;
-    let a = u128_to_name(name);
-    let b = name_to_u128_unsafe(&a);
-    let c = u128_to_name(b);
+    let a = name.to_string();
+    let b = Name::from_str(&a).unwrap();
+    let c = b.to_string();
     assert_eq!(name, b);
     assert_eq!(a, c);
   }

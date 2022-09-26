@@ -22,11 +22,11 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use hvm::Name;
 use warp::Future;
 
 use crate::api::{client as api_client, Hash, HexStatement};
 use crate::bits::{deserialized_statement, serialized_statement};
+use crate::common::Name;
 use crate::crypto;
 use crate::hvm::{self, view_statement, Statement};
 use crate::node::{self, read_address, MinerCommunication, Node};

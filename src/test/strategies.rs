@@ -2,9 +2,10 @@ use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
   crypto,
+  common::Name,
   hvm::{
-    init_map, name_to_u128_unsafe, Arits, CompFunc, CompRule, Func, Funcs,
-    Heap, Map, Name, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
+    init_map, Arits, CompFunc, CompRule, Func, Funcs,
+    Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
     SerializedHeap, Statement, Store, Term, Var, U120,
   },
   node::{hash_bytes, Address, Block, Body, Message, Peer, Transaction},
@@ -23,12 +24,11 @@ pub fn name() -> impl Strategy<Value = Name> {
   // TODO: temporary fix to new limitation due
   // to the fact that is not possible make a name
   // that start with a number anymore
-  "[a-z][a-zA-Z0-9_]{1,19}"
+  "[a-z][a-zA-Z0-9_]{1,11}"
     .prop_filter("Differente than 'ask'", |s| s != "ask")
     .prop_filter("Differente than 'let'", |s| s != "let")
     .prop_filter("Differente than 'dup'", |s| s != "dup")
-    .prop_map(|s| name_to_u128_unsafe(&s))
-    .prop_map(|s| Name::from_u128_unchecked(s))
+    .prop_map(|s| Name::from_str(&s).unwrap())
 }
 
 pub fn u120() -> impl Strategy<Value = U120> {
@@ -37,8 +37,7 @@ pub fn u120() -> impl Strategy<Value = U120> {
 
 pub fn small_name() -> impl Strategy<Value = Name> {
   "[A-Z][a-zA-Z0-9_]{0,11}"
-    .prop_map(|s| name_to_u128_unsafe(&s))
-    .prop_map(|s| Name::from_u128_unchecked(s))
+    .prop_map(|s| Name::from_str(&s).unwrap())
 }
 
 // generate terms
@@ -123,7 +122,7 @@ pub fn statement() -> impl Strategy<Value = Statement> {
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
     (term(), option::of(sign()))
       .prop_map(|(t, s)| { Statement::Run { expr: t, sign: s } }),
-    (name(), name(), option::of(sign()))
+    (name(), u120(), option::of(sign()))
       .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
 }
