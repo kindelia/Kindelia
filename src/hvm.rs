@@ -4207,11 +4207,11 @@ fn show_runtime_error(rt: &Runtime, err: RuntimeError) -> String {
     RuntimeError::DivisionByZero => "Tried to divide by zero.".to_string(),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
-        EffectFailure::NonExistantState(state) => format!("Tried to read state of {} but did not exist.", state),
-        EffectFailure::StateIsZero(state) => format!("Tried to read state that was taken {}", state),
-        EffectFailure::InvalidCallArg { caller, callee, arg } => format!("{} tried to call {} with invalid argument {}", caller, callee, arg),
-        EffectFailure::InvalidIOCtr(name) => format!("{} is not an IO constructor.", name),
-        EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", show_ptr(term)), // READBACK? NOT?
+        EffectFailure::NonExistantState(state) => format!("Tried to read state of '{}' but did not exist.", state),
+        EffectFailure::StateIsZero(state) => format!("Tried to read state that was taken '{}'", state),
+        EffectFailure::InvalidCallArg { caller, callee, arg } => format!("'{}' tried to call '{}' with invalid argument '{}'", caller, callee, arg),
+        EffectFailure::InvalidIOCtr(name) => format!("'{}' is not an IO constructor.", name),
+        EffectFailure::InvalidIONonCtr(term) => format!("'{}' is not an IO term", show_ptr(term)), // READBACK? NOT?
     }
   }
 }
