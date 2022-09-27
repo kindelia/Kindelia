@@ -474,17 +474,19 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
+  DivisionByZero,
+  ArityMismatch { name: Name, expected: usize, got: usize },
+  UnboundVar { name: Name },
   EffectFailure(EffectFailure),
-  DivisionByZero
 }
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
-  NonExistantState(U120),
+  NoSuchState(U120),
   StateIsZero(U120),
   InvalidCallArg { caller: U120, callee: U120, arg: Ptr },
   InvalidIOCtr(Name),
-  InvalidIONonCtr(Ptr)
+  InvalidIONonCtr(Ptr),
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -895,6 +897,19 @@ pub fn init_map<A>() -> Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
+// Address
+// -------
+
+fn show_addr(addr: U120) -> String {
+  let name = Name::try_from(addr);
+  if let Ok(name) = name {
+    if !name.is_empty() {
+      return name.to_string();
+    }
+  }
+  addr.to_hex_literal()
+}
+
 // U120
 // ====
 
@@ -906,7 +921,7 @@ impl U120 {
     let res = self.0 + other.0;
     U120(res & U120::MAX.0)
   }
-  
+
   pub fn wrapping_sub(self, other: U120) -> U120 {
     let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
     U120::wrapping_add(self, other_complement)
@@ -953,6 +968,10 @@ impl U120 {
 
   pub fn wrapping_shr(self, other: U120) -> U120 {
     U120(self.0 >> (other.0 % 120))
+  }
+
+  pub fn to_hex_literal(&self) -> String {
+    format!("#x{:x}", self.0)
   }
 }
 
@@ -1682,25 +1701,15 @@ impl Runtime {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Ptr {
+  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
     return create_term(self, term, loc, vars_data);
   }
 
-  pub fn alloc_term(&mut self, term: &Term) -> u128 {
+  pub fn alloc_term(&mut self, term: &Term) -> Result<u128, RuntimeError> {
     let loc = alloc(self, 1);
-    let lnk = create_term(self, term, loc, &mut init_map());
-    self.write(loc, lnk);
-    return loc;
-  }
-
-  pub fn alloc_term_from_code(&mut self, code: &str) -> u128 {
-    let term = read_term(code);
-    match term {
-      Ok((.., term)) => {
-        return self.alloc_term(&term);
-      }
-      Err(err) => 0 // TODO: what should we do here?
-    }
+    let ptr = create_term(self, term, loc, &mut init_map())?;
+    self.write(loc, ptr);
+    Ok(loc)
   }
 
   pub fn collect(&mut self, term: Ptr) {
@@ -1859,7 +1868,7 @@ impl Runtime {
                 return Err(RuntimeError::EffectFailure(EffectFailure::StateIsZero(subject)));
               }
             }
-            return Err(RuntimeError::EffectFailure(EffectFailure::NonExistantState(subject)));
+            return Err(RuntimeError::EffectFailure(EffectFailure::NoSuchState(subject)));
           }
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
@@ -1877,6 +1886,7 @@ impl Runtime {
             let fnid = ask_arg(self, term, 0);
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
+            let fnid = get_num(fnid);
 
             // Builds the argument vector
             let arit = self.get_arity(&Name::new_unsafe(get_ext(argm)));
@@ -1888,14 +1898,13 @@ impl Runtime {
             for i in 0 .. arit {
               let argm = reduce(self, get_loc(argm, 0), mana)?;
               if get_tag(argm) != NUM {
-                let f = EffectFailure::InvalidCallArg { caller: subject, callee: U120(fnid), arg: argm };
+                let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
                 return Err(RuntimeError::EffectFailure(f));
               }
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, *get_num(fnid), &[argm]);
-            let fnid = get_num(fnid);
+            let ioxp = alloc_fun(self, *fnid, &[argm]);
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
@@ -2019,9 +2028,17 @@ impl Runtime {
   #[allow(clippy::useless_format)]
   pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
-      rt.undo();
-      println!("{:03$} [{}] Error: {}", rt.get_tick(), tag, err, 10);
+      rt.undo(); // TODO: don't undo inside here. too much coupling
+      println!("{:03$} [{}] ERROR: {}", rt.get_tick(), tag, err, 10);
       return Err(StatementErr { err });
+    }
+    fn handle_runtime_err<T>(rt: &mut Runtime, tag: &str, val: Result<T, RuntimeError>) -> Result<T, StatementErr> {
+      val.map_err(|err| {
+        let err = show_runtime_error(err);
+        rt.undo(); // TODO: don't undo inside here. too much coupling
+        println!("{:03$} [{}] ERROR: {}", rt.get_tick(), tag, err, 10);
+        StatementErr { err }
+      })
     }
     let hash = hash_statement(statement);
     let res = match statement {
@@ -2044,6 +2061,7 @@ impl Runtime {
         self.set_arity(*name, args.len() as u128);
         self.define_function(*name, func);
         let state = self.create_term(init, 0, &mut init_map());
+        let state = handle_runtime_err(self, "fun", state)?;
         self.write_disk(U120::from(*name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Fun { name: *name, args }
@@ -2074,14 +2092,15 @@ impl Runtime {
         }
         let subj = self.get_subject(&sign, hash);
         let host = self.alloc_term(expr);
+        let host = handle_runtime_err(self, "run", host)?;
         let done = self.run_io(U120(subj), U120(0), host, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(self, err));
+          return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
         let done = self.compute(done, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(self, err));
+          return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
         // The term return by Done is only read and stored in debug mode for
@@ -2452,7 +2471,7 @@ impl Runtime {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
-
+  // TODO: return Option
   pub fn get_arity(&self, name: &Name) -> u128 {
     if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
       return arity;
@@ -3004,7 +3023,7 @@ pub fn is_linear(term: &Term) -> bool {
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Ptr {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
   fn consume(rt: &mut Runtime, loc: u128, name: u128, vars_data: &mut Map<Vec<u128>>) -> Option<Ptr> {
     let got = vars_data.get_mut(&name)?;
     let got = got.pop()?;
@@ -3025,7 +3044,8 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", name, vars_data.len());
-      consume(rt, loc, **name, vars_data).unwrap_or_else(|| Num(0)) // TODO: handle error / panic
+      consume(rt, loc, **name, vars_data).ok_or_else(||
+        RuntimeError::UnboundVar { name: *name })
     }
     Term::Dup { nam0, nam1, expr, body } => {
       let node = alloc(rt, 3);
@@ -3033,7 +3053,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       // TODO: Review: expr create_term was moved above the 2 below binds (Dp0
       // and Dp1) to so it consumes variable names so they can be re-binded,
       // allowing: `dup x y = x`
-      let expr = create_term(rt, expr, node + 2, vars_data);
+      let expr = create_term(rt, expr, node + 2, vars_data)?;
       link(rt, node + 2, expr);
       bind(rt, node + 0, **nam0, Dp0(dupk, node), vars_data);
       bind(rt, node + 1, **nam1, Dp1(dupk, node), vars_data);
@@ -3043,54 +3063,56 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
       bind(rt, node + 0, **name, Var(node), vars_data);
-      let body = create_term(rt, body, node + 1, vars_data);
+      let body = create_term(rt, body, node + 1, vars_data)?;
       link(rt, node + 1, body);
-      Lam(node)
+      Ok(Lam(node))
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
-      let func = create_term(rt, func, node + 0, vars_data);
+      let func = create_term(rt, func, node + 0, vars_data)?;
       link(rt, node + 0, func);
-      let argm = create_term(rt, argm, node + 1, vars_data);
+      let argm = create_term(rt, argm, node + 1, vars_data)?;
       link(rt, node + 1, argm);
-      App(node)
+      Ok(App(node))
     }
     Term::Fun { name, args } => {
-      if args.len() != rt.get_arity(name) as usize {
-        Num(0)
+      let expected = rt.get_arity(name) as usize;
+      if args.len() != expected {
+        Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
         let size = args.len() as u128;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
           link(rt, node + i as u128, arg_lnk);
         }
-        Fun(**name, node)
+        Ok(Fun(**name, node))
       }
     }
     Term::Ctr { name, args } => {
-      if args.len() != rt.get_arity(name) as usize {
-        Num(0)
+      let expected = rt.get_arity(name) as usize;
+      if args.len() != expected {
+        Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
         let size = args.len() as u128;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data);
+          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
           link(rt, node + i as u128, arg_lnk);
         }
-        Ctr(**name, node)
+        Ok(Ctr(**name, node))
       }
     }
     Term::Num { numb } => {
-      Num(**numb)
+      Ok(Num(**numb))
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
-      let val0 = create_term(rt, val0, node + 0, vars_data);
+      let val0 = create_term(rt, val0, node + 0, vars_data)?;
       link(rt, node + 0, val0);
-      let val1 = create_term(rt, val1, node + 1, vars_data);
+      let val1 = create_term(rt, val1, node + 1, vars_data)?;
       link(rt, node + 1, val1);
-      Op2(*oper as u128, node)
+      Ok(Op2(*oper as u128, node))
     }
   }
 }
@@ -3622,7 +3644,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<Vec<u128>>) -> bool {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<Vec<u128>>) -> Result<bool, RuntimeError> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -3657,7 +3679,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 link(rt, par0 + 1, Fun(funx, fun1));
                 let done = Par(get_ext(argn), par0);
                 link(rt, host, done);
-                return true;
+                return Ok(true);
               }
             }
             // For each rule condition vector
@@ -3719,7 +3741,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 }
                 // Builds the right-hand side term (ex: `(Succ (Add a b))`)
                 //println!("-- vars: {:?}", vars);
-                let done = create_term(rt, &rule.body, host, vars_data);
+                let done = create_term(rt, &rule.body, host, vars_data)?;
                 // Links the host location to it
                 link(rt, host, done);
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
@@ -3735,15 +3757,15 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 //     }
                 //   }
                 // }
-                return true;
+                return Ok(true);
               }
             }
-            return false;
+            return Ok(false);
           }
 
           let fid = get_ext(term);
           if let Some(func) = rt.get_func(&Name::new_unsafe(fid)) {
-            if call_function(rt, func, host, term, mana, &mut vars_data) {
+            if call_function(rt, func, host, term, mana, &mut vars_data)? {
               init = 1;
               continue;
             }
@@ -4110,18 +4132,23 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   text
 }
 
-fn show_runtime_error(rt: &Runtime, err: RuntimeError) -> String {
+fn show_runtime_error(err: RuntimeError) -> String {
   match err {
-    RuntimeError::NotEnoughMana => "Not enough mana.".to_string(),
-    RuntimeError::NotEnoughSpace => "Not enough space.".to_string(),
-    RuntimeError::DivisionByZero => "Tried to divide by zero.".to_string(),
+    RuntimeError::NotEnoughMana => "Not enough mana".to_string(),
+    RuntimeError::NotEnoughSpace => "Not enough space".to_string(),
+    RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
+    RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
+    RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
-        EffectFailure::NonExistantState(state) => format!("Tried to read state of {} but did not exist.", state),
-        EffectFailure::StateIsZero(state) => format!("Tried to read state that was taken {}", state),
-        EffectFailure::InvalidCallArg { caller, callee, arg } => format!("{} tried to call {} with invalid argument {}", caller, callee, arg),
-        EffectFailure::InvalidIOCtr(name) => format!("{} is not an IO constructor.", name),
-        EffectFailure::InvalidIONonCtr(term) => format!("{} is not an IO term", show_ptr(term)), // READBACK? NOT?
+        EffectFailure::NoSuchState(addr) => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
+        EffectFailure::StateIsZero(addr) => format!("Tried to read state that was taken '{}'", show_addr(addr)),
+        EffectFailure::InvalidCallArg { caller, callee, arg } => {
+          let pos = get_val(arg);
+          format!("'{}' tried to call '{}' with invalid argument '{}'", show_addr(caller), show_addr(callee), show_ptr(arg))
+        },
+        EffectFailure::InvalidIOCtr(name) => format!("'{}' is not an IO constructor", name),
+        EffectFailure::InvalidIONonCtr(ptr) => format!("'{}' is not an IO term", show_ptr(ptr)),
     }
   }
 }
@@ -4215,7 +4242,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
 
     let mut output = Vec::new();
     let mut stack = vec![StackItem::Term(term)];
-      
+
     let print_stack = |stack: &Vec<StackItem>| {
       println!("Stack: ");
       for (i, item) in stack.iter().rev().enumerate() {
