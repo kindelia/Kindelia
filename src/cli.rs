@@ -206,6 +206,11 @@ pub enum CliCommand {
     /// The shell to generate completion for.
     shell: String,
   },
+  Util {
+    /// Which command run.
+    #[clap(subcommand)]
+    command: UtilCommand,
+  },
 }
 
 #[derive(Subcommand)]
@@ -223,6 +228,14 @@ pub enum NodeCommand {
     /// Mine blocks.
     #[clap(long, short = 'm')]
     mine: bool,
+  },
+}
+
+#[derive(Subcommand)]
+pub enum UtilCommand {
+  /// Generate a new keypair.
+  DecodeName {
+    file: FileInput,
   },
 }
 
@@ -561,6 +574,30 @@ pub fn run_cli() -> Result<(), String> {
           // Start node
           start(data_path, initial_peers, network_id, mine);
 
+          Ok(())
+        }
+      }
+    }
+    CliCommand::Util { command } => {
+      match command {
+        UtilCommand::DecodeName { file } => {
+          let txt = file.read_to_string()?;
+          let data: Result<Vec<Vec<u8>>, _> = txt
+            .trim()
+            .split(|c: char| c.is_whitespace())
+            .map(hex::decode)
+            .collect();
+          let data = data.map_err(|err| format!("Invalid hex string: {}", err))?;
+          let nums = data.iter().map(|v| bytes_to_u128(v));
+          for num in nums {
+            if let Some(num) = num {
+              if let Ok(name) = Name::try_from(num) {
+                println!("{}", name);
+                continue;
+              }
+            }
+            println!();
+          }
           Ok(())
         }
       }
@@ -927,6 +964,18 @@ fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
       }
     }
   }
+}
+
+// Util
+// ====
+
+pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
+  let mut num: u128 = 0;
+  for byte in bytes {
+    num = num.checked_shl(8)?;
+    num += *byte as u128;
+  }
+  Some(num)
 }
 
 // Auxiliar traits and types
