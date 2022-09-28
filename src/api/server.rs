@@ -325,7 +325,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let query_tx = node_query_sender.clone();
   let interact_test =
-    post().and(interact_base).and(path!("test")).and(body::bytes()).and_then(
+    post().and(interact_base).and(path!("run")).and(body::bytes()).and_then(
       move |code: warp::hyper::body::Bytes| {
         let query_tx = query_tx.clone();
         async move {
@@ -348,7 +348,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let query_tx = node_query_sender.clone();
   let interact_send =
-    post().and(interact_base).and(path!("send")).and(body::bytes()).and_then(
+    post().and(interact_base).and(path!("publish")).and(body::bytes()).and_then(
       move |code: warp::hyper::body::Bytes| {
         let query_tx = query_tx.clone();
         async move {
