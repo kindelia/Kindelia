@@ -474,33 +474,21 @@ pub struct Runtime {
 pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
-<<<<<<< HEAD
-  EffectFailure(EffectFailure),
-  DivisionByZero
-=======
   DivisionByZero,
+  CtrOrFunNotDefined { name: Name },
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
   EffectFailure(EffectFailure),
 }
 
-#[derive(Debug, Clone)]
-pub enum EffectFailure {
-  NoSuchState(U120),
-  StateIsZero(U120),
-  InvalidCallArg { caller: U120, callee: U120, arg: Ptr },
-  InvalidIOCtr(Name),
-  InvalidIONonCtr(Ptr),
->>>>>>> dev
-}
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
-  NonExistantState(Name),
-  StateIsZero(Name),
-  InvalidCallArg {caller: Name, callee: Name, arg: Ptr},
-  InvalidIOCtr(Name),
-  InvalidIONonCtr(Ptr)
+  NoSuchState { state: U120 },
+  StateIsZero { state: U120 },
+  InvalidCallArg {caller: U120, callee: U120, arg: Ptr},
+  InvalidIOCtr { name: Name },
+  InvalidIONonCtr { ptr: Ptr },
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -1877,16 +1865,15 @@ impl Runtime {
                 clear(self, host, 1);
                 clear(self, get_loc(term, 0), 1);
                 return done;
-              }
-              else {
-                return Err(RuntimeError::EffectFailure(EffectFailure::StateIsZero(subject)));
+              } else {
+                return Err(RuntimeError::EffectFailure(
+                  EffectFailure::StateIsZero { state: subject },
+                ));
               }
             }
-<<<<<<< HEAD
-            return Err(RuntimeError::EffectFailure(EffectFailure::NonExistantState(subject)));
-=======
-            return Err(RuntimeError::EffectFailure(EffectFailure::NoSuchState(subject)));
->>>>>>> dev
+            return Err(RuntimeError::EffectFailure(
+              EffectFailure::NoSuchState { state: subject },
+            ));
           }
           IO_SAVE => {
             //println!("- IO_SAVE subject is {} {}", u128_to_name(subject), subject);
@@ -1907,7 +1894,10 @@ impl Runtime {
             let fnid = get_num(fnid);
 
             // Builds the argument vector
-            let arit = self.get_arity(&Name::new_unsafe(get_ext(argm)));
+            let name = Name::new_unsafe(get_ext(argm));
+            let arit = self
+              .get_arity(&name)
+              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             // Checks if the argument is a constructor with numeric fields. This is needed since
             // Kindelia's language is untyped, yet contracts can call each other freely. That would
             // allow a contract to pass an argument with an unexpected type to another, corrupting
@@ -1916,12 +1906,8 @@ impl Runtime {
             for i in 0 .. arit {
               let argm = reduce(self, get_loc(argm, 0), mana)?;
               if get_tag(argm) != NUM {
-<<<<<<< HEAD
-                return Err(RuntimeError::EffectFailure(EffectFailure::InvalidCallArg { caller: subject, callee: Name(fnid), arg: argm }));
-=======
                 let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
                 return Err(RuntimeError::EffectFailure(f));
->>>>>>> dev
               }
             }
             // Calls called function IO, changing the subject
@@ -1994,17 +1980,17 @@ impl Runtime {
             return done;
           }
           _ => {
-<<<<<<< HEAD
-            return Err(RuntimeError::EffectFailure(EffectFailure::InvalidIOCtr(Name(ext))));
-=======
             let name = Name::new_unsafe(ext);
-            return Err(RuntimeError::EffectFailure(EffectFailure::InvalidIOCtr(name)));
->>>>>>> dev
+            return Err(RuntimeError::EffectFailure(
+              EffectFailure::InvalidIOCtr { name },
+            ));
           }
         }
       }
       _ => {
-        return Err(RuntimeError::EffectFailure(EffectFailure::InvalidIONonCtr(term)));
+        return Err(RuntimeError::EffectFailure(
+          EffectFailure::InvalidIONonCtr { ptr: term },
+        ));
       }
     }
   }
@@ -2121,12 +2107,12 @@ impl Runtime {
         let host = handle_runtime_err(self, "run", host)?;
         let done = self.run_io(U120(subj), U120(0), host, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(self, err));
+          return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
         let done = self.compute(done, mana_lim);
         if let Err(err) = done {
-          return error(self, "run", show_runtime_error(self, err));
+          return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
         // The term return by Done is only read and stored in debug mode for
@@ -2498,12 +2484,8 @@ impl Runtime {
   }
 
   // TODO: return Option
-  pub fn get_arity(&self, name: &Name) -> u128 {
-    if let Some(arity) = self.get_with(None, None, |heap| heap.read_arit(name)) {
-      return arity;
-    } else {
-      return U128_NONE;
-    }
+  pub fn get_arity(&self, name: &Name) -> Option<u128> {
+    self.get_with(None, None, |heap| heap.read_arit(name))
   }
 
   pub fn set_arity(&mut self, name: Name, arity: u128) {
@@ -2913,7 +2895,9 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
       }
       NUM => {}
       CTR | FUN => {
-        let arity = rt.get_arity(&Name::new_unsafe(get_ext(term)));
+        let arity = rt.get_arity(&Name::new_unsafe(get_ext(term))).unwrap();
+        // NOTE: should never be none, should panic
+        // TODO: remove unwrap?
         for i in 0 .. arity {
           if i < arity - 1 {
             stack.push(ask_arg(rt, term, i));
@@ -3058,11 +3042,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 
   fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
     // println!("~~ bind {} {}", u128_to_name(name), show_ptr(lnk));
-<<<<<<< HEAD
-    if name == VAR_NONE {
-=======
     if name == Name::_NONE {
->>>>>>> dev
       link(rt, loc, Era());
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
@@ -3106,7 +3086,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       Ok(App(node))
     }
     Term::Fun { name, args } => {
-      let expected = rt.get_arity(name) as usize;
+      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
@@ -3120,7 +3100,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       }
     }
     Term::Ctr { name, args } => {
-      let expected = rt.get_arity(name) as usize;
+      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
@@ -3385,7 +3365,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
         }
         FUN => {
           let name = Name::new_unsafe(get_ext(term));
-          let ari = rt.get_arity(&name);
+          let ari = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
           if let Some(func) = &rt.get_func(&name) {
             if ari == func.arity {
               if func.redux.len() == 0 {
@@ -3548,7 +3528,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           } else if get_tag(arg0) == CTR {
             //println!("dup-ctr");
             let func = get_ext(arg0);
-            let arit = rt.get_arity(&Name::new_unsafe(func));
+            let name = Name::new_unsafe(func);
+            let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
@@ -3686,7 +3667,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               if get_tag(ask_arg(rt, term, *idx)) == SUP {
                 //println!("fun-sup");
                 let funx = get_ext(term);
-                let arit = rt.get_arity(&Name::new_unsafe(funx));
+                let name = Name::new_unsafe(funx);
+                let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
                 rt.set_mana(rt.get_mana() + FunSupMana(arit));
                 rt.set_rwts(rt.get_rwts() + 1);
                 let argn = ask_arg(rt, term, *idx);
@@ -3878,7 +3860,9 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
               stack.push(StackItem::Host(loc_2, mana));
             }
             CTR | FUN => {
-              for i in (0..rt.get_arity(&Name::new_unsafe(get_ext(norm)))).rev() {
+              let name = Name::new_unsafe(get_ext(norm));
+              let arity = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+              for i in (0..arity).rev() {
                 let loc_i = get_loc(norm, i);
                 stack.push(StackItem::LinkResolver(loc_i));
                 stack.push(StackItem::Host(loc_i, mana));
@@ -4011,7 +3995,10 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
           stack.push(ask_arg(rt, term, 0));
         }
         CTR | FUN => {
-          let arity = rt.get_arity(&Name::new_unsafe(get_ext(term)));
+          let name = Name::new_unsafe(get_ext(term));
+          let arity = rt.get_arity(&name).unwrap();
+          // NOTE: arity should never be None (read from memory), should panic
+          // TODO: remove unwrap?
           for i in (0..arity).rev() {
             stack.push(ask_arg(rt, term, i));
           }
@@ -4109,7 +4096,9 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
             }
             CTR => {
               let name = Name::new_unsafe(get_ext(term));
-              let mut arit = rt.get_arity(&name);
+              let mut arit = rt.get_arity(&name).unwrap();
+              // NOTE: arity should never be zero (read from memory)
+              // TODO: remove unwrap
               let mut name = view_name(name);
               // Pretty print names
               if name == "Name" && arit == 1 {
@@ -4133,7 +4122,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               let name = Name::new_unsafe(get_ext(term));
               output.push(format!("({}", name));
               stack.push(StackItem::Str(")".to_string()));
-              let arit = rt.get_arity(&name);
+              let arit = rt.get_arity(&name).unwrap();
               for i in (0..arit).rev() {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
                 stack.push(StackItem::Str(" ".to_string()));
@@ -4169,17 +4158,18 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::NotEnoughSpace => "Not enough space".to_string(),
     RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
     RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
+    RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
-        EffectFailure::NoSuchState(addr) => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
-        EffectFailure::StateIsZero(addr) => format!("Tried to read state that was taken '{}'", show_addr(addr)),
+        EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
+        EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'", show_addr(addr)),
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
           let pos = get_val(arg);
           format!("'{}' tried to call '{}' with invalid argument '{}'", show_addr(caller), show_addr(callee), show_ptr(arg))
         },
-        EffectFailure::InvalidIOCtr(name) => format!("'{}' is not an IO constructor", name),
-        EffectFailure::InvalidIONonCtr(ptr) => format!("'{}' is not an IO term", show_ptr(ptr)),
+        EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor", name),
+        EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term", show_ptr(ptr)),
     }
   }
 }
@@ -4224,7 +4214,9 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
         NUM => {}
         CTR | FUN => {
           let name = Name::new_unsafe(get_ext(term));
-          let arity = rt.get_arity(&name);
+          let arity = rt.get_arity(&name).unwrap();
+          // NOTE: should never be None, should panic.
+          // TODO: remove unwrap?
           for i in (0..arity).rev() {
             let arg = ask_arg(rt, term, i);
             stack.push(arg);
@@ -4363,7 +4355,9 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
             }
             CTR | FUN => {
               let name = Name::new_unsafe(get_ext(term));
-              let arit = rt.get_arity(&name);
+              let arit = rt.get_arity(&name).unwrap();
+              // NOTE: arity cant be None, should panic
+              // TODO: remove unwrap?
               stack.push(StackItem::Resolver(term));
               for i in 0..arit {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
@@ -4402,7 +4396,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
             }
             CTR | FUN => {
               let name = Name::new_unsafe(get_ext(term));
-              let arit = rt.get_arity(&name);
+              let arit = rt.get_arity(&name).unwrap();
               let mut args = Vec::new();
               for i in 0..arit {
                 args.push(output.pop().unwrap());
