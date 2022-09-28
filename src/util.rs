@@ -40,8 +40,13 @@ pub fn print_type_of<T>(_: &T) {
 // Numerics
 // ========
 
-// Size of a u128, in bytes
+/// Size of an u128, in bytes
 pub const U128_SIZE : usize = 128 / 8;
+
+/// Build bit mask
+pub const fn mask(size: usize, pos: usize) -> u128 {
+  ((1 << size) - 1) << pos
+}
 
 // TODO: remove
 pub fn u256(x: u128) -> U256 {

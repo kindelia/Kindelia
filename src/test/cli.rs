@@ -7,6 +7,7 @@ use std::{fmt::Debug, process::Command, process::Stdio};
 
 use crate::api;
 use crate::bits;
+use crate::common;
 use crate::hvm;
 use crate::node::{self, read_address};
 use crate::util;
@@ -63,7 +64,12 @@ fn serialization(#[case] file: &str, temp_file: TempPath) {
 
   // serializes file and saves it in a temp file
   let output = kindelia!().args(["serialize", file]).output().unwrap();
+  let err = get_stderr(&output);
   let output = get_stdout(&output);
+
+  eprintln!("OUT:\n{}", output);
+  eprintln!("ERR:\n{}", err);
+
   std::fs::write(&temp_file.path, &output)
     .expect("Could not write in serialized file");
 
@@ -74,6 +80,8 @@ fn serialization(#[case] file: &str, temp_file: TempPath) {
     .unwrap();
   let output = get_stdout(&output);
   let (_, s2) = hvm::read_statements(&output).unwrap();
+
+  eprintln!("OUT:\n{}", output);
 
   // checks if the statements are equal
   assert_eq!(s1, s2)
@@ -87,7 +95,10 @@ fn serialization(#[case] file: &str, temp_file: TempPath) {
 #[case("example/block_5.kdl", &["{Entry #7 #100 {Entry #2 #200 {Empty}}}"])]
 fn test_examples(#[case] file: &str, #[case] expected_results: &[&str]) {
   let output = kindelia!().args(["test", file]).output().unwrap();
+  let err = get_stderr(&output);
   let output = get_stdout(&output);
+  eprintln!("OUT:\n{}", output);
+  eprintln!("ERR:\n{}", err);
   let results = get_runs_result(&output);
   assert_eq!(results, expected_results)
 }
@@ -207,11 +218,11 @@ fn ctr_response_1() -> api::CtrInfo {
 }
 
 fn reg_response_1() -> api::RegInfo {
-  let names: Vec<hvm::Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
+  let names: Vec<common::Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
     .iter()
     .map(|s| (*s).try_into().unwrap())
     .collect();
-  api::RegInfo { ownr: hvm::Name::from_u128_unchecked(1024), stmt: names }
+  api::RegInfo { ownr: common::Name::from_u128_unchecked(1024), stmt: names }
 }
 
 fn peers_response_1() -> Vec<node::Peer> {
