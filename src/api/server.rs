@@ -3,23 +3,24 @@
 use std::sync::mpsc::SyncSender;
 
 use bit_vec::BitVec;
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
-use warp::hyper::StatusCode;
 use warp::body;
+use warp::hyper::StatusCode;
+use warp::query::query;
 use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
-use warp::query::query;
 
-use super::NodeRequest;
 use super::u256_to_hex;
+use super::NodeRequest;
 use crate::api::HexStatement;
 use crate::bits;
-use crate::hvm::{self, name_to_u128, Name, StatementErr, StatementInfo};
+use crate::common::Name;
+use crate::hvm::{self, StatementErr, StatementInfo};
 use crate::util::U256;
 
 // Util
@@ -60,7 +61,12 @@ where
 // ===
 
 fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
-  names.iter().copied().map(hvm::u128_to_name).collect::<Vec<_>>()
+  names
+    .iter()
+    .copied()
+    .map(Name::new_unsafe)
+    .map(|n| n.to_string())
+    .collect::<Vec<_>>()
 }
 
 // Protocol Serialization
@@ -190,18 +196,17 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   };
 
   let query_tx = node_query_sender.clone();
-  let get_block_hash = path!("block-hash" / u64).and_then(
-    move |index: u64| {
-      let query_tx = query_tx.clone();
-      async move {
-        let block_hash = ask(query_tx, |tx| NodeRequest::GetBlockHash { index, tx }).await;
-        match block_hash {
-          None             => Err(Rejection::from(Error::NotFound)),
-          Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
-        }
+  let get_block_hash = path!("block-hash" / u64).and_then(move |index: u64| {
+    let query_tx = query_tx.clone();
+    async move {
+      let block_hash =
+        ask(query_tx, |tx| NodeRequest::GetBlockHash { index, tx }).await;
+      match block_hash {
+        None => Err(Rejection::from(Error::NotFound)),
+        Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
       }
-    });
-
+    }
+  });
 
   let get_block_go = get_block().and(path!()).map(ok_json);
 
@@ -226,7 +231,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let get_function_base = path!("functions" / String / ..).and_then(
     move |name_txt: String| async move {
-      match name_to_u128(&name_txt) {
+      match Name::from_str(&name_txt) {
         Ok(name) => Ok(name),
         Err(err) => {
           let msg = format!("Invalid function name '{}': {}", name_txt, err);
@@ -257,8 +262,10 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   }
 
   let query_tx = node_query_sender.clone();
-  let get_function_state =
-    get_function_base.and(path!("state")).and(query::<GetStateQuery>()).and_then(move |name: Name, query: GetStateQuery| {
+  let get_function_state = get_function_base
+    .and(path!("state"))
+    .and(query::<GetStateQuery>())
+    .and_then(move |name: Name, query: GetStateQuery| {
       let query_tx = query_tx.clone();
       async move {
         let state =
@@ -281,15 +288,14 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
     .or(get_function) //
     .or(get_function_state);
 
-
   // == Constructors ==
 
   let get_constructor_base = path!("constructor" / String / ..).and_then(
     move |name_txt: String| async move {
-      match name_to_u128(&name_txt) {
+      match Name::from_str(&name_txt) {
         Ok(name) => Ok(name),
         Err(err) => {
-          let msg = format!("Invalid constructor name '{}': {}", name_txt, err);
+          let msg = format!("Invalid function name '{}': {}", name_txt, err);
           Err(reject::custom(InvalidParameter::from(msg)))
         }
       }
@@ -310,7 +316,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
         }
       }
     });
-  
+
   let constructor_router = get_constructor;
 
   // == Interact ==
@@ -319,7 +325,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let query_tx = node_query_sender.clone();
   let interact_test =
-    post().and(interact_base).and(path!("test")).and(body::bytes()).and_then(
+    post().and(interact_base).and(path!("run")).and(body::bytes()).and_then(
       move |code: warp::hyper::body::Bytes| {
         let query_tx = query_tx.clone();
         async move {
@@ -342,7 +348,7 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
 
   let query_tx = node_query_sender.clone();
   let interact_send =
-    post().and(interact_base).and(path!("send")).and(body::bytes()).and_then(
+    post().and(interact_base).and(path!("publish")).and(body::bytes()).and_then(
       move |code: warp::hyper::body::Bytes| {
         let query_tx = query_tx.clone();
         async move {
@@ -389,10 +395,8 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   );
 
   let query_tx = node_query_sender.clone();
-  let interact_publish = post()
-    .and(path!("publish"))
-    .and(json_body())
-    .then(move |code: Vec<HexStatement>| {
+  let interact_publish = post().and(path!("publish")).and(json_body()).then(
+    move |code: Vec<HexStatement>| {
       let query_tx = query_tx.clone();
       async move {
         let code: Vec<hvm::Statement> =
@@ -402,40 +406,38 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
         let result: Vec<Result<(), ()>> = results.into_iter().collect();
         ok_json(result)
       }
-    });
+    },
+  );
 
   let interact_router =
     interact_test.or(interact_send).or(interact_run).or(interact_publish);
 
   // == Reg ==
 
-  let get_reg_base = path!("reg" / String / ..).and_then(
-    move |name_txt: String| async move {
-      match name_to_u128(&name_txt) {
+  let get_reg_base =
+    path!("reg" / String / ..).and_then(move |name_txt: String| async move {
+      match Name::from_str(&name_txt) {
         Ok(name) => Ok(name),
         Err(err) => {
           let msg = format!("Invalid constructor name '{}': {}", name_txt, err);
           Err(reject::custom(InvalidParameter::from(msg)))
         }
       }
-    },
-  );
+    });
 
   let query_tx = node_query_sender.clone();
-  let get_reg =
-    get_reg_base.and(path!()).and_then(move |name: Name| {
-      let query_tx = query_tx.clone();
-      async move {
-        let reg =
-          ask(query_tx, |tx| NodeRequest::GetReg { name, tx }).await;
-        if let Some(reg) = reg {
-          Ok(ok_json(reg))
-        } else {
-          Err(Rejection::from(Error::NotFound))
-        }
+  let get_reg = get_reg_base.and(path!()).and_then(move |name: Name| {
+    let query_tx = query_tx.clone();
+    async move {
+      let reg = ask(query_tx, |tx| NodeRequest::GetReg { name, tx }).await;
+      if let Some(reg) = reg {
+        Ok(ok_json(reg))
+      } else {
+        Err(Rejection::from(Error::NotFound))
       }
-    });
-  
+    }
+  });
+
   let reg_router = get_reg;
 
   // == Peers ==
@@ -443,29 +445,27 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let get_peers_base = path!("peers" / ..);
 
   let query_tx = node_query_sender.clone();
-  let get_peers =
-    get_peers_base.and(path!()).then(move || {
-      let query_tx = query_tx.clone();
-      async move {
-        let peers_store =
-          ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
-        ok_json(peers_store)
-      }
-    });
-  
+  let get_peers = get_peers_base.and(path!()).then(move || {
+    let query_tx = query_tx.clone();
+    async move {
+      let peers_store =
+        ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
+      ok_json(peers_store)
+    }
+  });
+
   let query_tx = node_query_sender.clone();
-  let get_all_peers =
-    get_peers_base.and(path!("all")).then(move || {
-      let query_tx = query_tx.clone();
-      async move {
-        let peers_store =
-          ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
-        ok_json(peers_store)
-      }
-    });
+  let get_all_peers = get_peers_base.and(path!("all")).then(move || {
+    let query_tx = query_tx.clone();
+    async move {
+      let peers_store =
+        ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
+      ok_json(peers_store)
+    }
+  });
 
   let peers_router = get_peers.or(get_all_peers);
-  
+
   // ==
 
   let app = root

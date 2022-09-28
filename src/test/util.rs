@@ -1,9 +1,10 @@
 use rstest::fixture;
 use tokio::runtime;
 
+use crate::common::Name;
 use crate::hvm::{
-  self, init_runtime, name_to_u128_unsafe, read_term, show_term, Name,
-  Rollback, Runtime, Statement, StatementInfo, Term, U128_NONE,
+  self, init_runtime, read_term, show_term, Rollback, Runtime, Statement,
+  StatementInfo, Term, U128_NONE, U120,
 };
 use std::{
   collections::{hash_map::DefaultHasher, HashMap},
@@ -90,11 +91,11 @@ impl RuntimeStateTest {
 pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
   let fn_ids = fn_names
     .iter()
-    .map(|x| Name::from_u128_unchecked(name_to_u128_unsafe(x)))
+    .map(|x| Name::from_str(x).unwrap())
     .collect::<Vec<Name>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
-    let term_lnk = rt.read_disk(fn_id);
+    let term_lnk = rt.read_disk(fn_id.into());
     if let Some(term_lnk) = term_lnk {
       let term_lnk = show_term(rt, term_lnk, None);
 
@@ -275,7 +276,9 @@ fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
   predicate: P,
 ) {
   let tick = rt.get_tick();
-  let state = rt.read_disk(name.try_into().unwrap()).unwrap();
+  let name = Name::from_str(name).unwrap();
+  let name = U120::from(name);
+  let state = rt.read_disk(name).unwrap();
   let state = hvm::readback_term(rt, state, None).unwrap();
   assert!(predicate(tick, &state, rt))
 }

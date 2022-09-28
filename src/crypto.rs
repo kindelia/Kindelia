@@ -6,7 +6,7 @@ use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
 use serde::{Serialize, Deserialize};
 use tiny_keccak::Hasher;
 
-use crate::hvm::Name;
+use crate::common::Name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "&str")]

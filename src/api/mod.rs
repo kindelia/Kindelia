@@ -20,7 +20,7 @@ use crate::hvm;
 use crate::node;
 use crate::{bits, util};
 
-pub use crate::hvm::Name;
+pub use crate::common::Name;
 
 // Util
 // ====

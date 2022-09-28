@@ -4,6 +4,7 @@
 use bit_vec::BitVec;
 use std::collections::HashMap;
 
+use crate::common::Name;
 use crate::crypto;
 use crate::hvm::*;
 use crate::node::*;
@@ -457,13 +458,13 @@ pub fn deserialize_term(bits: &BitVec, index: &mut u128, names: &mut Names) -> O
         let term = deserialize_term(bits, index, names)?;
         return Some(term);
       }, bits, index, names)?;
-      let term = Term::ctr(name, args).ok()?;
+      let term = Term::ctr(name, args);
       Some(term)
     }
     5 => {
       let name = deserialize_name(bits, index, names)?;
       let args = deserialize_list(deserialize_term, bits, index, names)?;
-      let term = Term::fun(name, args).ok()?;
+      let term = Term::fun(name, args);
       Some(term)
     }
     6 => {
@@ -613,7 +614,7 @@ pub fn deserialize_statement(bits: &BitVec, index: &mut u128, names: &mut Names)
     3 => {
       let name = deserialize_name(bits, index, names)?;
       let ownr = deserialize_fixlen(128, bits, index, names)?.low_u128();
-      let ownr: Name = ownr.try_into().ok()?;
+      let ownr: U120 = ownr.try_into().ok()?;
       let sign = deserialize_sign(bits, index, names)?;
       Some(Statement::Reg { name, ownr, sign })
     }
