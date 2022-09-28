@@ -983,11 +983,10 @@ impl Node {
     Some(FuncInfo { func })
   }
   pub fn get_ctr_info(&self, name: &Name) -> Option<CtrInfo> {
-    let arit = self.runtime.get_arity(name);
-    if arit == U128_NONE {
-      None
+    if let Some(arit) = self.runtime.get_arity(name) {
+      Some(CtrInfo { arit: arit as u64 })
     } else {
-      Some(CtrInfo { arit: arit as u64 }) 
+      None
     }
   }
 
