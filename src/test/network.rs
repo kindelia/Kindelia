@@ -70,7 +70,7 @@ fn network() {
 // Simulation address
 
 /// The address of the simulation will be a simple `u32` value.
-impl net::ProtoCommAddress for u32 {}
+impl net::ProtoAddr for u32 {}
 
 /// `ProtoSerialize` implementation of `u32`, necessary to satisfy
 /// the ProtoCommAddress trait.

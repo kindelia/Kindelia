@@ -21,6 +21,7 @@ use crate::api::HexStatement;
 use crate::common::Name;
 use crate::hvm::{self, StatementErr, StatementInfo};
 use crate::bits::ProtoSerialize;
+use crate::net::ProtoAddr;
 use crate::util::U256;
 
 // Util
@@ -131,7 +132,7 @@ async fn handle_rejection(
   }
 }
 
-pub fn http_api_loop(node_query_sender: SyncSender<NodeRequest>) {
+pub fn http_api_loop<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
@@ -139,11 +140,22 @@ pub fn http_api_loop(node_query_sender: SyncSender<NodeRequest>) {
   });
 }
 
-async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
-  async fn ask<T>(
-    node_query_tx: SyncSender<NodeRequest>,
-    f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest,
-  ) -> T {
+async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) {
+  // async fn ask<T>(
+  //   node_query_tx: SyncSender<NodeRequest<A>>,
+  //   f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest<A>,
+  // ) -> T {
+  //   let (tx, rx) = oneshot::channel();
+  //   let request = f(tx);
+  //   node_query_tx.send(request).unwrap();
+  //   let result = rx.await.expect("Node query channel closed");
+  //   result
+  // }
+  
+  let ask = <T>|
+    node_query_tx: SyncSender<NodeRequest<A>>,
+    f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest<A>,
+  | -> T {
     let (tx, rx) = oneshot::channel();
     let request = f(tx);
     node_query_tx.send(request).unwrap();

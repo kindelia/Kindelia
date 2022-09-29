@@ -1,22 +1,18 @@
-use std::{
-  fmt::{Debug, Display},
-  hash::Hash,
-  net::{Ipv4Addr, SocketAddrV4, UdpSocket},
-};
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
 use bit_vec::BitVec;
 
-use crate::{
-  bits::{ProtoSerialize},
-  node::Message,
-  util::bitvec_to_bytes,
-};
+use crate::bits::ProtoSerialize;
+use crate::node::Message;
+use crate::util::bitvec_to_bytes;
 
 // Traits
-// =======================
+// ======
 
 /// A representation of a ProtoComm address
-pub trait ProtoCommAddress
+pub trait ProtoAddr
 where
   Self: ProtoSerialize
     + Eq
@@ -36,7 +32,7 @@ pub trait ProtoComm
 where
   Self: Sized + Send,
 {
-  type Address: ProtoCommAddress;
+  type Address: ProtoAddr;
   fn proto_send(
     &mut self,
     addresses: Vec<Self::Address>,
@@ -47,7 +43,7 @@ where
 }
 
 // UDP Implementation
-// ==============================
+// ==================
 
 /// Default UDP port to listen to
 pub const UDP_PORT: u16 = 42000;
@@ -60,7 +56,7 @@ pub enum Address {
   IPv4 { val0: u8, val1: u8, val2: u8, val3: u8, port: u16 },
 }
 
-impl ProtoCommAddress for Address {}
+impl ProtoAddr for Address {}
 
 impl std::fmt::Display for Address {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

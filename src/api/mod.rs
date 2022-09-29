@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 
 use crate::bits::ProtoSerialize;
 use crate::hvm;
+use crate::net::ProtoAddr;
 use crate::node;
 use crate::util;
 
@@ -286,7 +287,7 @@ type RequestAnswer<T> = oneshot::Sender<T>;
 // Node Internal API
 // =================
 
-pub enum NodeRequest {
+pub enum NodeRequest <A: ProtoAddr> {
   GetStats {
     tx: RequestAnswer<Stats>,
   },
@@ -313,11 +314,10 @@ pub enum NodeRequest {
     name: Name,
     tx: RequestAnswer<Option<hvm::Term>>,
   },
-  // TODO
-  // GetPeers {
-  //   all: bool,
-  //   tx: RequestAnswer<Vec<node::Peer<node::Address>>>,
-  // },
+  GetPeers {
+    all: bool,
+    tx: RequestAnswer<Vec<node::Peer<A>>>,
+  },
   GetConstructor {
     name: Name,
     tx: RequestAnswer<Option<CtrInfo>>,

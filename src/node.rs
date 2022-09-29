@@ -19,7 +19,7 @@ use sha3::Digest;
 
 use std::hash::BuildHasherDefault;
 use crate::NoHashHasher as NHH;
-use crate::net::{ProtoComm, ProtoCommAddress, Address};
+use crate::net::{ProtoComm, ProtoAddr, Address};
 use crate::print_with_timestamp;
 
 use crate::api::{self, CtrInfo, RegInfo};
@@ -93,7 +93,7 @@ pub struct Node<C: ProtoComm> {
   pub comm       : C,                                // UDP socket
   pub addr       : C::Address,                       // UDP port
   pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest>,            // Receives an API request
+  pub receiver   : Receiver<NodeRequest<C::Address>>,// Receives an API request
   pub tip        : U256,                             // current tip
   pub block      : U256Map<Block>,                   // block_hash -> block
   pub pending    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
@@ -112,17 +112,17 @@ pub struct Node<C: ProtoComm> {
 // -----
 
 #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Peer<A: ProtoCommAddress> {
+pub struct Peer<A: ProtoAddr> {
   pub seen_at: u128,
   pub address: A,
 }
 
-pub struct PeersStore<A: ProtoCommAddress> {
+pub struct PeersStore<A: ProtoAddr> {
   seen: HashMap<A, Peer<A>>,
   active: HashMap<A, Peer<A>>,
 }
 
-impl <A: ProtoCommAddress> PeersStore<A> {
+impl <A: ProtoAddr> PeersStore<A> {
   pub fn new() -> PeersStore<A> {
     PeersStore {
       seen: HashMap::new(),
@@ -229,7 +229,7 @@ pub struct MinerCommunication {
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
-pub enum Message<A: ProtoCommAddress> {
+pub enum Message<A: ProtoAddr> {
   NoticeTheseBlocks {
     magic: u64,
     gossip: bool,
@@ -630,7 +630,7 @@ impl <C: ProtoComm> Node<C> {
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
     comm: C
-  ) -> (SyncSender<NodeRequest>, Self) {
+  ) -> (SyncSender<NodeRequest<C::Address>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
     let mut node = Node {
@@ -961,7 +961,7 @@ impl <C: ProtoComm> Node<C> {
     Some(RegInfo { ownr, stmt })
   }
 
-  pub fn handle_request(&mut self, request: NodeRequest) {
+  pub fn handle_request(&mut self, request: NodeRequest<C::Address>) {
     // TODO: handle unwraps
     match request {
       NodeRequest::GetStats { tx: answer } => {
@@ -1027,16 +1027,15 @@ impl <C: ProtoComm> Node<C> {
         let state = self.runtime.read_disk_as_term(name.into(), Some(2 << 16));
         answer.send(state).unwrap();
       },
-      // TODO
-      // NodeRequest::GetPeers { all, tx: answer } => {
-      //   let peers = 
-      //     if all {
-      //       self.peers.get_all()
-      //     } else {
-      //       self.peers.get_all_active()
-      //     };
-      //   answer.send(peers).unwrap();
-      // },
+      NodeRequest::GetPeers { all, tx: answer } => {
+        let peers = 
+          if all {
+            self.peers.get_all()
+          } else {
+            self.peers.get_all_active()
+          };
+        answer.send(peers).unwrap();
+      },
       NodeRequest::GetConstructor { name, tx: answer } => {
         let info = self.get_ctr_info(&name);
         answer.send(info).unwrap();

@@ -8,7 +8,7 @@ use crate::common::Name;
 use crate::crypto;
 use crate::hvm::*;
 use crate::net;
-use crate::net::ProtoCommAddress;
+use crate::net::ProtoAddr;
 use crate::node::*;
 use crate::util::*;
 
@@ -618,7 +618,7 @@ impl ProtoSerialize for net::Address {
   }
 }
 
-impl<A: ProtoCommAddress> ProtoSerialize for Peer<A> {
+impl<A: ProtoAddr> ProtoSerialize for Peer<A> {
   fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
     self.address.proto_serialize(bits, names);
     serialize_fixlen(48, &u256(self.seen_at as u128), bits, names);
@@ -635,7 +635,7 @@ impl<A: ProtoCommAddress> ProtoSerialize for Peer<A> {
   }
 }
 
-impl<A: ProtoCommAddress> ProtoSerialize for Message<A> {
+impl<A: ProtoAddr> ProtoSerialize for Message<A> {
   fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
     match self {
       // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
