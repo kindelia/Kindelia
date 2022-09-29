@@ -122,9 +122,10 @@ async fn handle_rejection(
     let msg = format!("parameter {} is invalid: {}", name, e.message);
     Ok(reply::with_status(msg, StatusCode::BAD_REQUEST))
   } else {
-    eprintln!("unhandled rejection: {:?}", err);
+    eprintln!("HTTP API: unhandled rejection: {:?}", err);
+    let err = format!("INTERNAL_SERVER_ERROR: {:?}", err);
     Ok(reply::with_status(
-      "INTERNAL_SERVER_ERROR".into(),
+      err,
       StatusCode::INTERNAL_SERVER_ERROR,
     ))
   }
@@ -480,6 +481,9 @@ async fn api_serve(node_query_sender: SyncSender<NodeRequest>) {
   let app = app.map(|reply| {
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")
   });
+
+  // let cors = warp::cors().allow_any_origin();
+  // let app = app.with(cors);
 
   let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
   // let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();
