@@ -1,8 +1,10 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddrV4};
+pub use std::net::UdpSocket;
 
 use bit_vec::BitVec;
+use serde;
 
 use crate::bits::ProtoSerialize;
 use crate::node::Message;
@@ -22,7 +24,8 @@ where
     + Copy
     + Clone
     + PartialEq
-    + Send,
+    + Send
+    + serde::Serialize
 {
 }
 

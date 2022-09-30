@@ -6,7 +6,6 @@ use bit_vec::BitVec;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::body;
 use warp::hyper::StatusCode;
@@ -17,11 +16,11 @@ use warp::{reject, Rejection};
 
 use super::u256_to_hex;
 use super::NodeRequest;
-use crate::api::HexStatement;
+use crate::api::{HexStatement, ReqAnsRecv};
+use crate::bits::ProtoSerialize;
 use crate::common::Name;
 use crate::hvm::{self, StatementErr, StatementInfo};
-use crate::bits::ProtoSerialize;
-use crate::net::ProtoAddr;
+use crate::net::ProtoComm;
 use crate::util::U256;
 
 // Util
@@ -125,39 +124,24 @@ async fn handle_rejection(
   } else {
     eprintln!("HTTP API: unhandled rejection: {:?}", err);
     let err = format!("INTERNAL_SERVER_ERROR: {:?}", err);
-    Ok(reply::with_status(
-      err,
-      StatusCode::INTERNAL_SERVER_ERROR,
-    ))
+    Ok(reply::with_status(err, StatusCode::INTERNAL_SERVER_ERROR))
   }
 }
 
-pub fn http_api_loop<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) {
+pub fn http_api_loop<C: ProtoComm + 'static>(node_query_sender: SyncSender<NodeRequest<C>>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    api_serve(node_query_sender).await;
+    api_serve::<C>(node_query_sender).await;
   });
 }
 
-async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) {
-  // async fn ask<T>(
-  //   node_query_tx: SyncSender<NodeRequest<A>>,
-  //   f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest<A>,
-  // ) -> T {
-  //   let (tx, rx) = oneshot::channel();
-  //   let request = f(tx);
-  //   node_query_tx.send(request).unwrap();
-  //   let result = rx.await.expect("Node query channel closed");
-  //   result
-  // }
-  
-  let ask = <T>|
-    node_query_tx: SyncSender<NodeRequest<A>>,
-    f: impl FnOnce(oneshot::Sender<T>) -> NodeRequest<A>,
-  | -> T {
-    let (tx, rx) = oneshot::channel();
-    let request = f(tx);
+async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<NodeRequest<C>>) {
+  async fn ask<T, C: ProtoComm>(
+    node_query_tx: SyncSender<NodeRequest<C>>,
+    req: (NodeRequest<C>, ReqAnsRecv<T>),
+  ) -> T {
+    let (request, rx) = req;
     node_query_tx.send(request).unwrap();
     let result = rx.await.expect("Node query channel closed");
     result
@@ -169,7 +153,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
   let get_stats = path!("stats").then(move || {
     let query_tx = query_tx.clone();
     async move {
-      let stats = ask(query_tx, |tx| NodeRequest::GetStats { tx }).await;
+      let stats = ask(query_tx, NodeRequest::get_stats()).await;
       ok_json(stats)
     }
   });
@@ -181,8 +165,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     let query_tx = query_tx.clone();
     async move {
       let range = (-10, -1);
-      let blocks =
-        ask(query_tx, |tx| NodeRequest::GetBlocks { range, tx }).await;
+      let blocks = ask(query_tx, NodeRequest::get_blocks(range)).await;
       ok_json(blocks)
     }
   });
@@ -195,8 +178,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
         let hash_hex = hash_hex.strip_prefix("0x").unwrap_or(&hash_hex);
         match hex_to_u256(hash_hex) {
           Ok(hash) => {
-            let block =
-              ask(query_tx, |tx| NodeRequest::GetBlock { hash, tx }).await;
+            let block = ask(query_tx, NodeRequest::get_block(hash)).await;
             Ok(block)
           }
           Err(err) => Err(reject::custom(InvalidParameter::from(format!(
@@ -212,8 +194,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
   let get_block_hash = path!("block-hash" / u64).and_then(move |index: u64| {
     let query_tx = query_tx.clone();
     async move {
-      let block_hash =
-        ask(query_tx, |tx| NodeRequest::GetBlockHash { index, tx }).await;
+      let block_hash = ask(query_tx, NodeRequest::get_block_hash(index)).await;
       match block_hash {
         None => Err(Rejection::from(Error::NotFound)),
         Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
@@ -233,8 +214,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
   let get_functions = path!("functions").then(move || {
     let query_tx = query_tx.clone();
     async move {
-      let functions =
-        ask(query_tx, |tx| NodeRequest::GetFunctions { tx }).await;
+      let functions = ask(query_tx, NodeRequest::get_functions()).await;
       let functions: Vec<u128> =
         functions.into_iter().map(|x| x as u128).collect();
       let functions = u128_names_to_strings(&functions);
@@ -259,8 +239,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     get_function_base.and(path!()).and_then(move |name: Name| {
       let query_tx = query_tx.clone();
       async move {
-        let function =
-          ask(query_tx, |tx| NodeRequest::GetFunction { name, tx }).await;
+        let function = ask(query_tx, NodeRequest::get_function(name)).await;
         if let Some(function) = function {
           Ok(ok_json(function))
         } else {
@@ -281,8 +260,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     .and_then(move |name: Name, query: GetStateQuery| {
       let query_tx = query_tx.clone();
       async move {
-        let state =
-          ask(query_tx, |tx| NodeRequest::GetState { name, tx }).await;
+        let state = ask(query_tx, NodeRequest::get_state(name)).await;
         if let Some(state) = state {
           if let Some(true) = query.protocol {
             let encoded = state.proto_serialized();
@@ -320,10 +298,9 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     get_constructor_base.and(path!()).and_then(move |name: Name| {
       let query_tx = query_tx.clone();
       async move {
-        let constructor =
-          ask(query_tx, |tx| NodeRequest::GetConstructor { name, tx }).await;
-        if let Some(constructor) = constructor {
-          Ok(ok_json(constructor))
+        let ctr = ask(query_tx, NodeRequest::get_constructor(name)).await;
+        if let Some(ctr) = ctr {
+          Ok(ok_json(ctr))
         } else {
           Err(Rejection::from(Error::NotFound))
         }
@@ -344,11 +321,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
         async move {
           let code = String::from_utf8(code.to_vec());
           if let Ok(code) = code {
-            let res = ask(query_tx, |tx| NodeRequest::TestCode {
-              code: code.clone(),
-              tx,
-            })
-            .await;
+            let res = ask(query_tx, NodeRequest::test_code(code)).await;
             Ok(ok_json(res))
           } else {
             Err(reject::custom(InvalidParameter::from(
@@ -360,30 +333,27 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     );
 
   let query_tx = node_query_sender.clone();
-  let interact_send =
-    post().and(interact_base).and(path!("publish")).and(body::bytes()).and_then(
-      move |code: warp::hyper::body::Bytes| {
-        let query_tx = query_tx.clone();
-        async move {
-          let code = String::from_utf8(code.to_vec());
-          if let Ok(code) = code {
-            let res = ask(query_tx, |tx| NodeRequest::PostCode {
-              code: code.clone(),
-              tx,
-            })
-            .await;
-            match res {
-              Ok(res) => Ok(ok_json(res)),
-              Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
-            }
-          } else {
-            Err(reject::custom(InvalidParameter::from(
-              "Invalid code".to_string(),
-            )))
+  let interact_send = post()
+    .and(interact_base)
+    .and(path!("publish"))
+    .and(body::bytes())
+    .and_then(move |code: warp::hyper::body::Bytes| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code = String::from_utf8(code.to_vec());
+        if let Ok(code) = code {
+          let res = ask(query_tx, NodeRequest::post_code(code)).await;
+          match res {
+            Ok(res) => Ok(ok_json(res)),
+            Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
           }
+        } else {
+          Err(reject::custom(InvalidParameter::from(
+            "Invalid code".to_string(),
+          )))
         }
-      },
-    );
+      }
+    });
 
   let query_tx = node_query_sender.clone();
   let interact_run = post().and(path!("run")).and(json_body()).and_then(
@@ -392,7 +362,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
       async move {
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
-        let results = ask(query_tx, |tx| NodeRequest::Run { code, tx }).await;
+        let results = ask(query_tx, NodeRequest::run(code)).await;
         // TODO: resulte type will be different
         let result: Result<Vec<StatementInfo>, StatementErr> =
           results.into_iter().collect();
@@ -414,8 +384,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
       async move {
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
-        let results =
-          ask(query_tx, |tx| NodeRequest::Publish { code, tx }).await;
+        let results = ask(query_tx, NodeRequest::publish(code)).await;
         let result: Vec<Result<(), ()>> = results.into_iter().collect();
         ok_json(result)
       }
@@ -442,7 +411,7 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
   let get_reg = get_reg_base.and(path!()).and_then(move |name: Name| {
     let query_tx = query_tx.clone();
     async move {
-      let reg = ask(query_tx, |tx| NodeRequest::GetReg { name, tx }).await;
+      let reg = ask(query_tx, NodeRequest::get_reg(name)).await;
       if let Some(reg) = reg {
         Ok(ok_json(reg))
       } else {
@@ -455,31 +424,27 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
 
   // == Peers ==
 
-  // TODO
+  let get_peers_base = path!("peers" / ..);
 
-  // let get_peers_base = path!("peers" / ..);
+  let query_tx = node_query_sender.clone();
+  let get_peers = get_peers_base.and(path!()).then(move || {
+    let query_tx = query_tx.clone();
+    async move {
+      let peers = ask(query_tx, NodeRequest::get_peers(false)).await;
+      ok_json(peers)
+    }
+  });
 
-  // let query_tx = node_query_sender.clone();
-  // let get_peers = get_peers_base.and(path!()).then(move || {
-  //   let query_tx = query_tx.clone();
-  //   async move {
-  //     let peers_store =
-  //       ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: false }).await;
-  //     ok_json(peers_store)
-  //   }
-  // });
+  let query_tx = node_query_sender.clone();
+  let get_all_peers = get_peers_base.and(path!("all")).then(move || {
+    let query_tx = query_tx.clone();
+    async move {
+      let peers = ask(query_tx, NodeRequest::get_peers(true)).await;
+      ok_json(peers)
+    }
+  });
 
-  // let query_tx = node_query_sender.clone();
-  // let get_all_peers = get_peers_base.and(path!("all")).then(move || {
-  //   let query_tx = query_tx.clone();
-  //   async move {
-  //     let peers_store =
-  //       ask(query_tx, |tx| NodeRequest::GetPeers { tx, all: true }).await;
-  //     ok_json(peers_store)
-  //   }
-  // });
-
-  // let peers_router = get_peers.or(get_all_peers);
+  let peers_router = get_peers.or(get_all_peers);
 
   // ==
 
@@ -488,9 +453,10 @@ async fn api_serve<A: ProtoAddr>(node_query_sender: SyncSender<NodeRequest<A>>) 
     .or(blocks_router)
     .or(functions_router)
     .or(interact_router)
-    // .or(peers_router)
+    .or(peers_router)
     .or(constructor_router)
     .or(reg_router);
+
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")

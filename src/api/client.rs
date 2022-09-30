@@ -6,10 +6,13 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
-// use crate::node;
-use crate::hvm::{Term, self};
+use crate::hvm::{self, Term};
+use crate::net::ProtoComm;
+use crate::node;
 
-use super::{BlockInfo, FuncInfo, Hash, Name, Stats, HexStatement, CtrInfo, RegInfo};
+use super::{
+  BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, RegInfo, Stats,
+};
 
 pub struct ApiClient {
   client: reqwest::Client,
@@ -64,11 +67,7 @@ impl ApiClient {
     B: Serialize,
   {
     let req = self.base_request(method, path);
-    let req = if let Some(body) = body {
-      req.json(&body)
-    } else {
-      req
-    };
+    let req = if let Some(body) = body { req.json(&body) } else { req };
     let res = req.send().await.map_err(|e| e.to_string())?;
     if res.status().is_success() {
       let value = res.json().await.map_err(|e| e.to_string())?;
@@ -119,23 +118,34 @@ impl ApiClient {
     self.get::<CtrInfo>(&format!("/constructor/{}", name)).await
   }
 
-  pub async fn run_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<hvm::StatementInfo>> {
+  pub async fn run_code(
+    &self,
+    code: Vec<HexStatement>,
+  ) -> ApiResult<Vec<hvm::StatementInfo>> {
     self.req(Method::POST, "/run", Some(code)).await
   }
 
   // I'm not sure what the return type should be.
-  pub async fn publish_code(&self, code: Vec<HexStatement>) -> ApiResult<Vec<Result<(), ()>>> {
+  pub async fn publish_code(
+    &self,
+    code: Vec<HexStatement>,
+  ) -> ApiResult<Vec<Result<(), ()>>> {
     self.req(Method::POST, "/publish", Some(code)).await
   }
 
-  // TODO
-  // pub async fn get_peers(&self, all: bool) -> ApiResult<Vec<node::Peer>> {
-  //   if all {
-  //     self.get::<Vec<node::Peer>>("/peers/all").await
-  //   } else {
-  //     self.get::<Vec<node::Peer>>("/peers").await
-  //   }
-  // }
+  pub async fn get_peers<C: ProtoComm>(
+    &self,
+    all: bool,
+  ) -> ApiResult<Vec<node::Peer<C::Address>>>
+  where
+    C::Address: serde::de::DeserializeOwned,
+  {
+    if all {
+      self.get::<Vec<node::Peer<C::Address>>>("/peers/all").await
+    } else {
+      self.get::<Vec<node::Peer<C::Address>>>("/peers").await
+    }
+  }
 
   pub async fn get_reg_info(&self, name: &str) -> ApiResult<RegInfo> {
     self.get::<RegInfo>(&format!("/reg/{}", name)).await

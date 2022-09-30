@@ -93,7 +93,7 @@ pub struct Node<C: ProtoComm> {
   pub comm       : C,                                // UDP socket
   pub addr       : C::Address,                       // UDP port
   pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest<C::Address>>,// Receives an API request
+  pub receiver   : Receiver<NodeRequest<C>>,         // Receives an API request
   pub tip        : U256,                             // current tip
   pub block      : U256Map<Block>,                   // block_hash -> block
   pub pending    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
@@ -630,7 +630,7 @@ impl <C: ProtoComm> Node<C> {
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
     comm: C
-  ) -> (SyncSender<NodeRequest<C::Address>>, Self) {
+  ) -> (SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
     let mut node = Node {
@@ -961,7 +961,7 @@ impl <C: ProtoComm> Node<C> {
     Some(RegInfo { ownr, stmt })
   }
 
-  pub fn handle_request(&mut self, request: NodeRequest<C::Address>) {
+  pub fn handle_request(&mut self, request: NodeRequest<C>) {
     // TODO: handle unwraps
     match request {
       NodeRequest::GetStats { tx: answer } => {
@@ -1437,6 +1437,7 @@ impl <C: ProtoComm> Node<C> {
 }
 
  // TODO: move this paramenters to a struct `NodeStartOptions<C>`?
+ // TODO: I don't know why 'static is needed and why it works
  pub fn start<C: ProtoComm + 'static>(
   state_path: PathBuf,
   network_id: u64,

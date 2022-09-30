@@ -18,7 +18,7 @@ use tokio::sync::oneshot;
 
 use crate::bits::ProtoSerialize;
 use crate::hvm;
-use crate::net::ProtoAddr;
+use crate::net::ProtoComm;
 use crate::node;
 use crate::util;
 
@@ -282,77 +282,126 @@ pub struct RegInfo {
   pub stmt: Vec<Name>
 }
 
-type RequestAnswer<T> = oneshot::Sender<T>;
-
 // Node Internal API
 // =================
 
-pub enum NodeRequest <A: ProtoAddr> {
+pub type ReqAnsSend<T> = oneshot::Sender<T>;
+pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
+
+pub enum NodeRequest <C: ProtoComm> {
   GetStats {
-    tx: RequestAnswer<Stats>,
+    tx: ReqAnsSend<Stats>,
   },
   GetBlockHash {
     index: u64,
-    tx: RequestAnswer<Option<U256>>,
+    tx: ReqAnsSend<Option<U256>>,
   },
   GetBlock {
     hash: U256,
-    tx: RequestAnswer<Option<BlockInfo>>,
+    tx: ReqAnsSend<Option<BlockInfo>>,
   },
   GetBlocks {
     range: (i64, i64),
-    tx: RequestAnswer<Vec<BlockInfo>>,
+    tx: ReqAnsSend<Vec<BlockInfo>>,
   },
   GetFunctions {
-    tx: RequestAnswer<HashSet<u128>>,
+    tx: ReqAnsSend<HashSet<u128>>,
   },
   GetFunction {
     name: Name,
-    tx: RequestAnswer<Option<FuncInfo>>,
+    tx: ReqAnsSend<Option<FuncInfo>>,
   },
   GetState {
     name: Name,
-    tx: RequestAnswer<Option<hvm::Term>>,
+    tx: ReqAnsSend<Option<hvm::Term>>,
   },
   GetPeers {
     all: bool,
-    tx: RequestAnswer<Vec<node::Peer<A>>>,
+    tx: ReqAnsSend<Vec<node::Peer<C::Address>>>,
   },
   GetConstructor {
     name: Name,
-    tx: RequestAnswer<Option<CtrInfo>>,
+    tx: ReqAnsSend<Option<CtrInfo>>,
   },
   GetReg {
     name: Name,
-    tx: RequestAnswer<Option<RegInfo>>,
+    tx: ReqAnsSend<Option<RegInfo>>,
   },
   /// DEPRECATED
   TestCode {
     code: String,
-    tx: RequestAnswer<Vec<hvm::StatementResult>>,
+    tx: ReqAnsSend<Vec<hvm::StatementResult>>,
   },
   /// DEPRECATED
   PostCode {
     code: String,
-    tx: RequestAnswer<Result<(), String>>,
+    tx: ReqAnsSend<Result<(), String>>,
   },
   Run {
     code: Vec<hvm::Statement>,
-    tx: RequestAnswer<Vec<hvm::StatementResult>>,
+    tx: ReqAnsSend<Vec<hvm::StatementResult>>,
   },
   Publish {
     code: Vec<hvm::Statement>,
-    tx: RequestAnswer<Vec<Result<(),()>>>,
+    tx: ReqAnsSend<Vec<Result<(),()>>>,
   },
 }
 
-// async fn ask<T>(
-//   node_query_tx: SyncSender<NodeRequest>,
-//   f: impl Fn(oneshot::Sender<T>) -> NodeRequest,
-// ) -> T {
-//   let (tx, rx) = oneshot::channel();
-//   let request = f(tx);
-//   node_query_tx.send(request).unwrap();
-//   let result = rx.await.expect("Node query channel closed");
-//   result
-// }
+impl <C: ProtoComm> NodeRequest<C> {
+  pub fn get_stats() -> (Self, ReqAnsRecv<Stats>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetStats { tx }, rx)
+  }
+  pub fn get_block_hash(index: u64) -> (Self, ReqAnsRecv<Option<U256>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetBlockHash { index, tx }, rx)
+  }
+  pub fn get_block(hash: U256) -> (Self, ReqAnsRecv<Option<BlockInfo>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetBlock { hash, tx }, rx)
+  }
+  pub fn get_blocks(range: (i64, i64)) -> (Self, ReqAnsRecv<Vec<BlockInfo>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetBlocks { range, tx }, rx)
+  }
+  pub fn get_functions() -> (Self, ReqAnsRecv<HashSet<u128>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetFunctions { tx }, rx)
+  }
+  pub fn get_function(name: Name) -> (Self, ReqAnsRecv<Option<FuncInfo>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetFunction { name, tx }, rx)
+  }
+  pub fn get_state(name: Name) -> (Self, ReqAnsRecv<Option<hvm::Term>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetState { name, tx }, rx)
+  }
+  pub fn get_peers(all: bool) -> (Self, ReqAnsRecv<Vec<node::Peer<C::Address>>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetPeers { all, tx }, rx)
+  }
+  pub fn get_constructor(name: Name) -> (Self, ReqAnsRecv<Option<CtrInfo>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetConstructor { name, tx }, rx)
+  }
+  pub fn get_reg(name: Name) -> (Self, ReqAnsRecv<Option<RegInfo>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::GetReg { name, tx }, rx)
+  }
+  pub fn test_code(code: String) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::TestCode { code, tx }, rx)
+  }
+  pub fn post_code(code: String) -> (Self, ReqAnsRecv<Result<(), String>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::PostCode { code, tx }, rx)
+  }
+  pub fn run(code: Vec<hvm::Statement>) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::Run { code, tx }, rx)
+  }
+  pub fn publish(code: Vec<hvm::Statement>) -> (Self, ReqAnsRecv<Vec<Result<(),()>>>) {
+    let (tx, rx) = oneshot::channel();
+    (NodeRequest::Publish { code, tx }, rx)
+  }
+}

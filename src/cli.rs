@@ -34,6 +34,10 @@ use crate::net;
 use crate::node;
 use crate::util::bytes_to_bitvec;
 
+// This client is meant to talk with node implementing Udp protocol comunication
+// (the default)
+type NC = UdpSocket;
+
 /*
 
 == Client ==
@@ -718,11 +722,11 @@ pub async fn get_info(
       };
       Ok(())
     }
-    GetKind::Peers { .. } => {
-      // let peers = client.get_peers(all).await?;
-      // for peer in peers {
-      //   println!("{}", peer.address)
-      // }
+    GetKind::Peers { all } => {
+      let peers = client.get_peers::<NC>(all).await?;
+      for peer in peers {
+        println!("{}", peer.address)
+      }
       Ok(())
     }
   }
