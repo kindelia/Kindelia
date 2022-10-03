@@ -142,6 +142,7 @@ impl TryFrom<u128> for Name {
 }
 
 impl From<U120> for Name {
+  // FIXME: convert checked
   fn from(num: U120) -> Self {
     Name(*num)
   }
