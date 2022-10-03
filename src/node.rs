@@ -523,20 +523,6 @@ pub fn GENESIS_BLOCK() -> Block {
   return new_block(ZERO_HASH(), 0, 0, Body { data: vec![0] });
 }
 
-// Converts a block to a string.
-// FIXME: is this still used?
-//pub fn show_block(block: &Block) -> String {
-  //return format!(
-    //"time: {}\nrand: {}\nbody: {}\nprev: {}\nhash: {} ({})\n-----\n",
-    //block.time,
-    //block.meta,
-    //body_to_string(&block.body),
-    //block.prev,
-    //hex::encode(u256_to_bytes(block.hash)),
-    //get_hash_work(block.hash),
-  //);
-//}
-
 impl Transaction {
   pub fn new(mut data: Vec<u8>) -> Self {
     // Transaction length is always a non-zero multiple of 5

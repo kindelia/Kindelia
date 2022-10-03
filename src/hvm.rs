@@ -775,122 +775,7 @@ fn count_allocs(body: &Term) -> u128 {
   }
 }
 
-const GENESIS : &str = "
-// T types
-ctr {T0}
-ctr {T1 x0}
-ctr {T2 x0 x1}
-ctr {T3 x0 x1 x2}
-ctr {T4 x0 x1 x2 x3}
-ctr {T5 x0 x1 x2 x3 x4}
-ctr {T6 x0 x1 x2 x3 x4 x5}
-ctr {T7 x0 x1 x2 x3 x4 x5 x6}
-ctr {T8 x0 x1 x2 x3 x4 x5 x6 x7}
-ctr {T9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
-ctr {TA x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
-ctr {TB x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
-ctr {TC x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
-ctr {TD x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12}
-ctr {TE x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13}
-ctr {TF x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14}
-ctr {TG x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15}
-
-// An if-then-else statement
-fun (If cond t f) {
-  (If #0 ~ f) = f
-  (If  ~ t ~) = t
-}
-
-// Used to pretty-print names
-ctr {Name name}
-
-// Below, we declare the built-in IO operations
-
-// DONE returns from an IO operation
-ctr {DONE expr}
-fun (Done expr) {
-  (Done expr) = {DONE expr}
-}
-
-// TAKE recovers an app's stored state
-ctr {TAKE cont}
-fun (Take) {
-  (Take) = @cont {TAKE cont}
-}
-
-// SAVE stores the app's state
-ctr {SAVE expr cont}
-fun (Save expr) {
-  (Save expr) = @cont {SAVE expr cont}
-}
-
-// CALL calls another IO operation, assigning
-// the caller name to the current subject name
-ctr {CALL name argm cont}
-fun (Call name argm) {
-  (Call name argm) = @cont {CALL name argm cont}
-}
-
-// SUBJ returns the name of the current subject
-ctr {SUBJ cont}
-fun (Subj) {
-  (Subj) = @cont {SUBJ cont}
-}
-
-// FROM returns the name of the current caller
-ctr {FROM cont} 
-fun (From) {
-  (From) = @cont {FROM cont}
-}
-
-// TICK returns the current block number
-ctr {TICK cont}
-fun (Tick) {
-  (Tick) = @cont {TICK cont}
-}
-
-// TIME returns the current block timestamp
-ctr {TIME cont}
-fun (Time) {
-  (Time) = @cont {TIME cont}
-}
-
-// META returns the current block metadata
-ctr {META cont}
-fun (Meta) {
-  (Meta) = @cont {META cont}
-}
-
-// HAX0 returns the current block metadata
-ctr {HAX0 cont}
-fun (Hax0) {
-  (Hax0) = @cont {HAX0 cont}
-}
-
-// HAX1 returns the current block metadata
-ctr {HAX1 cont}
-fun (Hax1) {
-  (Hax1) = @cont {HAX1 cont}
-}
-
-// LOAD works like TAKE, but clones the state
-fun (Load) {
-  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (cont x1)}}
-}
-
-// This is here for debugging. Will be removed.
-ctr {Inc}
-ctr {Get}
-fun (Count action) {
-  (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
-  (Count {Get}) = ((Load) @x {DONE x})
-}
-
-// Registers the empty namespace.
-reg {
-  #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
-}
-";
+const GENESIS_CODE: &str = include_str!("../genesis.kdl");
 
 // Utils
 // -----
@@ -1679,7 +1564,10 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
     back: Arc::new(Rollback::Nil),
     path: heaps_path,
   };
-  rt.run_statements_from_code(GENESIS, true, false);
+
+  // TODO: extract to Node
+  // TODO: add Genesis statements to actual block 0
+  rt.run_statements_from_code(GENESIS_CODE, true, false);
 
   rt.snapshot();
   return rt;
@@ -1848,7 +1736,6 @@ impl Runtime {
         let ext = get_ext(term);
         match ext {
           IO_DONE => {
-            // TODO: should allow only Num
             let retr = ask_arg(self, term, 0);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
