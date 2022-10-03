@@ -269,38 +269,3 @@ impl RouterMock {
     }
   }
 }
-
-fn start(init_peers: &Option<Vec<u32>>, socket_mock: SocketMock) {
-  eprintln!("Starting Kindelia node.");
-
-  let state_path = dirs::home_dir().unwrap().join(".kindelia");
-  let port = socket_mock.get_addr();
-
-  // Node state object
-  let (node_query_sender, node) =
-    node::Node::new(state_path, init_peers, port as u64, socket_mock);
-
-  // Node to Miner communication object
-  let miner_comm_0 = MinerCommunication::new();
-  let miner_comm_1 = miner_comm_0.clone();
-
-  // Threads
-  let mut threads = vec![];
-
-  // Spawns the node thread
-  let node_thread = thread::spawn(move || {
-    node.main(miner_comm_0, true);
-  });
-  threads.push(node_thread);
-
-  // Spawns the miner thread
-  let miner_thread = thread::spawn(move || {
-    node::miner_loop(miner_comm_1);
-  });
-  threads.push(miner_thread);
-
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
-  }
-}
