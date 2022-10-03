@@ -1568,9 +1568,9 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
   // TODO: extract to Node
   // TODO: add Genesis statements to actual block 0
   rt.run_statements_from_code(GENESIS_CODE, true, false);
+  rt.commit();
 
-  rt.snapshot();
-  return rt;
+  rt
 }
 
 impl Runtime {
@@ -2130,9 +2130,13 @@ impl Runtime {
     return self.back.clone();
   }
 
-  // Advances the heap time counter, saving past states for rollback.
-  pub fn tick(&mut self) {
+  /// Advances the heap time counter.
+  pub fn open(&mut self) {
     self.set_tick(self.get_tick() + 1);
+  }
+
+  /// Saves past states for rollback.
+  pub fn commit(&mut self) {
     self.draw();
     self.snapshot();
   }

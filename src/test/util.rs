@@ -129,7 +129,7 @@ pub fn rollback(
     if let Some(code) = code {
       rt.run_statements_from_code(code, true, true);
     }
-    tick_and_validate(rt, validators);
+    validate_and_tick(rt, validators);
   }
   // println!("- final rollback tick {}", rt.get_tick());
 }
@@ -141,13 +141,13 @@ pub fn advance(
   validators: &[Validator],
 ) {
   debug_assert!(tick >= rt.get_tick());
-  // println!("- advancing from {} to {}", rt.get_tick(), tick);
-  let actual_tick = rt.get_tick();
-  for _ in actual_tick..tick {
+  // eprintln!("- advancing from {} to {}", rt.get_tick(), tick);
+  let current_tick = rt.get_tick();
+  for _ in current_tick..tick {
     if let Some(code) = code {
       rt.run_statements_from_code(code, true, true);
     }
-    tick_and_validate(rt, validators);
+    validate_and_tick(rt, validators);
   }
 }
 
@@ -177,7 +177,7 @@ pub fn rollback_simple(
   rt.run_statements_from_code(pre_code, true, true);
   for _ in 0..total_tick {
     rt.run_statements_from_code(code, true, true);
-    tick_and_validate(&mut rt, validators);
+    validate_and_tick(&mut rt, validators);
     // dbg!(test_heap_checksum(&fn_names, &mut rt));
     if rt.get_tick() == rollback_tick {
       old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -192,7 +192,7 @@ pub fn rollback_simple(
   let tick_diff = rollback_tick - rt.get_tick();
   for _ in 0..tick_diff {
     rt.run_statements_from_code(code, true, true);
-    tick_and_validate(&mut rt, validators);
+    validate_and_tick(&mut rt, validators);
   }
   // Calculates new checksum, after rollback
   let new_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -283,11 +283,13 @@ fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
   assert!(predicate(tick, &state, rt))
 }
 
-fn tick_and_validate(rt: &mut Runtime, validators: &[Validator]) {
-  rt.tick();
+fn validate_and_tick(rt: &mut Runtime, validators: &[Validator]) {
+  rt.open();
+  eprintln!("tick: {}", rt.get_tick());
   for (fn_name, predicate) in validators {
     validate(rt, fn_name, predicate)
   }
+  rt.commit();
 }
 
 // ===========================================================

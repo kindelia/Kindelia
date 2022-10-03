@@ -3,9 +3,8 @@ use std::convert::TryInto;
 use crate::{
   common::Name,
   hvm::{
-    self, init_map, init_runtime, read_statements,
-    readback_term, show_term, view_statements, view_term,
-    Rollback, Runtime, StatementInfo, Term, U120,
+    self, init_map, init_runtime, read_statements, readback_term, show_term,
+    view_statements, view_term, Rollback, Runtime, StatementInfo, Term, U120,
   },
   test::{
     strategies::{func, heap, name, op2, statement, term},
@@ -123,7 +122,7 @@ pub fn advanced_rollback_run_fail(
 
 #[apply(hvm_cases)]
 pub fn stack_overflow(
-  fn_names: &[&str],
+  _fn_names: &[&str],
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
@@ -190,13 +189,14 @@ fn one_hundred_snapshots(temp_dir: TempPath) {
   // run this with rollback in each 4th snapshot
   // note: this test has no state
   let mut rt = init_runtime(temp_dir.path.clone());
-  for i in 0..100000 {
-    rt.tick();
+  for _ in 0..100000 {
+    rt.open();
     println!(
       " - tick: {}, - rollback: {}",
       rt.get_tick(),
       view_rollback_ticks(&rt)
     );
+    rt.commit();
   }
 }
 
@@ -513,10 +513,13 @@ pub const COUNTER: &'static str = "
 
 fn counter_validators() -> [util::Validator; 2] {
   fn count_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
-    view_term(term) == format!("#{}", tick)
+    let counter = tick;
+    assert_eq!(view_term(term), format!("#{}", counter));
+    view_term(term) == format!("#{}", counter)
   }
   fn store_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
-    view_term(term).matches("Succ").count() as u128 == tick
+    let counter = tick;
+    view_term(term).matches("Succ").count() as u128 == counter
   }
   [("Count", count_validator), ("Store", store_validator)]
 }
@@ -604,7 +607,8 @@ pub const BANK: &'static str = "
 
 fn bank_validators() -> [util::Validator; 1] {
   fn tree_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
-    view_term(term).matches("Node").count() as u128 == tick
+    let counter = tick;
+    view_term(term).matches("Node").count() as u128 == counter
   }
   [("Bank", tree_validator)]
 }

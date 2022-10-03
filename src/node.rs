@@ -837,9 +837,10 @@ impl <C: ProtoComm> Node<C> {
     self.runtime.set_meta(block.meta >> 8);
     self.runtime.set_hax0((block.hash >>   0).low_u128() >> 8);
     self.runtime.set_hax1((block.hash >> 120).low_u128() >> 8);
+    self.runtime.open();
     let result = self.runtime.run_statements(&statements, false, false);
     self.results.insert(block.hash, result);
-    self.runtime.tick();
+    self.runtime.commit();
   }
 
   // Get the current target
