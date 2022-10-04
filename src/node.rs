@@ -1304,8 +1304,6 @@ impl <C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
-    
-
     let log = object!{
       event: "heartbeat",
       peers: { num: peers_num },
@@ -1339,10 +1337,10 @@ impl <C: ProtoComm> Node<C> {
 
   pub fn main(mut self, mut miner_communication: MinerCommunication, mine: bool) -> ! {
 
-    eprintln!("Port: {:?}", self.addr);
+    eprintln!("Port: {}", self.addr);
     eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {
-      eprintln!("- {:?}", peer.address);
+      eprintln!("  - {}", peer.address);
     }
 
     // Loads all stored blocks. FIXME: remove the if (used for debugging)
@@ -1433,7 +1431,9 @@ impl <C: ProtoComm> Node<C> {
   mine: bool,
   api: bool
 ) {
-  eprintln!("Starting Kindelia node. Store path: {:?}", state_path);
+  eprintln!("Starting Kindelia node...");
+  eprintln!("Store path: {:?}", state_path);
+  eprintln!("Network ID: {:#X}", network_id);
 
   // Node state object
   let (node_query_sender, node) =
