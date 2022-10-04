@@ -1,6 +1,7 @@
 use crate::{
   api::{Hash, NodeRequest},
-  node::MinerMessage,
+  net::ProtoAddr,
+  node::{Block, Peer},
 };
 use primitive_types::U256;
 use serde;
@@ -56,6 +57,24 @@ pub struct HeartbeatStatInfo {
 }
 
 #[derive(Debug, serde::Serialize)]
+pub enum HandleMessageEvent {
+  NoticeTheseBlocks {
+    magic: u64,
+    gossip: bool,
+    blocks: Vec<Hash>,
+    peers: Vec<String>, // peer not used to avoid type parameter
+  },
+  GiveMeThatBlock {
+    magic: u64,
+    bhash: Hash,
+  },
+  PleaseMineThisTransaction {
+    magic: u64,
+    trans: Hash, // shoul we guard the data of transaction too?
+  },
+}
+
+#[derive(Debug, serde::Serialize)]
 pub enum NodeEvent {
   AddBlock {
     block: Hash,
@@ -70,6 +89,9 @@ pub enum NodeEvent {
     tip: HeartbeatTip,
     blocks: HeartbeatBlocks,
     runtime: HeartbeatRuntime,
+  },
+  HandleMessage {
+    event: HandleMessageEvent,
   },
 }
 
@@ -112,6 +134,34 @@ impl std::fmt::Display for HeartbeatStatInfo {
       "current: {} | limit: {} | available: {}",
       self.current, self.limit, self.available
     ))
+  }
+}
+
+impl std::fmt::Display for HandleMessageEvent {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let message = match self {
+      HandleMessageEvent::NoticeTheseBlocks {
+        magic,
+        gossip,
+        blocks,
+        peers,
+      } => {
+        let blocks =
+          blocks.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(", ");
+        let peers = peers.join(", ");
+        format!(
+          "[notice_blocks] magic: {} | gossip: {} | blocks: {} | peers: {}",
+          magic, gossip, blocks, peers
+        )
+      }
+      HandleMessageEvent::GiveMeThatBlock { magic, bhash } => {
+        format!("[give_me_block] magic: {} | block: {}", magic, bhash)
+      }
+      HandleMessageEvent::PleaseMineThisTransaction { magic, trans } => {
+        format!("[mine_trans] magic: {} | trans: {}", magic, trans)
+      }
+    };
+    f.write_fmt(format_args!("{}", message))
   }
 }
 
@@ -170,6 +220,9 @@ impl std::fmt::Display for NodeEvent {
       }
       NodeEvent::Heartbeat { peers, tip, blocks, runtime } => {
         format!("[heartbeat] {} {} {} {}", peers, tip, blocks, runtime)
+      }
+      NodeEvent::HandleMessage { event } => {
+        format!("[handle_message] {}", event)
       }
     };
 
@@ -232,6 +285,32 @@ impl NodeEvent {
   }
 
   // HANDLE MESSAGE
+  pub fn notice_blocks<A: ProtoAddr>(
+    magic: u64,
+    gossip: bool,
+    blocks: &[Block],
+    peers: &[Peer<A>],
+  ) -> Self {
+    let event = HandleMessageEvent::NoticeTheseBlocks {
+      magic,
+      gossip,
+      blocks: blocks.iter().map(|b| b.hash.into()).collect(),
+      peers: peers.iter().map(|p| format!("{}", p.address)).collect(),
+    };
+    NodeEvent::HandleMessage { event }
+  }
+  pub fn give_me_block(magic: u64, block: U256) -> Self {
+    let event =
+      HandleMessageEvent::GiveMeThatBlock { magic, bhash: block.into() };
+    NodeEvent::HandleMessage { event }
+  }
+  pub fn mine_trans(magic: u64, trans: U256) -> Self {
+    let event = HandleMessageEvent::PleaseMineThisTransaction {
+      magic,
+      trans: trans.into(),
+    };
+    NodeEvent::HandleMessage { event }
+  }
 }
 
 pub fn new_event_channel(

@@ -1135,7 +1135,8 @@ impl<C: ProtoComm> Node<C> {
 
       match msg {
         // Someone asked a block
-        Message::GiveMeThatBlock { magic: _, bhash } => {
+        Message::GiveMeThatBlock { magic, bhash } => {
+          emit_event!(self.event_emitter, NodeEvent::give_me_block(*magic, *bhash), tags = handle_message, give_me_block);
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
           let mut chunk = vec![];
@@ -1159,7 +1160,9 @@ impl<C: ProtoComm> Node<C> {
           self.send_blocks_to(vec![addr], false, chunk, 0);
         }
         // Someone sent us some blocks
-        Message::NoticeTheseBlocks { magic: _, gossip, blocks, peers } => {
+        Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
+          emit_event!(self.event_emitter, NodeEvent::notice_blocks(*magic, *gossip, blocks, peers), tags = handle_message, notice_blocks);
+
           // TODO: validate if blocks are sorted by age?
 
           // Notice received peers
@@ -1178,7 +1181,8 @@ impl<C: ProtoComm> Node<C> {
           }
         }
         // Someone sent us a transaction to mine
-        Message::PleaseMineThisTransaction { magic: _, trans } => {
+        Message::PleaseMineThisTransaction { magic, trans } => {
+          emit_event!(self.event_emitter, NodeEvent::mine_trans(*magic, trans.hash), tags = handle_message, mine_trans);
           //print_with_timestamp!("- Transaction added to pool:");
           //print_with_timestamp!("-- {:?}", trans.data);
           //print_with_timestamp!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
