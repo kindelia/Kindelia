@@ -3,7 +3,7 @@ dir = "~/.kindelia/state"
 mine = false
 
 [node.network]
-network_id = "0xCAFE000000000001"
+network_id = "0xCAFE000000000002"
 initial_peers = [
   "64.227.110.69",
   "188.166.3.140",
