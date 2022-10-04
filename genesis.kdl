@@ -71,6 +71,11 @@ fun (Tick) {
   (Tick) = @cont {TICK cont}
 }
 
+ctr {GIDX name cont}
+fun (GetIdx name) {
+  (GetIdx name) = @cont {GIDX name cont}
+}
+
 // TIME returns the current block timestamp
 ctr {TIME cont}
 fun (Time) {

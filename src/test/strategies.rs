@@ -6,7 +6,7 @@ use crate::{
   hvm::{
     init_map, Arits, CompFunc, CompRule, Func, Funcs,
     Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
-    SerializedHeap, Statement, Store, Term, Var, U120,
+    SerializedHeap, Statement, Store, Term, Var, U120, Indxs,
   },
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
@@ -155,6 +155,9 @@ pub fn arits() -> impl Strategy<Value = Arits> {
 pub fn ownrs() -> impl Strategy<Value = Ownrs> {
   map(any::<u128>()).prop_map(|m| Ownrs { ownrs: m })
 }
+pub fn indxs() -> impl Strategy<Value = Indxs> {
+  map(any::<u128>()).prop_map(|m| Indxs { indxs: m })
+}
 
 pub fn var() -> impl Strategy<Value = Var> {
   (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>())
@@ -199,6 +202,7 @@ pub fn heap() -> impl Strategy<Value = Heap> {
     arits(),
     ownrs(),
     funcs(),
+    indxs(),
   )
     .prop_map(
       |(
@@ -210,11 +214,13 @@ pub fn heap() -> impl Strategy<Value = Heap> {
         arit,
         ownr,
         file,
+        indx,
       )| Heap {
         mcap,
         disk,
         arit,
         ownr,
+        indx,
         file: Funcs { funcs: init_map() }, // TODO, fix?
         uuid,
         memo,

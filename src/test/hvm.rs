@@ -53,6 +53,7 @@ pub fn simple_rollback(
   ));
 }
 
+
 #[apply(hvm_cases)]
 pub fn advanced_rollback_in_random_state(
   fn_names: &[&str],
@@ -198,6 +199,85 @@ fn one_hundred_snapshots(temp_dir: TempPath) {
     );
     rt.commit();
   }
+}
+
+// Statement Indexes
+#[rstest]
+fn test_simple_idx(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit();
+  let code = "
+    fun (Add a b) {
+      (Add #256 #256) = #512
+      (Add {True} {True}) = {T2 {True} {True}}
+      (Add a b) = {T2 a b}
+    }
+    fun (B test) {
+      (B ~) = #0
+    }
+    run {
+      ask B_idx = (GetIdx 'B');
+      (Done B_idx)
+    }
+  ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#3458764513820540929", view_term(&done_term));
+              // (3 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+}
+#[rstest]
+fn test_genesis_idx(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  let code = "
+   run {
+     ask T2_idx = (GetIdx 'T2');
+     (Done T2_idx)
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#2", view_term(&done_term));
+              // (1 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+
+}
+#[rstest]
+fn test_thousand_idx(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  for i in 0..1000 {
+    rt.open();
+    rt.commit();
+  }
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   run {
+     ask idx = (GetIdx 'Test');
+     (Done idx)
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#1152921504606846976000", view_term(&done_term));
+              // (1000 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+
 }
 
 #[rstest]

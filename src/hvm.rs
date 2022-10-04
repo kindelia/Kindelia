@@ -66,7 +66,7 @@
 //
 //   Duplication Node:
 //   - [0] => either an ERA or an ARG pointing to the 1st variable location
-//   - [1] => either an ERA or an ARG pointing to the 2nd variable location
+//   - [1] => either an ERA or an ARG pointing to the 2nd variable location.
 //   - [2] => pointer to the duplicated expression
 //
 //   Lambda Node:
@@ -386,6 +386,11 @@ pub struct Ownrs {
   pub ownrs: Map<u128>,
 }
 
+#[derive(Clone, Debug)]
+pub struct Indxs {
+  pub indxs: Map<u128>
+}
+
 // A map of `FuncID -> Ptr`
 // It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug)]
@@ -419,6 +424,7 @@ pub struct Heap {
   pub disk: Store, // points to stored function states
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
+  pub indx: Indxs, // function name to position in heap
   pub ownr: Ownrs, // namespace owners
   pub tick: u128,  // tick counter
   pub time: u128,  // block timestamp
@@ -444,6 +450,7 @@ pub struct SerializedHeap {
   pub file: Vec<u128>,
   pub arit: Vec<u128>,
   pub ownr: Vec<u128>,
+  pub indx: Vec<u128>,
   pub nums: Vec<u128>,
   pub stat: Vec<u128>,
 }
@@ -469,6 +476,7 @@ pub struct Runtime {
   nuls: Vec<u64>,       // reuse heap indices
   back: Arc<Rollback>,  // past states
   path: PathBuf,        // where to save runtime state
+  stmt_count: usize,    // statement count within a block.
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +487,7 @@ pub enum RuntimeError {
   CtrOrFunNotDefined { name: Name },
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
+  NameTooBig { numb: u128 },
   EffectFailure(EffectFailure),
 }
 
@@ -649,6 +658,7 @@ const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
 const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
 const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
 const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
+const IO_GIDX : u128 = 0x4533a2; // GIDX --  TODO: is this correct? i did this by hand
 // TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
 // TODO: GRUN -> get run result
 
@@ -1137,6 +1147,12 @@ impl Heap {
   fn read_ownr(&self, name: &Name) -> Option<u128> {
     return self.ownr.read(name);
   }
+  fn write_indx(&mut self, name: Name, pos: u128) {
+    return self.indx.write(name, pos);
+  }
+  fn read_indx(&self, name: &Name) -> Option<u128> {
+    return self.indx.read(name);
+  } 
   fn set_tick(&mut self, tick: u128) {
     self.tick = tick;
   }
@@ -1282,6 +1298,11 @@ impl Heap {
       ownr_buff.push(*fnid as u128);
       ownr_buff.push(*ownr);
     }
+    let mut indx_buff : Vec<u128> = vec![];
+    for (name, pos) in &self.indx.indxs {
+      indx_buff.push(*name);
+      indx_buff.push(*pos);
+    }
     // Serializes Nums
     let nums_buff : Vec<u128> = vec![
       self.tick,
@@ -1305,6 +1326,7 @@ impl Heap {
       file: file_buff,
       arit: arit_buff,
       ownr: ownr_buff,
+      indx: indx_buff,
       nums: nums_buff,
       stat,
     };
@@ -1393,6 +1415,7 @@ impl Heap {
     self.write_buffer(serial.uuid, "file", &serial.file, true, path)?;
     self.write_buffer(serial.uuid, "arit", &serial.arit, true, path)?;
     self.write_buffer(serial.uuid, "ownr", &serial.ownr, true, path)?;
+    self.write_buffer(serial.uuid, "indx", &serial.indx, true, path)?;
     self.write_buffer(serial.uuid, "nums", &serial.nums, true, path)?;
     self.write_buffer(serial.uuid, "stat", &serial.stat, false, path)?;
     return Ok(());
@@ -1403,9 +1426,10 @@ impl Heap {
     let file = self.read_buffer(uuid, "file", path)?;
     let arit = self.read_buffer(uuid, "arit", path)?;
     let ownr = self.read_buffer(uuid, "ownr", path)?;
+    let indx = self.read_buffer(uuid, "indx", path)?;
     let nums = self.read_buffer(uuid, "nums", path)?;
     let stat = self.read_buffer(uuid, "stat", path)?;
-    self.deserialize(&SerializedHeap { uuid, memo, disk, file, arit, ownr, nums, stat });
+    self.deserialize(&SerializedHeap { uuid, memo, disk, file, arit, ownr, indx, nums, stat });
     return Ok(());
   }
   fn delete_buffers(&mut self, path: &PathBuf) -> std::io::Result<()> {
@@ -1437,6 +1461,7 @@ pub fn init_heap() -> Heap {
     file: Funcs { funcs: init_map() },
     arit: Arits { arits: init_map() },
     ownr: Ownrs { ownrs: init_map() },
+    indx: Indxs { indxs: init_map() },
     tick: U128_NONE,
     time: U128_NONE,
     meta: U128_NONE,
@@ -1548,6 +1573,25 @@ impl Ownrs {
   }
 }
 
+impl Indxs {
+  fn write(&mut self, name: Name, pos: u128) {
+    self.indxs.insert(*name, pos);
+  }
+  fn read(&self, name: &Name) -> Option<u128> {
+    return self.indxs.get(name).map(|x| *x);
+  }
+  fn clear(&mut self) {
+    self.indxs.clear();
+  }
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    for (name, pos) in other.indxs.drain() {
+      if overwrite || !self.indxs.contains_key(&name) {
+        self.indxs.insert(name, pos);
+      }
+    }
+  }
+}
+
 pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
@@ -1562,6 +1606,7 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
     nuls: (2 .. MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
     path: heaps_path,
+    stmt_count: 1 // start with 1 because 0 should be ~ genesis
   };
 
   // TODO: extract to Node
@@ -1577,15 +1622,31 @@ impl Runtime {
   // API
   // ---
 
-  pub fn define_function(&mut self, name: Name, func: CompFunc) {
+  pub fn define_function(&mut self, name: Name, func: CompFunc, stmt_index: Option<usize>) {
     self.get_heap_mut(self.draw).write_arit(name, func.arity);
     self.get_heap_mut(self.draw).write_file(name, Arc::new(func));
+    self.save_name_to_index(name, stmt_index);
   }
 
-  pub fn define_constructor(&mut self, name: Name, arity: u128) {
+  pub fn define_constructor(&mut self, name: Name, arity: u128, stmt_index: Option<usize>) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
+    self.save_name_to_index(name, stmt_index);
   }
 
+  pub fn define_register(&mut self, name: Name, stmt_index: Option<usize>) {
+    self.save_name_to_index(name, stmt_index);
+  }
+
+  pub fn save_name_to_index(&mut self, name: Name, stmt_index: Option<usize>) {
+    if let Some(idx) = stmt_index {
+      let tick = self.get_tick();
+      let pos = tick.wrapping_shl(60) | (idx as u128);
+      // TODO : refactor to use less bits?
+      // idx should never take more than 1 byte, this is hugely wasteful
+      self.get_heap_mut(self.draw).write_indx(name, pos);
+    }
+  }
+  
   // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
   //   self.define_function(name_to_u128(name), read_func(code).1);
   // }
@@ -1620,9 +1681,9 @@ impl Runtime {
   //}
 
   pub fn run_statements(&mut self, statements: &[Statement], silent: bool, debug: bool) -> Vec<StatementResult> {
-    statements.iter().map(
-      |s| { 
-        let res = self.run_statement(s, silent, debug);
+    statements.iter().enumerate().map(
+      |(i, s)| {
+        let res = self.run_statement(s, silent, debug, Some(i));
         if let Ok(..) = res {
           self.draw();
         }
@@ -1644,7 +1705,7 @@ impl Runtime {
   pub fn test_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
     let mut results = vec![];
     for (idx, statement) in statements.iter().enumerate() {
-      let res = self.run_statement(statement, true, false);
+      let res = self.run_statement(statement, true, false, Some(idx));
       match res {
         Ok(..) => {
           results.push(res);
@@ -1708,6 +1769,10 @@ impl Runtime {
       let b_ref = &mut *(&mut (*a_arr)[absorbed as usize] as *mut Heap);
       a_ref.absorb(b_ref, overwrite);
     }
+  }
+
+  fn reset_stmt_index(&mut self) {
+    self.stmt_count = 0;
   }
 
   fn clear_heap(&mut self, index: u64) {
@@ -1778,18 +1843,18 @@ impl Runtime {
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
             let fnid = get_num(fnid);
-
-            // Builds the argument vector
-            let name = Name::new_unsafe(get_ext(argm));
-            let arit = self
-              .get_arity(&name)
-              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            // TODO: check if fnid fits in name and if it is defined.
+            
+            let arg_name = Name::new(get_ext(argm)).ok_or_else(|| RuntimeError::NameTooBig { numb: argm })?;
+            let arg_arit = self
+              .get_arity(&arg_name)
+              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: arg_name })?;
             // Checks if the argument is a constructor with numeric fields. This is needed since
             // Kindelia's language is untyped, yet contracts can call each other freely. That would
             // allow a contract to pass an argument with an unexpected type to another, corrupting
             // its state. To avoid that, we only allow contracts to communicate by passing flat
             // constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
-            for i in 0 .. arit {
+            for i in 0 .. arg_arit {
               let argm = reduce(self, get_loc(argm, 0), mana)?;
               if get_tag(argm) != NUM {
                 let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
@@ -1807,6 +1872,18 @@ impl Runtime {
             clear(self, host, 1);
             //clear(self, get_loc(argm, 0), arit);
             clear(self, get_loc(term, 0), 3);
+            return done;
+          }
+          IO_GIDX => {
+            let fnid = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let fnid = get_num(fnid);
+            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let cont = alloc_app(self, cont, Num(indx));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
             return done;
           }
           IO_SUBJ => {
@@ -1924,7 +2001,7 @@ impl Runtime {
   ///
   /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
-  pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool) -> StatementResult {
+  pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool, stmt_index: Option<usize>) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo(); // TODO: don't undo inside here. too much coupling
       println!("{:03$} [{}] ERROR: {}", rt.get_tick(), tag, err, 10);
@@ -1956,13 +2033,14 @@ impl Runtime {
           return error(self, "fun", format!("Invalid function {}.", name));
         }
         let func = func.unwrap();
-        self.set_arity(*name, args.len() as u128);
-        self.define_function(*name, func);
+        let name = *name;
+        self.set_arity(name, args.len() as u128);
+        self.define_function(name, func, stmt_index);
         let state = self.create_term(init, 0, &mut init_map());
         let state = handle_runtime_err(self, "fun", state)?;
-        self.write_disk(U120::from(*name), state);
+        self.write_disk(U120::from(name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
-        StatementInfo::Fun { name: *name, args }
+        StatementInfo::Fun { name, args }
       }
       Statement::Ctr { name, args, sign } => {
         if self.exists(name) {
@@ -1976,7 +2054,7 @@ impl Runtime {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
         }
         let name = *name;
-        self.set_arity(name, args.len() as u128);
+        self.define_constructor(name, args.len() as u128, stmt_index);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Ctr { name, args }
       }
@@ -2026,6 +2104,7 @@ impl Runtime {
           size_diff: size_dif,
           end_size: size_end as u128, // TODO: rename to done_size for consistency?
         }
+        // TODO: save run to statement array?
       }
       Statement::Reg { name, ownr, sign } => {
         let ownr = **ownr;
@@ -2038,6 +2117,7 @@ impl Runtime {
           return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, name));
         }
         let name = *name;
+        self.define_register(name, stmt_index);
         self.set_owner(name, ownr);
         StatementInfo::Reg { name, ownr }
       }
@@ -2136,6 +2216,7 @@ impl Runtime {
 
   /// Saves past states for rollback.
   pub fn commit(&mut self) {
+    self.reset_stmt_index();
     self.draw();
     self.snapshot();
   }
@@ -2387,6 +2468,10 @@ impl Runtime {
 
   pub fn set_owner(&mut self, name: Name, owner: u128) {
     self.get_heap_mut(self.draw).write_ownr(name, owner);
+  }
+
+  pub fn get_index(&mut self, name: &Name) -> Option<u128> {
+    self.get_with(None, None, |heap| heap.read_indx(name))
   }
 
   pub fn exists(&self, name: &Name) -> bool {
@@ -2975,7 +3060,9 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       Ok(App(node))
     }
     Term::Fun { name, args } => {
-      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
+      let expected = rt.get_arity(name)
+        .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })?
+        as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
@@ -2989,7 +3076,9 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       }
     }
     Term::Ctr { name, args } => {
-      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
+      let expected = rt.get_arity(name)
+        .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })?
+        as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
@@ -4040,6 +4129,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   text
 }
 
+
 fn show_runtime_error(err: RuntimeError) -> String {
   match err {
     RuntimeError::NotEnoughMana => "Not enough mana".to_string(),
@@ -4048,6 +4138,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
     RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
+    RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
