@@ -1,14 +1,12 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 #![allow(non_snake_case)]
 #![allow(unused_variables)]
 #![allow(clippy::style)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::sync::mpsc::{SyncSender, Receiver};
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 
 use bit_vec::BitVec;
 use json::object;
@@ -17,17 +15,13 @@ use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
 use sha3::Digest;
 
-use std::hash::BuildHasherDefault;
-use crate::NoHashHasher as NHH;
-use crate::net::{ProtoComm, ProtoAddr, Address};
-use crate::print_with_timestamp;
-
 use crate::api::{self, CtrInfo, RegInfo};
-use crate::api::{NodeRequest, BlockInfo, FuncInfo};
-use crate::common::Name;
-use crate::util::*;
+use crate::api::{BlockInfo, FuncInfo, NodeRequest};
 use crate::bits::*;
+use crate::common::Name;
 use crate::hvm::{self, *};
+use crate::net::{ProtoAddr, ProtoComm};
+use crate::util::*;
 
 // Types
 // =====
@@ -40,72 +34,70 @@ use crate::hvm::{self, *};
 // TX_COUNT is a single byte storing the number of transactions in this block. The length of each
 // transaction is stored using 2 bytes, called LEN.
 
-// A u64 HashMap / HashSet
-pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
-pub type Set    = im::HashSet<u64, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
-
 #[derive(Debug, Clone)]
 pub struct Transaction {
   pub data: Vec<u8>,
   pub hash: U256,
 }
 
-// TODO: store number of used bits
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
-  // TODO: optimize size
   pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Block {
-  pub time: u128, // block timestamp
-  pub meta: u128, // block metadata
-  pub prev: U256, // previous block (32 bytes)
-  pub body: Body, // block contents (1280 bytes)
-  pub hash: U256, // cached block hash // TODO: refactor out
+  /// 32 bytes hash of previous block.
+  pub prev: U256,
+  /// Block timestamp.
+  pub time: u128,
+  /// Block metadata.
+  pub meta: u128,
+  /// Block contents. 1280 bytes max.
+  pub body: Body,
+  /// Cached block hash.
+  /// TODO: refactor out
+  pub hash: U256,
 }
 
-// Blocks have 4 states of inclusion:
-//
-//   has wait_list? | is on .pending? | is on .block? | meaning
-//   -------------- | --------------- | ------------- | ------------------------------------------------------
-//   no             | no              | no            | unseen   : never seen, may not exist
-//   yes            | no              | no            | missing  : some block cited it, but it wasn't downloaded
-//   yes            | yes             | no            | pending  : downloaded, but waiting ancestors for inclusion
-//   no             | no              | yes           | included : fully included, as well as all its ancestors
+/// Blocks have 4 states of inclusion:
+///
+///   has wait_list? | is on .pending? | is on .block? | meaning
+///   -------------- | --------------- | ------------- | ------------------------------------------------------
+///   no             | no              | no            | UNSEEN   : never seen, may not exist
+///   yes            | no              | no            | MISSING  : some block cited it, but it wasn't downloaded
+///   yes            | yes             | no            | PENDING  : downloaded, but waiting ancestors for inclusion
+///   no             | no              | yes           | INCLUDED : fully included, as well as all its ancestors
 #[derive(Debug, Clone, PartialEq)]
 pub enum InclusionState {
-  UNSEEN, MISSING, PENDING, INCLUDED
+  UNSEEN,
+  MISSING,
+  PENDING,
+  INCLUDED,
 }
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
-// TODO: dashmap?
-//
-// The was_mined field stores which transactions were mined, to avoid re-inclusion. It is NOT
-// reversible, though. As such, if a transaction is included, then there is a block reorg that
-// drops it, then this node will NOT try to mine it again. It can still be mined by other nodes, or
-// re-submitted. FIXME: `was_mined` should be removed. Instead, we just need a priority-queue with
-// fast removal of mined transactions. An immutable map should suffice.
+
+#[rustfmt::skip]
 pub struct Node<C: ProtoComm> {
-  pub state_path : PathBuf,                          // path where files are saved
-  pub network_id : u64,                              // Network ID / magic number
-  pub comm       : C,                                // UDP socket
-  pub addr       : C::Address,                       // UDP port
-  pub runtime    : Runtime,                          // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest<C>>,         // Receives an API request
-  pub tip        : U256,                             // current tip
-  pub block      : U256Map<Block>,                   // block_hash -> block
-  pub pending    : U256Map<Block>,                   // block_hash -> downloaded block, waiting for ancestors
-  pub ancestor   : U256Map<U256>,                    // block_hash -> hash of its most recent missing ancestor (shortcut jump table)
-  pub wait_list  : U256Map<Vec<U256>>,               // block_hash -> hashes of blocks that are waiting for this one
-  pub children   : U256Map<Vec<U256>>,               // block_hash -> hashes of this block's children
-  pub work       : U256Map<U256>,                    // block_hash -> accumulated work
-  pub target     : U256Map<U256>,                    // block_hash -> this block's target
-  pub height     : U256Map<u128>,                    // block_hash -> cached height
-  pub results    : U256Map<Vec<StatementResult>>,    // block_hash -> results of the statements in this block
-  pub pool       : PriorityQueue<Transaction, u64>,  // transactions to be mined
-  pub peers      : PeersStore<C::Address>,           // peers store and state control
+  pub state_path : PathBuf,                           // path where files are saved
+  pub network_id : u64,                               // Network ID / magic number
+  pub comm       : C,                                 // UDP socket
+  pub addr       : C::Address,                        // UDP port
+  pub runtime    : Runtime,                           // Kindelia's runtime
+  pub receiver   : Receiver<NodeRequest<C>>,          // Receives an API request
+  pub pool       : PriorityQueue<Transaction, u64>,   // transactions to be mined
+  pub peers      : PeersStore<C::Address>,            // peers store and state control
+  pub tip        : U256,                              // current tip
+  pub block      : U256Map<Block>,                 // block hash -> block
+  pub pending    : U256Map<Block>,                 // block hash -> downloaded block, waiting for ancestors
+  pub ancestor   : U256Map<U256>,                  // block hash -> hash of its most recent missing ancestor (shortcut jump table)
+  pub wait_list  : U256Map<Vec<U256>>,             // block hash -> hashes of blocks that are waiting for this one
+  pub children   : U256Map<Vec<U256>>,             // block hash -> hashes of this block's children
+  pub work       : U256Map<U256>,                  // block hash -> accumulated work
+  pub target     : U256Map<U256>,                  // block hash -> this block's target
+  pub height     : U256Map<u128>,                  // block hash -> cached height
+  pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
 }
 
 // Peers
@@ -122,19 +114,15 @@ pub struct PeersStore<A: ProtoAddr> {
   active: HashMap<A, Peer<A>>,
 }
 
-impl <A: ProtoAddr> PeersStore<A> {
+impl<A: ProtoAddr> PeersStore<A> {
   pub fn new() -> PeersStore<A> {
-    PeersStore {
-      seen: HashMap::new(),
-      active: HashMap::new(),
-    }
+    PeersStore { seen: HashMap::new(), active: HashMap::new() }
   }
 
-  /// This function checks and puts
-  /// a peer as active on `PeerStore`.
+  /// This function checks and puts a peer as active on `PeerStore`.
   pub fn activate(&mut self, addr: &A, peer: Peer<A>) {
     let now = get_time();
-    // only activate if its `seen_at` is newer than `now - TIMEOUT` 
+    // Only activate if its `seen_at` is newer than `now - TIMEOUT`
     if peer.seen_at >= now - PEER_TIMEOUT {
       self.active.insert(*addr, peer);
     }
@@ -144,20 +132,24 @@ impl <A: ProtoAddr> PeersStore<A> {
     let addr = peer.address;
     // print_with_timestamp!("- see peer {}", addr);
     match self.seen.get(&addr) {
-      None => { // New peer, not seen before
+      // New peer, not seen before
+      None => {
         // print_with_timestamp!("- new peer {}", addr);
         self.seen.insert(addr, peer);
         self.activate(&addr, peer);
       }
-      Some(index) => { // Peer seen before, but maybe not active
+      // Peer seen before, but maybe not active
+      Some(index) => {
         // print_with_timestamp!("- peer {} already seen", addr);
         let old_peer = self.active.get_mut(&addr);
         match old_peer {
-          None => { // Peer not active, so activate it
+          // Peer not active, so activate it
+          None => {
             // print_with_timestamp!("- activating peer {}", addr);
             self.activate(&addr, peer);
           }
-          Some(old_peer) => { // Peer already active, so update it
+          // Peer already active, so update it
+          Some(old_peer) => {
             // print_with_timestamp!("\t- old peer {:?}", old_peer);
             old_peer.seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
             // print_with_timestamp!("\t- new peer {:?}", old_peer);
@@ -169,7 +161,7 @@ impl <A: ProtoAddr> PeersStore<A> {
 
   fn timeout(&mut self) {
     let mut forget = Vec::new();
-    for (id,peer) in &self.active {
+    for (id, peer) in &self.active {
       // print_with_timestamp!("- Peer {}: {}", id, peer.address);
       // print_with_timestamp!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
       if peer.seen_at < get_time() - PEER_TIMEOUT {
@@ -208,20 +200,14 @@ impl <A: ProtoAddr> PeersStore<A> {
 
 #[derive(Debug, Clone)]
 pub enum MinerMessage {
-  Request {
-    prev: U256,
-    body: Body,
-    targ: U256, 
-  },
-  Answer {
-    block: Block
-  },
-  Stop
+  Request { prev: U256, body: Body, targ: U256 },
+  Answer { block: Block },
+  Stop,
 }
 
 #[derive(Debug, Clone)]
 pub struct MinerCommunication {
-  message: Arc<Mutex<MinerMessage>>
+  message: Arc<Mutex<MinerMessage>>,
 }
 
 // Protocol
@@ -238,83 +224,85 @@ pub enum Message<A: ProtoAddr> {
   },
   GiveMeThatBlock {
     magic: u64,
-    bhash: Hash
+    bhash: Hash,
   },
   PleaseMineThisTransaction {
     magic: u64,
-    trans: Transaction
-  }
+    trans: Transaction,
+  },
 }
 
 // Constants
 // =========
 
 // Size of a hash, in bytes
-pub const HASH_SIZE : usize = 32;
+pub const _HASH_SIZE: usize = 32;
 
 // Size of a block's body, in bytes
-pub const MAX_BODY_SIZE : usize = 1280;
+pub const MAX_BODY_SIZE: usize = 1280;
 
 // Max size of a big UDP packet, in bytes
-pub const MAX_UDP_SIZE_SLOW : usize = 8000;
+pub const MAX_UDP_SIZE_SLOW: usize = 8000;
 
 // Max size of a fast UDP packet, in bytes
-pub const MAX_UDP_SIZE_FAST : usize = 1500;
+pub const _MAX_UDP_SIZE_FAST: usize = 1500;
+
+// TODO: enforce maximum block size on debug mode
 
 // Size of a block, in bytes
 //pub const BLOCK_SIZE : usize = HASH_SIZE + (U128_SIZE * 4) + BODY_SIZE;
 
-// TODO: enforce maximum block size on debug mode
-
 // Size of an IPv4 address, in bytes
-pub const IPV4_SIZE : usize = 4;
+pub const _IPV4_SIZE: usize = 4;
 
 // Size of an IPv6 address, in bytes
-pub const IPV6_SIZE : usize = 16;
+pub const _IPV6_SIZE: usize = 16;
 
 // Size of an IP port, in bytes
-pub const PORT_SIZE : usize = 2;
+pub const _PORT_SIZE: usize = 2;
 
 // How many nodes we gossip an information to?
-pub const GOSSIP_FACTOR : u128 = 16;
+pub const _GOSSIP_FACTOR: u128 = 16;
 
 // How many times the mining thread attempts before unblocking?
-pub const MINE_ATTEMPTS : u128 = 1024;
+pub const MINE_ATTEMPTS: u128 = 1024;
 
 // Desired average time between mined blocks, in milliseconds
-pub const TIME_PER_BLOCK : u128 = 1000;
+pub const TIME_PER_BLOCK: u128 = 1000;
 
 // Don't accept blocks from N milliseconds in the future
-pub const DELAY_TOLERANCE : u128 = 60 * 60 * 1000;
+pub const DELAY_TOLERANCE: u128 = 60 * 60 * 1000;
 
 // Readjust difficulty every N blocks
-pub const BLOCKS_PER_PERIOD : u128 = 20;
+pub const BLOCKS_PER_PERIOD: u128 = 20;
 
 // Readjusts difficulty every N seconds
-pub const TIME_PER_PERIOD : u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
+pub const TIME_PER_PERIOD: u128 = TIME_PER_BLOCK * BLOCKS_PER_PERIOD;
 
 // Initial difficulty, in expected hashes per block
-pub const INITIAL_DIFFICULTY : u128 = 256;
+pub const INITIAL_DIFFICULTY: u128 = 256;
 
 // How many milliseconds without notice until we forget a peer?
-pub const PEER_TIMEOUT : u128 = 10 * 1000;
+pub const PEER_TIMEOUT: u128 = 10 * 1000;
 
 // How many peers we need to keep minimum?
-pub const PEER_COUNT_MINIMUM : u128 = 256;
+pub const _PEER_COUNT_MINIMUM: u128 = 256;
 
 // How many peers we send when asked?
-pub const SHARE_PEER_COUNT : u128 = 3;
+pub const _SHARE_PEER_COUNT: u128 = 3;
 
 // How many peers we keep on the last_seen object?
-pub const LAST_SEEN_SIZE : u128 = 2;
+pub const _LAST_SEEN_SIZE: u128 = 2;
 
 // Delay between handling of network messages, in ms
-pub const HANDLE_MESSAGE_DELAY : u128 = 20;
+pub const HANDLE_MESSAGE_DELAY: u128 = 20;
 
 // Delay between handling of API requests, in ms
-pub const HANDLE_REQUEST_DELAY : u128 = 20;
+pub const HANDLE_REQUEST_DELAY: u128 = 20;
 
 // This limits how many messages we accept at once
+pub const _HANDLE_MESSAGE_LIMIT: u128 = 5;
+
 // FIXME:
 // With a handle_message_delay of 20ms, and the message limit of 5, we can handle up to 250
 // messages per second. This number is made up. I do not know how many messages we're able to
@@ -322,96 +310,36 @@ pub const HANDLE_REQUEST_DELAY : u128 = 20;
 // come up with a constant that is aligned. Furthermore, we can also greatly optimize the
 // performance of Node::handle_message with some key changes, which would allow us to increase that
 // limit considerably.
-// 1. Cache block hashes:
-//   The `NoticeThisBlock` handler hashes the same block twice: one inside `add_block`, and another
-//   on the missing ancestor discovery logic. We should avoid that. A good idea might be to include
-//   the block hash on the Block struct, so that it is always cached, avoiding re-hashing.
-// 2. Use a faster hash function:
+// 1. Use a faster hash function:
 //   We can replace every usage of Keccak by K12 on Kindelia, with the only exception being the
 //   hash of a public address to end up with an account's name, since Keccak is required to achieve
 //   Ethereum account compatibility.
-// 3. Receive the hash from the peer:
+// 2. Receive the hash from the peer:
 //   We can *perhaps*, receive a block's hash from the peer that sends it. Obviously, this would
 //   open door for several vulnerabilities, but it might be used as a heuristic to avoid slow
 //   branches. Of course, when the hash is needed for critical purposes, we must compute it.
-// 4. Cache the "first missing ancestor":
-//   Every time the `NoticeThisBlock` handler receives a tip, it must find the first missing block
-//   on that tips ancestry. That information may be cached, avoiding that loop.
-pub const HANDLE_MESSAGE_LIMIT : u128 = 5;
-
-
-// UDP
-// ===
-
-/// Builds an IPV4 Address. TODO: refactor into `impl Address`
-pub fn ipv4(val0: u8, val1: u8, val2: u8, val3: u8, port: u16) -> Address {
-  Address::IPv4 { val0, val1, val2, val3, port }
-}
-
-/// Starts listening to UDP messages on one port of a set of ports
-// pub fn udp_init(ports: &[u16]) -> Option<(UdpSocket,u16)> {
-//   for port in ports {
-//     if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}",port)) {
-//       socket.set_nonblocking(true).ok();
-//       return Some((socket, *port));
-//     }
-//   }
-//   return None;
-// }
-
-/// Sends an UDP message to many addresses
-// pub fn udp_send(socket: &mut UdpSocket, addresses: Vec<Address>, message: &Message) {
-//   let bytes = bitvec_to_bytes(&serialized_message(message));
-//   for address in addresses {
-//     match address {
-//       Address::IPv4 { val0, val1, val2, val3, port } => {
-//         let addr = SocketAddrV4::new(Ipv4Addr::new(val0, val1, val2, val3), port);
-//         socket.send_to(bytes.as_slice(), addr).ok();
-//       }
-//     }
-//   }
-// }
-
-// Receives an UDP messages
-// Non-blocking, returns a vector of received messages on buffer
-// pub fn udp_recv(socket: &mut UdpSocket) -> Vec<(Address, Message)> {
-//   let mut buffer = [0; 65536];
-//   let mut messages = Vec::new();
-//   while let Ok((msg_len, sender_addr)) = socket.recv_from(&mut buffer) {
-//     let bits = BitVec::from_bytes(&buffer[0 .. msg_len]);
-//     if let Some(msge) = deserialized_message(&bits) {
-//       let addr = match sender_addr.ip() {
-//         std::net::IpAddr::V4(v4addr) => {
-//           let [val0, val1, val2, val3] = v4addr.octets();
-//           Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
-//         }
-//         _ => {
-//           panic!("TODO: IPv6")
-//         }
-//       };
-//       messages.push((addr, msge));
-//     }
-//   }
-//   return messages;
-// }
 
 // Algorithms
 // ==========
 
-// Converts a target to a difficulty (see below)
+// Target is a U256 number. A hash larger than or equal to that number hits the target.
+// Difficulty is an estimation of how many hashes it takes to hit a given target.
+
+/// Converts a target to a difficulty.
 pub fn target_to_difficulty(target: U256) -> U256 {
-  let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+  let p256 =
+    "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+  let p256 = U256::from(p256);
   return p256 / (p256 - target);
 }
 
-// Converts a difficulty to a target (see below)
+/// Converts a difficulty to a target.
 pub fn difficulty_to_target(difficulty: U256) -> U256 {
-  let p256 = U256::from("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+  let p256 =
+    "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+  let p256 = U256::from(p256);
   return p256 - p256 / difficulty;
 }
-
-// Target is a U256 number. A hash larger than or equal to that number hits the target.
-// Difficulty is an estimation of how many hashes it takes to hit a given target.
 
 // Computes next target by scaling the current difficulty by a `scale` factor.
 // Since the factor is an integer, it is divided by 2^32 to allow integer division.
@@ -423,11 +351,6 @@ pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
   let last_difficulty = target_to_difficulty(last_target);
   let next_difficulty = u256(1) + (last_difficulty * scale - u256(1)) / p32;
   return difficulty_to_target(next_difficulty);
-}
-
-// Computes the next target, scaling by a floating point factor.
-pub fn compute_next_target_f64(last_target: U256, scale: f64) -> U256 {
-  return compute_next_target(last_target, u256(scale as u128));
 }
 
 // Estimates how many hashes were necessary to get this one.
@@ -457,7 +380,7 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
   let hash = if time == 0 {
     hash_bytes(&[])
   } else {
-    let mut bytes : Vec<u8> = Vec::new();
+    let mut bytes: Vec<u8> = Vec::new();
     bytes.extend_from_slice(&u256_to_bytes(prev));
     bytes.extend_from_slice(&u128_to_bytes(time));
     bytes.extend_from_slice(&u128_to_bytes(meta));
@@ -467,20 +390,6 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
   return Block { prev, time, meta, body, hash };
 }
 
-// Converts a byte array to a Body.
-pub fn bytes_to_body(bytes: &[u8]) -> Body {
-  Body { data: bytes.to_vec() }
-}
-
-// Converts a string (with a list of statements) to a body.
-// TODO: remove
-pub fn code_to_body(code: &str) -> Body {
-  let (_rest, acts) = crate::hvm::read_statements(code).unwrap(); // TODO: handle error
-  let bits = acts.proto_serialized();
-  let body = bytes_to_body(&bitvec_to_bytes(&bits));
-  return body;
-}
-
 // Encodes a transaction length as a pair of 2 bytes
 fn encode_length(len: usize) -> (u8, u8) {
   let num = (len as u16).reverse_bits();
@@ -488,7 +397,7 @@ fn encode_length(len: usize) -> (u8, u8) {
 }
 
 // Decodes an encoded transaction length
-fn decode_length(pair: (u8,u8)) -> usize {
+fn decode_length(pair: (u8, u8)) -> usize {
   (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
 }
 
@@ -497,12 +406,17 @@ pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
   let mut index = 1;
   let tx_count = body.data[0];
-  for i in 0 .. tx_count {
-    if index >= body.data.len() { break; }
+  for i in 0..tx_count {
+    if index >= body.data.len() {
+      break;
+    }
     let tx_len = decode_length((body.data[index], body.data[index + 1]));
     index += 2;
-    if index + tx_len > body.data.len() { break; }
-    transactions.push(Transaction::new(body.data[index .. index + tx_len].to_vec()));
+    if index + tx_len > body.data.len() {
+      break;
+    }
+    let transaction_body = body.data[index..index + tx_len].to_vec();
+    transactions.push(Transaction::new(transaction_body));
     index += tx_len;
   }
   return transactions;
@@ -560,15 +474,21 @@ impl std::hash::Hash for Transaction {
 // ------
 
 // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
-pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Option<Block> {
+pub fn try_mine(
+  prev: U256,
+  body: Body,
+  targ: U256,
+  max_attempts: u128,
+) -> Option<Block> {
   let rand = rand::random::<u128>();
   let time = get_time();
   let mut block = new_block(prev, time, rand, body);
-  for _i in 0 .. max_attempts {
+  for _i in 0..max_attempts {
     if block.hash >= targ {
       return Some(block);
     } else {
       block.meta = block.meta.wrapping_add(1);
+      // FIXME: not updating block hash.
     }
   }
   return None;
@@ -577,9 +497,7 @@ pub fn try_mine(prev: U256, body: Body, targ: U256, max_attempts: u128) -> Optio
 impl MinerCommunication {
   // Creates a shared MinerCommunication object
   pub fn new() -> Self {
-    MinerCommunication {
-      message: Arc::new(Mutex::new(MinerMessage::Stop))
-    }
+    MinerCommunication { message: Arc::new(Mutex::new(MinerMessage::Stop)) }
   }
 
   // Writes the shared MinerCommunication object
@@ -596,7 +514,9 @@ impl MinerCommunication {
 // Main miner loop: if asked, attempts to mine a block
 pub fn miner_loop(mut miner_communication: MinerCommunication) {
   loop {
-    if let MinerMessage::Request { prev, body, targ } = miner_communication.read() {
+    if let MinerMessage::Request { prev, body, targ } =
+      miner_communication.read()
+    {
       //print_with_timestamp!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
@@ -610,34 +530,36 @@ pub fn miner_loop(mut miner_communication: MinerCommunication) {
 // Node
 // ----
 
-impl <C: ProtoComm> Node<C> {
+impl<C: ProtoComm> Node<C> {
   pub fn new(
     state_path: PathBuf,
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
-    comm: C
+    comm: C,
   ) -> (SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
+
+    #[rustfmt::skip]
     let mut node = Node {
       state_path,
       network_id,
-      addr       : comm.get_addr(),
+      addr: comm.get_addr(),
       comm,
       runtime,
-      receiver   : query_receiver,
-      block      : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
-      pending    : u256map_new(),
-      ancestor   : u256map_new(),
-      wait_list  : u256map_new(),
-      children   : u256map_from([(ZERO_HASH(), vec![])]),
-      work       : u256map_from([(ZERO_HASH(), u256(0))]),
-      height     : u256map_from([(ZERO_HASH(), 0)]),
-      target     : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
-      results    : u256map_from([(ZERO_HASH(), vec![])]),
-      tip        : ZERO_HASH(),
-      pool       : PriorityQueue::new(),
-      peers      : PeersStore::new(),
+      receiver : query_receiver,
+      pool     : PriorityQueue:: new(),
+      peers    : PeersStore:: new(),
+      tip      : ZERO_HASH(),
+      block    : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
+      pending  : u256map_new(),
+      ancestor : u256map_new(),
+      wait_list: u256map_new(),
+      children : u256map_from([(ZERO_HASH(), vec![])]),
+      work     : u256map_from([(ZERO_HASH(), u256(0))]),
+      height   : u256map_from([(ZERO_HASH(), 0)]),
+      target   : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
+      results  : u256map_from([(ZERO_HASH(), vec![])]),
     };
 
     let now = get_time();
@@ -659,7 +581,10 @@ impl <C: ProtoComm> Node<C> {
     (query_sender, node)
   }
 
-  pub fn add_transaction(&mut self, transaction: Transaction) -> Result<(), ()> {
+  pub fn add_transaction(
+    &mut self,
+    transaction: Transaction,
+  ) -> Result<(), ()> {
     let t_score = transaction.hash.low_u64();
     if self.pool.get(&transaction).is_none() {
       self.pool.push(transaction, t_score);
@@ -680,26 +605,31 @@ impl <C: ProtoComm> Node<C> {
   //     - In case of a reorg, rollback to the block before it
   //     - Run that block's code, updating the HVM state
   //     - Updates the longest chain saved on disk
-  pub fn add_block(&mut self, miner_communication: &mut MinerCommunication, block: &Block) {
+  pub fn add_block(
+    &mut self,
+    miner_communication: &mut MinerCommunication,
+    block: &Block,
+  ) {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
-    let mut must_include = vec![block.clone()]; // blocks to be added
+
+    // Blocks to be added
+    let mut must_include = vec![block.clone()];
     // While there is a block to add...
     while let Some(block) = must_include.pop() {
-      let btime = block.time; // the block timestamp
-      //print_with_timestamp!("- add block time={}", btime);
+      let btime = block.time;
       // If block is too far into the future, ignore it
       if btime >= get_time() + DELAY_TOLERANCE {
         //print_with_timestamp!("# new block: too late");
         continue;
       }
-      let bhash = block.hash; // hash of the block
+      let bhash = block.hash;
       // If we already registered this block, ignore it
       if self.block.get(&bhash).is_some() {
         //print_with_timestamp!("# new block: already in");
         continue;
       }
-      let phash = block.prev; // hash of the previous block
+      let phash = block.prev;
       // If previous block is available, add the block to the chain
       if self.block.get(&phash).is_some() {
         //print_with_timestamp!("- previous available");
@@ -710,6 +640,7 @@ impl <C: ProtoComm> Node<C> {
         self.target.insert(bhash, u256(0)); // inits the target attr
         self.children.insert(bhash, vec![]); // inits the children attrs
         self.ancestor.remove(&bhash); // remove it from the ancestor jump table
+
         // Checks if this block PoW hits the target
         let has_enough_work = bhash >= self.target[&phash];
         // Checks if this block's timestamp is larger than its parent's timestamp
@@ -720,11 +651,15 @@ impl <C: ProtoComm> Node<C> {
           // print_with_timestamp!("# new_block: enough work & advances_time");
           self.work.insert(bhash, self.work[&phash] + work); // sets this block accumulated work
           self.height.insert(bhash, self.height[&phash] + 1); // sets this block accumulated height
+
           // If this block starts a new period, computes the new target
-          if self.height[&bhash] > 0 && self.height[&bhash] > BLOCKS_PER_PERIOD && self.height[&bhash] % BLOCKS_PER_PERIOD == 1 {
+          if self.height[&bhash] > 0
+            && self.height[&bhash] > BLOCKS_PER_PERIOD
+            && self.height[&bhash] % BLOCKS_PER_PERIOD == 1
+          {
             // Finds the checkpoint hash (hash of the first block of the last period)
             let mut checkpoint_hash = phash;
-            for _ in 0 .. BLOCKS_PER_PERIOD - 1 {
+            for _ in 0..BLOCKS_PER_PERIOD - 1 {
               checkpoint_hash = self.block[&checkpoint_hash].prev;
             }
             // Computes how much time the last period took to complete
@@ -732,7 +667,8 @@ impl <C: ProtoComm> Node<C> {
             // Computes the target of this period
             let last_target = self.target[&phash];
             let next_scaler = 2u128.pow(32) * TIME_PER_PERIOD / period_time;
-            let next_target = compute_next_target(last_target, u256(next_scaler));
+            let next_target =
+              compute_next_target(last_target, u256(next_scaler));
             // Sets the new target
             self.target.insert(bhash, next_target);
           // Otherwise, keep the old target
@@ -779,9 +715,14 @@ impl <C: ProtoComm> Node<C> {
               }
               // 3. Saves overwritten blocks to disk
               for bhash in must_compute.iter().rev() {
-                let file_path = self.get_blocks_path().join(format!("{:0>32x}.kindelia_block.bin", self.height[bhash]));
-                let file_buff = bitvec_to_bytes(&self.block[bhash].proto_serialized());
-                std::fs::write(file_path, file_buff).expect("Couldn't save block to disk.");
+                let file_path = self.get_blocks_path().join(format!(
+                  "{:0>32x}.kindelia_block.bin",
+                  self.height[bhash]
+                ));
+                let file_buff =
+                  bitvec_to_bytes(&self.block[bhash].proto_serialized());
+                std::fs::write(file_path, file_buff)
+                  .expect("Couldn't save block to disk.");
               }
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
@@ -809,7 +750,8 @@ impl <C: ProtoComm> Node<C> {
         // This will cause the block to be moved from self.pending to self.block
         if let Some(wait_list) = self.wait_list.get(&bhash) {
           for waiting_for_me in wait_list {
-            must_include.push(self.pending.remove(waiting_for_me).expect("block"));
+            must_include
+              .push(self.pending.remove(waiting_for_me).expect("block"));
           }
           self.wait_list.remove(&bhash);
         }
@@ -835,7 +777,7 @@ impl <C: ProtoComm> Node<C> {
     }
     self.runtime.set_time(block.time >> 8);
     self.runtime.set_meta(block.meta >> 8);
-    self.runtime.set_hax0((block.hash >>   0).low_u128() >> 8);
+    self.runtime.set_hax0((block.hash >> 000).low_u128() >> 8);
     self.runtime.set_hax1((block.hash >> 120).low_u128() >> 8);
     self.runtime.open();
     let result = self.runtime.run_statements(&statements, false, false);
@@ -867,10 +809,13 @@ impl <C: ProtoComm> Node<C> {
     return longest;
   }
 
-  pub fn receive_message(&mut self, miner_communication: &mut MinerCommunication) {
+  pub fn receive_message(
+    &mut self,
+    miner_communication: &mut MinerCommunication,
+  ) {
     let mut count = 0;
-    for (addr, msg) in  self.comm.proto_recv() {
-      //if count < HANDLE_MESSAGE_LIMIT {
+    for (addr, msg) in self.comm.proto_recv() {
+      //if count < HANDLE_MESSAGE_LIMIT {  TODO: ???
       self.handle_message(miner_communication, addr, &msg);
       count = count + 1;
       //}
@@ -903,12 +848,8 @@ impl <C: ProtoComm> Node<C> {
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).map(|r| r.clone());
     let transactions = extract_transactions(&block.body);
-    let info = BlockInfo {
-      block: block.into(),
-      hash: (*hash).into(),
-      height,
-      results,
-    };
+    let info =
+      BlockInfo { block: block.into(), hash: (*hash).into(), height, results };
     Some(info)
   }
 
@@ -929,21 +870,12 @@ impl <C: ProtoComm> Node<C> {
     let ownr = self.runtime.get_owner(&name)?;
     let ownr = Name::from_u128_unchecked(ownr);
     let pred = |c: &Name| c.to_string().starts_with(&format!("{}.", name));
-    let ctrs: Vec<Name> = 
-      self.runtime.get_all_ctr()
-        .into_iter()
-        .filter(pred)
-        .collect();
-    let funs: Vec<Name> = 
-      self.runtime.get_all_funs()
-        .into_iter()
-        .filter(pred)
-        .collect();
-    let ns: Vec<Name> = 
-        self.runtime.get_all_ns()
-          .into_iter()
-          .filter(pred)
-          .collect();
+    let ctrs: Vec<Name> =
+      self.runtime.get_all_ctr().into_iter().filter(pred).collect();
+    let funs: Vec<Name> =
+      self.runtime.get_all_funs().into_iter().filter(pred).collect();
+    let ns: Vec<Name> =
+      self.runtime.get_all_ns().into_iter().filter(pred).collect();
     let stmt = [ctrs, funs, ns].concat();
     Some(RegInfo { ownr, stmt })
   }
@@ -963,11 +895,11 @@ impl <C: ProtoComm> Node<C> {
         self.runtime.reduce_with(&mut ctr_count, |acc, heap| {
           *acc += heap.get_ct_count();
         });
-        let mut reg_count = 0; 
+        let mut reg_count = 0;
         self.runtime.reduce_with(&mut reg_count, |acc, heap| {
           *acc += heap.get_ns_count();
         });
-        let stats = api::Stats { 
+        let stats = api::Stats {
           tick,
           mana,
           space: size,
@@ -983,20 +915,20 @@ impl <C: ProtoComm> Node<C> {
         debug_assert!(end == -1);
         let num = (end - start + 1) as usize;
         let hashes = self.get_longest_chain(Some(num));
-        let infos = hashes.iter()
-          .map(|h| 
-            self.get_block_info(h).expect("Missing block.")
-          ).collect();
+        let infos = hashes
+          .iter()
+          .map(|h| self.get_block_info(h).expect("Missing block."))
+          .collect();
         answer.send(infos).unwrap();
-      },
+      }
       NodeRequest::GetBlock { hash, tx: answer } => {
         let info = self.get_block_info(&hash);
         answer.send(info).unwrap();
-      },
+      }
       NodeRequest::GetBlockHash { index, tx: answer } => {
         let info = self.get_block_hash_by_index(index);
         answer.send(info).unwrap();
-      },
+      }
       NodeRequest::GetFunctions { tx } => {
         let mut funcs: HashSet<u128> = HashSet::new();
         self.runtime.reduce_with(&mut funcs, |acc, heap| {
@@ -1005,66 +937,64 @@ impl <C: ProtoComm> Node<C> {
           }
         });
         tx.send(funcs).unwrap();
-      },
-      NodeRequest::GetFunction { name, tx: answer } =>  {
+      }
+      NodeRequest::GetFunction { name, tx: answer } => {
         let info = self.get_func_info(&name);
         answer.send(info).unwrap();
-      },
+      }
       NodeRequest::GetState { name, tx: answer } => {
         let state = self.runtime.read_disk_as_term(name.into(), Some(1 << 16));
         answer.send(state).unwrap();
-      },
+      }
       NodeRequest::GetPeers { all, tx: answer } => {
-        let peers = 
-          if all {
-            self.peers.get_all()
-          } else {
-            self.peers.get_all_active()
-          };
+        let peers =
+          if all { self.peers.get_all() } else { self.peers.get_all_active() };
         answer.send(peers).unwrap();
-      },
+      }
       NodeRequest::GetConstructor { name, tx: answer } => {
         let info = self.get_ctr_info(&name);
         answer.send(info).unwrap();
-      },
+      }
       NodeRequest::GetReg { name, tx: answer } => {
         let info = self.get_reg_info(name);
         answer.send(info).unwrap();
-      },
+      }
       NodeRequest::RunCode { code, tx: answer } => {
         let result = self.runtime.test_statements_from_code(&code);
         answer.send(result).unwrap();
-      },
+      }
       NodeRequest::PublishCode { code, tx: answer } => {
         let statements =
-          hvm::read_statements(&code)
-            .map_err(|err| err.erro)
-            .map(|(_, s)| s);
+          hvm::read_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
         let res = match statements {
-          Err(err) => {
-            Err(err)
-          }
+          Err(err) => Err(err),
           Ok(stmts) => {
-            let results: Vec<_> = stmts.into_iter().map(|stmt| {
-              let bytes = bitvec_to_bytes(&stmt.proto_serialized());
-              let t = Transaction::new(bytes);
-              self.add_transaction(t)
-            }).collect();
+            let results: Vec<_> = stmts
+              .into_iter()
+              .map(|stmt| {
+                let bytes = bitvec_to_bytes(&stmt.proto_serialized());
+                let t = Transaction::new(bytes);
+                self.add_transaction(t)
+              })
+              .collect();
             Ok(results)
           }
         };
         answer.send(res).unwrap();
-      },
+      }
       NodeRequest::Run { code, tx: answer } => {
         let result = self.runtime.test_statements(&code);
         answer.send(result).unwrap();
-      },
+      }
       NodeRequest::Publish { code, tx } => {
-        let result: Vec<_> = code.into_iter().map(|stmt| {
-          let bytes = bitvec_to_bytes(&stmt.proto_serialized());
-          let t = Transaction::new(bytes);
-          self.add_transaction(t)
-        }).collect();
+        let result: Vec<_> = code
+          .into_iter()
+          .map(|stmt| {
+            let bytes = bitvec_to_bytes(&stmt.proto_serialized());
+            let t = Transaction::new(bytes);
+            self.add_transaction(t)
+          })
+          .collect();
         tx.send(result).unwrap();
       }
     }
@@ -1072,7 +1002,13 @@ impl <C: ProtoComm> Node<C> {
 
   // Sends a block to a target address; also share some random peers
   // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(&mut self, addrs: Vec<C::Address>, gossip: bool, blocks: Vec<Block>, share_peers: u128) {
+  pub fn send_blocks_to(
+    &mut self,
+    addrs: Vec<C::Address>,
+    gossip: bool,
+    blocks: Vec<Block>,
+    share_peers: u128,
+  ) {
     let magic = self.network_id;
     //print_with_timestamp!("- sending block: {:?}", block);
     let peers = self.peers.get_random_active(share_peers);
@@ -1128,7 +1064,12 @@ impl <C: ProtoComm> Node<C> {
     }
   }
 
-  pub fn handle_message(&mut self, miner_communication: &mut MinerCommunication, addr: C::Address, msg: &Message<C::Address>) {
+  pub fn handle_message(
+    &mut self,
+    miner_communication: &mut MinerCommunication,
+    addr: C::Address,
+    msg: &Message<C::Address>,
+  ) {
     if addr != self.addr {
       // print_with_timestamp!("- received message from {:?}: {:?}", addr, msg);
       match msg {
@@ -1151,11 +1092,17 @@ impl <C: ProtoComm> Node<C> {
           let mut chunk = vec![];
           let mut tsize = 0; // total size of the corresponding "NoticeTheseBlocks" message
           loop {
-            if !self.block.contains_key(&bhash) { break; }
-            if *bhash == ZERO_HASH() { break; }
+            if !self.block.contains_key(&bhash) {
+              break;
+            }
+            if *bhash == ZERO_HASH() {
+              break;
+            }
             let block = &self.block[bhash];
             let bsize = serialized_block_size(block) as usize;
-            if tsize + bsize > MAX_UDP_SIZE_SLOW { break }
+            if tsize + bsize > MAX_UDP_SIZE_SLOW {
+              break;
+            }
             chunk.push(block.clone());
             tsize += bsize;
             bhash = &block.prev;
@@ -1196,7 +1143,12 @@ impl <C: ProtoComm> Node<C> {
   }
 
   pub fn gossip(&mut self, peer_count: u128, message: &Message<C::Address>) {
-    let addrs = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
+    let addrs = self
+      .peers
+      .get_random_active(peer_count)
+      .iter()
+      .map(|x| x.address)
+      .collect();
     self.comm.proto_send(addrs, message);
   }
 
@@ -1205,13 +1157,19 @@ impl <C: ProtoComm> Node<C> {
   }
 
   fn broadcast_tip_block(&mut self) {
-    let addrs: Vec<C::Address>  = self.peers.get_all_active().iter().map(|x| x.address).collect();
+    let addrs: Vec<C::Address> =
+      self.peers.get_all_active().iter().map(|x| x.address).collect();
     let blocks = vec![self.block[&self.tip].clone()];
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
   fn gossip_tip_block(&mut self, peer_count: u128) {
-    let addrs: Vec<C::Address>  = self.peers.get_random_active(peer_count).iter().map(|x| x.address).collect();
+    let addrs: Vec<C::Address> = self
+      .peers
+      .get_random_active(peer_count)
+      .iter()
+      .map(|x| x.address)
+      .collect();
     let blocks = vec![self.block[&self.tip].clone()];
     self.send_blocks_to(addrs, true, blocks, 3);
   }
@@ -1219,7 +1177,7 @@ impl <C: ProtoComm> Node<C> {
   fn load_blocks(&mut self, miner_communication: &mut MinerCommunication) {
     let blocks_dir = self.get_blocks_path();
     std::fs::create_dir_all(&blocks_dir).ok();
-    let mut file_paths : Vec<PathBuf> = vec![];
+    let mut file_paths: Vec<PathBuf> = vec![];
     for entry in std::fs::read_dir(&blocks_dir).unwrap() {
       file_paths.push(entry.unwrap().path());
     }
@@ -1235,7 +1193,7 @@ impl <C: ProtoComm> Node<C> {
   fn ask_mine(&self, miner_communication: &mut MinerCommunication, body: Body) {
     //print_with_timestamp!("Asking miner to mine:");
     //for transaction in extract_transactions(&body) {
-      //print_with_timestamp!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
+    //print_with_timestamp!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
     //}
     miner_communication.write(MinerMessage::Request {
       prev: self.tip,
@@ -1244,24 +1202,33 @@ impl <C: ProtoComm> Node<C> {
     });
   }
 
-  fn handle_mined_block(&mut self, miner_communication: &mut MinerCommunication) {
+  fn handle_mined_block(
+    &mut self,
+    miner_communication: &mut MinerCommunication,
+  ) {
     if let MinerMessage::Answer { block } = miner_communication.read() {
       self.add_block(miner_communication, &block);
       self.broadcast_tip_block();
     }
   }
 
-  // Builds the body to be mined.
-  // To convert back to a vector of transactions, use `extract_transactions()`.
-  pub fn build_body(&self) -> Body {
-    let mut body_vec = vec![0]; 
+  /// Builds the body to be mined.
+  /// To convert back to a vector of transactions, use `extract_transactions()`.
+  pub fn build_body_from_pool(&self) -> Body {
+    let mut body_vec = vec![0];
     let mut tx_count = 0;
     for (transaction, _score) in self.pool.iter() {
       let tx_len = transaction.data.len();
-      if tx_len == 0 { continue; }
+      if tx_len == 0 {
+        continue;
+      }
       let len_info = transaction.encode_length(); // number we will store as the length
-      if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE { break; }
-      if tx_count + 1 > 255 { break; }
+      if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE {
+        break;
+      }
+      if tx_count + 1 > 255 {
+        break;
+      }
       body_vec.push(len_info.0);
       body_vec.push(len_info.1);
       body_vec.extend_from_slice(&transaction.data);
@@ -1301,7 +1268,7 @@ impl <C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
-    let log = object!{
+    let log = object! {
       event: "heartbeat",
       peers: { num: peers_num },
       tip: {
@@ -1332,23 +1299,23 @@ impl <C: ProtoComm> Node<C> {
     println!("{}", log);
   }
 
-  pub fn main(mut self, mut miner_communication: MinerCommunication, mine: bool) -> ! {
-
+  pub fn main(
+    mut self,
+    mut miner_communication: MinerCommunication,
+    mine: bool,
+  ) -> ! {
     eprintln!("Port: {}", self.addr);
     eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {
       eprintln!("  - {}", peer.address);
     }
 
-    // Loads all stored blocks. FIXME: remove the if (used for debugging)
-    // if self.port == UDP_PORT {
-      self.load_blocks(&mut miner_communication);
-    // }
+    self.load_blocks(&mut miner_communication);
 
-   // A task that is executed continuously on the main loop
+    // A task that is executed continuously on the main loop
     struct Task<C: ProtoComm> {
-      pub delay : u128,
-      pub action : fn (&mut Node<C>, &mut MinerCommunication) -> (),
+      pub delay: u128,
+      pub action: fn(&mut Node<C>, &mut MinerCommunication) -> (),
     }
 
     // The vector of tasks
@@ -1356,27 +1323,37 @@ impl <C: ProtoComm> Node<C> {
       // Gossips the tip block
       Task {
         delay: 20,
-        action: |node, mc| { node.gossip_tip_block(8); },
+        action: |node, mc| {
+          node.gossip_tip_block(8);
+        },
       },
       // Receives and handles incoming network messages
       Task {
         delay: HANDLE_MESSAGE_DELAY,
-        action: |node, mc| { node.receive_message(mc); },
+        action: |node, mc| {
+          node.receive_message(mc);
+        },
       },
       // Receives and handles incoming API requests
       Task {
         delay: HANDLE_REQUEST_DELAY,
-        action: |node, mc| { node.receive_request(); },
+        action: |node, mc| {
+          node.receive_request();
+        },
       },
       // Forgets inactive peers
       Task {
         delay: 5_000,
-        action: |node, mc| { node.peers.timeout(); },
+        action: |node, mc| {
+          node.peers.timeout();
+        },
       },
       // Prints stats
       Task {
         delay: 5_000,
-        action: |node, mc| { node.log_heartbeat(); },
+        action: |node, mc| {
+          node.log_heartbeat();
+        },
       },
     ];
 
@@ -1385,12 +1362,16 @@ impl <C: ProtoComm> Node<C> {
         // Asks the miner thread to mine a block
         Task {
           delay: 1000,
-          action: |node, mc| { node.ask_mine(mc, node.build_body()); },
+          action: |node, mc| {
+            node.ask_mine(mc, node.build_body_from_pool());
+          },
         },
         // If the miner mined a block, adds it
         Task {
           delay: 5,
-          action: |node, mc| { node.handle_mined_block(mc); },
+          action: |node, mc| {
+            node.handle_mined_block(mc);
+          },
         },
       ];
       tasks.extend(miner_tasks);
@@ -1418,15 +1399,15 @@ impl <C: ProtoComm> Node<C> {
   }
 }
 
- // TODO: move this paramenters to a struct `NodeStartOptions<C>`?
- // TODO: I don't know why 'static is needed and why it works
- pub fn start<C: ProtoComm + 'static>(
+// TODO: move this paramenters to a struct `NodeStartOptions<C>`?
+// TODO: I don't know why 'static is needed and why it works
+pub fn start<C: ProtoComm + 'static>(
   state_path: PathBuf,
   network_id: u64,
   comm: C,
   init_peers: &Option<Vec<C::Address>>,
   mine: bool,
-  api: bool
+  api: bool,
 ) {
   eprintln!("Starting Kindelia node...");
   eprintln!("Store path: {:?}", state_path);

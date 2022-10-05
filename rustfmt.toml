@@ -3,3 +3,6 @@ tab_spaces = 2
 
 use_field_init_shorthand = true
 use_small_heuristics = "Max"
+
+struct_field_align_threshold = 10
+enum_discrim_align_threshold = 20
