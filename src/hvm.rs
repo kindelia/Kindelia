@@ -2366,8 +2366,7 @@ impl Runtime {
 
   pub fn read_disk_as_term(&mut self, name: U120, limit: Option<usize>) -> Option<Term> {
     let host = self.read_disk(name)?;
-    let term = readback_term(self, host, limit);
-    term
+    readback_term(self, host, limit)
   }
 
   pub fn read_file(&self, name: &Name) -> Option<CompFunc> {
@@ -5068,3 +5067,19 @@ pub fn test_statements_from_code(code: &str, debug: bool) {
 pub fn test_statements_from_file(file: &str, debug: bool) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"), debug);
 }
+
+// Term Drop implementation
+// ========================
+
+// This implementation is necessary as Rust is unable do dealloc deeply nested
+// structures without it.
+//
+// References:
+// - https://rust-unofficial.github.io/too-many-lists/first-drop.html
+// - https://doc.rust-lang.org/nomicon/destructors.html
+
+// impl Drop for Term {
+//     fn drop(&mut self) {
+//         todo!()
+//     }
+// }

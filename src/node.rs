@@ -1011,7 +1011,7 @@ impl <C: ProtoComm> Node<C> {
         answer.send(info).unwrap();
       },
       NodeRequest::GetState { name, tx: answer } => {
-        let state = self.runtime.read_disk_as_term(name.into(), Some(2 << 16));
+        let state = self.runtime.read_disk_as_term(name.into(), Some(1 << 16));
         answer.send(state).unwrap();
       },
       NodeRequest::GetPeers { all, tx: answer } => {
@@ -1031,12 +1031,12 @@ impl <C: ProtoComm> Node<C> {
         let info = self.get_reg_info(name);
         answer.send(info).unwrap();
       },
-      NodeRequest::TestCode { code, tx: answer } => {
+      NodeRequest::RunCode { code, tx: answer } => {
         let result = self.runtime.test_statements_from_code(&code);
         answer.send(result).unwrap();
       },
-      NodeRequest::PostCode { code, tx: answer } => {
-        let statements = 
+      NodeRequest::PublishCode { code, tx: answer } => {
+        let statements =
           hvm::read_statements(&code)
             .map_err(|err| err.erro)
             .map(|(_, s)| s);
@@ -1044,16 +1044,13 @@ impl <C: ProtoComm> Node<C> {
           Err(err) => {
             Err(err)
           }
-          Ok(statements) => {
-            statements
-              .iter()
-              .map(|s| Transaction::new(bitvec_to_bytes(&s.proto_serialized())))
-              .into_iter()
-              .for_each(|t| {
-                let hash = t.hash.low_u64();
-                self.pool.push(t, hash);
-              });
-            Ok(())
+          Ok(stmts) => {
+            let results: Vec<_> = stmts.into_iter().map(|stmt| {
+              let bytes = bitvec_to_bytes(&stmt.proto_serialized());
+              let t = Transaction::new(bytes);
+              self.add_transaction(t)
+            }).collect();
+            Ok(results)
           }
         };
         answer.send(res).unwrap();
