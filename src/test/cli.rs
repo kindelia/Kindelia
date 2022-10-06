@@ -104,6 +104,24 @@ fn test_examples(#[case] file: &str, #[case] expected_results: &[&str]) {
 }
 
 #[rstest]
+#[case("example/block_1.kdl")]
+#[case("example/block_2.kdl")]
+#[case("example/block_3.kdl")]
+#[case("example/block_4.kdl")]
+#[case("example/block_5.kdl")]
+#[case("genesis.kdl")] // FAILS
+fn test_ser_deser(#[case] file: &str) {
+  use crate::bits::ProtoSerialize;
+  let txt = std::fs::read_to_string(file).unwrap();
+  let stmts = hvm::parse_code(&txt).unwrap();
+  let str_0 = hvm::view_statements(&stmts);
+  let ser = stmts.proto_serialized();
+  let deser = Vec::proto_deserialized(&ser).unwrap();
+  let str_1 = hvm::view_statements(&deser);
+  assert_eq!(str_0, str_1);
+}
+
+#[rstest]
 #[case("example/private_key_1_namer", "#656161725219724531611238334681629285")]
 #[case("example/private_key_2_alice", "#225111118185718227719509163399323998")]
 #[case("example/private_key_3_bob", "#540402903301314077240655651075245048")]
