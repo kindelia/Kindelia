@@ -11,6 +11,7 @@ mod api;
 mod bits;
 mod cli;
 mod common;
+mod constants;
 mod crypto;
 mod hvm;
 mod net;
