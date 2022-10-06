@@ -1,13 +1,44 @@
+use futures_util::{SinkExt, StreamExt};
+use primitive_types::U256;
+use serde;
+use std::convert::Infallible;
+use tokio::{self, sync::broadcast};
+use warp::{
+  ws::{Message, WebSocket},
+  Filter, Rejection, Reply,
+};
+
 use crate::{
-  api::{Hash, NodeRequest},
+  api::Hash,
   net::ProtoAddr,
   node::{Block, Peer},
 };
-use primitive_types::U256;
-use serde;
-use std::sync::mpsc;
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum NodeEvent {
+  AddBlock {
+    block: Hash,
+    event: AddBlockEvent,
+  },
+  Mining {
+    event: MiningEvent,
+  },
+  // HandleRequest,
+  Peers {
+    event: PeersEvent,
+  },
+  HandleMessage {
+    event: HandleMessageEvent,
+  },
+  Heartbeat {
+    peers: HeartbeatPeers,
+    tip: HeartbeatTip,
+    blocks: HeartbeatBlocks,
+    runtime: HeartbeatRuntime,
+  },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum AddBlockEvent {
   AlreadyIncluded,
   NotEnoughWork,
@@ -16,7 +47,7 @@ pub enum AddBlockEvent {
   TooLate,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum MiningEvent {
   Success { block: Hash, target: Hash },
   Failure { target: Hash },
@@ -24,39 +55,22 @@ pub enum MiningEvent {
   Stop,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatPeers {
-  pub num: usize,
+#[derive(Debug, Clone, serde::Serialize)]
+// The peers are represented as strings (addr display)
+// to avoid type parameter
+pub enum PeersEvent {
+  SeePeer { addr: String, seen_at: u128, result: SeePeerResult },
+  Timeout { addr: String, seen_at: u128 },
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatTip {
-  pub height: u64,
-  pub difficulty: u64,
-  pub hashrate: u64,
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum SeePeerResult {
+  NotSeenBefore,
+  Activated,
+  AlreadyActive { new_seen_at: u128 },
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatBlocks {
-  pub missing: u64,
-  pub pending: u64,
-  pub included: usize,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatRuntime {
-  pub mana: HeartbeatStatInfo,
-  pub size: HeartbeatStatInfo,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatStatInfo {
-  pub current: i64,
-  pub limit: i64,
-  pub available: i64,
-}
-
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum HandleMessageEvent {
   NoticeTheseBlocks {
     magic: u64,
@@ -74,26 +88,40 @@ pub enum HandleMessageEvent {
   },
 }
 
-#[derive(Debug, serde::Serialize)]
-pub enum NodeEvent {
-  AddBlock {
-    block: Hash,
-    event: AddBlockEvent,
-  },
-  Mining {
-    event: MiningEvent,
-  },
-  HandleRequest,
-  Heartbeat {
-    peers: HeartbeatPeers,
-    tip: HeartbeatTip,
-    blocks: HeartbeatBlocks,
-    runtime: HeartbeatRuntime,
-  },
-  HandleMessage {
-    event: HandleMessageEvent,
-  },
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeartbeatPeers {
+  pub num: usize,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeartbeatTip {
+  pub height: u64,
+  pub difficulty: u64,
+  pub hashrate: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeartbeatBlocks {
+  pub missing: u64,
+  pub pending: u64,
+  pub included: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeartbeatRuntime {
+  pub mana: HeartbeatStatInfo,
+  pub size: HeartbeatStatInfo,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeartbeatStatInfo {
+  pub current: i64,
+  pub limit: i64,
+  pub available: i64,
+}
+
+// ========================================================
+// Display
 
 impl std::fmt::Display for HeartbeatPeers {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -165,6 +193,30 @@ impl std::fmt::Display for HandleMessageEvent {
   }
 }
 
+impl std::fmt::Display for PeersEvent {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let formatted = match self {
+      PeersEvent::SeePeer { addr, seen_at, result } => {
+        let formatted_result = match result {
+          SeePeerResult::NotSeenBefore => "[not_seen_before]".to_string(),
+          SeePeerResult::Activated => "[activated]".to_string(),
+          SeePeerResult::AlreadyActive { new_seen_at } => {
+            format!("[activated] new_seen_at: {}", new_seen_at)
+          }
+        };
+        format!(
+          "[see_peer] addr: {} | seen_at: {} | result: {}",
+          addr, seen_at, formatted_result
+        )
+      }
+      PeersEvent::Timeout { addr, seen_at } => {
+        format!("[timeout] addr: {} | seen_at: {}", addr, seen_at)
+      }
+    };
+    f.write_fmt(format_args!("{}", formatted))
+  }
+}
+
 impl std::fmt::Display for NodeEvent {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let str_res = match self {
@@ -215,20 +267,26 @@ impl std::fmt::Display for NodeEvent {
         }
         MiningEvent::Stop => "[mining] [stop] stopping mining".to_string(),
       },
-      NodeEvent::HandleRequest => {
-        "[handle_request] something was requested in node api".to_string()
-      }
-      NodeEvent::Heartbeat { peers, tip, blocks, runtime } => {
-        format!("[heartbeat] {} {} {} {}", peers, tip, blocks, runtime)
+      // NodeEvent::HandleRequest => {
+      //   "[handle_request] something was requested in node api".to_string()
+      // }
+      NodeEvent::Peers { event } => {
+        format!("[peers] {}", event)
       }
       NodeEvent::HandleMessage { event } => {
         format!("[handle_message] {}", event)
+      }
+      NodeEvent::Heartbeat { peers, tip, blocks, runtime } => {
+        format!("[heartbeat] {} {} {} {}", peers, tip, blocks, runtime)
       }
     };
 
     f.write_fmt(format_args!("{}", str_res))
   }
 }
+
+// ========================================================
+// Constructors
 
 impl NodeEvent {
   // ADD BLOCK
@@ -279,10 +337,50 @@ impl NodeEvent {
     NodeEvent::Mining { event: MiningEvent::Stop }
   }
 
-  // HANDLE REQUEST
-  pub fn handle_request() -> Self {
-    NodeEvent::HandleRequest
+  // PEERS
+  pub fn timeout<A: ProtoAddr>(peer: &Peer<A>) -> Self {
+    NodeEvent::Peers {
+      event: PeersEvent::Timeout {
+        addr: peer.address.to_string(),
+        seen_at: peer.seen_at,
+      },
+    }
   }
+  pub fn see_peer_activated<A: ProtoAddr>(peer: &Peer<A>) -> Self {
+    NodeEvent::Peers {
+      event: PeersEvent::SeePeer {
+        addr: peer.address.to_string(),
+        seen_at: peer.seen_at,
+        result: SeePeerResult::Activated,
+      },
+    }
+  }
+  pub fn see_peer_not_seen<A: ProtoAddr>(peer: &Peer<A>) -> Self {
+    NodeEvent::Peers {
+      event: PeersEvent::SeePeer {
+        addr: peer.address.to_string(),
+        seen_at: peer.seen_at,
+        result: SeePeerResult::NotSeenBefore,
+      },
+    }
+  }
+  pub fn see_peer_already_active<A: ProtoAddr>(
+    peer: &Peer<A>,
+    new_seen_at: u128,
+  ) -> Self {
+    NodeEvent::Peers {
+      event: PeersEvent::SeePeer {
+        addr: peer.address.to_string(),
+        seen_at: peer.seen_at,
+        result: SeePeerResult::AlreadyActive { new_seen_at },
+      },
+    }
+  }
+
+  // HANDLE REQUEST
+  // pub fn handle_request() -> Self {
+  //   NodeEvent::HandleRequest
+  // }
 
   // HANDLE MESSAGE
   pub fn notice_blocks<A: ProtoAddr>(
@@ -311,12 +409,6 @@ impl NodeEvent {
     };
     NodeEvent::HandleMessage { event }
   }
-}
-
-pub fn new_event_channel(
-) -> (mpsc::Sender<NodeEvent>, mpsc::Receiver<NodeEvent>) {
-  let (tx, rx) = mpsc::channel::<NodeEvent>();
-  (tx, rx)
 }
 
 #[macro_export]
@@ -372,4 +464,58 @@ macro_rules! heartbeat {
       },
     }
   };
+}
+
+// =======================================================
+// Websocket server
+
+pub struct WsConfig {
+  pub port: u16,
+  pub buffer_size: usize,
+}
+
+pub fn ws_loop(port: u16, ws_tx: broadcast::Sender<NodeEvent>) {
+  let runtime = tokio::runtime::Runtime::new().unwrap();
+  runtime.block_on(async move {
+    ws_server(port, ws_tx).await;
+  });
+}
+
+async fn ws_server(port: u16, ws_tx: broadcast::Sender<NodeEvent>) {
+  let ws_route = warp::ws().and(with_rx(ws_tx.clone())).and_then(ws_handler);
+  warp::serve(ws_route).run(([127, 0, 0, 1], port)).await;
+}
+
+fn with_rx(
+  ws_tx: broadcast::Sender<NodeEvent>,
+) -> impl Filter<Extract = (broadcast::Sender<NodeEvent>,), Error = Infallible> + Clone
+{
+  warp::any().map(move || ws_tx.clone())
+}
+
+pub async fn ws_handler(
+  ws: warp::ws::Ws,
+  ws_tx: broadcast::Sender<NodeEvent>,
+) -> Result<impl Reply, Rejection> {
+  Ok(ws.on_upgrade(move |socket| client_connection(socket, ws_tx)))
+}
+
+pub async fn client_connection(
+  ws: WebSocket,
+  ws_tx: broadcast::Sender<NodeEvent>,
+) {
+  let (mut client_ws_sender, _) = ws.split();
+
+  let mut ws_rx = ws_tx.subscribe();
+
+  while let Ok(event) = ws_rx.recv().await {
+    let json_stringfied = serde_json::to_string(&event).unwrap();
+    if let Err(err) =
+      client_ws_sender.send(Message::text(json_stringfied)).await
+    {
+      eprintln!("Could not send message through websocket: {}", err);
+    };
+  }
+
+  println!("disconnected");
 }

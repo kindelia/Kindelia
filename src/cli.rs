@@ -32,6 +32,8 @@ use crate::bits::ProtoSerialize;
 use crate::hvm::{self, view_statement, Statement};
 use crate::net;
 use crate::node;
+#[cfg(log)]
+use crate::events;
 use crate::util::bytes_to_bitvec;
 
 // This client is meant to talk with node implementing Udp protocol comunication
@@ -582,7 +584,14 @@ pub fn run_cli() -> Result<(), String> {
             .collect::<Vec<_>>();
           let initial_peers =
             if !initial_peers.is_empty() { Some(initial_peers) } else { None };
-          node::start(data_path, network_id, comm, &initial_peers, mine, true);
+
+          #[cfg(log)]
+          let ws_config = events::WsConfig {
+            port: 8080,
+            buffer_size: 1024 * 2
+          };
+
+          node::start(data_path, network_id, comm, &initial_peers, mine, true, #[cfg(log)] ws_config);
           // start(data_path, initial_peers, mine);
 
           Ok(())

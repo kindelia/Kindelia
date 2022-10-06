@@ -4,20 +4,20 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 use bit_vec::BitVec;
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
 use sha3::Digest;
+use tokio::sync::broadcast;
 
-use std::hash::BuildHasherDefault;
-use crate::NoHashHasher as NHH;
 #[cfg(log)]
-use crate::{heartbeat, events::{self, NodeEvent}};
+use crate::{
+  events::{self, NodeEvent, WsConfig},
+  heartbeat,
+};
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
@@ -54,10 +54,6 @@ macro_rules! emit_event {
     }
   };
 }
-
-// A u64 HashMap / HashSet
-pub type Map<A> = HashMap<u64, A, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
-pub type Set    = im::HashSet<u64, BuildHasherDefault<NHH::NoHashHasher<u64>>>;
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
@@ -110,7 +106,7 @@ pub struct Node<C: ProtoComm> {
   pub comm       : C,                                 // UDP socket
   pub addr       : C::Address,                        // UDP port
   pub runtime    : Runtime,                           // Kindelia's runtime
-  pub receiver   : Receiver<NodeRequest<C>>,          // Receives an API request
+  pub receiver   : mpsc::Receiver<NodeRequest<C>>,          // Receives an API request
   pub pool       : PriorityQueue<Transaction, u64>,   // transactions to be mined
   pub peers      : PeersStore<C::Address>,            // peers store and state control
   pub tip        : U256,                              // current tip
@@ -124,7 +120,7 @@ pub struct Node<C: ProtoComm> {
   pub height     : U256Map<u128>,                  // block hash -> cached height
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
   #[cfg(log)]
-  pub event_emitter     : std::sync::mpsc::Sender<NodeEvent>
+  pub event_emitter     : mpsc::Sender<NodeEvent>
 }
 
 // Peers
@@ -155,7 +151,11 @@ impl<A: ProtoAddr> PeersStore<A> {
     }
   }
 
-  pub fn see_peer(&mut self, peer: Peer<A>) {
+  pub fn see_peer(
+    &mut self,
+    peer: Peer<A>,
+    #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>,
+  ) {
     let addr = peer.address;
     // print_with_timestamp!("- see peer {}", addr);
     match self.seen.get(&addr) {
@@ -163,6 +163,12 @@ impl<A: ProtoAddr> PeersStore<A> {
       None => {
         // print_with_timestamp!("- new peer {}", addr);
         self.seen.insert(addr, peer);
+        emit_event!(
+          event_emitter,
+          NodeEvent::see_peer_not_seen(&peer),
+          tags = peers,
+          see_peer
+        );
         self.activate(&addr, peer);
       }
       // Peer seen before, but maybe not active
@@ -173,12 +179,25 @@ impl<A: ProtoAddr> PeersStore<A> {
           // Peer not active, so activate it
           None => {
             // print_with_timestamp!("- activating peer {}", addr);
+            emit_event!(
+              event_emitter,
+              NodeEvent::see_peer_activated(&peer),
+              tags = peers,
+              see_peer
+            );
             self.activate(&addr, peer);
           }
           // Peer already active, so update it
           Some(old_peer) => {
             // print_with_timestamp!("\t- old peer {:?}", old_peer);
-            old_peer.seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
+            let new_seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
+            emit_event!(
+              event_emitter,
+              NodeEvent::see_peer_already_active(&old_peer, new_seen_at),
+              tags = peers,
+              see_peer
+            );
+            old_peer.seen_at = new_seen_at;
             // print_with_timestamp!("\t- new peer {:?}", old_peer);
           }
         }
@@ -186,13 +205,19 @@ impl<A: ProtoAddr> PeersStore<A> {
     }
   }
 
-  fn timeout(&mut self) {
+  fn timeout(&mut self, #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>) {
     let mut forget = Vec::new();
     for (id, peer) in &self.active {
       // print_with_timestamp!("- Peer {}: {}", id, peer.address);
       // print_with_timestamp!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
       if peer.seen_at < get_time() - PEER_TIMEOUT {
         // print_with_timestamp!("... forgetting {}", id);
+        emit_event!(
+          event_emitter,
+          NodeEvent::timeout(&peer),
+          tags = peers,
+          timeout
+        );
         forget.push(peer.address);
       }
     }
@@ -540,8 +565,8 @@ impl MinerCommunication {
 
 // Main miner loop: if asked, attempts to mine a block
 pub fn miner_loop(
-  mut miner_communication: MinerCommunication, 
-  #[cfg(log)] event_emitter: std::sync::mpsc::Sender<events::NodeEvent>
+  mut miner_communication: MinerCommunication,
+  #[cfg(log)] event_emitter: mpsc::Sender<events::NodeEvent>,
 ) {
   loop {
     if let MinerMessage::Request { prev, body, targ } =
@@ -550,11 +575,21 @@ pub fn miner_loop(
       //print_with_timestamp!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
-        emit_event!(event_emitter, NodeEvent::mined(block.hash, targ), tags = mining, mined);
+        emit_event!(
+          event_emitter,
+          NodeEvent::mined(block.hash, targ),
+          tags = mining,
+          mined
+        );
         //print_with_timestamp!("[miner] mined a block!");
         miner_communication.write(MinerMessage::Answer { block });
       } else {
-        emit_event!(event_emitter, NodeEvent::failed_mined(targ), tags = mining, failed_mined);
+        emit_event!(
+          event_emitter,
+          NodeEvent::failed_mined(targ),
+          tags = mining,
+          failed_mined
+        );
       }
     }
   }
@@ -569,9 +604,8 @@ impl<C: ProtoComm> Node<C> {
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
     comm: C,
-    #[cfg(log)]
-    event_emitter: std::sync::mpsc::Sender<events::NodeEvent>
-  ) -> (SyncSender<NodeRequest<C>>, Self) {
+    #[cfg(log)] event_emitter: mpsc::Sender<events::NodeEvent>,
+  ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
 
@@ -596,14 +630,18 @@ impl<C: ProtoComm> Node<C> {
       target   : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
       results  : u256map_from([(ZERO_HASH(), vec![])]),
       #[cfg(log)]
-      event_emitter
+      event_emitter: event_emitter.clone()
     };
 
     let now = get_time();
 
     if let Some(init_peers) = init_peers {
       init_peers.iter().for_each(|address| {
-        return node.peers.see_peer(Peer { address: *address, seen_at: now });
+        return node.peers.see_peer(
+          Peer { address: *address, seen_at: now },
+          #[cfg(log)]
+          event_emitter.clone(),
+        );
       });
     }
 
@@ -658,14 +696,24 @@ impl<C: ProtoComm> Node<C> {
       // If block is too far into the future, ignore it
       if btime >= get_time() + DELAY_TOLERANCE {
         //print_with_timestamp!("# new block: too late");
-        emit_event!(self.event_emitter, NodeEvent::too_late(block.hash), tags = add_block, too_late);
+        emit_event!(
+          self.event_emitter,
+          NodeEvent::too_late(block.hash),
+          tags = add_block,
+          too_late
+        );
         continue;
       }
       let bhash = block.hash;
       // If we already registered this block, ignore it
       if self.block.get(&bhash).is_some() {
         //print_with_timestamp!("# new block: already in");
-        emit_event!(self.event_emitter, NodeEvent::already_included(bhash), tags = add_block, already_included);
+        emit_event!(
+          self.event_emitter,
+          NodeEvent::already_included(bhash),
+          tags = add_block,
+          already_included
+        );
         continue;
       }
       let phash = block.prev;
@@ -723,7 +771,12 @@ impl<C: ProtoComm> Node<C> {
           let new_tip = bhash;
           if self.work[&new_tip] > self.work[&old_tip] {
             miner_communication.write(MinerMessage::Stop);
-            emit_event!(self.event_emitter, NodeEvent::stopped(), tags = mining, stopped);
+            emit_event!(
+              self.event_emitter,
+              NodeEvent::stopped(),
+              tags = mining,
+              stopped
+            );
             self.tip = bhash;
             //print_with_timestamp!("- hash: {:x}", bhash);
             //print_with_timestamp!("- work: {}", self.work[&new_tip]);
@@ -749,7 +802,8 @@ impl<C: ProtoComm> Node<C> {
               emit_event!(
                 self.event_emitter,
                 NodeEvent::reorg(bhash, old_tip, self.height[&old_bhash]),
-                tags = add_block, reorg
+                tags = add_block,
+                reorg
               );
               // 2. Finds highest block with same value on both timelines
               //    On the example above, we'd have `D`
@@ -789,7 +843,12 @@ impl<C: ProtoComm> Node<C> {
             }
           }
         } else {
-          emit_event!(self.event_emitter, NodeEvent::not_enough_work(bhash), tags = add_block, not_enough_work);
+          emit_event!(
+            self.event_emitter,
+            NodeEvent::not_enough_work(bhash),
+            tags = add_block,
+            not_enough_work
+          );
         }
         // Registers this block as a child of its parent
         self.children.insert(phash, vec![bhash]);
@@ -807,7 +866,12 @@ impl<C: ProtoComm> Node<C> {
       } else if self.pending.get(&bhash).is_none() {
         self.pending.insert(bhash, block.clone());
         self.wait_list.entry(phash).or_insert_with(|| Vec::new()).push(bhash);
-        emit_event!(self.event_emitter, NodeEvent::missing_parent(bhash, phash), tags = add_block, missing_parent);
+        emit_event!(
+          self.event_emitter,
+          NodeEvent::missing_parent(bhash, phash),
+          tags = add_block,
+          missing_parent
+        );
       }
     }
   }
@@ -930,7 +994,7 @@ impl<C: ProtoComm> Node<C> {
 
   pub fn handle_request(&mut self, request: NodeRequest<C>) {
     // TODO: handle unwraps
-    emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
+    // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
     match request {
       NodeRequest::GetStats { tx: answer } => {
         let tick = self.runtime.get_tick().try_into().unwrap();
@@ -1131,12 +1195,21 @@ impl<C: ProtoComm> Node<C> {
         }
       }
 
-      self.peers.see_peer(Peer { address: addr, seen_at: get_time() });
+      self.peers.see_peer(
+        Peer { address: addr, seen_at: get_time() },
+        #[cfg(log)]
+        self.event_emitter.clone(),
+      );
 
       match msg {
         // Someone asked a block
         Message::GiveMeThatBlock { magic, bhash } => {
-          emit_event!(self.event_emitter, NodeEvent::give_me_block(*magic, *bhash), tags = handle_message, give_me_block);
+          emit_event!(
+            self.event_emitter,
+            NodeEvent::give_me_block(*magic, *bhash),
+            tags = handle_message,
+            give_me_block
+          );
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
           let mut chunk = vec![];
@@ -1161,13 +1234,22 @@ impl<C: ProtoComm> Node<C> {
         }
         // Someone sent us some blocks
         Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
-          emit_event!(self.event_emitter, NodeEvent::notice_blocks(*magic, *gossip, blocks, peers), tags = handle_message, notice_blocks);
+          emit_event!(
+            self.event_emitter,
+            NodeEvent::notice_blocks(*magic, *gossip, blocks, peers),
+            tags = handle_message,
+            notice_blocks
+          );
 
           // TODO: validate if blocks are sorted by age?
 
           // Notice received peers
           for peer in peers {
-            self.peers.see_peer(*peer);
+            self.peers.see_peer(
+              *peer,
+              #[cfg(log)]
+              self.event_emitter.clone(),
+            );
           }
 
           // Adds the block to the database
@@ -1182,7 +1264,12 @@ impl<C: ProtoComm> Node<C> {
         }
         // Someone sent us a transaction to mine
         Message::PleaseMineThisTransaction { magic, trans } => {
-          emit_event!(self.event_emitter, NodeEvent::mine_trans(*magic, trans.hash), tags = handle_message, mine_trans);
+          emit_event!(
+            self.event_emitter,
+            NodeEvent::mine_trans(*magic, trans.hash),
+            tags = handle_message,
+            mine_trans
+          );
           //print_with_timestamp!("- Transaction added to pool:");
           //print_with_timestamp!("-- {:?}", trans.data);
           //print_with_timestamp!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
@@ -1249,7 +1336,12 @@ impl<C: ProtoComm> Node<C> {
     //print_with_timestamp!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
     //}
     let targ = self.get_tip_target();
-    emit_event!(self.event_emitter, NodeEvent::ask_mine(targ), tags = mining, ask_mine);
+    emit_event!(
+      self.event_emitter,
+      NodeEvent::ask_mine(targ),
+      tags = mining,
+      ask_mine
+    );
     miner_communication.write(MinerMessage::Request {
       prev: self.tip,
       body,
@@ -1324,7 +1416,7 @@ impl<C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
-    let log = heartbeat!{
+    let log = heartbeat! {
       peers: { num: peers_num },
       tip: {
         height: tip_height,
@@ -1400,7 +1492,10 @@ impl<C: ProtoComm> Node<C> {
       Task {
         delay: 5_000,
         action: |node, mc| {
-          node.peers.timeout();
+          node.peers.timeout(
+            #[cfg(log)]
+            node.event_emitter.clone(),
+          );
         },
       },
       #[cfg(all(log, any(all, heartbeat)))]
@@ -1457,6 +1552,7 @@ impl<C: ProtoComm> Node<C> {
 
 // TODO: move this paramenters to a struct `NodeStartOptions<C>`?
 // TODO: I don't know why 'static is needed and why it works
+// TODO: add api_config e ws_config: Options
 pub fn start<C: ProtoComm + 'static>(
   state_path: PathBuf,
   network_id: u64,
@@ -1464,26 +1560,46 @@ pub fn start<C: ProtoComm + 'static>(
   init_peers: &Option<Vec<C::Address>>,
   mine: bool,
   api: bool,
+  #[cfg(log)] ws_config: WsConfig,
 ) {
   eprintln!("Starting Kindelia node...");
   eprintln!("Store path: {:?}", state_path);
   eprintln!("Network ID: {:#X}", network_id);
 
   #[cfg(log)]
-  let (event_tx, event_rx) = events::new_event_channel(); //EventChannel::new();
+  let event_tx = {
+    let (event_tx, event_rx) = mpsc::channel::<NodeEvent>();
+    let (ws_tx, ws_rx) = broadcast::channel(ws_config.buffer_size);
 
-  #[cfg(log)]
-  std::thread::spawn(move || {
-    loop {
+    eprintln!("Log working on {}", ws_config.port);
+    let ws_tx1 = ws_tx.clone();
+    std::thread::spawn(move || {
+      events::ws_loop(ws_config.port, ws_tx1);
+    });
+
+    let ws_tx2 = ws_tx;
+    std::thread::spawn(move || {
       while let Ok(event) = event_rx.recv() {
+        if ws_tx2.receiver_count() > 0 {
+          if let Err(err) = ws_tx2.send(event.clone()) {
+            eprintln!("Could not send event to websocket: {}", err);
+          };
+        }
         println!("{}", event);
       }
-    }
-  });
+    });
+    event_tx
+  };
 
   // Node state object
-  let (node_query_sender, node) =
-    Node::new(state_path, &init_peers, network_id, comm, #[cfg(log)] event_tx.clone());
+  let (node_query_sender, node) = Node::new(
+    state_path,
+    &init_peers,
+    network_id,
+    comm,
+    #[cfg(log)]
+    event_tx.clone(),
+  );
 
   // Node to Miner communication object
   let miner_comm_0 = MinerCommunication::new();
@@ -1501,7 +1617,11 @@ pub fn start<C: ProtoComm + 'static>(
   // Spawns the miner thread
   if mine {
     let miner_thread = std::thread::spawn(move || {
-      miner_loop(miner_comm_1, #[cfg(log)] event_tx.clone());
+      miner_loop(
+        miner_comm_1,
+        #[cfg(log)]
+        event_tx,
+      );
     });
     threads.push(miner_thread);
   }

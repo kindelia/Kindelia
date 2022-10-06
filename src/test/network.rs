@@ -18,6 +18,9 @@ use crate::{
   util::u256,
 };
 
+#[cfg(log)]
+use crate::events;
+
 use super::util::temp_dir;
 
 #[test]
@@ -48,12 +51,20 @@ fn network() {
   for (socket, idx) in sockets {
     let initial_peers =
       g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
+    let addr = socket.addr;
     let socket_thread = thread::spawn(move || {
       let state_path = temp_dir()
         .path
         .join(".kindelia")
-        .join(format!(".test-{}", socket.addr));
-      node::start(state_path, 0, socket, &Some(initial_peers), true, false);
+        .join(format!(".test-{}", addr));
+      
+      #[cfg(log)]
+      let ws_config = events::WsConfig {
+        port: 30000 + (addr as u16),
+        buffer_size: 1024 * 2
+      };
+      node::start(state_path, 0, socket, &Some(initial_peers), true, false, #[cfg(log)] ws_config);
+
     });
     threads.push(socket_thread);
   }
