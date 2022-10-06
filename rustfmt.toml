@@ -4,5 +4,10 @@ tab_spaces = 2
 use_field_init_shorthand = true
 use_small_heuristics = "Max"
 
-struct_field_align_threshold = 10
-enum_discrim_align_threshold = 20
+
+# # Unstable :(
+
+# imports_granularity = "Module"
+
+# struct_field_align_threshold = 8
+# enum_discrim_align_threshold = 16
