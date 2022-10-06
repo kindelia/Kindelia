@@ -5,10 +5,11 @@ use crate::{
     deserialize_fixlen, deserialize_list, deserialize_varlen, serialize_fixlen,
     serialize_list, serialize_varlen, ProtoSerialize,
   },
+  common,
   hvm::{view_statements, Term},
   net,
   node::Message,
-  test::strategies::{message, statement, u256 as u256_strategy},
+  test::strategies::{message, name, statement, u256 as u256_strategy},
   util::u256,
 };
 use bit_vec::BitVec;
@@ -29,6 +30,13 @@ proptest! {
     let bits = message.proto_serialized();
     let message2: Message<net::Address> = Message::proto_deserialized(&bits).unwrap();
     assert_eq!(format!("{:?}", message), format!("{:?}", message2));
+  }
+
+  #[test]
+  fn serialize_deserialize_name(name in name()) {
+    let bits = name.proto_serialized();
+    let name2 = common::Name::proto_deserialized(&bits).unwrap();
+    assert_eq!(format!("{:?}", name), format!("{:?}", name2));
   }
 }
 
