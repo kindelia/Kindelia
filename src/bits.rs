@@ -647,14 +647,15 @@ impl<A: ProtoAddr> ProtoSerialize for Message<A> {
         serialize_fixlen(4, &u256(1), bits, names);
         bhash.proto_serialize(bits, names);
       }
-      Message::PleaseMineThisTransaction { magic, trans } => {
+      Message::PleaseMineThisTransaction { magic, tx } => {
         serialize_fixlen(64, &u256(*magic as u128), bits, names);
-        if trans.data.len() == 0 {
+        let tx_len = tx.len();
+        if tx_len == 0 {
           panic!("Invalid transaction length.");
         } else {
           serialize_fixlen(4, &u256(2), bits, names);
-          serialize_fixlen(16, &u256(trans.data.len() as u128), bits, names);
-          serialize_bytes(trans.data.len() as u128, &trans.data, bits, names);
+          serialize_fixlen(16, &u256(tx_len as u128), bits, names);
+          serialize_bytes(tx_len as u128, tx, bits, names);
         }
       }
     }
@@ -682,7 +683,7 @@ impl<A: ProtoAddr> ProtoSerialize for Message<A> {
         let data = deserialize_bytes(size, bits, index, names)?;
         Some(Message::PleaseMineThisTransaction {
           magic,
-          trans: Transaction::new(data),
+          tx: Transaction::new(data),
         })
       }
       _ => None,

@@ -1,8 +1,7 @@
-#![allow(non_snake_case)]
-#![allow(unused_variables)]
 #![allow(clippy::style)]
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -14,7 +13,8 @@ use sha3::Digest;
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
-use crate::bits::*;
+use crate::constants;
+use crate::bits::{ProtoSerialize, serialized_block_size};
 use crate::common::Name;
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
@@ -27,17 +27,6 @@ use crate::{
   events::{self, NodeEvent, WsConfig},
   heartbeat,
 };
-
-// Types
-// =====
-
-// Kindelia's block format is agnostic to HVM. A Transaction is just a vector of bytes. A Body
-// groups transactions in a single combined vector of bytes, using the following format:
-//
-//   body ::= TX_COUNT | LEN(tx_0) | tx_0 | LEN(tx_1) | tx_1 | ...
-//
-// TX_COUNT is a single byte storing the number of transactions in this block. The length of each
-// transaction is stored using 2 bytes, called LEN.
 
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
@@ -56,16 +45,130 @@ macro_rules! emit_event {
   };
 }
 
-#[derive(Debug, Clone)]
+// Block
+// =====
+
+// Kindelia's block format is agnostic to HVM. A Transaction is just a vector of
+// bytes. A Body groups transactions in a single combined vector of bytes, using
+// the following format:
+//
+//   body ::= TX_COUNT | LEN(tx_0) | tx_0 | LEN(tx_1) | tx_1 | ...
+//
+// TX_COUNT is a single byte storing the number of transactions in this block.
+// The length of each transaction is stored using 2 bytes, called LEN.
+
+// Transaction
+// -----------
+
+/// Represents transaction inside a block. It's a list of bytes with non-zero
+/// multiple-of-5 number of bytes.
+#[derive(Debug, Clone, Eq)]
 pub struct Transaction {
-  pub data: Vec<u8>,
+  data: Vec<u8>,
   pub hash: U256,
 }
+
+impl Transaction {
+  pub fn new(mut data: Vec<u8>) -> Self {
+    // Transaction length is always a non-zero multiple of 5
+    while data.len() == 0 || data.len() % 5 != 0 {
+      data.push(0);
+    }
+    let hash = hash_bytes(&data);
+    return Transaction { data, hash };
+  }
+
+  // Encodes a transaction length as a pair of 2 bytes
+  pub fn encode_length(&self) -> (u8, u8) {
+    let len = self.data.len() as u16;
+    let num = (len as u16).reverse_bits();
+    (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
+  }
+
+  // Decodes an encoded transaction length
+  fn decode_length(pair: (u8, u8)) -> usize {
+    (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
+  }
+
+  pub fn to_statement(&self) -> Option<Statement> {
+    hvm::Statement::proto_deserialized(&BitVec::from_bytes(&self.data))
+  }
+}
+
+impl Deref for Transaction {
+  type Target = [u8];
+  fn deref(&self) -> &[u8] {
+    &self.data
+  }
+}
+
+impl From<&Statement> for Transaction {
+  fn from(stmt: &Statement) -> Self {
+    Transaction::new(stmt.proto_serialized().to_bytes())
+  }
+}
+
+impl PartialEq for Transaction {
+  fn eq(&self, other: &Self) -> bool {
+    self.hash == other.hash
+  }
+}
+
+impl std::hash::Hash for Transaction {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.hash.hash(state);
+  }
+}
+
+// Block body
+// ----------
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
   pub data: Vec<u8>,
 }
+
+impl Body {
+  /// Build a body from a sequence of transactions.
+  /// Fails if they can't fit in a block body.
+  pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
+  where
+    I: IntoIterator<Item = T>,
+    T: Into<Transaction>,
+  {
+    // Reserve a byte in the beginning for the number of transactions
+    let mut data = vec![0];
+    let mut tx_count = 0;
+    for transaction in transactions.into_iter() {
+      let transaction = transaction.into();
+      // Ignore transaction if it's empty
+      let tx_len = transaction.data.len();
+      if tx_len == 0 {
+        continue;
+      }
+      // Fails if there's no space left for the transaction
+      if data.len() + 2 + tx_len > MAX_BODY_SIZE {
+        return Err(());
+      }
+      // Fails if tx count overflows 255, as we store it in a single byte.
+      if tx_count + 1 > 255 {
+        return Err(());
+      }
+      tx_count += 1;
+      // Pair of bytes we will store as the length
+      let len_bytes = transaction.encode_length();
+      data.push(len_bytes.0);
+      data.push(len_bytes.1);
+      data.extend_from_slice(&transaction.data);
+    }
+    // Finally stores resulting transaction count on the first byte
+    data[0] = tx_count as u8;
+    Ok(Body { data })
+  }
+}
+
+// The Block itself
+// ----------------
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -81,6 +184,9 @@ pub struct Block {
   /// TODO: refactor out
   pub hash: U256,
 }
+
+// Node
+// ====
 
 /// Blocks have 4 states of inclusion:
 ///
@@ -99,7 +205,6 @@ pub enum InclusionState {
 }
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
-
 #[rustfmt::skip]
 pub struct Node<C: ProtoComm> {
   pub state_path : PathBuf,                           // path where files are saved
@@ -171,7 +276,7 @@ impl<A: ProtoAddr> PeersStore<A> {
         self.activate(&addr, peer);
       }
       // Peer seen before, but maybe not active
-      Some(index) => {
+      Some(_) => {
         let old_peer = self.active.get_mut(&addr);
         match old_peer {
           // Peer not active, so activate it
@@ -202,7 +307,7 @@ impl<A: ProtoAddr> PeersStore<A> {
 
   fn timeout(&mut self, #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEvent>) {
     let mut forget = Vec::new();
-    for (id, peer) in &self.active {
+    for (_, peer) in &self.active {
       if peer.seen_at < get_time() - PEER_TIMEOUT {
         emit_event!(
           event_emitter,
@@ -271,7 +376,7 @@ pub enum Message<A: ProtoAddr> {
   },
   PleaseMineThisTransaction {
     magic: u64,
-    trans: Transaction,
+    tx: Transaction,
   },
 }
 
@@ -433,27 +538,17 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
   return Block { prev, time, meta, body, hash };
 }
 
-// Encodes a transaction length as a pair of 2 bytes
-fn encode_length(len: usize) -> (u8, u8) {
-  let num = (len as u16).reverse_bits();
-  (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
-}
-
-// Decodes an encoded transaction length
-fn decode_length(pair: (u8, u8)) -> usize {
-  (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
-}
-
-// Converts a body to a vector of transactions.
+/// Converts a block body to a vector of transactions.
 pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
   let mut index = 1;
   let tx_count = body.data[0];
-  for i in 0..tx_count {
+  for _ in 0..tx_count {
     if index >= body.data.len() {
       break;
     }
-    let tx_len = decode_length((body.data[index], body.data[index + 1]));
+    let tx_len =
+      Transaction::decode_length((body.data[index], body.data[index + 1]));
     index += 2;
     if index + tx_len > body.data.len() {
       break;
@@ -462,55 +557,25 @@ pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
     transactions.push(Transaction::new(transaction_body));
     index += tx_len;
   }
-  return transactions;
+  transactions
 }
 
-// Initial target of 256 hashes per block
-pub fn INITIAL_TARGET() -> U256 {
-  return difficulty_to_target(u256(INITIAL_DIFFICULTY));
+/// Initial target of 256 hashes per block.
+pub fn initial_target() -> U256 {
+  difficulty_to_target(u256(INITIAL_DIFFICULTY))
 }
 
-// The hash of the genesis block's parent.
-pub fn ZERO_HASH() -> U256 {
-  return hash_u256(u256(0)); // why though
+/// The hash of the genesis block's parent.
+/// TODO: actual zero.
+pub fn zero_hash() -> U256 {
+  hash_u256(u256(0)) // why though
 }
 
-// The genesis block.
-pub fn GENESIS_BLOCK() -> Block {
-  return new_block(ZERO_HASH(), 0, 0, Body { data: vec![0] });
-}
-
-impl Transaction {
-  pub fn new(mut data: Vec<u8>) -> Self {
-    // Transaction length is always a non-zero multiple of 5
-    while data.len() == 0 || data.len() % 5 != 0 {
-      data.push(0);
-    }
-    let hash = hash_bytes(&data);
-    return Transaction { data, hash };
-  }
-
-  pub fn encode_length(&self) -> (u8, u8) {
-    return encode_length(self.data.len());
-  }
-
-  pub fn to_statement(&self) -> Option<Statement> {
-    return hvm::Statement::proto_deserialized(&BitVec::from_bytes(&self.data));
-  }
-}
-
-impl PartialEq for Transaction {
-  fn eq(&self, other: &Self) -> bool {
-    self.hash == other.hash
-  }
-}
-
-impl Eq for Transaction {}
-
-impl std::hash::Hash for Transaction {
-  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-    self.hash.hash(state);
-  }
+/// Builds the Genesis Block.
+pub fn build_genesis_block(stmts: &[Statement]) -> Block {
+  let body = Body::from_transactions_iter(stmts)
+    .expect("Genesis statements should fit in a block body");
+  new_block(zero_hash(), 0, 0, body)
 }
 
 // Mining
@@ -596,7 +661,17 @@ impl<C: ProtoComm> Node<C> {
     #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEvent>,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
-    let runtime = init_runtime(state_path.join("heaps"));
+
+    let genesis_stmts =
+      hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
+    let genesis_block = build_genesis_block(&genesis_stmts);
+
+    let runtime = init_runtime(state_path.join("heaps"), &genesis_stmts);
+
+    let zero_hash = zero_hash();
+    // let genesis_hash = genesis_block.hash;
+    // println!("genesis hash: {:#34x}", genesis_hash);
+    // println!("   zero hash: {:#34x}", genesis_hash);
 
     #[rustfmt::skip]
     let mut node = Node {
@@ -605,21 +680,23 @@ impl<C: ProtoComm> Node<C> {
       addr: comm.get_addr(),
       comm,
       runtime,
-      receiver : query_receiver,
       pool     : PriorityQueue:: new(),
       peers    : PeersStore:: new(),
-      tip      : ZERO_HASH(),
-      block    : u256map_from([(ZERO_HASH(), GENESIS_BLOCK())]),
+
+      tip      : zero_hash,
+      block    : u256map_from([(zero_hash, genesis_block)]),
       pending  : u256map_new(),
       ancestor : u256map_new(),
       wait_list: u256map_new(),
-      children : u256map_from([(ZERO_HASH(), vec![])]),
-      work     : u256map_from([(ZERO_HASH(), u256(0))]),
-      height   : u256map_from([(ZERO_HASH(), 0)]),
-      target   : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
-      results  : u256map_from([(ZERO_HASH(), vec![])]),
+      children : u256map_from([(zero_hash, vec![]          )]),
+      work     : u256map_from([(zero_hash, u256(0)         )]),
+      height   : u256map_from([(zero_hash, 0               )]),
+      target   : u256map_from([(zero_hash, initial_target())]),
+      results  : u256map_from([(zero_hash, vec![]          )]),
+
       #[cfg(feature = "events")]
-      event_emitter: event_emitter.clone()
+      event_emitter: event_emitter.clone(),
+      receiver : query_receiver,
     };
 
     let now = get_time();
@@ -885,7 +962,7 @@ impl<C: ProtoComm> Node<C> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
-    while self.block.contains_key(&bhash) && bhash != ZERO_HASH() {
+    while self.block.contains_key(&bhash) && bhash != zero_hash() {
       let block = self.block.get(&bhash).unwrap();
       longest.push(bhash);
       bhash = block.prev;
@@ -938,7 +1015,6 @@ impl<C: ProtoComm> Node<C> {
     let height = self.height.get(hash).expect("Missing block height.");
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).map(|r| r.clone());
-    let transactions = extract_transactions(&block.body);
     let info =
       BlockInfo { block: block.into(), hash: (*hash).into(), height, results };
     Some(info)
@@ -1194,7 +1270,7 @@ impl<C: ProtoComm> Node<C> {
             if !self.block.contains_key(&bhash) {
               break;
             }
-            if *bhash == ZERO_HASH() {
+            if *bhash == zero_hash() {
               break;
             }
             let block = &self.block[bhash];
@@ -1239,15 +1315,15 @@ impl<C: ProtoComm> Node<C> {
           }
         }
         // Someone sent us a transaction to mine
-        Message::PleaseMineThisTransaction { magic, trans } => {
+        Message::PleaseMineThisTransaction { magic, tx } => {
           emit_event!(
             self.event_emitter,
-            NodeEvent::mine_trans(*magic, trans.hash),
+            NodeEvent::mine_trans(*magic, tx.hash),
             tags = handle_message,
             mine_trans
           );
-          if self.pool.get(&trans).is_none() {
-            self.pool.push(trans.clone(), trans.hash.low_u64());
+          if self.pool.get(&tx).is_none() {
+            self.pool.push(tx.clone(), tx.hash.low_u64());
             self.gossip(5, msg);
           }
         }
@@ -1368,7 +1444,6 @@ impl<C: ProtoComm> Node<C> {
 
     let tip_target = *self.target.get(&tip).unwrap();
     let difficulty = target_to_difficulty(tip_target);
-    let hash_rate = difficulty * u256(1000) / u256(TIME_PER_BLOCK);
 
     // Counts missing, pending and included blocks
     let included_count = self.block.keys().count();
@@ -1397,9 +1472,7 @@ impl<C: ProtoComm> Node<C> {
       peers: { num: peers_num },
       tip: {
         height: tip_height,
-        // target: u256_to_hex(tip_target),
         difficulty: difficulty.low_u64(),
-        hashrate: hash_rate.low_u64(),
       },
       blocks: {
         missing: missing_count,
@@ -1447,7 +1520,7 @@ impl<C: ProtoComm> Node<C> {
       // Gossips the tip block
       Task {
         delay: 20,
-        action: |node, mc| {
+        action: |node, _mc| {
           node.gossip_tip_block(8);
         },
       },
@@ -1461,14 +1534,14 @@ impl<C: ProtoComm> Node<C> {
       // Receives and handles incoming API requests
       Task {
         delay: HANDLE_REQUEST_DELAY,
-        action: |node, mc| {
+        action: |node, _mc| {
           node.receive_request();
         },
       },
       // Forgets inactive peers
       Task {
         delay: 5_000,
-        action: |node, mc| {
+        action: |node, _mc| {
           node.peers.timeout(
             #[cfg(feature = "events")]
             node.event_emitter.clone(),
@@ -1479,7 +1552,7 @@ impl<C: ProtoComm> Node<C> {
       // Prints stats
       Task {
         delay: 5_000,
-        action: |node, mc| {
+        action: |node, _mc| {
           node.log_heartbeat();
         },
       },
@@ -1548,7 +1621,7 @@ pub fn start<C: ProtoComm + 'static>(
   #[cfg(feature = "events")]
   let event_tx = {
     let (event_tx, event_rx) = mpsc::channel::<NodeEvent>();
-    let (ws_tx, ws_rx) = broadcast::channel(ws_config.buffer_size);
+    let (ws_tx, _ws_rx) = broadcast::channel(ws_config.buffer_size);
 
     eprintln!("Events WS on port: {}", ws_config.port);
     let ws_tx1 = ws_tx.clone();

@@ -190,7 +190,7 @@ pub struct Stats {
 
 impl From<&node::Transaction> for String {
   fn from(transaction: &node::Transaction) -> Self {
-    hex::encode(&transaction.data)
+    hex::encode(&**transaction)
   }
 }
 

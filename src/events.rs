@@ -433,7 +433,6 @@ macro_rules! heartbeat {
     tip: {
       height: $tip_height:expr,
       difficulty: $difficulty:expr,
-      hashrate: $hashrate:expr,
     },
     blocks: {
       missing: $missing_count:expr,
