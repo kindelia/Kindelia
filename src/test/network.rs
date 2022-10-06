@@ -63,7 +63,7 @@ fn network() {
         port: 30000 + (addr as u16),
         buffer_size: 1024 * 2
       };
-      node::start(state_path, 0, socket, &Some(initial_peers), true, false, #[cfg(log)] ws_config);
+      node::start(state_path, 0, socket, &Some(initial_peers), true, None, #[cfg(log)] ws_config);
 
     });
     threads.push(socket_thread);

@@ -1559,7 +1559,7 @@ pub fn start<C: ProtoComm + 'static>(
   comm: C,
   init_peers: &Option<Vec<C::Address>>,
   mine: bool,
-  api: bool,
+  api_config: Option<api::ApiConfig>,
   #[cfg(log)] ws_config: WsConfig,
 ) {
   eprintln!("Starting Kindelia node...");
@@ -1627,9 +1627,9 @@ pub fn start<C: ProtoComm + 'static>(
   }
 
   // Spawns the API thread
-  if api {
+  if let Some(api_config) = api_config {
     let api_thread = std::thread::spawn(move || {
-      crate::api::server::http_api_loop(node_query_sender);
+      crate::api::server::http_api_loop(node_query_sender, api_config);
     });
     threads.push(api_thread);
   }

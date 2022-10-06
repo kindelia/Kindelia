@@ -25,15 +25,15 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use warp::Future;
 
-use crate::api::{client as api_client, Hash, HexStatement};
+use crate::api::{self, client as api_client, Hash, HexStatement};
+use crate::bits::ProtoSerialize;
 use crate::common::Name;
 use crate::crypto;
-use crate::bits::ProtoSerialize;
+#[cfg(log)]
+use crate::events;
 use crate::hvm::{self, view_statement, Statement};
 use crate::net;
 use crate::node;
-#[cfg(log)]
-use crate::events;
 use crate::util::bytes_to_bitvec;
 
 // This client is meant to talk with node implementing Udp protocol comunication
@@ -242,9 +242,7 @@ pub enum NodeCommand {
 #[derive(Subcommand)]
 pub enum UtilCommand {
   /// Generate a new keypair.
-  DecodeName {
-    file: FileInput,
-  },
+  DecodeName { file: FileInput },
 }
 
 #[derive(Subcommand)]
@@ -374,6 +372,35 @@ where
       toml: Some(toml_value),
       prop: Some(prop_path),
     } = self.config
+    {
+      // if config file is set and valid, read from config file
+      // doing this way because of issue #469 toml-rs
+      let props: Vec<_> = prop_path.split('.').collect();
+      let mut value = toml_value.get(&props[0]).ok_or(format!(
+        "Could not found prop '{}' in config file.",
+        prop_path
+      ))?;
+      for prop in &props[1..] {
+        value = value.get(&prop).ok_or(format!(
+          "Could not found prop {} in config file.",
+          prop_path
+        ))?;
+      }
+      T::arg_from(value.clone()).map_err(|e| {
+        format!("Could not convert value '{}' into desired type: {}", value, e)
+      })
+    } else {
+      (self.default)()
+    }
+  }
+
+  // TODO: refactor
+  fn get_config_toml(self) -> Result<T, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    if let ConfigFileOptions { toml: Some(toml_value), prop: Some(prop_path) } =
+      self.config
     {
       // if config file is set and valid, read from config file
       // doing this way because of issue #469 toml-rs
@@ -576,6 +603,14 @@ pub fn run_cli() -> Result<(), String> {
           }
           .get_config_value()?;
 
+          let api_config = ConfigValueOption {
+            value: None,
+            env: None,
+            config: ConfigFileOptions::new(&config, "node.api"),
+            default: || Ok(api::ApiConfig::default()),
+          }
+          .get_config_toml()?;
+
           // Start
           let comm = init_socket().expect("Could not open a UDP socket");
           let initial_peers = initial_peers
@@ -586,42 +621,48 @@ pub fn run_cli() -> Result<(), String> {
             if !initial_peers.is_empty() { Some(initial_peers) } else { None };
 
           #[cfg(log)]
-          let ws_config = events::WsConfig {
-            port: 8080,
-            buffer_size: 1024 * 2
-          };
+          let ws_config =
+            events::WsConfig { port: 8080, buffer_size: 1024 * 2 };
 
-          node::start(data_path, network_id, comm, &initial_peers, mine, true, #[cfg(log)] ws_config);
+          node::start(
+            data_path,
+            network_id,
+            comm,
+            &initial_peers,
+            mine,
+            Some(api_config),
+            #[cfg(log)]
+            ws_config,
+          );
           // start(data_path, initial_peers, mine);
 
           Ok(())
         }
       }
     }
-    CliCommand::Util { command } => {
-      match command {
-        UtilCommand::DecodeName { file } => {
-          let txt = file.read_to_string()?;
-          let data: Result<Vec<Vec<u8>>, _> = txt
-            .trim()
-            .split(|c: char| c.is_whitespace())
-            .map(hex::decode)
-            .collect();
-          let data = data.map_err(|err| format!("Invalid hex string: {}", err))?;
-          let nums = data.iter().map(|v| bytes_to_u128(v));
-          for num in nums {
-            if let Some(num) = num {
-              if let Ok(name) = Name::try_from(num) {
-                println!("{}", name);
-                continue;
-              }
+    CliCommand::Util { command } => match command {
+      UtilCommand::DecodeName { file } => {
+        let txt = file.read_to_string()?;
+        let data: Result<Vec<Vec<u8>>, _> = txt
+          .trim()
+          .split(|c: char| c.is_whitespace())
+          .map(hex::decode)
+          .collect();
+        let data =
+          data.map_err(|err| format!("Invalid hex string: {}", err))?;
+        let nums = data.iter().map(|v| bytes_to_u128(v));
+        for num in nums {
+          if let Some(num) = num {
+            if let Ok(name) = Name::try_from(num) {
+              println!("{}", name);
+              continue;
             }
-            println!();
           }
-          Ok(())
+          println!();
         }
+        Ok(())
       }
-    }
+    },
     CliCommand::Completion { .. } => todo!(),
   }
 }
@@ -1112,5 +1153,11 @@ impl ArgumentFrom<toml::Value> for Vec<String> {
 impl ArgumentFrom<toml::Value> for bool {
   fn arg_from(t: toml::Value) -> Result<Self, String> {
     t.as_bool().ok_or(format!("Invalid boolean value: {}", t))
+  }
+}
+
+impl ArgumentFrom<toml::Value> for api::ApiConfig {
+  fn arg_from(t: toml::Value) -> Result<Self, String> {
+    t.try_into().map_err(|_| "Could not convert value into array".to_string())
   }
 }
