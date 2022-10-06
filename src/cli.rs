@@ -505,7 +505,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        parse_code(&code)?
+        hvm::parse_code(&code)?
       };
       let results = run_on_remote(&api_url, stmts, f)?;
       for result in results {
@@ -518,7 +518,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        parse_code(&code)?
+        hvm::parse_code(&code)?
       };
       publish_code(&api_url, stmts)
     }
@@ -933,21 +933,7 @@ fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
   if encoded {
     statements_from_hex_seq(code)
   } else {
-    parse_code(code)
-  }
-}
-
-fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
-  let statements = hvm::read_statements(code);
-  match statements {
-    Ok((code, statements)) => {
-      if code.is_empty() {
-        Ok(statements)
-      } else {
-        Err(format!("Your code was not parsed entirely: {}", code))
-      }
-    }
-    Err(hvm::ParseErr { erro, .. }) => Err(erro),
+    hvm::parse_code(code)
   }
 }
 

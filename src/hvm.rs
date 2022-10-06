@@ -4805,6 +4805,20 @@ pub fn read_statements(code: &str) -> ParseResult<Vec<Statement>> {
   read_until(code, '\0', read_statement)
 }
 
+pub fn parse_code(code: &str) -> Result<Vec<Statement>, String> {
+  let statements = read_statements(code);
+  match statements {
+    Ok((code, statements)) => {
+      if code.is_empty() {
+        Ok(statements)
+      } else {
+        Err(format!("Your code was not parsed entirely: {}", code))
+      }
+    }
+    Err(ParseErr { erro, .. }) => Err(erro),
+  }
+}
+
 // View
 // ----
 
