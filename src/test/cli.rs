@@ -128,9 +128,9 @@ fn signing_run(
 }
 
 #[rstest]
-#[case("example/private_key_1_namer", "4d576ce7dc24f565a7cee2390071191da2b0de13e1fd99c7008225694cf4c21788fe7395ac05091428440fb6e64a0af6d3cdbad53421a46d3d34d49f2864301dd28e774a2a9228434e492ed9c3")]
-#[case("example/private_key_2_alice", "4d576ce7dc24f565a7cee23980b6cc8dbc97db445ce9db50e5f7cddba5f5088227bcbb1d517aebe61f324ef5bd38c44d544ffc8ae962de6379f20fa638417184d45a6b25365411657889c7f41e")]
-#[case("example/private_key_3_bob", "4d576ce7dc24f565a7cee239808f479434991302dd2cf82b2b4e4acfe67bbd93d81f496e1da6610498261a2bc92270c58c260d857ff98f761e6afff7f9294feccf28f1f5455cf0e80722f82c6b")]
+#[case("example/private_key_1_namer", "755db39f7093d5969f3b88e6023f4bf7cca8c046e3cd00013cd7f9198fef2d0653daa42da9a3aa6bab1344b13dbb87355f25f2a0393ae4a1e836b0e50a763c227e21743712e4abaa15450db66c")]
+#[case("example/private_key_2_alice", "755db39f7093d5969f3b88e6023771ae6a24b5b8c3be37068d8b0eb74d293c99396bc3f21a0a221aae3dfe8dee8b78680600b304724c4637d3729b982c24249a8dc47b9aa0eeb0eda6cef17490")]
+#[case("example/private_key_3_bob", "755db39f7093d5969f3b88e600304bbff232fb35a58fc6c2f1b02a105514bdf9a05a400cfe684342ab9339f3bb628ba11b859e9cfda89730a347fb1194bd88e6d71d40aabc3a3be8799c3d9734")]
 fn signing(#[case] private_key: &str, #[case] expected_result: &str) {
   let output = kindelia!()
     .args([
