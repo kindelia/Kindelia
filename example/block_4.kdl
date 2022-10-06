@@ -6,25 +6,25 @@
 // Registers the "Foo" namespace to Alice.
 // Since this is a top-level name, this must be signed by the global Namer.
 reg Foo { 
-  #x2b5ad5c4795c026514f8317c7a215e
-} sign { 
-  0055db2c36550b962462a80acb
-  acb562aa04638674ce654a4fbc
-  2ef195591414ee3e87b8e08543
-  10818e8f46ccf15a0f2e338c4f
-  ee20fa177e4c1cf0365b4acae8
+  #x2b5ad5c4795c026514f8317c7a215e 
+} sign {
+  01e98cf3735586ebad0e5f0455
+  addda8c242f4b4a7e673695db8
+  f11d4e583c51c145bc502f8f86
+  47cb88ea7c922644f0d843c5d3
+  b9e3e272cb4e3cb73b70effc0b
 }
 
 // Registers the "Foo.Bar" namespace to Bob.
 // Since "Foo" is owned by Alice, this must be signed by her.
 reg Foo.Bar {
-  #x6813eb9362372eef6200f3b1dbc3f8
+  #x6813eb9362372eef6200f3b1dbc3f8 
 } sign {
-  0145ccb8ab88d3f07822a0cff7
-  85d3eb3c8183afffa7d03efa0e
-  5956dcc54e0e7007d608aff377
-  05c51d7336c05c37f1e210fbfa
-  13621c960eaadedc839b6b86fa
+  0033216afb6e55ed55a66b5862
+  f10fe3501cd5989867a129e222
+  5760d9702aa8da697df25613ee
+  c935d9b933e7d9b3522b5f3455
+  affe0276d2cd37550de556f47d
 }
 
 // Defines a "Foo.Bar.cats" function that always returns 42.
@@ -32,11 +32,11 @@ reg Foo.Bar {
 fun (Foo.Bar.cats) {
   (Foo.Bar.cats) = #42
 } sign {
-  0178f2cc0b6a326640029b64f9
-  7a414d388f24676090f1371857
-  81cc615dc49fff08396c429613
-  9420ff9d45c417bbf0224b5586
-  de4149b06405587de4615c780a
+  00f5886b04c847874cc3f7319b
+  8f32934bd3cd6632bcb8c5d9d6
+  d97099ca19bf8f491e95d1d570
+  0e494a31457e55598cd8b9bf83
+  9e452585051b8cc1cae09449c5
 }
 
 // Runs Bob's cats function!

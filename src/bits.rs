@@ -468,7 +468,7 @@ impl ProtoSerialize for Statement {
   fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
     match self {
       Statement::Fun { name, args, func, init, sign } => {
-        serialize_fixlen(4, &u256(0), bits, names);
+        serialize_fixlen(2, &u256(0), bits, names);
         name.proto_serialize(bits, names);
         serialize_list(args, bits, names);
         func.proto_serialize(bits, names);
@@ -476,18 +476,18 @@ impl ProtoSerialize for Statement {
         sign.proto_serialize(bits, names);
       }
       Statement::Ctr { name, args, sign } => {
-        serialize_fixlen(4, &u256(1), bits, names);
+        serialize_fixlen(2, &u256(1), bits, names);
         name.proto_serialize(bits, names);
         serialize_list(args, bits, names);
         sign.proto_serialize(bits, names);
       }
       Statement::Run { expr, sign } => {
-        serialize_fixlen(4, &u256(2), bits, names);
+        serialize_fixlen(2, &u256(2), bits, names);
         expr.proto_serialize(bits, names);
         sign.proto_serialize(bits, names);
       }
       Statement::Reg { name, ownr, sign } => {
-        serialize_fixlen(4, &u256(3), bits, names);
+        serialize_fixlen(2, &u256(3), bits, names);
         name.proto_serialize(bits, names);
         serialize_fixlen(128, &u256(**ownr), bits, names);
         sign.proto_serialize(bits, names);
@@ -500,7 +500,7 @@ impl ProtoSerialize for Statement {
     index: &mut u128,
     names: &mut Names,
   ) -> Option<Self> {
-    let tag = deserialize_fixlen(4, bits, index, names)?.low_u128();
+    let tag = deserialize_fixlen(2, bits, index, names)?.low_u128();
     match tag {
       0 => {
         let name = Name::proto_deserialize(bits, index, names)?;
