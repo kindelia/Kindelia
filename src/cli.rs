@@ -29,15 +29,16 @@ use crate::api::{self, client as api_client, Hash, HexStatement};
 use crate::bits::ProtoSerialize;
 use crate::common::Name;
 use crate::crypto;
-#[cfg(log)]
-use crate::events;
 use crate::hvm::{self, view_statement, Statement};
 use crate::net;
 use crate::node;
 use crate::util::bytes_to_bitvec;
 
-// This client is meant to talk with node implementing Udp protocol comunication
-// (the default)
+#[cfg(feature = "events")]
+use crate::events;
+
+// This client is meant to talk with a node implementing UDP protocol
+// communication (the default)
 type NC = UdpSocket;
 
 /*
@@ -632,7 +633,7 @@ pub fn run_cli() -> Result<(), String> {
             &initial_peers,
             mine,
             Some(api_config),
-            #[cfg(log)]
+            #[cfg(feature = "events")]
             ws_config,
           );
           // start(data_path, initial_peers, mine);

@@ -17,7 +17,8 @@ mod hvm;
 mod net;
 mod node;
 mod util;
-#[cfg(log)]
+
+#[cfg(feature = "events")]
 mod events;
 
 pub use clap::{Parser, Subcommand};

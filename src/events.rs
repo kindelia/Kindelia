@@ -450,24 +450,24 @@ macro_rules! heartbeat {
     }
   ) => {
     NodeEvent::Heartbeat {
-      peers: crate::events::HeartbeatPeers { num: $peers_num },
-      tip: crate::events::HeartbeatTip {
+      peers: $crate::events::HeartbeatPeers { num: $peers_num },
+      tip: $crate::events::HeartbeatTip {
         height: $tip_height,
         difficulty: $difficulty,
         hashrate: $hashrate,
       },
-      blocks: crate::events::HeartbeatBlocks {
+      blocks: $crate::events::HeartbeatBlocks {
         missing: $missing_count,
         pending: $pending_count,
         included: $included_count,
       },
-      runtime: crate::events::HeartbeatRuntime {
-        mana: crate::events::HeartbeatStatInfo {
+      runtime: $crate::events::HeartbeatRuntime {
+        mana: $crate::events::HeartbeatStatInfo {
           current: $mana_cur,
           limit: $mana_lim,
           available: $mana_avail,
         },
-        size: crate::events::HeartbeatStatInfo {
+        size: $crate::events::HeartbeatStatInfo {
           current: $size_cur,
           limit: $size_lim,
           available: $size_avail,

@@ -20,9 +20,9 @@ use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
 
-#[cfg(log)]
+#[cfg(feature = "events")]
 use tokio::sync::broadcast;
-#[cfg(log)]
+#[cfg(feature = "events")]
 use crate::{
   events::{self, NodeEvent, WsConfig},
   heartbeat,
@@ -41,15 +41,15 @@ use crate::{
 
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
-    #[cfg(log)]
+    #[cfg(feature = "events")]
     if let Err(_) = $tx.send($event) {
       println!("Could not send event");
     }
   };
 
   ($tx: expr, $event: expr, tags = $($tag:ident),+) => {
-    #[cfg(log)]
-    #[cfg(any(all, $($tag),+))]
+    #[cfg(feature = "events")]
+    // #[cfg(any(all, $($tag),+))] // TODO: all
     if let Err(_) = $tx.send($event) {
       println!("Could not send event");
     }
@@ -120,7 +120,7 @@ pub struct Node<C: ProtoComm> {
   pub target     : U256Map<U256>,                  // block hash -> this block's target
   pub height     : U256Map<u128>,                  // block hash -> cached height
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
-  #[cfg(log)]
+  #[cfg(feature = "events")]
   pub event_emitter     : mpsc::Sender<NodeEvent>
 }
 
@@ -155,7 +155,7 @@ impl<A: ProtoAddr> PeersStore<A> {
   pub fn see_peer(
     &mut self,
     peer: Peer<A>,
-    #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEvent>,
   ) {
     let addr = peer.address;
     match self.seen.get(&addr) {
@@ -200,7 +200,7 @@ impl<A: ProtoAddr> PeersStore<A> {
     }
   }
 
-  fn timeout(&mut self, #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>) {
+  fn timeout(&mut self, #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEvent>) {
     let mut forget = Vec::new();
     for (id, peer) in &self.active {
       if peer.seen_at < get_time() - PEER_TIMEOUT {
@@ -557,7 +557,7 @@ impl MinerCommunication {
 // Main miner loop: if asked, attempts to mine a block
 pub fn miner_loop(
   mut miner_communication: MinerCommunication,
-  #[cfg(log)] event_emitter: mpsc::Sender<events::NodeEvent>,
+  #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEvent>,
 ) {
   loop {
     if let MinerMessage::Request { prev, body, targ } =
@@ -593,7 +593,7 @@ impl<C: ProtoComm> Node<C> {
     init_peers: &Option<Vec<C::Address>>,
     network_id: u64,
     comm: C,
-    #[cfg(log)] event_emitter: mpsc::Sender<events::NodeEvent>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEvent>,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
     let runtime = init_runtime(state_path.join("heaps"));
@@ -618,7 +618,7 @@ impl<C: ProtoComm> Node<C> {
       height   : u256map_from([(ZERO_HASH(), 0)]),
       target   : u256map_from([(ZERO_HASH(), INITIAL_TARGET())]),
       results  : u256map_from([(ZERO_HASH(), vec![])]),
-      #[cfg(log)]
+      #[cfg(feature = "events")]
       event_emitter: event_emitter.clone()
     };
 
@@ -628,7 +628,7 @@ impl<C: ProtoComm> Node<C> {
       init_peers.iter().for_each(|address| {
         return node.peers.see_peer(
           Peer { address: *address, seen_at: now },
-          #[cfg(log)]
+          #[cfg(feature = "events")]
           event_emitter.clone(),
         );
       });
@@ -1173,7 +1173,7 @@ impl<C: ProtoComm> Node<C> {
 
       self.peers.see_peer(
         Peer { address: addr, seen_at: get_time() },
-        #[cfg(log)]
+        #[cfg(feature = "events")]
         self.event_emitter.clone(),
       );
 
@@ -1223,7 +1223,7 @@ impl<C: ProtoComm> Node<C> {
           for peer in peers {
             self.peers.see_peer(
               *peer,
-              #[cfg(log)]
+              #[cfg(feature = "events")]
               self.event_emitter.clone(),
             );
           }
@@ -1356,7 +1356,6 @@ impl<C: ProtoComm> Node<C> {
     return Body { data: body_vec };
   }
 
-  #[cfg(all(log, any(all, heartbeat)))]
   fn log_heartbeat(&self) {
     let tip = self.tip;
     let tip_height = *self.height.get(&tip).unwrap() as u64;
@@ -1387,7 +1386,7 @@ impl<C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
-    let log = heartbeat! {
+    let event = heartbeat! {
       peers: { num: peers_num },
       tip: {
         height: tip_height,
@@ -1414,7 +1413,7 @@ impl<C: ProtoComm> Node<C> {
       }
     };
 
-    emit_event!(self.event_emitter, log, tags = heartbeat);
+    emit_event!(self.event_emitter, event, tags = heartbeat);
   }
 
   pub fn main(
@@ -1464,12 +1463,12 @@ impl<C: ProtoComm> Node<C> {
         delay: 5_000,
         action: |node, mc| {
           node.peers.timeout(
-            #[cfg(log)]
+            #[cfg(feature = "events")]
             node.event_emitter.clone(),
           );
         },
       },
-      #[cfg(all(log, any(all, heartbeat)))]
+      #[cfg(feature = "events")]
       // Prints stats
       Task {
         delay: 5_000,
@@ -1531,18 +1530,18 @@ pub fn start<C: ProtoComm + 'static>(
   init_peers: &Option<Vec<C::Address>>,
   mine: bool,
   api_config: Option<api::ApiConfig>,
-  #[cfg(log)] ws_config: WsConfig,
+  #[cfg(feature = "events")] ws_config: WsConfig,
 ) {
   eprintln!("Starting Kindelia node...");
   eprintln!("Store path: {:?}", state_path);
   eprintln!("Network ID: {:#X}", network_id);
 
-  #[cfg(log)]
+  #[cfg(feature = "events")]
   let event_tx = {
     let (event_tx, event_rx) = mpsc::channel::<NodeEvent>();
     let (ws_tx, ws_rx) = broadcast::channel(ws_config.buffer_size);
 
-    eprintln!("Log working on {}", ws_config.port);
+    eprintln!("Events WS on port: {}", ws_config.port);
     let ws_tx1 = ws_tx.clone();
     std::thread::spawn(move || {
       events::ws_loop(ws_config.port, ws_tx1);
@@ -1556,7 +1555,9 @@ pub fn start<C: ProtoComm + 'static>(
             eprintln!("Could not send event to websocket: {}", err);
           };
         }
-        println!("{}", event);
+        if let NodeEvent::Heartbeat { .. } = event {
+          println!("{}", event);
+        }
       }
     });
     event_tx
@@ -1568,7 +1569,7 @@ pub fn start<C: ProtoComm + 'static>(
     &init_peers,
     network_id,
     comm,
-    #[cfg(log)]
+    #[cfg(feature = "events")]
     event_tx.clone(),
   );
 
@@ -1590,7 +1591,7 @@ pub fn start<C: ProtoComm + 'static>(
     let miner_thread = std::thread::spawn(move || {
       miner_loop(
         miner_comm_1,
-        #[cfg(log)]
+        #[cfg(feature = "events")]
         event_tx,
       );
     });

@@ -6,19 +6,27 @@ description = "An efficient, secure cryptocomputer."
 license = "MIT"
 repository = "https://github.com/Kindelia/Kindelia"
 
+[features]
+default = ["events"]
+events = ["dep:futures-util"]
+
 [profile.dev_fast]
 inherits = "dev"
 opt-level = 3
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# Docs: https://doc.rust-lang.org/cargo/reference/manifest.html
+
 
 [dependencies]
 
 fastrand = "1.7.0"
 rand = "0.8.5"
 
-# == Crypto == #
+# Util
+dirs = "4.0.0"
+hex = "0.4"
 
+# Crypto
 secp256k1 = { version = "0.22.1", features = [
   "rand-std",
   "recovery",
@@ -27,16 +35,11 @@ secp256k1 = { version = "0.22.1", features = [
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 sha3 = "0.9.1"
 
-# == Util == #
-dirs = "4.0.0"
-hex = "0.4"
-# pad = "0.1.6"
-
-# == CLI arguments parser == #
+# CLI / configuration
 clap = { version = "3.1.3", features = ["derive"] }
 toml = "0.5.9"
 
-# == Datastructures == #
+# Datastructures
 bit-vec = "0.6.3"
 im = "15.0.0"
 # nohash-hasher = "0.2.0" # inlined, because we need u128
@@ -44,10 +47,7 @@ primitive-types = { version = "0.11.1" }
 priority-queue = "1.2.1"
 # num = "0.1.36"
 
-# # == TUI == #
-# termion = "1.5.6"
-
-# == API == #
+# API
 chrono = "0.4.22"
 json = "0.12.4"
 reqwest = { version = "0.11", features = ["json"] }
@@ -58,13 +58,13 @@ tokio = { version = "1.19.1", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["net"] }
 warp = "0.3"
 
+# Events API
+futures-util = { version = "0.3.21", optional = true }
+
+
 [dev-dependencies]
-# == TESTS == #
 proptest = "1.0.0"
 rstest = "0.15.0"
 rstest_reuse = "0.4.0"
 httpmock = "0.6.6"
-petgraph = "0.6.2" # used in network.rs
-
-[target.'cfg(log)'.dependencies]
-futures-util = "0.3.21"
+petgraph = "0.6.2"

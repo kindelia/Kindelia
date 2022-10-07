@@ -2001,15 +2001,15 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
+        // TODO:
         // The term return by Done is only read and stored in debug mode for
         // testing purpouses. In the future, the Done return value will be
         // limited to `Term::Num`s and the U120s will be stored as part of the
         // protocol. Also, a `Log` primitive should be added.
         let done_term =
           // if debug {
-          if let Some(term) = readback_term(self, done, Some(2 << 16)) {
-            // TODO: limit readback computational resources
-            term // unwrap!!!
+          if let Some(term) = readback_term(self, done, Some(1 << 16)) {
+            term
            } else {
             Term::num(U120::ZERO)
           };
