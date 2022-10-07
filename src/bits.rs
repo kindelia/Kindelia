@@ -311,12 +311,8 @@ impl ProtoSerialize for Name {
         add = add.saturating_mul(64);
       }
       *index = *index + 1;
-      if add > 1 {
-        names.insert(names.len() as u128, nam);
-        Some(Name::from_u128_unchecked(nam))
-      } else {
-        None
-      }
+      names.insert(names.len() as u128, nam);
+      Some(Name::from_u128_unchecked(nam))
     }
   }
 }
