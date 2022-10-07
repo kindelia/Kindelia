@@ -409,6 +409,17 @@ impl NodeEvent {
     };
     NodeEvent::HandleMessage { event }
   }
+
+  // UTILS
+  pub fn get_tag(&self) -> String {
+    match self {
+      NodeEvent::AddBlock { .. } => "add_block".to_string(),
+      NodeEvent::Mining { .. } => "mining".to_string(),
+      NodeEvent::Peers { .. } => "peers".to_string(),
+      NodeEvent::HandleMessage { .. } => "handle_message".to_string(),
+      NodeEvent::Heartbeat { .. } => "heartbeat".to_string(),
+    }
+  }
 }
 
 #[macro_export]
@@ -474,6 +485,15 @@ pub struct WsConfig {
   pub buffer_size: usize,
 }
 
+#[derive(serde::Deserialize)]
+pub struct QueryParams {
+  pub tags: Option<String>,
+}
+
+pub struct Query {
+  pub tags: Vec<String>,
+}
+
 pub fn ws_loop(port: u16, ws_tx: broadcast::Sender<NodeEvent>) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
   runtime.block_on(async move {
@@ -482,8 +502,19 @@ pub fn ws_loop(port: u16, ws_tx: broadcast::Sender<NodeEvent>) {
 }
 
 async fn ws_server(port: u16, ws_tx: broadcast::Sender<NodeEvent>) {
-  let ws_route = warp::ws().and(with_rx(ws_tx.clone())).and_then(ws_handler);
+  let ws_route = warp::ws()
+    .and(with_rx(ws_tx.clone()))
+    .and(warp::query::<QueryParams>().map(parse_query))
+    .and_then(ws_handler);
   warp::serve(ws_route).run(([127, 0, 0, 1], port)).await;
+}
+
+fn parse_query(query: QueryParams) -> Query {
+  let tags = match query.tags {
+    Some(tags) => tags.split(',').map(str::to_string).collect(),
+    None => vec![],
+  };
+  Query { tags }
 }
 
 fn with_rx(
@@ -496,26 +527,37 @@ fn with_rx(
 pub async fn ws_handler(
   ws: warp::ws::Ws,
   ws_tx: broadcast::Sender<NodeEvent>,
+  query: Query,
 ) -> Result<impl Reply, Rejection> {
-  Ok(ws.on_upgrade(move |socket| client_connection(socket, ws_tx)))
+  Ok(ws.on_upgrade(move |socket| client_connection(socket, ws_tx, query.tags)))
 }
 
 pub async fn client_connection(
   ws: WebSocket,
   ws_tx: broadcast::Sender<NodeEvent>,
+  tags: Vec<String>,
 ) {
   let (mut client_ws_sender, _) = ws.split();
-
   let mut ws_rx = ws_tx.subscribe();
+  let mut count = 0;
 
   while let Ok(event) = ws_rx.recv().await {
-    let json_stringfied = serde_json::to_string(&event).unwrap();
-    if let Err(err) =
-      client_ws_sender.send(Message::text(json_stringfied)).await
-    {
-      eprintln!("Could not send message through websocket: {}", err);
-    };
+    if tags.is_empty() || tags.contains(&event.get_tag()) {
+      let json_stringfied = serde_json::to_string(&event).unwrap();
+      if let Err(err) =
+        client_ws_sender.send(Message::text(json_stringfied)).await
+      {
+        eprintln!("Could not send message through websocket: {}", err);
+        count += 1;
+      } else {
+        count = 0;
+      };
+      // After 10 consecutive fails we close the connection
+      if count == 10 {
+        break;
+      };
+    }
   }
 
-  println!("disconnected");
+  eprintln!("Disconnected");
 }

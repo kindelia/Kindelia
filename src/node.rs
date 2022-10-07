@@ -11,13 +11,6 @@ use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
 use sha3::Digest;
-use tokio::sync::broadcast;
-
-#[cfg(log)]
-use crate::{
-  events::{self, NodeEvent, WsConfig},
-  heartbeat,
-};
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
@@ -26,6 +19,14 @@ use crate::common::Name;
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
+
+#[cfg(log)]
+use tokio::sync::broadcast;
+#[cfg(log)]
+use crate::{
+  events::{self, NodeEvent, WsConfig},
+  heartbeat,
+};
 
 // Types
 // =====
