@@ -158,11 +158,9 @@ impl<A: ProtoAddr> PeersStore<A> {
     #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>,
   ) {
     let addr = peer.address;
-    // print_with_timestamp!("- see peer {}", addr);
     match self.seen.get(&addr) {
       // New peer, not seen before
       None => {
-        // print_with_timestamp!("- new peer {}", addr);
         self.seen.insert(addr, peer);
         emit_event!(
           event_emitter,
@@ -174,12 +172,10 @@ impl<A: ProtoAddr> PeersStore<A> {
       }
       // Peer seen before, but maybe not active
       Some(index) => {
-        // print_with_timestamp!("- peer {} already seen", addr);
         let old_peer = self.active.get_mut(&addr);
         match old_peer {
           // Peer not active, so activate it
           None => {
-            // print_with_timestamp!("- activating peer {}", addr);
             emit_event!(
               event_emitter,
               NodeEvent::see_peer_activated(&peer),
@@ -190,7 +186,6 @@ impl<A: ProtoAddr> PeersStore<A> {
           }
           // Peer already active, so update it
           Some(old_peer) => {
-            // print_with_timestamp!("\t- old peer {:?}", old_peer);
             let new_seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
             emit_event!(
               event_emitter,
@@ -199,7 +194,6 @@ impl<A: ProtoAddr> PeersStore<A> {
               see_peer
             );
             old_peer.seen_at = new_seen_at;
-            // print_with_timestamp!("\t- new peer {:?}", old_peer);
           }
         }
       }
@@ -209,10 +203,7 @@ impl<A: ProtoAddr> PeersStore<A> {
   fn timeout(&mut self, #[cfg(log)] event_emitter: mpsc::Sender<NodeEvent>) {
     let mut forget = Vec::new();
     for (id, peer) in &self.active {
-      // print_with_timestamp!("- Peer {}: {}", id, peer.address);
-      // print_with_timestamp!("... {} < {} {}", peer.seen_at, get_time() - PEER_TIMEOUT, peer.seen_at < get_time() - PEER_TIMEOUT);
       if peer.seen_at < get_time() - PEER_TIMEOUT {
-        // print_with_timestamp!("... forgetting {}", id);
         emit_event!(
           event_emitter,
           NodeEvent::timeout(&peer),
@@ -243,7 +234,6 @@ impl<A: ProtoAddr> PeersStore<A> {
     let amount = amount as usize;
     let mut rng = rand::thread_rng();
     let peers = self.active.values().cloned().choose_multiple(&mut rng, amount);
-    // print_with_timestamp!("- get random peers {:?}", peers.iter().map(|p| p.address).collect::<Vec<_>>());
     peers
   }
 }
@@ -573,7 +563,6 @@ pub fn miner_loop(
     if let MinerMessage::Request { prev, body, targ } =
       miner_communication.read()
     {
-      //print_with_timestamp!("[miner] mining with target: {}", hex::encode(u256_to_bytes(targ)));
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
       if let Some(block) = mined {
         emit_event!(
@@ -582,7 +571,6 @@ pub fn miner_loop(
           tags = mining,
           mined
         );
-        //print_with_timestamp!("[miner] mined a block!");
         miner_communication.write(MinerMessage::Answer { block });
       } else {
         emit_event!(
@@ -696,7 +684,6 @@ impl<C: ProtoComm> Node<C> {
       let btime = block.time;
       // If block is too far into the future, ignore it
       if btime >= get_time() + DELAY_TOLERANCE {
-        //print_with_timestamp!("# new block: too late");
         emit_event!(
           self.event_emitter,
           NodeEvent::too_late(block.hash),
@@ -708,7 +695,6 @@ impl<C: ProtoComm> Node<C> {
       let bhash = block.hash;
       // If we already registered this block, ignore it
       if self.block.get(&bhash).is_some() {
-        //print_with_timestamp!("# new block: already in");
         emit_event!(
           self.event_emitter,
           NodeEvent::already_included(bhash),
@@ -720,7 +706,6 @@ impl<C: ProtoComm> Node<C> {
       let phash = block.prev;
       // If previous block is available, add the block to the chain
       if self.block.get(&phash).is_some() {
-        //print_with_timestamp!("- previous available");
         let work = get_hash_work(bhash); // block work score
         self.block.insert(bhash, block.clone()); // inserts the block
         self.work.insert(bhash, u256(0)); // inits the work attr
@@ -736,7 +721,6 @@ impl<C: ProtoComm> Node<C> {
         let advances_time = btime > self.block[&phash].time;
         // If the PoW hits the target and the block's timestamp is valid...
         if has_enough_work && advances_time {
-          // print_with_timestamp!("# new_block: enough work & advances_time");
           self.work.insert(bhash, self.work[&phash] + work); // sets this block accumulated work
           self.height.insert(bhash, self.height[&phash] + 1); // sets this block accumulated height
 
@@ -779,8 +763,6 @@ impl<C: ProtoComm> Node<C> {
               stopped
             );
             self.tip = bhash;
-            //print_with_timestamp!("- hash: {:x}", bhash);
-            //print_with_timestamp!("- work: {}", self.work[&new_tip]);
             if true {
               // Block reorganization (* marks blocks for which we have runtime snapshots):
               // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
@@ -827,7 +809,6 @@ impl<C: ProtoComm> Node<C> {
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
-              //print_with_timestamp!("- tick: old={} new={}", self.runtime.get_tick(), tick);
               self.runtime.rollback(tick);
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
@@ -878,13 +859,10 @@ impl<C: ProtoComm> Node<C> {
   }
 
   pub fn compute_block(&mut self, block: &Block) {
-    //print_with_timestamp!("Computing block...");
-    //print_with_timestamp!("==================");
     let transactions = extract_transactions(&block.body);
     let mut statements = Vec::new();
     for transaction in transactions {
       if let Some(statement) = transaction.to_statement() {
-        //print_with_timestamp!("- {}", view_statement(&statement));
         statements.push(statement);
       }
     }
@@ -1124,10 +1102,8 @@ impl<C: ProtoComm> Node<C> {
     share_peers: u128,
   ) {
     let magic = self.network_id;
-    //print_with_timestamp!("- sending block: {:?}", block);
     let peers = self.peers.get_random_active(share_peers);
     let msg = Message::NoticeTheseBlocks { magic, gossip, blocks, peers };
-    // print_with_timestamp!("- sending block: {:?}", msg);
     self.comm.proto_send(addrs, &msg);
   }
 
@@ -1185,7 +1161,6 @@ impl<C: ProtoComm> Node<C> {
     msg: &Message<C::Address>,
   ) {
     if addr != self.addr {
-      // print_with_timestamp!("- received message from {:?}: {:?}", addr, msg);
       match msg {
         Message::GiveMeThatBlock { magic, .. }
         | Message::NoticeTheseBlocks { magic, .. }
@@ -1271,9 +1246,6 @@ impl<C: ProtoComm> Node<C> {
             tags = handle_message,
             mine_trans
           );
-          //print_with_timestamp!("- Transaction added to pool:");
-          //print_with_timestamp!("-- {:?}", trans.data);
-          //print_with_timestamp!("-- {}", if let Some(st) = trans.to_statement() { view_statement(&st) } else { String::new() });
           if self.pool.get(&trans).is_none() {
             self.pool.push(trans.clone(), trans.hash.low_u64());
             self.gossip(5, msg);
@@ -1332,9 +1304,7 @@ impl<C: ProtoComm> Node<C> {
   }
 
   fn ask_mine(&self, miner_communication: &mut MinerCommunication, body: Body) {
-    //print_with_timestamp!("Asking miner to mine:");
     //for transaction in extract_transactions(&body) {
-    //print_with_timestamp!("- statement: {}", view_statement(&transaction.to_statement().unwrap()));
     //}
     let targ = self.get_tip_target();
     emit_event!(
