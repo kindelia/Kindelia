@@ -8,3 +8,10 @@ initial_peers = [
   "64.227.110.69",
   "188.166.3.140",
 ]
+
+[node.api]
+port = 8000
+
+# # TODO
+# [node.ws]
+# port = 3000

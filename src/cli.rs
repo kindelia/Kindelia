@@ -620,9 +620,10 @@ pub fn run_cli() -> Result<(), String> {
           let initial_peers =
             if !initial_peers.is_empty() { Some(initial_peers) } else { None };
 
-          #[cfg(log)]
+          #[cfg(feature = "events")]
+          // TODO: load from config file
           let ws_config =
-            events::WsConfig { port: 8080, buffer_size: 1024 * 2 };
+            events::WsConfig { port: 3000, buffer_size: 1024 * 2 };
 
           node::start(
             data_path,
