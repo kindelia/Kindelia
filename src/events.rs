@@ -97,7 +97,6 @@ pub struct HeartbeatPeers {
 pub struct HeartbeatTip {
   pub height: u64,
   pub difficulty: u64,
-  pub hashrate: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -125,15 +124,15 @@ pub struct HeartbeatStatInfo {
 
 impl std::fmt::Display for HeartbeatPeers {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!("[peers] {}", self.num))
+    f.write_fmt(format_args!("peers: {}", self.num))
   }
 }
 
 impl std::fmt::Display for HeartbeatTip {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.write_fmt(format_args!(
-      "[tip] height: {} | diff: {} | hashrate: {}",
-      self.height, self.difficulty, self.hashrate
+      "tip: {{ height: {} | difficulty: {} }}",
+      self.height, self.difficulty
     ))
   }
 }
@@ -141,7 +140,7 @@ impl std::fmt::Display for HeartbeatTip {
 impl std::fmt::Display for HeartbeatBlocks {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.write_fmt(format_args!(
-      "[tip] included: {} | missing: {} | pending: {}",
+      "blocks: {{ included: {} | missing: {} | pending: {} }}",
       self.included, self.missing, self.pending
     ))
   }
@@ -149,10 +148,15 @@ impl std::fmt::Display for HeartbeatBlocks {
 
 impl std::fmt::Display for HeartbeatRuntime {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    // Do not display mana stats right now as they are too verbose
     f.write_fmt(format_args!(
-      "[runtime] [mana] {} | [size] {}",
-      self.mana, self.size
+      "runtime: {{ size: {} }}",
+      self.size
     ))
+    // f.write_fmt(format_args!(
+    //   "[runtime] [mana] {} | [size] {}",
+    //   self.mana, self.size
+    // ))
   }
 }
 
@@ -183,7 +187,7 @@ impl std::fmt::Display for HandleMessageEvent {
         )
       }
       HandleMessageEvent::GiveMeThatBlock { magic, bhash } => {
-        format!("[give_me_block] magic: {} | block: {}", magic, bhash)
+        format!("[give_me_that_block] magic: {} | block: {}", magic, bhash)
       }
       HandleMessageEvent::PleaseMineThisTransaction { magic, trans } => {
         format!("[mine_trans] magic: {} | trans: {}", magic, trans)
@@ -454,7 +458,6 @@ macro_rules! heartbeat {
       tip: $crate::events::HeartbeatTip {
         height: $tip_height,
         difficulty: $difficulty,
-        hashrate: $hashrate,
       },
       blocks: $crate::events::HeartbeatBlocks {
         missing: $missing_count,

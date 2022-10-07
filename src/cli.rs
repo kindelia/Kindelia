@@ -237,6 +237,8 @@ pub enum NodeCommand {
     /// Mine blocks.
     #[clap(long, short = 'm')]
     mine: bool,
+    /// Log events as JSON
+    json: bool,
   },
 }
 
@@ -572,7 +574,7 @@ pub fn run_cli() -> Result<(), String> {
           }
           Ok(())
         }
-        NodeCommand::Start { initial_peers, network_id, mine } => {
+        NodeCommand::Start { initial_peers, network_id, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
@@ -633,6 +635,7 @@ pub fn run_cli() -> Result<(), String> {
             &initial_peers,
             mine,
             Some(api_config),
+            json,
             #[cfg(feature = "events")]
             ws_config,
           );

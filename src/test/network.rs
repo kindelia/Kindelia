@@ -53,18 +53,23 @@ fn network() {
       g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
     let addr = socket.addr;
     let socket_thread = thread::spawn(move || {
-      let state_path = temp_dir()
-        .path
-        .join(".kindelia")
-        .join(format!(".test-{}", addr));
+      let state_path =
+        temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
 
       #[cfg(feature = "events")]
-      let ws_config = events::WsConfig {
-        port: 30000 + (addr as u16),
-        buffer_size: 1024 * 2
-      };
-      node::start(state_path, 0, socket, &Some(initial_peers), true, None, #[cfg(feature = "events")] ws_config);
-
+      let ws_config =
+        events::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+      node::start(
+        state_path,
+        0,
+        socket,
+        &Some(initial_peers),
+        true,
+        None,
+        true,
+        #[cfg(feature = "events")]
+        ws_config,
+      );
     });
     threads.push(socket_thread);
   }

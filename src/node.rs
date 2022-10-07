@@ -1295,12 +1295,14 @@ impl<C: ProtoComm> Node<C> {
       file_paths.push(entry.unwrap().path());
     }
     file_paths.sort();
-    eprintln!("Loading {} blocks from disk...", file_paths.len());
+    let num_blocks = file_paths.len();
+    eprintln!("Loading {} blocks from disk...", num_blocks);
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
       let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer)).unwrap();
       self.add_block(miner_communication, &block);
     }
+    eprintln!("Loaded {} blocks from disk.", num_blocks);
   }
 
   fn ask_mine(&self, miner_communication: &mut MinerCommunication, body: Body) {
@@ -1421,7 +1423,7 @@ impl<C: ProtoComm> Node<C> {
     mut miner_communication: MinerCommunication,
     mine: bool,
   ) -> ! {
-    eprintln!("Port: {}", self.addr);
+    eprintln!("UDP/protocol port: {}", self.addr);
     eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {
       eprintln!("  - {}", peer.address);
@@ -1523,6 +1525,7 @@ impl<C: ProtoComm> Node<C> {
 // TODO: move this paramenters to a struct `NodeStartOptions<C>`?
 // TODO: I don't know why 'static is needed and why it works
 // TODO: add api_config e ws_config: Options
+#[allow(clippy::too_many_arguments)]
 pub fn start<C: ProtoComm + 'static>(
   state_path: PathBuf,
   network_id: u64,
@@ -1530,6 +1533,7 @@ pub fn start<C: ProtoComm + 'static>(
   init_peers: &Option<Vec<C::Address>>,
   mine: bool,
   api_config: Option<api::ApiConfig>,
+  json: bool,
   #[cfg(feature = "events")] ws_config: WsConfig,
 ) {
   eprintln!("Starting Kindelia node...");
@@ -1555,8 +1559,13 @@ pub fn start<C: ProtoComm + 'static>(
             eprintln!("Could not send event to websocket: {}", err);
           };
         }
+        // TODO: way to select which logs to print
         if let NodeEvent::Heartbeat { .. } = event {
-          println!("{}", event);
+          if json {
+            println!("{}", serde_json::to_string(&event).unwrap());
+          } else {
+            println!("{}", event);
+          }
         }
       }
     });
