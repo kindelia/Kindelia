@@ -252,6 +252,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{serde_as, DisplayFromStr};
 
 use crate::bits::ProtoSerialize;
+use crate::constants;
 use crate::crypto;
 use crate::util::{U128_SIZE, mask};
 use crate::util;
@@ -774,8 +775,6 @@ fn count_allocs(body: &Term) -> u128 {
     }
   }
 }
-
-const GENESIS_CODE: &str = include_str!("../genesis.kdl");
 
 // Utils
 // -----
@@ -1567,7 +1566,7 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
 
   // TODO: extract to Node
   // TODO: add Genesis statements to actual block 0
-  rt.run_statements_from_code(GENESIS_CODE, true, false);
+  rt.run_statements_from_code(constants::GENESIS_CODE, true, false);
   rt.commit();
 
   rt
