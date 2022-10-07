@@ -1213,6 +1213,7 @@ dependencies = [
  "clap",
  "dirs",
  "fastrand",
+ "futures-util",
  "hex",
  "httpmock",
  "im",

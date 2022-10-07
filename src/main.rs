@@ -16,6 +16,8 @@ mod hvm;
 mod net;
 mod node;
 mod util;
+#[cfg(log)]
+mod events;
 
 pub use clap::{Parser, Subcommand};
 

@@ -15,8 +15,8 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
-use super::u256_to_hex;
 use super::NodeRequest;
+use super::{u256_to_hex, ApiConfig};
 use crate::api::{HexStatement, ReqAnsRecv};
 use crate::bits::ProtoSerialize;
 use crate::common::Name;
@@ -152,16 +152,18 @@ async fn handle_rejection(
 
 pub fn http_api_loop<C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
+  api_config: ApiConfig,
 ) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    api_serve::<C>(node_query_sender).await;
+    api_serve::<C>(node_query_sender, api_config).await;
   });
 }
 
 async fn api_serve<'a, C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
+  api_config: ApiConfig,
 ) {
   async fn ask<T, C: ProtoComm>(
     node_query_tx: SyncSender<NodeRequest<C>>,
@@ -354,23 +356,24 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
   let interact_code_base = path!("code" / ..);
 
   let query_tx = node_query_sender.clone();
-  let interact_code_run =
-    post().and(interact_code_base).and(path!("run")).and(body::bytes()).and_then(
-      move |code: warp::hyper::body::Bytes| {
-        let query_tx = query_tx.clone();
-        async move {
-          let code = String::from_utf8(code.to_vec());
-          if let Ok(code) = code {
-            let res = ask(query_tx, NodeRequest::test_code(code)).await;
-            Ok(ok_json(res))
-          } else {
-            Err(reject::custom(InvalidParameter::from(
-              "Invalid code".to_string(),
-            )))
-          }
+  let interact_code_run = post()
+    .and(interact_code_base)
+    .and(path!("run"))
+    .and(body::bytes())
+    .and_then(move |code: warp::hyper::body::Bytes| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code = String::from_utf8(code.to_vec());
+        if let Ok(code) = code {
+          let res = ask(query_tx, NodeRequest::test_code(code)).await;
+          Ok(ok_json(res))
+        } else {
+          Err(reject::custom(InvalidParameter::from(
+            "Invalid code".to_string(),
+          )))
         }
-      },
-    );
+      }
+    });
 
   let query_tx = node_query_sender.clone();
   let interact_code_publish = post()
@@ -431,8 +434,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     },
   );
 
-  let interact_router =
-    interact_code_run.or(interact_code_publish).or(interact_run).or(interact_publish);
+  let interact_router = interact_code_run
+    .or(interact_code_publish)
+    .or(interact_run)
+    .or(interact_publish);
 
   // == Reg ==
 
@@ -503,7 +508,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")
   });
 
-  let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
+  let listener_v4 =
+    TcpListener::bind(format!("0.0.0.0:{}", api_config.port)).await.unwrap();
   // let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();
   let listener = TcpListenerStream::new(listener_v4)
     // .merge(TcpListenerStream::new(listener_v6))
