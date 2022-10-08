@@ -6,6 +6,12 @@ use std::ops::Deref;
 use crate::hvm::{CompFunc, Func, compile_func};
 use crate::bits::ProtoSerialize;
 
+
+/// Trait that represents serialization of a type to memory.
+/// `disk_serialize` expects a sink to write to and returns the amount of bytes written
+/// `disk_deserialize` expects a source to read from, and returns an option:
+///  - Some(obj) represents that it was successfully created.
+///  - None represents that the `source` was empty.
 pub trait DiskSer
 where
   Self: Sized,
@@ -44,6 +50,9 @@ impl DiskSer for i128 {
   }
 }
 
+// All numeric serializations are just this `u128` boilerplate
+// We could write this for any Type that implements
+// the function `from_le_bytes`.
 impl DiskSer for u128 {
   fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     sink.write(&self.to_le_bytes())
@@ -57,6 +66,23 @@ impl DiskSer for u128 {
       0 => { Ok(None) }
       1..=AT_MOST => { Err(Error::from(ErrorKind::UnexpectedEof)) }
       _ => { Ok(Some(u128::from_le_bytes(buf))) }
+    }
+  }
+}
+
+impl DiskSer for u64 {
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
+    sink.write(&self.to_le_bytes())
+  }
+  fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<u64>> {
+    const BYTES : usize = (u64::BITS / 8) as usize;
+    const AT_MOST : usize = BYTES-1;
+    let mut buf = [0; BYTES];
+    let bytes_read = source.read(&mut buf)?;
+    match bytes_read {
+      0 => { Ok(None) }
+      1..=AT_MOST => { Err(Error::from(ErrorKind::UnexpectedEof)) }
+      _ => { Ok(Some(u64::from_le_bytes(buf))) }
     }
   }
 }
