@@ -2134,11 +2134,11 @@ impl Runtime {
     if included {
       self.save_state_metadata().expect("Error saving state metadata.");
       let path = &self.get_dir_path();
-      &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
+      let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers.");
+          let _ = self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers.");
         }
         self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers.");
         self.clear_heap(deleted);
