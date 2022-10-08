@@ -87,7 +87,7 @@ impl DiskSer for u64 {
   }
 }
 
-// we assume that every map will be stored in a whole file.
+// We assume that every map will be stored in a whole file.
 // because of that, it will consume all of the file while reading it.
 impl<K, V, H> DiskSer for HashMap<K, V, H>
 where
@@ -102,7 +102,6 @@ where
       let val_size = v.disk_serialize(sink)?;
       total_written += key_size + val_size;
     }
-    sink.flush()?;
     Ok(total_written)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
@@ -181,5 +180,39 @@ impl DiskSer for CompFunc {
     else {
       Ok(None)
     }
+  }
+} 
+
+impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer for [T; N]
+{
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
+    let mut total_written = 0;
+    for elem in self {
+      let elem_size = elem.disk_serialize(sink)?;
+      total_written += elem_size;
+    }
+    Ok(total_written)      
+  }
+  fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
+    let mut res: [T; N] = [T::default(); N];
+    for i in 0..N {
+      if let Some(elem) = T::disk_deserialize(source)? {
+        res[i] = elem;
+      }
+      else {
+        return Ok(None)
+      }
+    }
+    Ok(Some(res))
+  } 
+}
+
+impl DiskSer for crate::crypto::Hash {
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
+    let hash = <[u8; 32]>::disk_deserialize(source)?;
+    Ok(hash.map(crate::crypto::Hash))
   }
 }
