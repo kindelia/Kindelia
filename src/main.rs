@@ -17,6 +17,7 @@ mod hvm;
 mod net;
 mod node;
 mod util;
+mod persistence;
 
 #[cfg(feature = "events")]
 mod events;

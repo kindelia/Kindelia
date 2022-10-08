@@ -245,6 +245,7 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
+use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -256,9 +257,10 @@ use crate::constants;
 use crate::crypto;
 use crate::util::{U128_SIZE, mask};
 use crate::util;
+use crate::NoHashHasher::NoHashHasher;
 
 use crate::common::Name;
-
+use crate::persistence::DiskSer;
 // Types
 // -----
 
@@ -365,7 +367,7 @@ pub struct CompFunc {
 
 // A file, which is just a map of `FuncID -> CompFunc`
 // It is used to find a function when it is called, in order to apply its rewrite rules.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Funcs {
   pub funcs: Map<Arc<CompFunc>>,
 }
@@ -374,26 +376,26 @@ pub struct Funcs {
 
 // A map of `FuncID -> Arity`
 // It is used in many places to find the arity (argument count) of functions and constructors.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Arits {
   pub arits: Map<u128>,
 }
 
 // A map of `FuncID -> FuncID
 // Stores the owner of the 'FuncID' a namespace.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ownrs {
   pub ownrs: Map<u128>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Indxs {
   pub indxs: Map<u128>
 }
 
 // A map of `FuncID -> Ptr`
 // It links a function id to its state on the runtime memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Store {
   pub links: Map<Ptr>,
 }
@@ -411,13 +413,13 @@ pub enum Statement {
 pub type Ptr = u128;
 
 // A mergeable vector of u128 values
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Nodes {
   pub nodes: Map<u128>,
 }
 
 // HVM's memory state (nodes, functions, metadata, statistics)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Heap {
   pub uuid: u128,  // unique identifier
   pub memo: Nodes, // memory block holding HVM nodes
@@ -1262,183 +1264,85 @@ impl Heap {
     self.mcap = U128_NONE;
     self.next = U128_NONE;
   }
-  pub fn serialize(&self) -> SerializedHeap {
-    // Serializes stat and size
-    let size = self.size as u128;
-    let stat = vec![self.tick, self.time, self.meta, self.hax0, self.hax1, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
-    // Serializes Nodes
-    let mut memo_buff : Vec<u128> = vec![];
-    for (idx, val) in &self.memo.nodes {
-      memo_buff.push(*idx as u128);
-      memo_buff.push(*val as u128);
+  pub fn serialize(self: &Heap, path: &PathBuf, append: bool) -> std::io::Result<()> {
+    fn open_writer(heap: &Heap, path: &PathBuf, buffer_name: &str, append: bool) -> std::io::Result<File> {
+      let file_path = Heap::buffer_file_path(heap.uuid, buffer_name, path);
+      std::fs::OpenOptions::new()
+        .write(true)
+        .append(append)
+        .create(true)
+        .open(file_path)
     }
-    // Serializes Store
-    let mut disk_buff : Vec<u128> = vec![];
-    for (fnid, lnk) in &self.disk.links {
-      disk_buff.push(*fnid as u128);
-      disk_buff.push(*lnk as u128);
-    }
-    // Serializes Funcs
-    let mut file_buff : Vec<u128> = vec![];
-    for (fnid, func) in &self.file.funcs {
-      let mut func_buff = util::u8s_to_u128s(&mut func.func.proto_serialized().to_bytes());
-      file_buff.push(*fnid as u128);
-      file_buff.push(func_buff.len() as u128);
-      file_buff.append(&mut func_buff);
-    }
-    // Serializes Arits
-    let mut arit_buff : Vec<u128> = vec![];
-    for (fnid, arit) in &self.arit.arits {
-      arit_buff.push(*fnid as u128);
-      arit_buff.push(*arit);
-    }
-    // Serializes Ownrs
-    let mut ownr_buff : Vec<u128> = vec![];
-    for (fnid, ownr) in &self.ownr.ownrs {
-      ownr_buff.push(*fnid as u128);
-      ownr_buff.push(*ownr);
-    }
-    let mut indx_buff : Vec<u128> = vec![];
-    for (name, pos) in &self.indx.indxs {
-      indx_buff.push(*name);
-      indx_buff.push(*pos);
-    }
-    // Serializes Nums
-    let nums_buff : Vec<u128> = vec![
-      self.tick,
-      self.time,
-      self.meta,
-      self.hax0,
-      self.hax1,
-      self.funs,
-      self.dups,
-      self.rwts,
-      self.mana,
-      self.size as u128,
-      self.mcap,
-      self.next
-    ];
-    // Returns the serialized heap
-    return SerializedHeap {
-      uuid: self.uuid,
-      memo: memo_buff,
-      disk: disk_buff,
-      file: file_buff,
-      arit: arit_buff,
-      ownr: ownr_buff,
-      indx: indx_buff,
-      nums: nums_buff,
-      stat,
-    };
+    self.memo.nodes.disk_serialize(&mut open_writer(self, path, "memo", append)?)?;
+    self.disk.links.disk_serialize(&mut open_writer(self, path, "disk", append)?)?;
+    self.file.funcs.disk_serialize(&mut open_writer(self, path, "file", append)?)?;
+    self.arit.arits.disk_serialize(&mut open_writer(self, path, "arit", append)?)?;
+    self.indx.indxs.disk_serialize(&mut open_writer(self, path, "indx", append)?)?;
+    self.ownr.ownrs.disk_serialize(&mut open_writer(self, path, "ownr", append)?)?;
+    let mut stat = open_writer(self, path, "stat", false)?;
+    self.tick.disk_serialize(&mut stat)?;
+    self.time.disk_serialize(&mut stat)?;
+    self.meta.disk_serialize(&mut stat)?;
+    self.hax0.disk_serialize(&mut stat)?;
+    self.hax1.disk_serialize(&mut stat)?;
+    self.funs.disk_serialize(&mut stat)?;
+    self.dups.disk_serialize(&mut stat)?;
+    self.rwts.disk_serialize(&mut stat)?;
+    self.mana.disk_serialize(&mut stat)?;
+    self.size.disk_serialize(&mut stat)?;
+    self.mcap.disk_serialize(&mut stat)?;
+    self.next.disk_serialize(&mut stat)?;
+    Ok(())
   }
-  pub fn deserialize(&mut self, serial: &SerializedHeap) {
-    // Deserializes stat and size
-    self.tick = serial.nums[0];
-    self.time = serial.nums[1];
-    self.meta = serial.nums[2];
-    self.hax0 = serial.nums[3];
-    self.hax1 = serial.nums[4];
-    self.funs = serial.nums[5];
-    self.dups = serial.nums[6];
-    self.rwts = serial.nums[7];
-    self.mana = serial.nums[8];
-    self.size = serial.nums[9] as i128;
-    self.mcap = serial.nums[10];
-    self.next = serial.nums[11];
+  pub fn deserialize(uuid: u128, path: &PathBuf) -> std::io::Result<Heap> {
+    fn open_reader(uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<File> {
+      let file_path = Heap::buffer_file_path(uuid, buffer_name, path);
+      std::fs::OpenOptions::new()
+        .read(true)
+        .open(file_path)
+    }
+    fn read_hash_map<T: DiskSer>(uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<u128, T, std::hash::BuildHasherDefault<NoHashHasher<u128>>>> {
+      HashMap::disk_deserialize(&mut open_reader(uuid, path, buffer_name)?)?
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+    }
+    fn read_num<T: DiskSer>(file: &mut File) -> std::io::Result<T>{
+      T::disk_deserialize(file)?.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+    }
+    let memo = Nodes { nodes: read_hash_map(uuid, path, "memo")? };
+    let disk = Store { links: read_hash_map(uuid, path, "disk")? };
+    let file = Funcs { funcs: read_hash_map(uuid, path, "file")? };
+    let arit = Arits { arits: read_hash_map(uuid, path, "arit")? };
+    let indx = Indxs { indxs: read_hash_map(uuid, path, "indx")? };
+    let ownr = Ownrs { ownrs: read_hash_map(uuid, path, "ownr")? };
+    let mut stat = open_reader(uuid, path, "stat")?;
+    let tick = read_num(&mut stat)?;
+    let time = read_num(&mut stat)?;
+    let meta = read_num(&mut stat)?;
+    let hax0 = read_num(&mut stat)?;
+    let hax1 = read_num(&mut stat)?;
+    let funs = read_num(&mut stat)?;
+    let dups = read_num(&mut stat)?;
+    let rwts = read_num(&mut stat)?;
+    let mana = read_num(&mut stat)?;
+    let size = read_num(&mut stat)?;
+    let mcap = read_num(&mut stat)?;
+    let next = read_num(&mut stat)?;
+    Ok( Heap { uuid, memo, disk, file, arit, indx, ownr, tick, time, meta, hax0, hax1, funs, dups, rwts,  mana, size, mcap, next })
+  }
 
-    // Deserializes Nodes
-    let mut i = 0;
-    while i < serial.memo.len() {
-      let idx = serial.memo[i + 0];
-      let val = serial.memo[i + 1];
-      self.write(idx, val);
-      i += 2;
-    }
-    // Deserializes Store
-    let mut i = 0;
-    while i < serial.disk.len() {
-      let fnid = serial.disk[i + 0];
-      let lnk  = serial.disk[i + 1];
-      self.write_disk(U120(fnid), lnk);
-      i += 2;
-    }
-    // Deserializes Funcs
-    let mut i = 0;
-    while i < serial.file.len() {
-      let fnid = serial.file[i + 0];
-      let size = serial.file[i + 1];
-      let buff = &serial.file[i + 2 .. i + 2 + size as usize];
-      let func = &Func::proto_deserialized(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
-      let func = compile_func(func, false).unwrap();
-      self.write_file(Name::new_unsafe(fnid), Arc::new(func));
-      i = i + 2 + size as usize;
-    }
-    // Deserializes Arits
-    for i in 0 .. serial.arit.len() / 2 {
-      let fnid = serial.arit[i * 2 + 0];
-      let arit = serial.arit[i * 2 + 1];
-      self.write_arit(Name::new_unsafe(fnid), arit);
-    }
-    // Deserializes Ownrs
-    for i in 0 .. serial.ownr.len() / 2 {
-      let fnid = serial.ownr[i * 2 + 0];
-      let ownr = serial.ownr[i * 2 + 1];
-      self.write_ownr(Name::new_unsafe(fnid), ownr);
-    }
-  }
-  fn buffer_file_path(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
+  fn buffer_file_path(uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
     path.join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
-  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128], append: bool, path: &PathBuf) -> std::io::Result<()> {
-    use std::io::Write;
-    std::fs::OpenOptions::new()
-      .write(true)
-      .append(append)
-      .create(true)
-      .open(self.buffer_file_path(self.uuid, buffer_name, path))?
-      .write_all(&util::u128s_to_u8s(buffer))?;
-    return Ok(());
-  }
-  fn read_buffer(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> std::io::Result<Vec<u128>> {
-    std::fs::read(self.buffer_file_path(uuid, buffer_name, path)).map(|x| util::u8s_to_u128s(&x))
-  }
   fn delete_buffer(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> std::io::Result<()> {
-    std::fs::remove_file(self.buffer_file_path(uuid, buffer_name, path))
-  }
-  pub fn save_buffers(&self, path: &PathBuf) -> std::io::Result<()> {
-    self.append_buffers(self.uuid, path)
-  }
-  fn append_buffers(&self, uuid: u128, path: &PathBuf) -> std::io::Result<()> {
-    let serial = self.serialize();
-    self.write_buffer(serial.uuid, "memo", &serial.memo, true, path)?;
-    self.write_buffer(serial.uuid, "disk", &serial.disk, true, path)?;
-    self.write_buffer(serial.uuid, "file", &serial.file, true, path)?;
-    self.write_buffer(serial.uuid, "arit", &serial.arit, true, path)?;
-    self.write_buffer(serial.uuid, "ownr", &serial.ownr, true, path)?;
-    self.write_buffer(serial.uuid, "indx", &serial.indx, true, path)?;
-    self.write_buffer(serial.uuid, "nums", &serial.nums, true, path)?;
-    self.write_buffer(serial.uuid, "stat", &serial.stat, false, path)?;
-    return Ok(());
-  }
-  pub fn load_buffers(&mut self, uuid: u128, path: &PathBuf) -> std::io::Result<()> {
-    let memo = self.read_buffer(uuid, "memo", path)?;
-    let disk = self.read_buffer(uuid, "disk", path)?;
-    let file = self.read_buffer(uuid, "file", path)?;
-    let arit = self.read_buffer(uuid, "arit", path)?;
-    let ownr = self.read_buffer(uuid, "ownr", path)?;
-    let indx = self.read_buffer(uuid, "indx", path)?;
-    let nums = self.read_buffer(uuid, "nums", path)?;
-    let stat = self.read_buffer(uuid, "stat", path)?;
-    self.deserialize(&SerializedHeap { uuid, memo, disk, file, arit, ownr, indx, nums, stat });
-    return Ok(());
+    std::fs::remove_file(Heap::buffer_file_path(uuid, buffer_name, path))
   }
   fn delete_buffers(&mut self, path: &PathBuf) -> std::io::Result<()> {
     self.delete_buffer(self.uuid, "memo", path)?;
     self.delete_buffer(self.uuid, "disk", path)?;
     self.delete_buffer(self.uuid, "file", path)?;
     self.delete_buffer(self.uuid, "arit", path)?;
+    self.delete_buffer(self.uuid, "indx", path)?;
     self.delete_buffer(self.uuid, "ownr", path)?;
-    self.delete_buffer(self.uuid, "nums", path)?;
     self.delete_buffer(self.uuid, "stat", path)?;
     return Ok(());
   }
@@ -2230,11 +2134,11 @@ impl Runtime {
     if included {
       self.save_state_metadata().expect("Error saving state metadata.");
       let path = &self.get_dir_path();
-      self.heap[self.curr as usize].save_buffers(path).expect("Error saving buffers."); // TODO: persistence-WIP
+      let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid, path).expect("Couldn't append buffers."); // TODO: persistence-WIP
+          self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers.");
         }
         self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers.");
         self.clear_heap(deleted);
@@ -2330,7 +2234,7 @@ impl Runtime {
           match next {
             Some(next) => {
               let path = rt.get_dir_path();
-              rt.heap[index as usize].load_buffers(uuid, &path)?;
+              rt.heap[index as usize] = Heap::deserialize(uuid, &path)?;
               rt.curr = index;
               return load_heaps(rt, keeps, lifes, uuids, next, Arc::new(Rollback::Cons { keep: keep as u64, life: life as u64, head: index, tail: back }));
             }

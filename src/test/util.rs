@@ -331,6 +331,7 @@ impl Drop for TempPath {
 pub fn temp_dir() -> TempPath {
   let path =
     std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
+  std::fs::create_dir_all(&path).unwrap();
   let temp_dir = TempPath { path };
   temp_dir
 }

@@ -4,13 +4,13 @@ use crate::{
   common::Name,
   hvm::{
     self, init_map, init_runtime, read_statements, readback_term, show_term,
-    view_statements, view_term, Rollback, Runtime, StatementInfo, Term, U120,
+    view_statements, view_term, Rollback, Runtime, StatementInfo, Term, U120, Heap
   },
   test::{
     strategies::{func, heap, name, op2, statement, term},
     util::{
       self, advance, rollback, rollback_path, rollback_simple, run_term_and,
-      run_term_from_code_and, temp_dir, test_heap_checksum,
+      run_term_from_code_and, temp_dir, temp_file, test_heap_checksum,
       view_rollback_ticks, RuntimeStateTest, TempPath,
     },
   },
@@ -456,12 +456,15 @@ proptest! {
   #[test]
   #[ignore = "slow"]
   fn serialize_deserialize_heap(heap in heap()) {
-    let mut h1 = heap;
-    let s1 = format!("{:?}", h1);
-    let a = h1.serialize();
-    h1.deserialize(&a);
-    let s2 = format!("{:?}", h1);
-    assert_eq!(s1, s2);
+    let h1 = heap;
+    let path = temp_dir();
+    h1.serialize(&path.path, false).unwrap();
+    if let Ok(h2) = Heap::deserialize(h1.uuid, &path.path) {
+        assert_eq!(h1, h2);
+    }
+    else {
+        panic!("Could not deserialize")
+    }
   }
 }
 
