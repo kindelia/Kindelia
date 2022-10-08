@@ -2134,7 +2134,7 @@ impl Runtime {
     if included {
       self.save_state_metadata().expect("Error saving state metadata.");
       let path = &self.get_dir_path();
-      let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
+      &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
