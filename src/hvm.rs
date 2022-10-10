@@ -443,20 +443,6 @@ pub struct Heap {
   // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
 }
 
-#[derive(Debug, Clone)]
-// A serialized Heap
-pub struct SerializedHeap {
-  pub uuid: u128,
-  pub memo: Vec<u128>,
-  pub disk: Vec<u128>,
-  pub file: Vec<u128>,
-  pub arit: Vec<u128>,
-  pub ownr: Vec<u128>,
-  pub indx: Vec<u128>,
-  pub nums: Vec<u128>,
-  pub stat: Vec<u128>,
-}
-
 // A list of past heap states, for block-reorg rollback
 // FIXME: this should be replaced by a much simpler index array
 #[derive(Debug, Clone)]
