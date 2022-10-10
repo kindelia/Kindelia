@@ -3,16 +3,13 @@ use primitive_types::U256;
 use serde;
 use std::convert::Infallible;
 use tokio::{self, sync::broadcast};
-use warp::{
-  ws::{Message, WebSocket},
-  Filter, Rejection, Reply,
-};
+use warp::ws::{Message, WebSocket};
+use warp::{Filter, Rejection, Reply};
 
-use crate::{
-  api::Hash,
-  net::ProtoAddr,
-  node::{Block, Peer},
-};
+use crate::api::Hash;
+use crate::config::{UiConfig, WsConfig};
+use crate::net::ProtoAddr;
+use crate::node::{Block, Peer};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum NodeEvent {
@@ -149,10 +146,7 @@ impl std::fmt::Display for HeartbeatBlocks {
 impl std::fmt::Display for HeartbeatRuntime {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     // Do not display mana stats right now as they are too verbose
-    f.write_fmt(format_args!(
-      "runtime: {{ size: {} }}",
-      self.size
-    ))
+    f.write_fmt(format_args!("runtime: {{ size: {} }}", self.size))
     // f.write_fmt(format_args!(
     //   "[runtime] [mana] {} | [size] {}",
     //   self.mana, self.size
@@ -482,11 +476,6 @@ macro_rules! heartbeat {
 // =======================================================
 // Websocket server
 
-pub struct WsConfig {
-  pub port: u16,
-  pub buffer_size: usize,
-}
-
 #[derive(serde::Deserialize)]
 pub struct QueryParams {
   pub tags: Option<String>,
@@ -562,4 +551,44 @@ pub async fn client_connection(
   }
 
   eprintln!("Disconnected");
+}
+
+//
+
+// TODO
+pub fn spawn_event_handlers(
+  ws_config: WsConfig,
+  ui_config: Option<UiConfig>,
+) -> (std::sync::mpsc::Sender<NodeEvent>, Vec<std::thread::JoinHandle<()>>) {
+  let (event_tx, event_rx) = std::sync::mpsc::channel::<NodeEvent>();
+  let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
+
+  eprintln!("Events WS on port: {}", ws_config.port);
+  let ws_tx1 = ws_tx.clone();
+  let thread_1 = std::thread::spawn(move || {
+    ws_loop(ws_config.port, ws_tx1);
+  });
+
+  let ws_tx2 = ws_tx;
+  let thread_2 = std::thread::spawn(move || {
+    while let Ok(event) = event_rx.recv() {
+      if ws_tx2.receiver_count() > 0 {
+        if let Err(err) = ws_tx2.send(event.clone()) {
+          eprintln!("Could not send event to websocket: {}", err);
+        };
+      }
+      // TODO: way to select which logs to print
+      if let (Some(ref ui_cfg), NodeEvent::Heartbeat { .. }) =
+        (&ui_config, &event)
+      {
+        if ui_cfg.json {
+          println!("{}", serde_json::to_string(&event).unwrap());
+        } else {
+          println!("{}", event);
+        }
+      }
+    }
+  });
+
+  (event_tx, vec![thread_1, thread_2])
 }

@@ -1,6 +1,5 @@
 [node.data]
 dir = "~/.kindelia/state"
-mine = false
 
 [node.network]
 network_id = "0xCAFE000000000003"
@@ -8,6 +7,9 @@ initial_peers = [
   "64.227.110.69",
   "188.166.3.140",
 ]
+
+[node.mining]
+enable = false
 
 [node.api]
 port = 8000

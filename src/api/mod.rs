@@ -55,17 +55,6 @@ pub fn u256_to_hex(value: &U256) -> String {
 // Config
 // ------
 
-#[derive(Clone, serde::Deserialize)]
-pub struct ApiConfig {
-  pub port: u16,
-}
-
-impl Default for ApiConfig {
-  fn default() -> Self {
-      ApiConfig { port: 8000 }
-  }
-}
-
 // Hash
 // ----
 

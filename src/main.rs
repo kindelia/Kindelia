@@ -10,6 +10,7 @@ mod NoHashHasher;
 mod api;
 mod bits;
 mod cli;
+mod config;
 mod common;
 mod constants;
 mod crypto;
