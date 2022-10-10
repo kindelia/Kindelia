@@ -195,12 +195,12 @@ impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer for [T; N
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
     let mut res: [T; N] = [T::default(); N];
-    for i in 0..N {
-      if let Some(elem) = T::disk_deserialize(source)? {
-        res[i] = elem;
-      }
-      else {
-        return Ok(None)
+    for (i, e) in res.iter_mut().take(N).enumerate() {
+      let read = T::disk_deserialize(source)?;
+      match (i, read) {
+        (_, Some(elem)) => *e = elem,
+        (0, None) => return Ok(None),
+        (_, None) => return Err(Error::from(ErrorKind::UnexpectedEof)),
       }
     }
     Ok(Some(res))
