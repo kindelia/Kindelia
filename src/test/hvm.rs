@@ -278,7 +278,32 @@ fn test_thousand_idx(temp_dir: TempPath){
     panic!("Wrong result");
   }
 
+#[rstest]
+fn test_stmt_hash(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   run {
+     ask h0 = (GetStmHash0 'Test');
+     ask h1 = (GetStmHash1 'Test');
+     (Done (T2 h0 h1))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name = Name::from_str("Test").unwrap();
+  let sth0 = rt.get_sth0(&name).unwrap();
+  let sth1 = rt.get_sth1(&name).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  }
+  
 }
+
 
 #[rstest]
 #[case(keyword_fail_1)]

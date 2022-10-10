@@ -418,6 +418,11 @@ pub struct Nodes {
   pub nodes: Map<u128>,
 }
 
+#[derive(Debug, Clone, PartialEq)] 
+pub struct Hashs {
+  pub stmt_hashes: Map<crypto::Hash>,
+}
+
 // HVM's memory state (nodes, functions, metadata, statistics)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Heap {
@@ -427,6 +432,7 @@ pub struct Heap {
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
   pub indx: Indxs, // function name to position in heap
+  pub hash: Hashs,
   pub ownr: Ownrs, // namespace owners
   pub tick: u128,  // tick counter
   pub time: u128,  // block timestamp
@@ -646,7 +652,9 @@ const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
 const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
 const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
 const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
-const IO_GIDX : u128 = 0x4533a2; // GIDX --  TODO: is this correct? i did this by hand
+const IO_GIDX : u128 = 0x4533a2; // name_to_u128("GIDX")
+const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
+const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
 // TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
 // TODO: GRUN -> get run result
 
@@ -1140,7 +1148,13 @@ impl Heap {
   }
   fn read_indx(&self, name: &Name) -> Option<u128> {
     return self.indx.read(name);
-  } 
+  }
+  fn write_stmt_hash(&mut self, name: Name, hash: crypto::Hash) {
+    return self.hash.write(name, hash);
+  }
+  fn read_stmt_hash(&self, name: &Name) -> Option<&crypto::Hash> {
+    return self.hash.read(name);
+  }
   fn set_tick(&mut self, tick: u128) {
     self.tick = tick;
   }
@@ -1264,6 +1278,7 @@ impl Heap {
     self.file.funcs.disk_serialize(&mut open_writer(self, path, "file", append)?)?;
     self.arit.arits.disk_serialize(&mut open_writer(self, path, "arit", append)?)?;
     self.indx.indxs.disk_serialize(&mut open_writer(self, path, "indx", append)?)?;
+    self.hash.stmt_hashes.disk_serialize(&mut open_writer(self, path, "stmt_hashes", append)?)?;
     self.ownr.ownrs.disk_serialize(&mut open_writer(self, path, "ownr", append)?)?;
     let mut stat = open_writer(self, path, "stat", false)?;
     self.tick.disk_serialize(&mut stat)?;
@@ -1299,6 +1314,7 @@ impl Heap {
     let file = Funcs { funcs: read_hash_map(uuid, path, "file")? };
     let arit = Arits { arits: read_hash_map(uuid, path, "arit")? };
     let indx = Indxs { indxs: read_hash_map(uuid, path, "indx")? };
+    let hash = Hashs { stmt_hashes: read_hash_map(uuid, path, "stmt_hashes")? };    
     let ownr = Ownrs { ownrs: read_hash_map(uuid, path, "ownr")? };
     let mut stat = open_reader(uuid, path, "stat")?;
     let tick = read_num(&mut stat)?;
@@ -1313,7 +1329,7 @@ impl Heap {
     let size = read_num(&mut stat)?;
     let mcap = read_num(&mut stat)?;
     let next = read_num(&mut stat)?;
-    Ok( Heap { uuid, memo, disk, file, arit, indx, ownr, tick, time, meta, hax0, hax1, funs, dups, rwts,  mana, size, mcap, next })
+    Ok( Heap { uuid, memo, disk, file, arit, indx, hash, ownr, tick, time, meta, hax0, hax1, funs, dups, rwts,  mana, size, mcap, next })
   }
 
   fn buffer_file_path(uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
@@ -1352,6 +1368,7 @@ pub fn init_heap() -> Heap {
     arit: Arits { arits: init_map() },
     ownr: Ownrs { ownrs: init_map() },
     indx: Indxs { indxs: init_map() },
+    hash: Hashs { stmt_hashes: init_map() },
     tick: U128_NONE,
     time: U128_NONE,
     meta: U128_NONE,
@@ -1482,6 +1499,26 @@ impl Indxs {
   }
 }
 
+impl Hashs {
+  fn write(&mut self, name: Name, hash: crypto::Hash) {
+    self.stmt_hashes.insert(*name, hash);
+  }
+  fn read(&self, name: &Name) -> Option<&crypto::Hash> {
+    return self.stmt_hashes.get(name);
+  }
+  fn clear(&mut self) {
+    self.stmt_hashes.clear();
+  }
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    for (name, pos) in other.stmt_hashes.drain() {
+      if overwrite || !self.stmt_hashes.contains_key(&name) {
+        self.stmt_hashes.insert(name, pos);
+      }
+    }
+  }
+}
+
+
 pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
@@ -1512,34 +1549,30 @@ impl Runtime {
   // API
   // ---
 
-  pub fn define_function(&mut self, name: Name, func: CompFunc, stmt_index: Option<usize>) {
+  pub fn define_function(&mut self, name: Name, func: CompFunc, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, func.arity);
     self.get_heap_mut(self.draw).write_file(name, Arc::new(func));
-    self.save_name_to_index(name, stmt_index);
+    self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  pub fn define_constructor(&mut self, name: Name, arity: u128, stmt_index: Option<usize>) {
+  pub fn define_constructor(&mut self, name: Name, arity: u128, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
-    self.save_name_to_index(name, stmt_index);
+    self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  pub fn define_register(&mut self, name: Name, stmt_index: Option<usize>) {
-    self.save_name_to_index(name, stmt_index);
+ 
+  pub fn define_register(&mut self, name: Name, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
+    self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  pub fn save_name_to_index(&mut self, name: Name, stmt_index: Option<usize>) {
+  pub fn save_stmt_name(&mut self, name: Name, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     if let Some(idx) = stmt_index {
       let tick = self.get_tick();
-      let pos = tick.wrapping_shl(60) | (idx as u128);
-      // TODO : refactor to use less bits?
-      // idx should never take more than 1 byte, this is hugely wasteful
+      let pos = tick.wrapping_shl(60) | (idx as u128); //TODO: refactor to use less bits
       self.get_heap_mut(self.draw).write_indx(name, pos);
+      self.get_heap_mut(self.draw).write_stmt_hash(name, stmt_hash);
     }
   }
-  
-  // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
-  //   self.define_function(name_to_u128(name), read_func(code).1);
-  // }
 
   pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
     return create_term(self, term, loc, vars_data);
@@ -1776,6 +1809,30 @@ impl Runtime {
             clear(self, get_loc(term, 0), 2);
             return done;
           }
+          IO_STH0 => {
+            let fnid = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let fnid = get_num(fnid);
+            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let stmt_hash = self.get_sth0(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
+            return done;
+          }
+          IO_STH1 => {
+            let fnid = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let fnid = get_num(fnid);
+            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let stmt_hash = self.get_sth1(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
+            return done;
+          }
           IO_SUBJ => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(*subject));
@@ -1849,10 +1906,10 @@ impl Runtime {
   }
 
   // Gets the subject of a signature
-  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: crypto::Hash) -> u128 {
+  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: &crypto::Hash) -> u128 {
     match sign {
       None       => 0,
-      Some(sign) => sign.signer_name(&hash).map(|x| *x).unwrap_or(1),
+      Some(sign) => sign.signer_name(hash).map(|x| *x).unwrap_or(1),
     }
   }
 
@@ -1911,7 +1968,7 @@ impl Runtime {
         if self.exists(name) {
           return error(self, "fun", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(&sign, hash);
+        let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
@@ -1925,7 +1982,7 @@ impl Runtime {
         let func = func.unwrap();
         let name = *name;
         self.set_arity(name, args.len() as u128);
-        self.define_function(name, func, stmt_index);
+        self.define_function(name, func, stmt_index, hash);
         let state = self.create_term(init, 0, &mut init_map());
         let state = handle_runtime_err(self, "fun", state)?;
         self.write_disk(U120::from(name), state);
@@ -1936,7 +1993,7 @@ impl Runtime {
         if self.exists(name) {
           return error(self, "ctr", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(&sign, hash);
+        let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
@@ -1944,7 +2001,7 @@ impl Runtime {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
         }
         let name = *name;
-        self.define_constructor(name, args.len() as u128, stmt_index);
+        self.define_constructor(name, args.len() as u128, stmt_index, hash);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Ctr { name, args }
       }
@@ -1956,7 +2013,7 @@ impl Runtime {
         if !self.check_term(expr) {
           return error(self, "run", format!("Invalid term."));
         }
-        let subj = self.get_subject(&sign, hash);
+        let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
         let done = self.run_io(U120(subj), U120(0), host, mana_lim);
@@ -2002,12 +2059,12 @@ impl Runtime {
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(sign, hash);
+        let subj = self.get_subject(sign, &hash);
         if !(self.can_register(subj, name) || sudo) {
           return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, name));
         }
         let name = *name;
-        self.define_register(name, stmt_index);
+        self.define_register(name, stmt_index, hash);
         self.set_owner(name, ownr);
         StatementInfo::Reg { name, ownr }
       }
@@ -2364,6 +2421,32 @@ impl Runtime {
     self.get_with(None, None, |heap| heap.read_indx(name))
   }
 
+
+  pub fn get_sth0(&mut self, name: &Name) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(name).map(|h| h.clone()));
+    if let Some(stmt_hash) = stmt_hash { // is cloning here really necessary?
+      let mut bytes: [u8; 16] = [0; 16];
+      bytes.copy_from_slice(&stmt_hash.0[0..16]); //read from 15 to 31st byte and throw the last one away.
+      Some(u128::from_le_bytes(bytes) & *U120::MAX)
+    }
+    else {
+      None
+    }
+  }
+
+  pub fn get_sth1(&mut self, name: &Name) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(name).map(|h| h.clone()));
+    if let Some(stmt_hash) = stmt_hash {
+      let mut bytes: [u8; 16] = [0; 16];
+      bytes.copy_from_slice(&stmt_hash.0[15..31]); //read from 15 to 31st byte and throw the last one away.
+      Some(u128::from_le_bytes(bytes) & *U120::MAX)
+    }
+    else {
+      None
+    }
+  }
+
+  
   pub fn exists(&self, name: &Name) -> bool {
     // there is a function or a constructor with this name
     if let Some(_) = self.get_with(None, None, |heap| heap.read_arit(name)) {
