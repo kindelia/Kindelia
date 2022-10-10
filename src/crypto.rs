@@ -13,7 +13,7 @@ use crate::common::Name;
 pub struct Signature(pub [u8; 65]);
 
 pub struct Address(pub [u8; 20]);
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hash(pub [u8; 32]);
 
 pub fn keccak256(data: &[u8]) -> Hash {
