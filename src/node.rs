@@ -1299,8 +1299,12 @@ impl<C: ProtoComm> Node<C> {
     eprintln!("Loading {} blocks from disk...", num_blocks);
     for file_path in file_paths {
       let buffer = std::fs::read(file_path.clone()).unwrap();
-      let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer)).unwrap();
-      self.add_block(miner_communication, &block);
+      let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer));
+      if let Some(block) = block {
+        self.add_block(miner_communication, &block);
+      } else {
+        eprintln!("WARN: Failed to load block from file '{}'", file_path.display());
+      }
     }
     eprintln!("Loaded {} blocks from disk.", num_blocks);
   }
