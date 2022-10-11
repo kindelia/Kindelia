@@ -381,7 +381,6 @@ where
       // If env var is set, read from it
       return T::arg_from(env_value);
     }
-    eprintln!("prop: {:?}", self.prop);
     if let (Some(prop_path), Some(config_values)) = (self.prop, config_values) {
       // If config file and argument prop path are set, read from config file
       return Self::resolve_from_config_aux(config_values, prop_path);
@@ -634,8 +633,6 @@ pub fn run_cli() -> Result<(), String> {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
-
-          eprintln!("cfg: {:#?}", config);
 
           let network_id = resolve_cfg!(
             env = "KINDELIA_NETWORK_ID",
