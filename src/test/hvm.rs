@@ -254,7 +254,7 @@ fn test_genesis_idx(temp_dir: TempPath){
 
 }
 #[rstest]
-fn test_thousand_idx(temp_dir: TempPath){
+fn test_thousand_idx(temp_dir: TempPath) {
   let mut rt = init_runtime(temp_dir.path.clone());
   for i in 0..1000 {
     rt.open();
@@ -277,7 +277,8 @@ fn test_thousand_idx(temp_dir: TempPath){
   } else {
     panic!("Wrong result");
   }
-
+}
+  
 #[rstest]
 fn test_stmt_hash(temp_dir: TempPath){
   let mut rt = init_runtime(temp_dir.path.clone());
@@ -300,8 +301,7 @@ fn test_stmt_hash(temp_dir: TempPath){
     assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
   } else {
     panic!("Wrong result");
-  }
-  
+  } 
 }
 
 
