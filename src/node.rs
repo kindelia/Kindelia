@@ -1377,8 +1377,9 @@ impl<C: ProtoComm> Node<C> {
     for (bhash, _) in self.wait_list.iter() {
       if self.pending.get(bhash).is_some() {
         pending_count += 1;
+      } else {
+        missing_count += 1;
       }
-      missing_count += 1;
     }
 
     let mana_cur = self.runtime.get_mana() as i64;
