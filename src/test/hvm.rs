@@ -303,7 +303,70 @@ fn test_stmt_hash(temp_dir: TempPath){
     panic!("Wrong result");
   } 
 }
+#[rstest]
+fn test_two_stmt_hash(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  let code = "
+   fun (Test1 x) {
+     (Test1 ~) = #0
+   }
+   fun (Test2 x) {
+     (Test2 ~) = #1
+   }
+   run {
+     ask h0 = (GetStmHash0 'Test1');
+     ask h1 = (GetStmHash1 'Test1');
+     ask h2 = (GetStmHash0 'Test2');
+     ask h3 = (GetStmHash1 'Test2');
+     (Done (T4 h0 h1 h2 h3))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name1 = Name::from_str("Test1").unwrap();
+  let name2 = Name::from_str("Test2").unwrap();
+  let sth0 = rt.get_sth0(&name1).unwrap();
+  let sth1 = rt.get_sth1(&name1).unwrap();
+  let sth2 = rt.get_sth0(&name2).unwrap();
+  let sth3 = rt.get_sth1(&name2).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  } 
+}
 
+#[rstest]
+fn test_stmt_hash_after_commit(temp_dir: TempPath){
+  let mut rt = init_runtime(temp_dir.path.clone());
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit(); //two ticks just to be safe
+  let code = "
+    run {
+     ask h0 = (GetStmHash0 'Test');
+     ask h1 = (GetStmHash1 'Test');
+     (Done (T2 h0 h1))
+   }
+  ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name = Name::from_str("Test").unwrap();
+  let sth0 = rt.get_sth0(&name).unwrap();
+  let sth1 = rt.get_sth1(&name).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  } 
+}
 
 #[rstest]
 #[case(keyword_fail_1)]
