@@ -211,6 +211,7 @@ fn test_simple_idx(temp_dir: TempPath){
   rt.commit();
   rt.open();
   rt.commit();
+  rt.open();
   let code = "
     fun (Add a b) {
       (Add #256 #256) = #512
@@ -227,8 +228,10 @@ fn test_simple_idx(temp_dir: TempPath){
   ";
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
+  let name = Name::from_str("B").unwrap();
+  let idx = rt.get_index(&name).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#3458764513820540929", view_term(&done_term));
+    assert_eq!(format!("#{}", idx), view_term(&done_term));
               // (3 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -282,21 +285,25 @@ fn test_thousand_idx(temp_dir: TempPath) {
 #[rstest]
 fn test_stmt_hash(temp_dir: TempPath){
   let mut rt = init_runtime(temp_dir.path.clone());
+  rt.open();
   let code = "
    fun (Test x) {
      (Test ~) = #0
    }
    run {
-     ask h0 = (GetStmHash0 'Test');
-     ask h1 = (GetStmHash1 'Test');
+     ask idx = (GetIdx 'Test');
+     dup id0 id1 = idx;
+     ask h0  = (GetStmHash0 id0);
+     ask h1  = (GetStmHash1 id1);
      (Done (T2 h0 h1))
    }
    ";
   let results = rt.run_statements_from_code(code, false, true);
-  let result_term = results.last().unwrap().clone().unwrap();
   let name = Name::from_str("Test").unwrap();
-  let sth0 = rt.get_sth0(&name).unwrap();
-  let sth1 = rt.get_sth1(&name).unwrap();
+  let indx = rt.get_index(&name).unwrap();
+  let sth0 = rt.get_sth0(indx).unwrap();
+  let sth1 = rt.get_sth1(indx).unwrap();
+  let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
   } else {
@@ -314,21 +321,27 @@ fn test_two_stmt_hash(temp_dir: TempPath){
      (Test2 ~) = #1
    }
    run {
-     ask h0 = (GetStmHash0 'Test1');
-     ask h1 = (GetStmHash1 'Test1');
-     ask h2 = (GetStmHash0 'Test2');
-     ask h3 = (GetStmHash1 'Test2');
+     ask idx_1 = (GetIdx 'Test1');
+     dup idx_11 idx_12 = idx_1;
+     ask idx_2 = (GetIdx 'Test2');
+     dup idx_21 idx_22 = idx_2;
+     ask h0 = (GetStmHash0 idx_11);
+     ask h1 = (GetStmHash1 idx_12);
+     ask h2 = (GetStmHash0 idx_21);
+     ask h3 = (GetStmHash1 idx_22);
      (Done (T4 h0 h1 h2 h3))
    }
    ";
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   let name1 = Name::from_str("Test1").unwrap();
+  let indx1 = rt.get_index(&name1).unwrap();
   let name2 = Name::from_str("Test2").unwrap();
-  let sth0 = rt.get_sth0(&name1).unwrap();
-  let sth1 = rt.get_sth1(&name1).unwrap();
-  let sth2 = rt.get_sth0(&name2).unwrap();
-  let sth3 = rt.get_sth1(&name2).unwrap();
+  let indx2 = rt.get_index(&name2).unwrap();
+  let sth0 = rt.get_sth0(indx1).unwrap();
+  let sth1 = rt.get_sth1(indx1).unwrap();
+  let sth2 = rt.get_sth0(indx2).unwrap();
+  let sth3 = rt.get_sth1(indx2).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
   } else {
@@ -351,16 +364,19 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
   rt.commit(); //two ticks just to be safe
   let code = "
     run {
-     ask h0 = (GetStmHash0 'Test');
-     ask h1 = (GetStmHash1 'Test');
+     ask idx = (GetIdx 'Test');
+     dup id0 id1 = idx; 
+     ask h0  = (GetStmHash0 id0);
+     ask h1  = (GetStmHash1 id1);
      (Done (T2 h0 h1))
    }
   ";
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   let name = Name::from_str("Test").unwrap();
-  let sth0 = rt.get_sth0(&name).unwrap();
-  let sth1 = rt.get_sth1(&name).unwrap();
+  let indx = rt.get_index(&name).unwrap();
+  let sth0 = rt.get_sth0(indx).unwrap();
+  let sth1 = rt.get_sth1(indx).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
   } else {

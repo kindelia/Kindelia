@@ -470,7 +470,6 @@ pub struct Runtime {
   nuls: Vec<u64>,       // reuse heap indices
   back: Arc<Rollback>,  // past states
   path: PathBuf,        // where to save runtime state
-  stmt_count: usize,    // statement count within a block.
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +478,7 @@ pub enum RuntimeError {
   NotEnoughSpace,
   DivisionByZero,
   CtrOrFunNotDefined { name: Name },
+  StmtDoesntExist { stmt_index: u128},
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
   NameTooBig { numb: u128 },
@@ -1149,11 +1149,11 @@ impl Heap {
   fn read_indx(&self, name: &Name) -> Option<u128> {
     return self.indx.read(name);
   }
-  fn write_stmt_hash(&mut self, name: Name, hash: crypto::Hash) {
-    return self.hash.write(name, hash);
+  fn write_stmt_hash(&mut self, pos: u128, hash: crypto::Hash) {
+    return self.hash.write(pos, hash);
   }
-  fn read_stmt_hash(&self, name: &Name) -> Option<&crypto::Hash> {
-    return self.hash.read(name);
+  fn read_stmt_hash(&self, pos: &u128) -> Option<&crypto::Hash> {
+    return self.hash.read(pos);
   }
   fn set_tick(&mut self, tick: u128) {
     self.tick = tick;
@@ -1500,19 +1500,19 @@ impl Indxs {
 }
 
 impl Hashs {
-  fn write(&mut self, name: Name, hash: crypto::Hash) {
-    self.stmt_hashes.insert(*name, hash);
+  fn write(&mut self, pos: u128, hash: crypto::Hash) {
+    self.stmt_hashes.insert(pos, hash);
   }
-  fn read(&self, name: &Name) -> Option<&crypto::Hash> {
-    return self.stmt_hashes.get(name);
+  fn read(&self, pos: &u128) -> Option<&crypto::Hash> {
+    return self.stmt_hashes.get(pos);
   }
   fn clear(&mut self) {
     self.stmt_hashes.clear();
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
-    for (name, pos) in other.stmt_hashes.drain() {
-      if overwrite || !self.stmt_hashes.contains_key(&name) {
-        self.stmt_hashes.insert(name, pos);
+    for (indx, hash) in other.stmt_hashes.drain() {
+      if overwrite || !self.stmt_hashes.contains_key(&indx) {
+        self.stmt_hashes.insert(indx, hash);
       }
     }
   }
@@ -1533,7 +1533,6 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
     nuls: (2 .. MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
     path: heaps_path,
-    stmt_count: 1 // start with 1 because 0 should be ~ genesis
   };
 
   // TODO: extract to Node
@@ -1570,7 +1569,7 @@ impl Runtime {
       let tick = self.get_tick();
       let pos = tick.wrapping_shl(60) | (idx as u128); //TODO: refactor to use less bits
       self.get_heap_mut(self.draw).write_indx(name, pos);
-      self.get_heap_mut(self.draw).write_stmt_hash(name, stmt_hash);
+      self.get_heap_mut(self.draw).write_stmt_hash(pos, stmt_hash);
     }
   }
 
@@ -1694,10 +1693,6 @@ impl Runtime {
     }
   }
 
-  fn reset_stmt_index(&mut self) {
-    self.stmt_count = 0;
-  }
-
   fn clear_heap(&mut self, index: u64) {
     self.heap[index as usize].clear();
   }
@@ -1801,6 +1796,7 @@ impl Runtime {
             let fnid = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
             let fnid = get_num(fnid);
+            //TODO: test if fnid is really a num.
             let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
             let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             let cont = alloc_app(self, cont, Num(indx));
@@ -1810,11 +1806,11 @@ impl Runtime {
             return done;
           }
           IO_STH0 => {
-            let fnid = ask_arg(self, term, 0);
+            let indx = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let fnid = get_num(fnid);
-            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
-            let stmt_hash = self.get_sth0(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let indx = self.compute(indx, mana)?;
+            let indx = get_num(indx);            
+            let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
@@ -1822,11 +1818,11 @@ impl Runtime {
             return done;
           }
           IO_STH1 => {
-            let fnid = ask_arg(self, term, 0);
+            let indx = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let fnid = get_num(fnid);
-            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
-            let stmt_hash = self.get_sth1(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let indx = self.compute(indx, mana)?;
+            let indx = get_num(indx);
+            let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
@@ -2163,7 +2159,6 @@ impl Runtime {
 
   /// Saves past states for rollback.
   pub fn commit(&mut self) {
-    self.reset_stmt_index();
     self.draw();
     self.snapshot();
   }
@@ -2422,11 +2417,11 @@ impl Runtime {
   }
 
 
-  pub fn get_sth0(&mut self, name: &Name) -> Option<u128> {
-    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(name).map(|h| h.clone()));
+  pub fn get_sth0(&mut self, pos: u128) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(&pos).map(|h| h.clone()));
     if let Some(stmt_hash) = stmt_hash { // is cloning here really necessary?
       let mut bytes: [u8; 16] = [0; 16];
-      bytes.copy_from_slice(&stmt_hash.0[0..16]); //read from 15 to 31st byte and throw the last one away.
+      bytes.copy_from_slice(&stmt_hash.0[0..16]);
       Some(u128::from_le_bytes(bytes) & *U120::MAX)
     }
     else {
@@ -2434,8 +2429,8 @@ impl Runtime {
     }
   }
 
-  pub fn get_sth1(&mut self, name: &Name) -> Option<u128> {
-    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(name).map(|h| h.clone()));
+  pub fn get_sth1(&mut self, pos: u128) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(&pos).map(|h| h.clone()));
     if let Some(stmt_hash) = stmt_hash {
       let mut bytes: [u8; 16] = [0; 16];
       bytes.copy_from_slice(&stmt_hash.0[15..31]); //read from 15 to 31st byte and throw the last one away.
@@ -4110,6 +4105,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
     RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
     RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
+    RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist", stmt_index),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
     RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
     RuntimeError::EffectFailure(effect_failure) =>

@@ -76,14 +76,14 @@ fun (GetIdx name) {
   (GetIdx name) = @cont {GIDX name cont}
 }
 
-ctr {STH0 name cont}
-fun (GetStmHash0 name) {
-  (GetStmHash0 name) = @cont {STH0 name cont}
+ctr {STH0 idx cont}
+fun (GetStmHash0 idx) {
+  (GetStmHash0 idx) = @cont {STH0 idx cont}
 }
 
-ctr {STH1 name cont}
-fun (GetStmHash1 name) {
-  (GetStmHash1 name) = @cont {STH1 name cont}
+ctr {STH1 idx cont}
+fun (GetStmHash1 idx) {
+  (GetStmHash1 idx) = @cont {STH1 idx cont}
 }
 
 // TIME returns the current block timestamp
