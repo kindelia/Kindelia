@@ -511,6 +511,7 @@ pub enum EffectFailure {
   InvalidIONonCtr { ptr: Ptr },
 }
 
+// TODO: move to tests?
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
   //let mut seen = vec![0u8; 10];
   //let mut heaps = vec![0u64; 0];
@@ -3763,73 +3764,59 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 /// since it would require passing over the entire state.
 pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
   enum StackItem {
-    LinkResolver(u128),
-    Host(u128, u128)
+    Compute(u128),
+    Link(u128),
   }
-  let mut stack = vec![StackItem::Host(host, mana)];
+  let mut stack = vec![StackItem::Compute(host)];
   let mut output = vec![];
-  while !stack.is_empty() {
-    let item = stack.pop().unwrap();
+
+  let push_arg = |stack: &mut Vec<StackItem>, cell, arg| {
+    let loc = get_loc(cell, arg);
+    stack.push(StackItem::Link(loc));
+    stack.push(StackItem::Compute(loc));
+  };
+
+  while let Some(item) = stack.pop() {
     match item {
-      StackItem::Host(host, mana) => {
+      StackItem::Compute(host) => {
         let term = ask_lnk(rt, host);
         let norm = reduce(rt, host, mana)?;
-
-        if term == norm {
-          output.push(Some(term));
-        } else {
+        output.push(norm);
+        if term != norm {
           match get_tag(norm) {
             LAM => {
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
+              push_arg(&mut stack, norm, 1);
             }
             APP => {
-              let loc_0 = get_loc(norm, 0);
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
-              stack.push(StackItem::LinkResolver(loc_0));
-              stack.push(StackItem::Host(loc_0, mana));
+              push_arg(&mut stack, norm, 1);
+              push_arg(&mut stack, norm, 0);
             }
             SUP => {
-              let loc_0 = get_loc(norm, 0);
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
-              stack.push(StackItem::LinkResolver(loc_0));
-              stack.push(StackItem::Host(loc_0, mana));
+              push_arg(&mut stack, norm, 1);
+              push_arg(&mut stack, norm, 0);
             }
             DP0 => {
-              let loc_2 = get_loc(norm, 2);
-              stack.push(StackItem::LinkResolver(loc_2));
-              stack.push(StackItem::Host(loc_2, mana));
+              push_arg(&mut stack, norm, 2);
             }
             DP1 => {
-              let loc_2 = get_loc(norm, 2);
-              stack.push(StackItem::LinkResolver(loc_2));
-              stack.push(StackItem::Host(loc_2, mana));
+              push_arg(&mut stack, norm, 2);
             }
             CTR | FUN => {
               let name = Name::new_unsafe(get_ext(norm));
-              let arity = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+              let arity = rt.get_arity(&name);
+              let arity = arity.ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
               for i in (0..arity).rev() {
-                let loc_i = get_loc(norm, i);
-                stack.push(StackItem::LinkResolver(loc_i));
-                stack.push(StackItem::Host(loc_i, mana));
+                push_arg(&mut stack, norm, i);
               }
             }
             _ => {}
           };
-          output.push(Some(norm));
         }
       },
-      StackItem::LinkResolver(loc) => {
+      StackItem::Link(loc) => {
         match output.pop() {
           Some(lnk) => {
-            if let Some(lnk) = lnk {
-              link(rt, loc, lnk);
-            }
+            link(rt, loc, lnk);
           }
           None => panic!("No term to resolve link"),
         }
@@ -3837,7 +3824,7 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
     }
   }
   // FIXME: is this always safe? if no, create a runtime error for what could go wrong
-  Ok(output.pop().unwrap().unwrap())
+  Ok(output.pop().unwrap())
 }
 
 // Debug
