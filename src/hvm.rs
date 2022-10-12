@@ -1795,8 +1795,7 @@ impl Runtime {
           IO_GIDX => {
             let fnid = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let fnid = self.check_num(fnid, mana)?;
-            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let name = self.check_name(fnid, mana)?;
             let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             let cont = alloc_app(self, cont, Num(indx));
             let done = self.run_io(subject, caller, cont, mana);
