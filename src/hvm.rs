@@ -2692,7 +2692,7 @@ pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
 
 pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
   rt.write(loc, lnk);
-  if get_tag(lnk) <= VAR {
+  if get_tag(lnk) <= VAR { // DPO, DP1 or VAR
     let pos = get_loc(lnk, get_tag(lnk) & 0x01);
     rt.write(pos, Arg(loc));
   }
@@ -2769,8 +2769,10 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
         link(rt, get_loc(term, 0), Era());
       }
       LAM => {
-        if get_tag(ask_arg(rt, term, 0)) != ERA {
-          link(rt, get_loc(ask_arg(rt, term, 0), 0), Era());
+        let arg0 = ask_arg(rt, term, 0);
+        if get_tag(arg0) != ERA {
+          debug_assert_eq!(get_tag(arg0), ARG);
+          link(rt, get_loc(arg0, 0), Era());
         }
         next = ask_arg(rt, term, 1);
         clear(rt, get_loc(term, 0), 2);
@@ -3014,7 +3016,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
       got.push(lnk);
-      link(rt, loc, Era());
+      // link(rt, loc, Era()); // will be bound later to an Arg
     }
   }
 
@@ -3261,6 +3263,7 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
 
 pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
   if get_tag(lnk) != ERA {
+    debug_assert_eq!(get_tag(lnk), ARG);
     link(rt, get_loc(lnk, 0), val);
   } else {
     collect(rt, val);
