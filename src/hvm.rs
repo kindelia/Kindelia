@@ -477,6 +477,7 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   DivisionByZero,
+  TermIsInvalidNumber { term: Ptr},
   CtrOrFunNotDefined { name: Name },
   StmtDoesntExist { stmt_index: u128},
   ArityMismatch { name: Name, expected: usize, got: usize },
@@ -1760,8 +1761,7 @@ impl Runtime {
             let fnid = ask_arg(self, term, 0);
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
-            let fnid = get_num(fnid);
-            // TODO: check if fnid fits in name and if it is defined.
+            let fnid = self.check_num(fnid, mana)?;
             
             let arg_name = Name::new(get_ext(argm)).ok_or_else(|| RuntimeError::NameTooBig { numb: argm })?;
             let arg_arit = self
@@ -1808,8 +1808,7 @@ impl Runtime {
           IO_STH0 => {
             let indx = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let indx = self.compute(indx, mana)?;
-            let indx = get_num(indx);            
+            let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
             let done = self.run_io(subject, caller, cont, mana);
@@ -1820,8 +1819,7 @@ impl Runtime {
           IO_STH1 => {
             let indx = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
-            let indx = self.compute(indx, mana)?;
-            let indx = get_num(indx);
+            let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
             let done = self.run_io(subject, caller, cont, mana);
@@ -1906,6 +1904,22 @@ impl Runtime {
     match sign {
       None       => 0,
       Some(sign) => sign.signer_name(hash).map(|x| *x).unwrap_or(1),
+    }
+  }
+
+  pub fn check_num(&mut self, ptr: u128, mana: u128) -> Result<U120, RuntimeError> {
+    let num = self.compute(ptr, mana)?;
+    match get_tag(num) {
+      NUM => Ok(get_num(num)),
+      _ => Err(RuntimeError::TermIsInvalidNumber { term: num })
+    }
+  }
+
+  pub fn check_name(&mut self, ptr: u128, mana: u128) -> Result<Name, RuntimeError> {
+    let num = self.check_num(ptr, mana)?;
+    match Name::new(*num) {
+      None => Err(RuntimeError::NameTooBig { numb: *num }),
+      Some(name) => Ok(name),
     }
   }
 
@@ -4104,6 +4118,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::NotEnoughSpace => "Not enough space".to_string(),
     RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
     RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
+    RuntimeError::TermIsInvalidNumber { term } => format!("'{}' is not a number", show_ptr(term)),
     RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
     RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist", stmt_index),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),

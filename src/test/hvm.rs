@@ -385,6 +385,32 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
 }
 
 #[rstest]
+fn test_name_sanitizing(temp_dir: TempPath) {
+  let mut rt = init_runtime(temp_dir.path.clone());
+  rt.open();
+  let code = "
+   fun (Test x) {
+     (Test ~) = (Done #5)
+   }
+
+   run {
+     dup n1 n2 = 'Test';
+     ask z1 = (Call n1 {T0});
+     ask z2 = (Call n2 {T0});
+     (Done (T2 z1 z2))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  rt.commit();
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #5 #5)"), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  }
+}
+
+#[rstest]
 #[case(keyword_fail_1)]
 #[case(keyword_fail_2)]
 #[case(keyword_fail_3)]
