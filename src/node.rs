@@ -24,7 +24,7 @@ use crate::util::*;
 
 #[cfg(feature = "events")]
 use crate::{
-  events::{self, NodeEvent},
+  events::{self, NodeEventType},
   heartbeat,
 };
 
@@ -227,7 +227,7 @@ pub struct Node<C: ProtoComm> {
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
 
   #[cfg(feature = "events")]
-  pub event_emitter : mpsc::Sender<NodeEvent>,
+  pub event_emitter : mpsc::Sender<NodeEventType>,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -262,7 +262,7 @@ impl<A: ProtoAddr> PeersStore<A> {
   pub fn see_peer(
     &mut self,
     peer: Peer<A>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEvent>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventType>,
   ) {
     let addr = peer.address;
     match self.seen.get(&addr) {
@@ -271,7 +271,7 @@ impl<A: ProtoAddr> PeersStore<A> {
         self.seen.insert(addr, peer);
         emit_event!(
           event_emitter,
-          NodeEvent::see_peer_not_seen(&peer),
+          NodeEventType::see_peer_not_seen(&peer),
           tags = peers,
           see_peer
         );
@@ -285,7 +285,7 @@ impl<A: ProtoAddr> PeersStore<A> {
           None => {
             emit_event!(
               event_emitter,
-              NodeEvent::see_peer_activated(&peer),
+              NodeEventType::see_peer_activated(&peer),
               tags = peers,
               see_peer
             );
@@ -296,7 +296,7 @@ impl<A: ProtoAddr> PeersStore<A> {
             let new_seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
             emit_event!(
               event_emitter,
-              NodeEvent::see_peer_already_active(&old_peer, new_seen_at),
+              NodeEventType::see_peer_already_active(&old_peer, new_seen_at),
               tags = peers,
               see_peer
             );
@@ -309,14 +309,14 @@ impl<A: ProtoAddr> PeersStore<A> {
 
   fn timeout(
     &mut self,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEvent>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventType>,
   ) {
     let mut forget = Vec::new();
     for (_, peer) in &self.active {
       if peer.seen_at < get_time() - PEER_TIMEOUT {
         emit_event!(
           event_emitter,
-          NodeEvent::timeout(&peer),
+          NodeEventType::timeout(&peer),
           tags = peers,
           timeout
         );
@@ -628,7 +628,7 @@ impl MinerCommunication {
 pub fn miner_loop(
   mut miner_comm: MinerCommunication,
   slow_mining: Option<u64>,
-  #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEvent>,
+  #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEventType>,
 ) {
   let mut before = std::time::Instant::now();
   loop {
@@ -637,7 +637,7 @@ pub fn miner_loop(
       if let Some(block) = mined {
         emit_event!(
           event_emitter,
-          NodeEvent::mined(block.hash, targ),
+          NodeEventType::mined(block.hash, targ),
           tags = mining,
           mined
         );
@@ -652,7 +652,7 @@ pub fn miner_loop(
       } else {
         emit_event!(
           event_emitter,
-          NodeEvent::failed_mined(targ),
+          NodeEventType::failed_mined(targ),
           tags = mining,
           failed_mined
         );
@@ -671,7 +671,7 @@ impl<C: ProtoComm> Node<C> {
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEvent>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEventType>,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
 
@@ -772,7 +772,7 @@ impl<C: ProtoComm> Node<C> {
       if btime >= get_time() + DELAY_TOLERANCE {
         emit_event!(
           self.event_emitter,
-          NodeEvent::too_late(block.hash),
+          NodeEventType::too_late(&self, block.hash),
           tags = add_block,
           too_late
         );
@@ -783,7 +783,7 @@ impl<C: ProtoComm> Node<C> {
       if self.block.get(&bhash).is_some() {
         emit_event!(
           self.event_emitter,
-          NodeEvent::already_included(bhash),
+          NodeEventType::already_included(&self, bhash),
           tags = add_block,
           already_included
         );
@@ -844,7 +844,7 @@ impl<C: ProtoComm> Node<C> {
             self.send_to_miner(MinerMessage::Stop);
             emit_event!(
               self.event_emitter,
-              NodeEvent::stopped(),
+              NodeEventType::stopped(),
               tags = mining,
               stopped
             );
@@ -868,12 +868,6 @@ impl<C: ProtoComm> Node<C> {
               while self.height[&old_bhash] > self.height[&new_bhash] {
                 old_bhash = self.block[&old_bhash].prev;
               }
-              emit_event!(
-                self.event_emitter,
-                NodeEvent::reorg(bhash, old_tip, self.height[&old_bhash]),
-                tags = add_block,
-                reorg
-              );
               // 2. Finds highest block with same value on both timelines
               //    On the example above, we'd have `D`
               while old_bhash != new_bhash {
@@ -895,6 +889,15 @@ impl<C: ProtoComm> Node<C> {
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
+              emit_event!(
+                self.event_emitter,
+                NodeEventType::reorg(
+                  self, old_tip, new_tip,
+                  old_bhash, // this store the common block
+                ),
+                tags = add_block,
+                reorg
+              );
               self.runtime.rollback(tick);
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
@@ -913,13 +916,22 @@ impl<C: ProtoComm> Node<C> {
         } else {
           emit_event!(
             self.event_emitter,
-            NodeEvent::not_enough_work(bhash),
+            NodeEventType::not_enough_work(&self, bhash),
             tags = add_block,
             not_enough_work
           );
         }
+
+        emit_event!(
+          self.event_emitter,
+          NodeEventType::included(self, bhash),
+          tags = add_block,
+          block_included
+        );
+
         // Registers this block as a child of its parent
-        self.children.insert(phash, vec![bhash]);
+        self.children.entry(phash).or_insert_with(Vec::new).push(bhash);
+
         // If there were blocks waiting for this one, include them on the next loop
         // This will cause the block to be moved from self.pending to self.block
         if let Some(wait_list) = self.wait_list.get(&bhash) {
@@ -936,7 +948,7 @@ impl<C: ProtoComm> Node<C> {
         self.wait_list.entry(phash).or_insert_with(|| Vec::new()).push(bhash);
         emit_event!(
           self.event_emitter,
-          NodeEvent::missing_parent(bhash, phash),
+          NodeEventType::missing_parent(&self, bhash, phash),
           tags = add_block,
           missing_parent
         );
@@ -1263,7 +1275,7 @@ impl<C: ProtoComm> Node<C> {
         Message::GiveMeThatBlock { magic, bhash } => {
           emit_event!(
             self.event_emitter,
-            NodeEvent::give_me_block(*magic, *bhash),
+            NodeEventType::give_me_block(*magic, *bhash),
             tags = handle_message,
             give_me_block
           );
@@ -1293,7 +1305,7 @@ impl<C: ProtoComm> Node<C> {
         Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
           emit_event!(
             self.event_emitter,
-            NodeEvent::notice_blocks(*magic, *gossip, blocks, peers),
+            NodeEventType::notice_blocks(*magic, *gossip, blocks, peers),
             tags = handle_message,
             notice_blocks
           );
@@ -1323,7 +1335,7 @@ impl<C: ProtoComm> Node<C> {
         Message::PleaseMineThisTransaction { magic, tx } => {
           emit_event!(
             self.event_emitter,
-            NodeEvent::mine_trans(*magic, tx.hash),
+            NodeEventType::mine_trans(*magic, tx.hash),
             tags = handle_message,
             mine_trans
           );
@@ -1403,7 +1415,7 @@ impl<C: ProtoComm> Node<C> {
     let targ = self.get_tip_target();
     emit_event!(
       self.event_emitter,
-      NodeEvent::ask_mine(targ),
+      NodeEventType::ask_mine(targ),
       tags = mining,
       ask_mine
     );
@@ -1627,9 +1639,13 @@ pub fn start<C: ProtoComm + 'static>(
 
   // Events
   #[cfg(feature = "events")]
-  let (event_tx, event_thrds) =
-    events::spawn_event_handlers(config.ws.unwrap_or_default(), config.ui);
-  threads.extend(event_thrds);
+  let event_tx = {
+    let addr = comm.get_addr();
+    let (event_tx, event_thrds) =
+      events::spawn_event_handlers(config.ws.unwrap_or_default(), config.ui, addr);
+    threads.extend(event_thrds);
+    event_tx
+  };
 
   // Mining
   let (miner_comm, miner_thrds) = spawn_miner(config.mining, event_tx.clone());
@@ -1668,7 +1684,7 @@ pub fn start<C: ProtoComm + 'static>(
 
 fn spawn_miner(
   mine_config: MineConfig,
-  #[cfg(feature = "events")] event_tx: mpsc::Sender<events::NodeEvent>,
+  #[cfg(feature = "events")] event_tx: mpsc::Sender<events::NodeEventType>,
 ) -> (Option<MinerCommunication>, Vec<JoinHandle<()>>) {
   // Only spaws thread if mining is enabled
   if mine_config.enabled {

@@ -25,15 +25,25 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use warp::Future;
 
-use crate::api::{client as api_client, Hash, HexStatement};
-use crate::bits::ProtoSerialize;
-use crate::common::Name;
-use crate::{crypto};
-use crate::config;
-use crate::hvm::{self, view_statement, Statement};
-use crate::net;
-use crate::node;
-use crate::util::bytes_to_bitvec;
+// use crate::api::{client as api_client, Hash, HexStatement};
+// use crate::bits::ProtoSerialize;
+// use crate::common::Name;
+// use crate::{crypto};
+// use crate::config;
+// use crate::hvm::{self, view_statement, Statement};
+// use crate::net;
+// use crate::node;
+// use crate::util::bytes_to_bitvec;
+
+use kindelia::api::{client as api_client, Hash, HexStatement};
+use kindelia::bits::ProtoSerialize;
+use kindelia::common::Name;
+use kindelia::config;
+use kindelia::crypto;
+use kindelia::hvm::{self, view_statement, Statement};
+use kindelia::net;
+use kindelia::node;
+use kindelia::util::bytes_to_bitvec;
 
 // This client is meant to talk with a node implementing UDP protocol
 // communication (the default)

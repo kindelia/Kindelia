@@ -29,11 +29,7 @@ fn network() {
   let mut g = UnGraph::new_undirected();
   let a = g.add_node(0_u32);
   let b = g.add_node(1);
-  let c = g.add_node(2);
-  g.extend_with_edges(&[
-    (a, b, RouterMockConnection::new(2, 0.5)),
-    (b, c, RouterMockConnection::new(5, 1.)),
-  ]);
+  g.extend_with_edges(&[(a, b, RouterMockConnection::new(2, 0.5))]);
 
   // creates the router
   let (router_mock, sockets) = RouterMock::from_graph(g.clone());

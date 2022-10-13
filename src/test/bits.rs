@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+use crate::test::strategies::{
+  message, name, statement, u256 as u256_strategy,
+};
 use crate::{
   bits::{
     deserialize_fixlen, deserialize_list, deserialize_varlen, serialize_fixlen,
@@ -9,7 +12,6 @@ use crate::{
   hvm::{view_statements, Term},
   net,
   node::Message,
-  test::strategies::{message, name, statement, u256 as u256_strategy},
   util::u256,
 };
 use bit_vec::BitVec;

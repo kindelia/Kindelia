@@ -1,26 +1,5 @@
 #![allow(clippy::single_component_path_imports)]
-
-#[cfg(test)]
-mod test;
-#[cfg(test)]
-use rstest_reuse;
-
-#[allow(non_snake_case)]
-mod NoHashHasher;
-mod api;
-mod bits;
 mod cli;
-mod config;
-mod common;
-mod constants;
-mod crypto;
-mod hvm;
-mod net;
-mod node;
-mod util;
-
-#[cfg(feature = "events")]
-mod events;
 
 pub use clap::{Parser, Subcommand};
 

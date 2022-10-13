@@ -12,8 +12,6 @@ use crate::hvm;
 use crate::node;
 use crate::util;
 
-use crate::test::strategies::statement;
-
 use super::util::{temp_file, TempPath};
 
 /// Runs a kindelia command.

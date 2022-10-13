@@ -156,7 +156,7 @@ pub fn advance(
   }
 }
 
-/// Tests the rollback of states in the kindelia runtime
+/// Tests the rollback of states in the crate runtime
 ///
 /// # Arguments
 ///
@@ -207,7 +207,7 @@ pub fn rollback_simple(
 }
 
 // Does basically the same of rollback_simple, but with a path
-// This path tells kindelia where to go
+// This path tells crate where to go
 pub fn rollback_path(
   pre_code: &str,
   code: &str,
@@ -335,7 +335,7 @@ impl Drop for TempPath {
 #[fixture]
 pub fn temp_dir() -> TempPath {
   let path =
-    std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
+    std::env::temp_dir().join(format!("crate.{:x}", fastrand::u128(..)));
   let temp_dir = TempPath { path };
   temp_dir
 }
@@ -346,8 +346,8 @@ pub fn temp_dir() -> TempPath {
 #[fixture]
 pub fn temp_file() -> TempPath {
   let path = std::env::temp_dir()
-    .join(format!("kindelia.{:x}", fastrand::u128(..)))
-    .join(format!("kindelia.{:x}.txt", fastrand::u128(..)));
+    .join(format!("crate.{:x}", fastrand::u128(..)))
+    .join(format!("crate.{:x}.txt", fastrand::u128(..)));
   std::fs::create_dir_all(&path.parent().unwrap()).unwrap();
   std::fs::write(&path, "").unwrap();
   let temp_file = TempPath { path };

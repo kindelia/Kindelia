@@ -13,7 +13,7 @@ use crate::hvm::{EXT_SIZE, U120};
 /// letters (72 bits).
 ///
 /// Name strings are converted to numbers using the following table:
-/// ```
+/// ```text
 /// '.'       =>  0
 /// '0' - '9' =>  1 to 10
 /// 'A' - 'Z' => 11 to 36
@@ -42,7 +42,7 @@ impl Name {
   pub const MAX_BITS: usize = EXT_SIZE;
   pub const MAX_CHARS: usize = Self::MAX_BITS / 6;
 
-  pub const _NONE  : u128 = 0x3FFFF; // ?? '___'
+  pub const _NONE: u128 = 0x3FFFF; // ?? '___'
 
   pub const EMPTY: Name = Name(0);
   pub const NONE: Name = Name(Self::_NONE);
@@ -76,6 +76,7 @@ impl Name {
     Name(numb)
   }
 
+  #[allow(clippy::should_implement_trait)]
   pub fn from_str(name_txt: &str) -> Result<Name, String> {
     if name_txt.len() > Self::MAX_CHARS {
       Err(format!("Name '{}' exceeds {} letters.", name_txt, Self::MAX_CHARS))
@@ -152,7 +153,7 @@ impl From<U120> for Name {
 impl TryFrom<&str> for Name {
   type Error = String;
   fn try_from(name: &str) -> Result<Self, Self::Error> {
-   Name::from_str(name)
+    Name::from_str(name)
   }
 }
 
