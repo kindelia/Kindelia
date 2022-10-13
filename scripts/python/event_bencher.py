@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 import os
@@ -82,22 +83,32 @@ class FailedMining(Bencher):
         return self.total
 
 
-n = 10
-warmup = 1
-execution_time = 10  # in seconds
+# ============================================================
+# Run
 
-if __name__ == "__main__":
+@dataclass
+class RunConfig:
+    n: int
+    warmup: int
+    execution_time: int
+    benchers: list[Bencher]
+
+
+def run(config: RunConfig):
     # create the list of benchmarkers
-    benchers: list[Bencher] = [UncleRate(), FailedMining()]
-    runs_result = []
 
-    for i in range(n + warmup):  # run n + warmup executions
+    print("Building in release mode")
+    # running the command this way makes the thread blocks the execution
+    subprocess.run("cargo test --release --no-run".split())
+
+    print("\n\nRunning tests\n\n")
+    for i in range(config.n + config.warmup):  # run n + warmup executions
 
         # runs the cargo test
         # doing this way because process doesn't end by itself
         process = subprocess.Popen(
             ["cargo", "test", "--release", "--", "network::network", "--ignored", "--nocapture"], stdout=subprocess.PIPE, preexec_fn=os.setsid)
-        time.sleep(execution_time)
+        time.sleep(config.execution_time)
 
         # Send the signal to all the process groups
         # https://stackoverflow.com/questions/4789837/how-to-terminate-a-python-subprocess-launched-with-shell-true
@@ -116,7 +127,7 @@ if __name__ == "__main__":
                 event = json.loads(line)
                 event = event['event']  # gets the event
                 # for each bench
-                for bench in benchers:
+                for bench in config.benchers:
                     bench.calculate(event)
                     bench.store_result()  # maybe put this inside calculate?
             except json.JSONDecodeError as error:
@@ -124,11 +135,12 @@ if __name__ == "__main__":
 
     # calculates means with the results of each bencher
     result = []
-    for bench in benchers:
+    for bench in config.benchers:
         bench_info = bench.info()
-        results = bench.get_results()[warmup:]  # throw away warmup executions
+        # throw away warmup executions
+        results = bench.get_results()[config.warmup:]
 
-        mean = sum(results) / len(results)
+        mean: float = sum(results) / len(results) if len(results) != 0 else 0
         result.append({
             'name': bench_info.name,
             'value': mean,
@@ -136,3 +148,35 @@ if __name__ == "__main__":
         })
 
     print(json.dumps(result), file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Benchmark on network simulation.")
+
+    parser.add_argument(
+        "-n", type=int, default=10
+    )
+
+    parser.add_argument(
+        "--warmup", type=int, default=1
+    )
+
+    parser.add_argument(
+        "--execution_time", type=int, default=10
+    )
+
+    benchers: list[Bencher] = [UncleRate(), FailedMining()]
+
+    args = parser.parse_args()
+
+    run(RunConfig(
+        n=args.n,
+        warmup=args.warmup,
+        execution_time=args.execution_time,
+        benchers=benchers
+    ))
+
+
+if __name__ == "__main__":
+    main()

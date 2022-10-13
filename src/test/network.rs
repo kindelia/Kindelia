@@ -13,9 +13,10 @@ use std::sync::mpsc::Sender;
 
 use crate::{
   bits::{self, deserialize_number, serialize_number},
+  config,
   net::{self, ProtoComm},
   node::{self, Message, MinerCommunication},
-  util::u256, config,
+  util::u256,
 };
 
 #[cfg(feature = "events")]
@@ -61,15 +62,15 @@ fn network() {
         .slow_mining(100)
         .build()
         .unwrap();
-      let ui_cfg = config::UiConfigBuilder::default().json(true).build().unwrap();
+      let ui_cfg =
+        config::UiConfigBuilder::default().json(true).build().unwrap();
       let node_cfg = config::NodeConfigBuilder::default()
         .data_path(data_path)
-        .build().unwrap();
-      node::start(
-        node_cfg,
-        socket,
-        initial_peers,
-      );
+        .ws(ws_config)
+        .mining(mine_cfg)
+        .build()
+        .unwrap();
+      node::start(node_cfg, socket, initial_peers);
     });
     threads.push(socket_thread);
   }
