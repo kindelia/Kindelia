@@ -245,7 +245,7 @@ Note that `load` and `save` aren't side-effective functions. Instead, they
 *describe* effects using a pure datatype, exactly like Haskell's IO. These
 effects can be passed as first-class expressions, and are evaluated when placed
 directly inside a `run{}` block. For a complete list, see the section [IO
-Effects](#io-effects) section.
+Effects](#effects) section.
 
 A function's state can be any arbitrary HVM structure: a number, a list, a tree.
 There is no forced, costly and error-prone `U256` serialization, like on
