@@ -1980,7 +1980,7 @@ impl Runtime {
         if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
-        handle_runtime_err(self, "fun", self.check_func(&func))?; 
+        handle_runtime_err(self, "fun", check_func(&func))?; 
         let func = compile_func(func, true);
         if func.is_none() {
           return error(self, "fun", format!("Invalid function {}.", name));
@@ -2016,7 +2016,7 @@ impl Runtime {
         let mana_lim = self.get_mana_limit();
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit();
-        handle_runtime_err(self, "run", self.check_term(&expr))?; 
+        handle_runtime_err(self, "run", check_term(&expr))?; 
         let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
@@ -2077,68 +2077,6 @@ impl Runtime {
       println!("{:02$} {}", self.get_tick(), res, 10);
     }
     Ok(res)
-  }
-
-  pub fn check_term(&self, term: &Term) -> Result<(), RuntimeError> {
-    check_linear(term)?;
-    self.check_term_depth(term, 0)?;
-    Ok(())
-  }
-
-  pub fn check_func(&self, func: &Func) -> Result<(), RuntimeError> {
-    for rule in &func.rules {
-      self.check_term(&rule.lhs)?;
-      self.check_term(&rule.rhs)?;
-    }
-    Ok(())
-  }
-
-  pub fn check_term_depth(&self, term: &Term, depth: u128) -> Result<(), RuntimeError> {
-    if depth > MAX_TERM_DEPTH {
-      return Err(RuntimeError::TermExceedsMaxDepth);
-      // this is the stupidest clone of all time, it is a huge waste
-      // but receivin a borrow in an enum is boring
-    } else {
-      match term {
-        Term::Var { name } => {
-          return Ok(());
-        },
-        Term::Dup { nam0, nam1, expr, body } => {
-          self.check_term_depth(expr, depth + 1)?;
-          self.check_term_depth(body, depth + 1)?;
-          return Ok(());
-        }
-        Term::Lam { name, body } => {
-          self.check_term_depth(body, depth + 1)?;
-          return Ok(());
-        }
-        Term::App { func, argm } => {
-          self.check_term_depth(func, depth + 1)?;
-          self.check_term_depth(argm, depth + 1)?;
-          return Ok(());
-        }
-        Term::Ctr { name, args } => {
-          for arg in args {
-            self.check_term_depth(arg, depth + 1)?;
-          }
-          return Ok(());
-        }
-        Term::Fun { name, args } => {
-          for arg in args {
-            self.check_term_depth(arg, depth + 1)?;
-          }
-          return Ok(());
-        }
-        Term::Num { numb } => {
-          return Ok(());
-        }
-        Term::Op2 { oper, val0, val1 } => {
-          self.check_term_depth(val0, depth + 1)?;
-          self.check_term_depth(val1, depth + 1)?;
-          return Ok(());
-        }
-      }
-    }
   }
 
   // Maximum mana = 42m * block_number
@@ -2880,6 +2818,22 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
 // Term
 // ----
 
+pub fn check_term(term: &Term) -> Result<(), RuntimeError> {
+  check_linear(term)?;
+  check_term_depth(term, 0)?;
+  Ok(())
+}
+
+
+pub fn check_func(func: &Func) -> Result<(), RuntimeError> {
+  for rule in &func.rules {
+    check_term(&rule.lhs)?;
+    check_term(&rule.rhs)?;
+  }
+  Ok(())
+}
+
+
 // Counts how many times the free variable 'name' appears inside Term
 fn count_uses(term: &Term, name: Name) -> u128 {
   match term {
@@ -2981,6 +2935,54 @@ pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
 
   // println!("{}: {}", view_term(term), res);
   res
+}
+
+pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
+  if depth > MAX_TERM_DEPTH {
+    return Err(RuntimeError::TermExceedsMaxDepth);
+    // this is the stupidest clone of all time, it is a huge waste
+    // but receivin a borrow in an enum is boring
+  } else {
+    match term {
+      Term::Var { name } => {
+        return Ok(());
+      },
+      Term::Dup { nam0, nam1, expr, body } => {
+        check_term_depth(expr, depth + 1)?;
+        check_term_depth(body, depth + 1)?;
+        return Ok(());
+      }
+      Term::Lam { name, body } => {
+        check_term_depth(body, depth + 1)?;
+        return Ok(());
+      }
+      Term::App { func, argm } => {
+        check_term_depth(func, depth + 1)?;
+        check_term_depth(argm, depth + 1)?;
+        return Ok(());
+      }
+      Term::Ctr { name, args } => {
+        for arg in args {
+          check_term_depth(arg, depth + 1)?;
+        }
+        return Ok(());
+      }
+      Term::Fun { name, args } => {
+        for arg in args {
+          check_term_depth(arg, depth + 1)?;
+        }
+        return Ok(());
+      }
+      Term::Num { numb } => {
+        return Ok(());
+      }
+      Term::Op2 { oper, val0, val1 } => {
+        check_term_depth(val0, depth + 1)?;
+        check_term_depth(val1, depth + 1)?;
+        return Ok(());
+      }
+    }
+  }
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
