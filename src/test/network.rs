@@ -15,7 +15,7 @@ use crate::{
   bits::{self, deserialize_number, serialize_number},
   net::{self, ProtoComm},
   node::{self, Message, MinerCommunication},
-  util::u256,
+  util::u256, config,
 };
 
 #[cfg(feature = "events")]
@@ -29,11 +29,7 @@ fn network() {
   let mut g = UnGraph::new_undirected();
   let a = g.add_node(0_u32);
   let b = g.add_node(1);
-  let c = g.add_node(2);
-  g.extend_with_edges(&[
-    (a, b, RouterMockConnection::new(2, 0.5)),
-    (b, c, RouterMockConnection::new(5, 1.)),
-  ]);
+  g.extend_with_edges(&[(a, b, RouterMockConnection::new(2, 0.5))]);
 
   // creates the router
   let (router_mock, sockets) = RouterMock::from_graph(g.clone());
@@ -53,22 +49,26 @@ fn network() {
       g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
     let addr = socket.addr;
     let socket_thread = thread::spawn(move || {
-      let state_path =
+      let data_path =
         temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
 
       #[cfg(feature = "events")]
       let ws_config =
-        events::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+        config::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+
+      let mine_cfg = config::MineConfigBuilder::default()
+        .enabled(true)
+        .slow_mining(100)
+        .build()
+        .unwrap();
+      let ui_cfg = config::UiConfigBuilder::default().json(true).build().unwrap();
+      let node_cfg = config::NodeConfigBuilder::default()
+        .data_path(data_path)
+        .build().unwrap();
       node::start(
-        state_path,
-        0,
+        node_cfg,
         socket,
-        &Some(initial_peers),
-        true,
-        None,
-        true,
-        #[cfg(feature = "events")]
-        ws_config,
+        initial_peers,
       );
     });
     threads.push(socket_thread);

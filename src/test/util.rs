@@ -1,17 +1,24 @@
+use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use rstest::fixture;
 use tokio::runtime;
 
+use crate::constants;
 use crate::common::Name;
 use crate::hvm::{
-  self, init_runtime, read_term, show_term, Rollback, Runtime, Statement,
-  StatementInfo, Term, U128_NONE, U120,
+  self, read_term, show_term, Rollback, Runtime, Statement, StatementInfo,
+  Term, U120, U128_NONE,
 };
-use std::{
-  collections::{hash_map::DefaultHasher, HashMap},
-  hash::{Hash, Hasher},
-  path::PathBuf,
-  sync::Arc,
-};
+use crate::node;
+
+pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
+  let genesis_stmts =
+    hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+  hvm::init_runtime(path.clone(), &genesis_stmts)
+}
 
 // ===========================================================
 // Aux types
@@ -89,10 +96,8 @@ impl RuntimeStateTest {
 
 // Generate a checksum for a runtime state (for testing)
 pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
-  let fn_ids = fn_names
-    .iter()
-    .map(|x| Name::from_str(x).unwrap())
-    .collect::<Vec<Name>>();
+  let fn_ids =
+    fn_names.iter().map(|x| Name::from_str(x).unwrap()).collect::<Vec<Name>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id.into());
@@ -151,7 +156,7 @@ pub fn advance(
   }
 }
 
-/// Tests the rollback of states in the kindelia runtime
+/// Tests the rollback of states in the crate runtime
 ///
 /// # Arguments
 ///
@@ -170,7 +175,7 @@ pub fn rollback_simple(
   validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
-  let mut rt = init_runtime(dir_path.clone());
+  let mut rt = init_runtime(dir_path);
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -202,7 +207,7 @@ pub fn rollback_simple(
 }
 
 // Does basically the same of rollback_simple, but with a path
-// This path tells kindelia where to go
+// This path tells crate where to go
 pub fn rollback_path(
   pre_code: &str,
   code: &str,
@@ -222,7 +227,7 @@ pub fn rollback_path(
     }
   };
 
-  let mut rt = init_runtime(dir_path.clone());
+  let mut rt = init_runtime(dir_path);
   rt.run_statements_from_code(pre_code, true, true);
 
   for tick in path {
@@ -245,7 +250,7 @@ where
   A: Fn(&Term),
 {
   let temp_dir = temp_dir();
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
 
   let term = Term::Fun {
     name: "Done".try_into().unwrap(),
@@ -330,8 +335,7 @@ impl Drop for TempPath {
 #[fixture]
 pub fn temp_dir() -> TempPath {
   let path =
-    std::env::temp_dir().join(format!("kindelia.{:x}", fastrand::u128(..)));
-  std::fs::create_dir_all(&path).unwrap();
+    std::env::temp_dir().join(format!("crate.{:x}", fastrand::u128(..)));
   let temp_dir = TempPath { path };
   temp_dir
 }
@@ -342,8 +346,8 @@ pub fn temp_dir() -> TempPath {
 #[fixture]
 pub fn temp_file() -> TempPath {
   let path = std::env::temp_dir()
-    .join(format!("kindelia.{:x}", fastrand::u128(..)))
-    .join(format!("kindelia.{:x}.txt", fastrand::u128(..)));
+    .join(format!("crate.{:x}", fastrand::u128(..)))
+    .join(format!("crate.{:x}.txt", fastrand::u128(..)));
   std::fs::create_dir_all(&path.parent().unwrap()).unwrap();
   std::fs::write(&path, "").unwrap();
   let temp_file = TempPath { path };

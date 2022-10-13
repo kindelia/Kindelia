@@ -1,25 +1,24 @@
 use std::convert::TryInto;
+use std::path::PathBuf;
 
-use crate::{
-  common::Name,
-  hvm::{
-    self, init_map, init_runtime, read_statements, readback_term, show_term,
-    view_statements, view_term, Rollback, Runtime, StatementInfo, Term, U120, Heap
-  },
-  test::{
-    strategies::{func, heap, name, op2, statement, term},
-    util::{
-      self, advance, rollback, rollback_path, rollback_simple, run_term_and,
-      run_term_from_code_and, temp_dir, temp_file, test_heap_checksum,
-      view_rollback_ticks, RuntimeStateTest, TempPath,
-    },
-  },
-};
 use proptest::prelude::ProptestConfig;
 use proptest::proptest;
 use proptest::{collection::vec, strategy::Strategy};
 use rstest::rstest;
 use rstest_reuse::{apply, template};
+
+use crate::common::Name;
+use crate::hvm::{
+  self, init_map, read_statements, readback_term, show_term, view_statements,
+  view_term, Rollback, Runtime, StatementInfo, Term, U120,
+};
+use crate::node;
+use crate::test::strategies::{func, heap, name, op2, statement, term};
+use crate::test::util::{
+  self, advance, init_runtime, rollback, rollback_path, rollback_simple,
+  run_term_and, run_term_from_code_and, temp_dir, temp_file, test_heap_checksum,
+  view_rollback_ticks, RuntimeStateTest, TempPath,
+};
 
 #[template]
 #[rstest]
@@ -81,7 +80,7 @@ pub fn advanced_rollback_in_saved_state(
   validators: &[util::Validator],
   temp_dir: TempPath,
 ) {
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   rt.run_statements_from_code(pre_code, true, true);
   advance(&mut rt, 1000, Some(code), validators);
   rt.rollback(900);
@@ -130,7 +129,7 @@ pub fn stack_overflow(
   temp_dir: TempPath,
 ) {
   // caused by compute_at function
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   rt.run_statements_from_code(pre_code, true, true);
   advance(&mut rt, 1000, Some(code), validators);
 }
@@ -140,7 +139,7 @@ pub fn stack_overflow(
 // TODO: fix drop stack overflow
 pub fn stack_overflow2(temp_dir: TempPath) {
   // caused by drop of term
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   rt.run_statements_from_code(PRE_COUNTER, false, true);
   rt.run_statements_from_code(COUNTER_STACKOVERFLOW, false, true);
 }
@@ -154,7 +153,7 @@ pub fn persistence1(
   #[values(1000, 1500, 2000)] tick: u128,
   temp_dir: TempPath,
 ) {
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   rt.run_statements_from_code(pre_code, true, true);
 
   advance(&mut rt, tick, Some(code), validators);
@@ -189,7 +188,7 @@ pub fn persistence1(
 fn one_hundred_snapshots(temp_dir: TempPath) {
   // run this with rollback in each 4th snapshot
   // note: this test has no state
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   for _ in 0..100000 {
     rt.open();
     println!(
@@ -431,12 +430,11 @@ fn compute_at_funs(temp_dir: TempPath) {
       (Add {True} {True}) = {T2 {True} {True}}
       (Add a b) = {T2 a b}
     }
-    
     run {
       (Done dup ~ b = @x @y (Add x y); b)
     }
   ";
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
@@ -455,7 +453,8 @@ fn dupped_state_test(temp_dir: TempPath) {
   ) {
     let original_state =
       rt.read_disk(Name::try_from("Original").unwrap().into()).unwrap();
-    let other_state = rt.read_disk(Name::try_from("Other").unwrap().into()).unwrap();
+    let other_state =
+      rt.read_disk(Name::try_from("Other").unwrap().into()).unwrap();
     println!();
     println!("original ptr: {}", original_state);
     println!("original: {}", show_term(&rt, original_state, None));
@@ -470,7 +469,10 @@ fn dupped_state_test(temp_dir: TempPath) {
     println!();
     println!("other ptr: {}", other_state);
     println!("other: {}", show_term(&rt, other_state, None));
-    println!("other readback: {}", view_term(&readback_term(&rt, other_state, None).unwrap()));
+    println!(
+      "other readback: {}",
+      view_term(&readback_term(&rt, other_state, None).unwrap())
+    );
     assert_eq!(
       expected_other_readback,
       view_term(&readback_term(&rt, other_state, None).unwrap())
@@ -478,7 +480,7 @@ fn dupped_state_test(temp_dir: TempPath) {
     println!();
   }
 
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   rt.run_statements_from_code(&PRE_DUPPED_STATE, false, true);
   rt.run_statements_from_code(&DUPPED_STATE, false, true);
   print_and_assert_states(&mut rt, "@x0 @x1 #7", "@x0 @x1 #7");
@@ -499,12 +501,11 @@ fn shadowing(temp_dir: TempPath) {
         let got = (+ got #1);
         (+ state got)
     }
-      
     run {
       (Done (Test #2))
     }
   ";
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
@@ -547,7 +548,7 @@ fn readback(
   temp_dir: TempPath,
 ) {
   // initialize runtime
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
   // declare used constructors
   let pre_code = "ctr {Cons x xs} ctr {Nil} ctr {Pair x y}";
   rt.run_statements_from_code(&pre_code, false, true);

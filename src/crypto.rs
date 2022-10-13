@@ -105,6 +105,7 @@ impl Name {
 
 impl Account {
   #[allow(dead_code)]
+  #[allow(clippy::new_without_default)]
   pub fn new() -> Account {
     Account::from_secret_key(SecretKey::new(&mut OsRng::new().expect("OsRng")))
   }

@@ -74,7 +74,7 @@ impl std::fmt::Display for Address {
 
 /// Converts a string to an UDP Address.
 /// TODO: UNSAFE.
-pub fn read_address(code: &str) -> Address {
+pub fn parse_address(code: &str) -> Address {
   let strs = code.split(':').collect::<Vec<&str>>();
   let vals =
     strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();

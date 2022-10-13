@@ -25,17 +25,25 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use warp::Future;
 
-use crate::api::{self, client as api_client, Hash, HexStatement};
-use crate::bits::ProtoSerialize;
-use crate::common::Name;
-use crate::crypto;
-use crate::hvm::{self, view_statement, Statement};
-use crate::net;
-use crate::node;
-use crate::util::bytes_to_bitvec;
+// use crate::api::{client as api_client, Hash, HexStatement};
+// use crate::bits::ProtoSerialize;
+// use crate::common::Name;
+// use crate::{crypto};
+// use crate::config;
+// use crate::hvm::{self, view_statement, Statement};
+// use crate::net;
+// use crate::node;
+// use crate::util::bytes_to_bitvec;
 
-#[cfg(feature = "events")]
-use crate::events;
+use kindelia::api::{client as api_client, Hash, HexStatement};
+use kindelia::bits::ProtoSerialize;
+use kindelia::common::Name;
+use kindelia::config;
+use kindelia::crypto;
+use kindelia::hvm::{self, view_statement, Statement};
+use kindelia::net;
+use kindelia::node;
+use kindelia::util::bytes_to_bitvec;
 
 // This client is meant to talk with a node implementing UDP protocol
 // communication (the default)
@@ -195,8 +203,8 @@ pub enum CliCommand {
     /// The kind of information to get.
     #[clap(subcommand)]
     kind: GetKind,
-    #[clap(long, short)]
     /// Outputs JSON machine readable output.
+    #[clap(long, short)]
     json: bool,
   },
   /// Initialize the configuration file.
@@ -228,16 +236,17 @@ pub enum NodeCommand {
   Clean,
   /// Starts a Kindelia node.
   Start {
-    /// Initial peer nodes.
-    #[clap(long, short = 'p')]
-    initial_peers: Option<Vec<String>>,
     /// Network id / magic number.
     #[clap(long)]
     network_id: Option<u64>,
+    /// Initial peer nodes.
+    #[clap(long, short = 'p')]
+    initial_peers: Option<Vec<String>>,
     /// Mine blocks.
     #[clap(long, short = 'm')]
     mine: bool,
     /// Log events as JSON
+    #[clap(long, short)]
     json: bool,
   },
 }
@@ -338,18 +347,23 @@ pub enum GetStatsKind {
   RegCount,
 }
 
-struct ConfigValueOption<'a, T, F>
+// Config Resolution
+// =================
+
+#[derive(derive_builder::Builder)]
+#[builder(setter(strip_option))]
+struct ConfigSettings<T, F>
 where
   T: Clone + Sized,
   F: Fn() -> Result<T, String>,
 {
-  value: Option<T>,
-  env: Option<&'a str>,
-  config: ConfigFileOptions<'a>,
-  default: F,
+  #[builder(default)]
+  env: Option<&'static str>,
+  prop: Option<&'static str>,
+  default_value: F,
 }
 
-impl<'a, T, F> ConfigValueOption<'a, T, F>
+impl<T, F> ConfigSettings<T, F>
 where
   T: Clone + Sized,
   F: Fn() -> Result<T, String>,
@@ -361,70 +375,123 @@ where
   /// 2. Environment variable
   /// 3. Config file
   /// 4. Default value
-  fn get_config_value(self) -> Result<T, String>
+  pub fn resolve(
+    self,
+    cli_value: Option<T>,
+    config_values: Option<&toml::Value>,
+  ) -> Result<T, String>
   where
     T: ArgumentFrom<String> + ArgumentFrom<toml::Value>,
   {
-    if let Some(value) = self.value {
-      // read from var
-      Ok(value)
-    } else if let Some(Ok(env_value)) = self.env.map(std::env::var) {
-      // if env var is set and valid, read from env var
-      T::arg_from(env_value)
-    } else if let ConfigFileOptions {
-      toml: Some(toml_value),
-      prop: Some(prop_path),
-    } = self.config
-    {
-      // if config file is set and valid, read from config file
-      // doing this way because of issue #469 toml-rs
-      let props: Vec<_> = prop_path.split('.').collect();
-      let mut value = toml_value.get(&props[0]).ok_or(format!(
-        "Could not found prop '{}' in config file.",
-        prop_path
-      ))?;
-      for prop in &props[1..] {
-        value = value.get(&prop).ok_or(format!(
-          "Could not found prop {} in config file.",
-          prop_path
-        ))?;
-      }
-      T::arg_from(value.clone()).map_err(|e| {
-        format!("Could not convert value '{}' into desired type: {}", value, e)
-      })
-    } else {
-      (self.default)()
+    if let Some(value) = cli_value {
+      // Read from CLI argument
+      return Ok(value);
     }
+    if let Some(Ok(env_value)) = self.env.map(std::env::var) {
+      // If env var is set, read from it
+      return T::arg_from(env_value);
+    }
+    if let (Some(prop_path), Some(config_values)) = (self.prop, config_values) {
+      // If config file and argument prop path are set, read from config file
+      return Self::resolve_from_config_aux(config_values, prop_path);
+    }
+    (self.default_value)()
   }
 
   // TODO: refactor
-  fn get_config_toml(self) -> Result<T, String>
+
+  fn resolve_from_file_only(
+    self,
+    config_values: Option<&toml::Value>,
+  ) -> Result<T, String>
   where
     T: ArgumentFrom<toml::Value>,
   {
-    if let ConfigFileOptions { toml: Some(toml_value), prop: Some(prop_path) } =
-      self.config
-    {
-      // if config file is set and valid, read from config file
-      // doing this way because of issue #469 toml-rs
-      let props: Vec<_> = prop_path.split('.').collect();
-      let mut value = toml_value.get(&props[0]).ok_or(format!(
-        "Could not found prop '{}' in config file.",
-        prop_path
-      ))?;
-      for prop in &props[1..] {
-        value = value.get(&prop).ok_or(format!(
-          "Could not found prop {} in config file.",
-          prop_path
-        ))?;
+    if let Some(prop_path) = self.prop {
+      if let Some(config_values) = config_values {
+        Self::resolve_from_config_aux(config_values, prop_path)
+      } else {
+        (self.default_value)()
       }
-      T::arg_from(value.clone()).map_err(|e| {
-        format!("Could not convert value '{}' into desired type: {}", value, e)
-      })
     } else {
-      (self.default)()
+      panic!("Cannot resolve from config file config without 'prop' field set")
     }
   }
+
+  fn resolve_from_file_opt(
+    self,
+    config_values: Option<&toml::Value>,
+  ) -> Result<Option<T>, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    if let Some(prop_path) = self.prop {
+      if let Some(config_values) = config_values {
+        let value = Self::get_prop(config_values, prop_path);
+        if let Some(value) = value {
+          return T::arg_from(value).map(|v| Some(v)).map_err(|e| {
+            format!(
+              "Could not convert value of '{}' into desired type: {}",
+              prop_path, e
+            )
+          });
+        }
+      }
+      Ok(None)
+    } else {
+      panic!("Cannot resolve from config file config without 'prop' field set")
+    }
+  }
+
+  fn resolve_from_config_aux(
+    config_values: &toml::Value,
+    prop_path: &str,
+  ) -> Result<T, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    let value = Self::get_prop(config_values, prop_path)
+      .ok_or(format!("Could not found prop '{}' in config file.", prop_path))?;
+    T::arg_from(value).map_err(|e| {
+      format!(
+        "Could not convert value of '{}' into desired type: {}",
+        prop_path, e
+      )
+    })
+  }
+
+  fn get_prop(mut value: &toml::Value, prop_path: &str) -> Option<toml::Value> {
+    // Doing this way because of issue #469 toml-rs
+    let props: Vec<_> = prop_path.split('.').collect();
+    for prop in props {
+      value = value.get(&prop)?;
+    }
+    Some(value.clone())
+  }
+}
+
+// Macros
+// ======
+
+macro_rules! resolve_cfg {
+  (env = $env:expr, prop = $prop:expr, default = $default:expr, val = $cli:expr, cfg = $cfg:expr $(,)*) => {
+    ConfigSettingsBuilder::default()
+      .env($env)
+      .prop($prop)
+      .default_value(|| Ok($default))
+      .build()
+      .unwrap()
+      .resolve($cli, $cfg)?
+  };
+  (env = $env:expr, prop = $prop:expr, no_default = $default:expr, val = $cli:expr, cfg = $cfg:expr $(,)*) => {
+    ConfigSettingsBuilder::default()
+      .env($env)
+      .prop($prop)
+      .default_value(|| Err($default))
+      .build()
+      .unwrap()
+      .resolve($cli, $cfg)?
+  };
 }
 
 // CLI main function
@@ -446,21 +513,19 @@ pub fn run_cli() -> Result<(), String> {
   };
 
   // get possible config path and content
-  let config_path = ConfigValueOption {
-    value: parsed.config,
+  let config_path = ConfigSettings {
     env: Some("KINDELIA_CONFIG"),
-    config: ConfigFileOptions::none(),
-    default: default_config_path,
+    prop: None,
+    default_value: default_config_path,
   }
-  .get_config_value()?;
+  .resolve(parsed.config, None)?;
 
-  let api_url = ConfigValueOption {
-    value: parsed.api,
+  let api_url = ConfigSettings {
     env: Some("KINDELIA_API_URL"),
-    config: ConfigFileOptions::none(),
-    default: || Ok("http://localhost:8000".to_string()),
+    prop: None,
+    default_value: || Ok("http://localhost:8000".to_string()),
   }
-  .get_config_value()?;
+  .resolve(parsed.api, None)?;
 
   match parsed.command {
     CliCommand::Test { file, sudo } => {
@@ -540,15 +605,15 @@ pub fn run_cli() -> Result<(), String> {
       Ok(())
     }
     CliCommand::Node { command, data_dir } => {
-      let config = Some(handle_config_file(&config_path)?);
+      let config = handle_config_file(&config_path)?;
+      let config = Some(&config);
 
-      let data_path = ConfigValueOption {
-        value: data_dir,
+      let data_path = ConfigSettings {
         env: Some("KINDELIA_NODE_DATA_DIR"),
-        config: ConfigFileOptions::new(&config, "node.data.dir"),
-        default: default_kindelia_path,
+        prop: Some("node.data.dir"),
+        default_value: default_kindelia_path,
       }
-      .get_config_value()?;
+      .resolve(data_dir, config)?;
 
       match command {
         NodeCommand::Clean => {
@@ -579,67 +644,62 @@ pub fn run_cli() -> Result<(), String> {
 
           // Get arguments from cli, env or config
 
-          let initial_peers = ConfigValueOption {
-            value: initial_peers,
-            env: Some("KINDELIA_INITIAL_PEERS"),
-            config: ConfigFileOptions::new(
-              &config,
-              "node.network.initial_peers",
-            ),
-            default: || Ok(Vec::new()),
-          }
-          .get_config_value()?;
+          let network_id = resolve_cfg!(
+            env = "KINDELIA_NETWORK_ID",
+            prop = "node.network.network_id",
+            no_default = "Missing `network_id` paramenter.".to_string(),
+            val = network_id,
+            cfg = config,
+          );
 
-          let network_id = ConfigValueOption {
-            value: network_id,
-            env: Some("KINDELIA_NETWORK_ID"),
-            config: ConfigFileOptions::new(&config, "node.network.network_id"),
-            default: || Err("Missing `network_id` paramenter.".to_string()),
-          }
-          .get_config_value()?;
+          let initial_peers = resolve_cfg!(
+            env = "KINDELIA_NODE_INITIAL_PEERS",
+            prop = "node.network.initial_peers",
+            default = vec![],
+            val = initial_peers,
+            cfg = config,
+          );
 
-          let mine = ConfigValueOption {
-            value: Some(mine), // TODO: fix boolean resolution
-            env: Some("KINDELIA_MINE"),
-            config: ConfigFileOptions::new(&config, "node.data.mine"),
-            default: || Ok(false),
-          }
-          .get_config_value()?;
+          let mine = resolve_cfg!(
+            env = "KINDELIA_MINE",
+            prop = "node.mining.enable",
+            default = false,
+            val = flag_to_option(mine),
+            cfg = config,
+          );
 
-          let api_config = ConfigValueOption {
-            value: None,
-            env: None,
-            config: ConfigFileOptions::new(&config, "node.api"),
-            default: || Ok(api::ApiConfig::default()),
-          }
-          .get_config_toml()?;
+          let slow_mining = ConfigSettingsBuilder::default()
+            .env("KINDELIA_SLOW_MINING")
+            .prop("node.debug.slow_mining")
+            .default_value(|| Ok(0))
+            .build()
+            .unwrap()
+            .resolve_from_file_opt(config)?;
+
+          let api_config = ConfigSettingsBuilder::default()
+            .prop("node.api")
+            .default_value(|| Ok(config::ApiConfig::default()))
+            .build()
+            .unwrap()
+            .resolve_from_file_only(config)?;
 
           // Start
-          let comm = init_socket().expect("Could not open a UDP socket");
+          let node_comm = init_socket().expect("Could not open a UDP socket");
           let initial_peers = initial_peers
             .iter()
-            .map(|x| net::read_address(x))
+            .map(|x| net::parse_address(x))
             .collect::<Vec<_>>();
-          let initial_peers =
-            if !initial_peers.is_empty() { Some(initial_peers) } else { None };
 
-          #[cfg(feature = "events")]
-          // TODO: load from config file
-          let ws_config =
-            events::WsConfig { port: 3000, buffer_size: 1024 * 2 };
-
-          node::start(
-            data_path,
+          let node_cfg = config::NodeConfig {
             network_id,
-            comm,
-            &initial_peers,
-            mine,
-            Some(api_config),
-            json,
-            #[cfg(feature = "events")]
-            ws_config,
-          );
-          // start(data_path, initial_peers, mine);
+            data_path,
+            mining: config::MineConfig { enabled: mine, slow_mining },
+            ui: Some(config::UiConfig { json }),
+            api: Some(api_config),
+            ws: None, // TODO: load from config file
+          };
+
+          node::start(node_cfg, node_comm, initial_peers);
 
           Ok(())
         }
@@ -861,8 +921,25 @@ fn init_socket() -> Option<UdpSocket> {
   None
 }
 
-// Auxiliar
-// ========
+// Utils
+// =====
+
+pub fn flag_to_option(flag: bool) -> Option<bool> {
+  if flag {
+    Some(true)
+  } else {
+    None
+  }
+}
+
+pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
+  let mut num: u128 = 0;
+  for byte in bytes {
+    num = num.checked_shl(8)?;
+    num += *byte as u128;
+  }
+  Some(num)
+}
 
 // Async
 // -----
@@ -877,27 +954,6 @@ where
 
 // Config
 // ------
-
-#[derive(Debug, Clone)]
-struct ConfigFileOptions<'a> {
-  toml: Option<&'a toml::Value>,
-  prop: Option<String>,
-}
-
-impl<'a> ConfigFileOptions<'a> {
-  pub fn new(toml: &'a Option<toml::Value>, prop: &str) -> Self {
-    match toml {
-      Some(_) => {
-        ConfigFileOptions { toml: toml.as_ref(), prop: Some(prop.into()) }
-      }
-      None => Self::none(),
-    }
-  }
-
-  pub fn none() -> Self {
-    ConfigFileOptions { toml: None, prop: None }
-  }
-}
 
 fn handle_config_file(path: &Path) -> Result<toml::Value, String> {
   if !path.exists() {
@@ -977,18 +1033,6 @@ fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
       }
     }
   }
-}
-
-// Util
-// ====
-
-pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
-  let mut num: u128 = 0;
-  for byte in bytes {
-    num = num.checked_shl(8)?;
-    num += *byte as u128;
-  }
-  Some(num)
 }
 
 // Auxiliar traits and types
@@ -1147,7 +1191,7 @@ impl ArgumentFrom<toml::Value> for bool {
   }
 }
 
-impl ArgumentFrom<toml::Value> for api::ApiConfig {
+impl ArgumentFrom<toml::Value> for config::ApiConfig {
   fn arg_from(t: toml::Value) -> Result<Self, String> {
     t.try_into().map_err(|_| "Could not convert value into array".to_string())
   }

@@ -1520,7 +1520,7 @@ impl Hashs {
 }
 
 
-pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
+pub fn init_runtime(heaps_path: PathBuf, init_stmts: &[Statement]) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
   let mut heap = Vec::new();
@@ -1536,9 +1536,7 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
     path: heaps_path,
   };
 
-  // TODO: extract to Node
-  // TODO: add Genesis statements to actual block 0
-  rt.run_statements_from_code(constants::GENESIS_CODE, true, false);
+  rt.run_statements(init_stmts, true, false);
   rt.commit();
 
   rt
@@ -5125,9 +5123,10 @@ pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
   println!("=====");
   println!();
 
-  // TODO: code below does not need heaps_path at all
+  // TODO: code below does not need heaps_path at all. extract heap persistence out of Runtime.
   let heaps_path = dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps");
-  let mut rt = init_runtime(heaps_path);
+  let genesis_smts = parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
+  let mut rt = init_runtime(heaps_path, &genesis_smts);
   let init = Instant::now();
   rt.run_statements(&statements, false, debug);
   println!();

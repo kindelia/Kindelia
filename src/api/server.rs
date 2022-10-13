@@ -16,9 +16,10 @@ use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
 use super::NodeRequest;
-use super::{u256_to_hex, ApiConfig};
+use super::u256_to_hex;
 use crate::api::{HexStatement, ReqAnsRecv};
 use crate::bits::ProtoSerialize;
+use crate::config::{ApiConfig};
 use crate::common::Name;
 use crate::hvm::{self, StatementErr, StatementInfo};
 use crate::net::ProtoComm;

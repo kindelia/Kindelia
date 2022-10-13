@@ -289,6 +289,6 @@ pub fn message() -> impl Strategy<Value = Message<Address>> {
     ),
     (u256(), any::<u64>()).prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
     (transaction(), any::<u64>())
-      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { trans: t, magic: m })
+      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { tx: t, magic: m })
   ]
 }
