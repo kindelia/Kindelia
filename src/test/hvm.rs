@@ -10,13 +10,13 @@ use rstest_reuse::{apply, template};
 use crate::common::Name;
 use crate::hvm::{
   self, init_map, read_statements, readback_term, show_term, view_statements,
-  view_term, Rollback, Runtime, StatementInfo, Term, U120,
+  view_term, Rollback, Runtime, StatementInfo, Term, U120, Heap
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
 use crate::test::util::{
   self, advance, init_runtime, rollback, rollback_path, rollback_simple,
-  run_term_and, run_term_from_code_and, temp_dir, test_heap_checksum,
+  run_term_and, run_term_from_code_and, temp_dir, temp_file, test_heap_checksum,
   view_rollback_ticks, RuntimeStateTest, TempPath,
 };
 
@@ -51,6 +51,7 @@ pub fn simple_rollback(
     &temp_dir.path
   ));
 }
+
 
 #[apply(hvm_cases)]
 pub fn advanced_rollback_in_random_state(
@@ -196,6 +197,215 @@ fn one_hundred_snapshots(temp_dir: TempPath) {
       view_rollback_ticks(&rt)
     );
     rt.commit();
+  }
+}
+
+// Statement Indexes
+#[rstest]
+fn test_simple_idx(temp_dir: TempPath){
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit();
+  rt.open();
+  let code = "
+    fun (Add a b) {
+      (Add #256 #256) = #512
+      (Add {True} {True}) = {T2 {True} {True}}
+      (Add a b) = {T2 a b}
+    }
+    fun (B test) {
+      (B ~) = #0
+    }
+    run {
+      ask B_idx = (GetIdx 'B');
+      (Done B_idx)
+    }
+  ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name = Name::from_str("B").unwrap();
+  let idx = rt.get_index(&name).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("#{}", idx), view_term(&done_term));
+              // (3 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+}
+#[rstest]
+fn test_genesis_idx(temp_dir: TempPath){
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  let code = "
+   run {
+     ask T2_idx = (GetIdx 'T2');
+     (Done T2_idx)
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#2", view_term(&done_term));
+              // (1 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+
+}
+#[rstest]
+fn test_thousand_idx(temp_dir: TempPath) {
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  for i in 0..1000 {
+    rt.open();
+    rt.commit();
+  }
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   run {
+     ask idx = (GetIdx 'Test');
+     (Done idx)
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!("#1152921504606846976000", view_term(&done_term));
+              // (1000 << 60) |  1
+  } else {
+    panic!("Wrong result");
+  }
+}
+  
+#[rstest]
+fn test_stmt_hash(temp_dir: TempPath){
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  rt.open();
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   run {
+     ask idx = (GetIdx 'Test');
+     dup id0 id1 = idx;
+     ask h0  = (GetStmHash0 id0);
+     ask h1  = (GetStmHash1 id1);
+     (Done (T2 h0 h1))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let name = Name::from_str("Test").unwrap();
+  let indx = rt.get_index(&name).unwrap();
+  let sth0 = rt.get_sth0(indx).unwrap();
+  let sth1 = rt.get_sth1(indx).unwrap();
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  } 
+}
+#[rstest]
+fn test_two_stmt_hash(temp_dir: TempPath){
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  let code = "
+   fun (Test1 x) {
+     (Test1 ~) = #0
+   }
+   fun (Test2 x) {
+     (Test2 ~) = #1
+   }
+   run {
+     ask idx_1 = (GetIdx 'Test1');
+     dup idx_11 idx_12 = idx_1;
+     ask idx_2 = (GetIdx 'Test2');
+     dup idx_21 idx_22 = idx_2;
+     ask h0 = (GetStmHash0 idx_11);
+     ask h1 = (GetStmHash1 idx_12);
+     ask h2 = (GetStmHash0 idx_21);
+     ask h3 = (GetStmHash1 idx_22);
+     (Done (T4 h0 h1 h2 h3))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name1 = Name::from_str("Test1").unwrap();
+  let indx1 = rt.get_index(&name1).unwrap();
+  let name2 = Name::from_str("Test2").unwrap();
+  let indx2 = rt.get_index(&name2).unwrap();
+  let sth0 = rt.get_sth0(indx1).unwrap();
+  let sth1 = rt.get_sth1(indx1).unwrap();
+  let sth2 = rt.get_sth0(indx2).unwrap();
+  let sth3 = rt.get_sth1(indx2).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  } 
+}
+
+#[rstest]
+fn test_stmt_hash_after_commit(temp_dir: TempPath){
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  let code = "
+   fun (Test x) {
+     (Test ~) = #0
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  rt.open();
+  rt.commit();
+  rt.open();
+  rt.commit(); //two ticks just to be safe
+  let code = "
+    run {
+     ask idx = (GetIdx 'Test');
+     dup id0 id1 = idx; 
+     ask h0  = (GetStmHash0 id0);
+     ask h1  = (GetStmHash1 id1);
+     (Done (T2 h0 h1))
+   }
+  ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  let name = Name::from_str("Test").unwrap();
+  let indx = rt.get_index(&name).unwrap();
+  let sth0 = rt.get_sth0(indx).unwrap();
+  let sth1 = rt.get_sth1(indx).unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
+  } 
+}
+
+#[rstest]
+fn test_name_sanitizing(temp_dir: TempPath) {
+  let mut rt = init_runtime(&temp_dir.path.clone());
+  rt.open();
+  let code = "
+   fun (Test x) {
+     (Test ~) = (Done #5)
+   }
+
+   run {
+     dup n1 n2 = 'Test';
+     ask z1 = (Call n1 {T0});
+     ask z2 = (Call n2 {T0});
+     (Done (T2 z1 z2))
+   }
+   ";
+  let results = rt.run_statements_from_code(code, false, true);
+  rt.commit();
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, .. } = result_term {
+    assert_eq!(format!("(T2 #5 #5)"), view_term(&done_term));
+  } else {
+    panic!("Wrong result");
   }
 }
 
@@ -377,12 +587,15 @@ proptest! {
   #[test]
   #[ignore = "slow"]
   fn serialize_deserialize_heap(heap in heap()) {
-    let mut h1 = heap;
-    let s1 = format!("{:?}", h1);
-    let a = h1.serialize();
-    h1.deserialize(&a);
-    let s2 = format!("{:?}", h1);
-    assert_eq!(s1, s2);
+    let h1 = heap;
+    let path = temp_dir();
+    h1.serialize(&path.path, false).unwrap();
+    if let Ok(h2) = Heap::deserialize(h1.uuid, &path.path) {
+        assert_eq!(h1, h2);
+    }
+    else {
+        panic!("Could not deserialize")
+    }
   }
 }
 

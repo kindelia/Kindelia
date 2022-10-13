@@ -12,6 +12,7 @@ pub mod net;
 pub mod node;
 pub mod util;
 pub mod config;
+pub mod persistence;
 
 #[cfg(feature = "events")]
 pub mod events;

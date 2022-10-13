@@ -257,7 +257,7 @@ where
     args: [term.clone()].to_vec(),
   };
   let stmt = Statement::Run { expr: term, sign: None };
-  let result = rt.run_statement(&stmt, false, true).unwrap();
+  let result = rt.run_statement(&stmt, false, true, None).unwrap();
 
   if let StatementInfo::Run { done_term, .. } = result {
     action(&done_term)

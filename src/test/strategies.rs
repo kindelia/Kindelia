@@ -4,9 +4,9 @@ use crate::{
   crypto,
   common::Name,
   hvm::{
-    init_map, Arits, CompFunc, CompRule, Func, Funcs,
+    init_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
     Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
-    SerializedHeap, Statement, Store, Term, Var, U120,
+    Statement, Store, Term, Var, U120, Indxs,
   },
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
@@ -127,6 +127,9 @@ pub fn statement() -> impl Strategy<Value = Statement> {
       .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
 }
+pub fn hash() -> impl Strategy<Value = crypto::Hash> {
+  (vec(any::<u8>(), 32)).prop_map(|h| crypto::Hash(h.try_into().unwrap()))
+}
 
 pub fn nodes() -> impl Strategy<Value = Nodes> {
   (map(any::<u128>())).prop_map(|m| Nodes { nodes: m })
@@ -154,6 +157,12 @@ pub fn arits() -> impl Strategy<Value = Arits> {
 
 pub fn ownrs() -> impl Strategy<Value = Ownrs> {
   map(any::<u128>()).prop_map(|m| Ownrs { ownrs: m })
+}
+pub fn indxs() -> impl Strategy<Value = Indxs> {
+  map(any::<u128>()).prop_map(|m| Indxs { indxs: m })
+}
+pub fn hashs() -> impl Strategy<Value = Hashs> {
+  map(hash()).prop_map(|m| Hashs { stmt_hashes: m })
 }
 
 pub fn var() -> impl Strategy<Value = Var> {
@@ -199,6 +208,8 @@ pub fn heap() -> impl Strategy<Value = Heap> {
     arits(),
     ownrs(),
     funcs(),
+    indxs(),
+    hashs(),
   )
     .prop_map(
       |(
@@ -210,11 +221,15 @@ pub fn heap() -> impl Strategy<Value = Heap> {
         arit,
         ownr,
         file,
+        indx,
+        hash
       )| Heap {
         mcap,
         disk,
         arit,
         ownr,
+        hash,
+        indx,
         file: Funcs { funcs: init_map() }, // TODO, fix?
         uuid,
         memo,
