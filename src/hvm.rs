@@ -483,6 +483,8 @@ pub enum RuntimeError {
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
   NameTooBig { numb: u128 },
+  TermIsNotLinear { term: Term, var: Name },
+  TermExceedsMaxDepth,
   EffectFailure(EffectFailure),
 }
 
@@ -1978,9 +1980,7 @@ impl Runtime {
         if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
-        if !self.check_func(&func) {
-          return error(self, "fun", format!("Invalid function '{}'.", name));
-        }
+        handle_runtime_err(self, "fun", self.check_func(&func))?; 
         let func = compile_func(func, true);
         if func.is_none() {
           return error(self, "fun", format!("Invalid function {}.", name));
@@ -2016,9 +2016,7 @@ impl Runtime {
         let mana_lim = self.get_mana_limit();
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit();
-        if !self.check_term(expr) {
-          return error(self, "run", format!("Invalid term."));
-        }
+        handle_runtime_err(self, "run", self.check_term(&expr))?; 
         let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
@@ -2081,64 +2079,63 @@ impl Runtime {
     Ok(res)
   }
 
-  pub fn check_term(&self, term: &Term) -> bool {
-    return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
+  pub fn check_term(&self, term: &Term) -> Result<(), RuntimeError> {
+    check_linear(term)?;
+    self.check_term_depth(term, 0)?;
+    Ok(())
   }
 
-  pub fn check_func(&self, func: &Func) -> bool {
+  pub fn check_func(&self, func: &Func) -> Result<(), RuntimeError> {
     for rule in &func.rules {
-      if !self.check_term(&rule.lhs) || !self.check_term(&rule.rhs) {
-        return false;
-      }
+      self.check_term(&rule.lhs)?;
+      self.check_term(&rule.rhs)?;
     }
-    return true;
+    Ok(())
   }
 
-  pub fn check_term_depth(&self, term: &Term, depth: u128) -> bool {
+  pub fn check_term_depth(&self, term: &Term, depth: u128) -> Result<(), RuntimeError> {
     if depth > MAX_TERM_DEPTH {
-      return false;
+      return Err(RuntimeError::TermExceedsMaxDepth);
+      // this is the stupidest clone of all time, it is a huge waste
+      // but receivin a borrow in an enum is boring
     } else {
       match term {
         Term::Var { name } => {
-          return true;
+          return Ok(());
         },
         Term::Dup { nam0, nam1, expr, body } => {
-          let expr_check = self.check_term_depth(expr, depth + 1);
-          let body_check = self.check_term_depth(body, depth + 1);
-          return expr_check && body_check;
+          self.check_term_depth(expr, depth + 1)?;
+          self.check_term_depth(body, depth + 1)?;
+          return Ok(());
         }
         Term::Lam { name, body } => {
-          let body_check = self.check_term_depth(body, depth + 1);
-          return body_check;
+          self.check_term_depth(body, depth + 1)?;
+          return Ok(());
         }
         Term::App { func, argm } => {
-          let func_check = self.check_term_depth(func, depth + 1);
-          let argm_check = self.check_term_depth(argm, depth + 1);
-          return func_check && argm_check;
+          self.check_term_depth(func, depth + 1)?;
+          self.check_term_depth(argm, depth + 1)?;
+          return Ok(());
         }
         Term::Ctr { name, args } => {
           for arg in args {
-            if !self.check_term_depth(arg, depth + 1) {
-              return false;
-            }
+            self.check_term_depth(arg, depth + 1)?;
           }
-          return true;
+          return Ok(());
         }
         Term::Fun { name, args } => {
           for arg in args {
-            if !self.check_term_depth(arg, depth + 1) {
-              return false;
-            }
+            self.check_term_depth(arg, depth + 1)?;
           }
-          return true;
+          return Ok(());
         }
         Term::Num { numb } => {
-          return true;
+          return Ok(());
         }
         Term::Op2 { oper, val0, val1 } => {
-          let val0_check = self.check_term_depth(val0, depth + 1);
-          let val1_check = self.check_term_depth(val1, depth + 1);
-          return val0_check && val1_check;
+          self.check_term_depth(val0, depth + 1)?;
+          self.check_term_depth(val1, depth + 1)?;
+          return Ok(());
         }
       }
     }
@@ -2930,53 +2927,55 @@ fn count_uses(term: &Term, name: Name) -> u128 {
 // Checks if:
 // - Every non-erased variable is used exactly once
 // - Every erased variable is never used
-pub fn is_linear(term: &Term) -> bool {
+pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
   // println!("{}", view_term(term));
   let res = match term {
     Term::Var { name: var_name } => {
       // TODO: check unbound variables
-      true
+      Ok(())
     }
     Term::Dup { nam0, nam1, expr, body } => {
-      let expr_linear = is_linear(expr);
-      let body_linear
-        =  (*nam0 == Name::NONE || count_uses(body, *nam0) == 1)
-        && (*nam1 == Name::NONE || count_uses(body, *nam1) == 1)
-        && is_linear(body);
-      expr_linear && body_linear
+      check_linear(expr)?;
+      check_linear(body)?;
+      if !(*nam0 == Name::NONE || count_uses(body, *nam0) == 1) {
+        return Err(RuntimeError::TermIsNotLinear { term: term.clone(), var: *nam0 });
+      }
+      if !(*nam1 == Name::NONE || count_uses(body, *nam1) == 1) {
+        return Err(RuntimeError::TermIsNotLinear {term : term.clone(), var: *nam0 });
+      }
+      Ok(())
     }
     Term::Lam { name, body } => {
-      let body_linear
-        =  (*name == Name::NONE || count_uses(body, *name) == 1)
-        && is_linear(body);
-      body_linear
+      check_linear(body)?;
+      if !(*name == Name::NONE || count_uses(body, *name) == 1) {
+        return Err(RuntimeError::TermIsNotLinear {term : term.clone(), var: *name });
+      }
+      Ok(())
     }
     Term::App { func, argm } => {
-      let func_linear = is_linear(func);
-      let argm_linear = is_linear(argm);
-      func_linear && argm_linear
+      check_linear(func)?;
+      check_linear(argm)?;
+      Ok(())
     }
     Term::Ctr { name: ctr_name, args } => {
-      let mut linear = true;
       for arg in args {
-        linear = linear && is_linear(arg);
+        check_linear(arg)?;
       }
-      linear
+      Ok(())
     }
     Term::Fun { name: fun_name, args } => {
-      let mut linear = true;
       for arg in args {
-        linear = linear && is_linear(arg);
+        check_linear(arg)?;
       }
-      linear
+      Ok(())
     }
     Term::Num { numb } => {
-      true
+      Ok(())
     }
     Term::Op2 { oper, val0, val1 } => {
-      let val0_linear = is_linear(val0);
-      let val1_linear = is_linear(val1);
-      val0_linear && val1_linear
+      check_linear(val0)?;
+      check_linear(val1)?;
+      Ok(())
     }
   };
 
@@ -4113,22 +4112,24 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::NotEnoughMana => "Not enough mana".to_string(),
     RuntimeError::NotEnoughSpace => "Not enough space".to_string(),
     RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
-    RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
-    RuntimeError::TermIsInvalidNumber { term } => format!("'{}' is not a number", show_ptr(term)),
+    RuntimeError::TermExceedsMaxDepth => "Term exceeds maximum depth.".to_string(),
+    RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'.", name),
+    RuntimeError::TermIsInvalidNumber { term } => format!("'{}' is not a number.", show_ptr(term)),
     RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
-    RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist", stmt_index),
-    RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
+    RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist.", stmt_index),
+    RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}.", name, expected, got),
     RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
+    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", view_term(&term), var),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
-        EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
-        EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'", show_addr(addr)),
+        EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
+        EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'.", show_addr(addr)),
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
           let pos = get_val(arg);
-          format!("'{}' tried to call '{}' with invalid argument '{}'", show_addr(caller), show_addr(callee), show_ptr(arg))
+          format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg))
         },
-        EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor", name),
-        EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term", show_ptr(ptr)),
+        EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
+        EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term.", show_ptr(ptr)),
     }
   }
 }
