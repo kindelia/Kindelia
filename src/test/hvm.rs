@@ -10,7 +10,7 @@ use rstest_reuse::{apply, template};
 use crate::common::Name;
 use crate::hvm::{
   self, init_map, read_statements, readback_term, show_term, view_statements,
-  view_term, Rollback, Runtime, StatementInfo, Term, U120,
+  view_term, Rollback, Runtime, StatementInfo, Term, U120, Heap
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
@@ -203,7 +203,7 @@ fn one_hundred_snapshots(temp_dir: TempPath) {
 // Statement Indexes
 #[rstest]
 fn test_simple_idx(temp_dir: TempPath){
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   rt.open();
   rt.commit();
   rt.open();
@@ -238,7 +238,7 @@ fn test_simple_idx(temp_dir: TempPath){
 }
 #[rstest]
 fn test_genesis_idx(temp_dir: TempPath){
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    run {
      ask T2_idx = (GetIdx 'T2');
@@ -257,7 +257,7 @@ fn test_genesis_idx(temp_dir: TempPath){
 }
 #[rstest]
 fn test_thousand_idx(temp_dir: TempPath) {
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   for i in 0..1000 {
     rt.open();
     rt.commit();
@@ -283,7 +283,7 @@ fn test_thousand_idx(temp_dir: TempPath) {
   
 #[rstest]
 fn test_stmt_hash(temp_dir: TempPath){
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   rt.open();
   let code = "
    fun (Test x) {
@@ -311,7 +311,7 @@ fn test_stmt_hash(temp_dir: TempPath){
 }
 #[rstest]
 fn test_two_stmt_hash(temp_dir: TempPath){
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    fun (Test1 x) {
      (Test1 ~) = #0
@@ -350,7 +350,7 @@ fn test_two_stmt_hash(temp_dir: TempPath){
 
 #[rstest]
 fn test_stmt_hash_after_commit(temp_dir: TempPath){
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    fun (Test x) {
      (Test ~) = #0
@@ -385,7 +385,7 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
 
 #[rstest]
 fn test_name_sanitizing(temp_dir: TempPath) {
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path.clone());
   rt.open();
   let code = "
    fun (Test x) {
