@@ -3,6 +3,8 @@ name: Continuous Benchmark
 on:
   workflow_dispatch:
   push:
+    branches:
+      - dev
 
 jobs:
   bench:
