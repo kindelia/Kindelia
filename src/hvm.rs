@@ -3100,9 +3100,6 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
 
   // If there are no rules, return none
   if rules.len() == 0 {
-    if debug {
-      println!("  - failed to build function: no rules");
-    }
     return Err(RuntimeError::DefinitionError(DefinitionError::FunctionHasNoRules));
   }
 
@@ -3111,9 +3108,6 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   if let Term::Fun { args, .. } = &rules[0].lhs {
     arity = args.len() as u128;
   } else {
-    if debug {
-      println!("  - failed to build function: left-hand side must be !(Fun ...)");
-    }
     return Err(RuntimeError::DefinitionError(DefinitionError::LHSIsNotAFunction));
     // TODO: remove this error, should be checked at compile time
   }
