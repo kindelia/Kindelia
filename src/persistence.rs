@@ -174,7 +174,7 @@ impl DiskSer for CompFunc {
       let func = &Func::proto_deserialized(&bit_vec::BitVec::from_bytes(&buf))
         .ok_or_else(|| Error::from(ErrorKind::InvalidData))?; // invalid data? which error is better?
       let func = compile_func(func, false)
-        .ok_or_else(|| Error::from(ErrorKind::InvalidData))?;
+        .map_err(|_| Error::from(ErrorKind::InvalidData))?; // TODO: return error in deserialization? 
       Ok(Some(func))
     }
     else {

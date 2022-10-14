@@ -20,7 +20,7 @@ use crate::hvm::{EXT_SIZE, U120};
 /// 'a' - 'z' => 37 to 62
 /// '_'       => 63
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
 pub struct Name(u128);
 

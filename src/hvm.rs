@@ -486,8 +486,21 @@ pub enum RuntimeError {
   TermIsNotLinear { term: Term, var: Name },
   TermExceedsMaxDepth,
   EffectFailure(EffectFailure),
+  DefinitionError(DefinitionError)
 }
-
+#[derive(Debug, Clone)]
+pub enum DefinitionError {
+  FunctionHasNoRules,
+  LHSIsNotAFunction, // TODO: check at compile time
+  LHSArityMismatch { rule_index: usize, expected: usize, got: usize }, // TODO: check at compile time
+  LHSNotConstructor { rule_index: usize }, // TODO: check at compile time
+  VarIsUsedTwiceInDefinition { name : Name, rule_index: usize },
+  VarIsNotLinearInBody { name : Name, rule_index: usize },
+  VarIsNotUsed { name : Name, rule_index: usize },
+  NestedMatch { rule_index: usize },
+  UnsupportedMatch { rule_index: usize },
+  
+}
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
@@ -1980,12 +1993,9 @@ impl Runtime {
         if !(self.can_deploy(subj, name) || sudo) {
           return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
         }
-        handle_runtime_err(self, "fun", check_func(&func))?; 
+        handle_runtime_err(self, "fun", check_func(&func))?;
         let func = compile_func(func, true);
-        if func.is_none() {
-          return error(self, "fun", format!("Invalid function {}.", name));
-        }
-        let func = func.unwrap();
+        let func = handle_runtime_err(self, "fun", func)?;
         let name = *name;
         self.set_arity(name, args.len() as u128);
         self.define_function(name, func, stmt_index, hash);
@@ -3085,7 +3095,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 }
 
 /// Given a Func (a vector of rules, lhs/rhs pairs), builds the CompFunc object
-pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
+pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> {
   let rules = &func.rules;
 
   // If there are no rules, return none
@@ -3093,7 +3103,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     if debug {
       println!("  - failed to build function: no rules");
     }
-    return None;
+    return Err(RuntimeError::DefinitionError(DefinitionError::FunctionHasNoRules));
   }
 
   // Find the function arity
@@ -3104,7 +3114,8 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     if debug {
       println!("  - failed to build function: left-hand side must be !(Fun ...)");
     }
-    return None;
+    return Err(RuntimeError::DefinitionError(DefinitionError::LHSIsNotAFunction));
+    // TODO: remove this error, should be checked at compile time
   }
 
   // The resulting vector
@@ -3120,15 +3131,20 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     // Validates that:
     // - the same lhs variable names aren't defined twice or more
     // - lhs variables are used linearly on the rhs
-    let mut seen : HashSet<u128> = HashSet::new();
-    fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
+    let mut seen : HashSet<Name> = HashSet::new();
+    fn check_var(name: Name, body: &Term, seen: &mut HashSet<Name>, rule_index: usize) -> Result<(), RuntimeError> {
       if seen.contains(&name) {
-        return false;
-      } else if name == Name::_NONE {
-        return true;
+        return Err(RuntimeError::DefinitionError(DefinitionError::VarIsUsedTwiceInDefinition { name, rule_index}));
+      } else if *name == Name::_NONE {
+        return Ok(());
       } else {
         seen.insert(name);
-        return count_uses(body, Name::new_unsafe(name)) == 1;
+        let uses = count_uses(body, name);
+        match uses {
+          0 => Err(RuntimeError::DefinitionError(DefinitionError::VarIsNotUsed { name, rule_index })),
+          1 => Ok(()),
+          _ => Err(RuntimeError::DefinitionError(DefinitionError::VarIsNotLinearInBody { name, rule_index }))
+        }
       }
     }
 
@@ -3141,10 +3157,8 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
 
       // If there is an arity mismatch, return None
       if args.len() as u128 != arity {
-        if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", rule_index);
-        }
-        return None;
+        return Err(RuntimeError::DefinitionError(DefinitionError::LHSArityMismatch { rule_index, expected: arity as usize, got: args.len() }));
+        // TODO: should check at compile time, remove this error
       }
 
       // For each lhs argument
@@ -3160,20 +3174,11 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
             for j in 0 .. arg_args.len() as u128 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                if !check_var(*name, &rule.rhs, &mut seen) {
-                  if debug {
-                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                  }
-                  return None;
-                } else {
-                  vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
-                }
+                check_var(name, &rule.rhs, &mut seen, rule_index)?;
+                vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
               // Otherwise..
               } else {
-                if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                }
-                return None; // return none, because we don't allow nested matches
+                return Err(RuntimeError::DefinitionError(DefinitionError::NestedMatch { rule_index })); // return none, because we don't allow nested matches
               }
             }
           }
@@ -3184,31 +3189,19 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            if !check_var(**arg_name, &rule.rhs, &mut seen) {
-              if debug {
-                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", arg_name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-              }
-              return None;
-            } else {
-              vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
-              cond.push(Var(0)); // it has no matching condition
-            }
+            check_var(*arg_name, &rule.rhs, &mut seen, rule_index)?;
+            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
+            cond.push(Var(0)); // it has no matching condition
           }
           _ => {
-            if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-            }
-            return None;
+            return Err(RuntimeError::DefinitionError(DefinitionError::UnsupportedMatch { rule_index } ));
           }
         }
       }
 
     // If lhs isn't a Ctr, return None
     } else {
-      if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.lhs), view_term(&rule.rhs));
-      }
-      return None;
+      return Err(RuntimeError::DefinitionError(DefinitionError::LHSNotConstructor { rule_index }))
     }
 
     // Creates the rhs body
@@ -3226,7 +3219,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     }
   }
 
-  return Some(CompFunc {
+  return Ok(CompFunc {
     func: func.clone(),
     arity,
     redux,
@@ -4133,6 +4126,18 @@ fn show_runtime_error(err: RuntimeError) -> String {
         EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
         EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term.", show_ptr(ptr)),
     }
+  RuntimeError::DefinitionError(def_error) =>
+      match def_error {
+        DefinitionError::FunctionHasNoRules => "Function has no rules.".to_string(),
+        DefinitionError::LHSIsNotAFunction => "Left hand side of function definition is not a function".to_string(),
+        DefinitionError::LHSArityMismatch { rule_index, expected, got } => format!("Arity mismatch at left-hand side of rule {}: expected {} arguments but got {}.", rule_index, expected, got),
+        DefinitionError::LHSNotConstructor { rule_index } => format!("Left-hand side of rule {} is not a constructor.", rule_index),
+        DefinitionError::VarIsUsedTwiceInDefinition { name, rule_index } => format!("'{}' is used twice in left-hand side of rule.", name),
+        DefinitionError::VarIsNotLinearInBody { name, rule_index } => format!("'{}' is not used linearly in body, in rule '{}'", name, rule_index),
+        DefinitionError::VarIsNotUsed { name, rule_index } => format!("'{}' is not used in rule {}.", name, rule_index),
+        DefinitionError::NestedMatch { rule_index } => format!("Nested pattern matching is not supported (at rule {}).", rule_index),
+        DefinitionError::UnsupportedMatch { rule_index } => format!("Unsupported match in rule {}. Only constructor, variable and number pattern matching are supported.", rule_index),
+      }
   }
 }
 
@@ -4770,13 +4775,13 @@ pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
 pub fn read_func(code: &str) -> ParseResult<CompFunc> {
   let (code, rules) = read_until(code, '\0', read_rule)?;
   let func = Func { rules };
-  if let Some(func) = compile_func(&func, false) {
-    return Ok((code, func));
-  } else {
-    return Err(ParseErr { 
-      code: code.to_string(), 
-      erro: "Couldn't parse function".to_string()
-    });
+  let comp_func = compile_func(&func, false);
+  match comp_func {
+    Ok(func) => Ok((code, func)),
+    Err(def_err) => Err(ParseErr {
+      code: code.to_string(),
+      erro: show_runtime_error(def_err)
+    })
   }
 }
 
