@@ -3,14 +3,7 @@ from dataclasses import dataclass
 from json import dumps
 import re
 import subprocess
-
-
-@dataclass
-class RunConfig:
-    n: int
-    warmup: int
-    command: str
-    branches: list[str]
+from typing import Callable
 
 
 def exec(command: str, capture_output=True) -> str:
@@ -59,15 +52,41 @@ def get_bench_name(line: str) -> str | None:
             return None
 
 
+@dataclass
+class Result:
+    mean: float
+    deviation: float
+
+    def __iter__(self):
+        return iter(self)
+
+
+def reduce_result(l: list[Result], init: float, f: Callable[[Result, float], float]):
+    if len(l) == 0:
+        return init
+    else:
+        return f(l[0], reduce_result(l[1:], init, f))
+
+
+@dataclass
+class RunConfig:
+    n: int
+    warmup: int
+    command: str
+    branches: list[str]
+
+
 def run(config: RunConfig):
+    def a(x, y): return x+y
     results = {}
     for branch in config.branches:
-        print(branch)
+        exec(f"git checkout {branch}")
+        print(f"On branch {branch}")
         for i in range(config.warmup):
             print(f"Executing warmup {i} for branch {branch}")
             exec(config.command)
 
-        branch_results = {}
+        branch_results: dict[str, list[Result]] = {}
 
         for i in range(config.n):
             print(f"Executing {i} for branch {branch}")
@@ -84,13 +103,39 @@ def run(config: RunConfig):
                 name = names[i]
                 mean = means[i]
                 deviation = deviations[i]
-                branch_results[name] = {
-                    'mean': mean,
-                    'deviation': deviation
-                }
 
-        results[branch] = branch_results
-    
+                if name is None or mean is None or deviation is None:
+                    raise TypeError
+
+                if name in branch_results:
+                    branch_results[name].append(
+                        Result(mean=mean,
+                               deviation=deviation)
+                    )
+                else:
+                    branch_results[name] = [
+                        Result(mean=mean,
+                               deviation=deviation)
+                    ]
+
+        branch_result = {}
+        for test in branch_results.keys():
+            test_results = branch_results[test]
+            sum_mean: float = reduce_result(test_results, 0,
+                                            lambda r1, acc: r1.mean + acc)
+            sum_deviation: float = reduce_result(test_results, 0,
+                                                 lambda r1, acc: r1.deviation + acc)
+
+            mean_means = sum_mean / config.n
+            mean_deviation = sum_deviation / config.n
+
+            branch_result[test] = {
+                'mean': mean_means,
+                'deviation': mean_deviation
+            }
+
+        results[branch] = branch_result
+
     print(dumps(results))
 
 
@@ -103,15 +148,11 @@ def main():
     )
 
     parser.add_argument(
-        "--warmup", type=int, default=2
+        "--warmup", type=int, default=1
     )
 
-    # parser.add_argument(
-    #     "--command", type=str, default="cargo bench"
-    # )
-
     parser.add_argument(
-        "--branches", type=list[str], default=["dev", "master"]
+        "--branches", type=str, default=["event-bench", "testing"], nargs='+'
     )
 
     command = "cargo +nightly bench -- --nocapture"
