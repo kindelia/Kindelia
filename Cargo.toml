@@ -67,5 +67,6 @@ futures-util = { version = "0.3.21", optional = true }
 proptest = "1.0.0"
 rstest = "0.15.0"
 rstest_reuse = "0.4.0"
+assert_cmd = "1.0.1"
 httpmock = "0.6.6"
 petgraph = "0.6.2"
