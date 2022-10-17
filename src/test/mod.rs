@@ -16,3 +16,4 @@ mod hasher;
 mod hvm;
 mod cli;
 mod network;
+mod node;

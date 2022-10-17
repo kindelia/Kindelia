@@ -543,6 +543,22 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
   return Block { prev, time, meta, body, hash };
 }
 
+/// Puts transaction inside `body_vec` if space is suficient
+pub fn build_body_from_transaction(
+  transaction: &Transaction,
+  body_vec: &mut Vec<u8>,
+) -> Result<(), String> {
+  let tx_len = transaction.data.len();
+  let len_info = transaction.encode_length();
+  if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE {
+    return Err("No enough space in block".to_string());
+  }
+  body_vec.push(len_info.0);
+  body_vec.push(len_info.1);
+  body_vec.extend_from_slice(&transaction.data);
+  Ok(())
+}
+
 /// Converts a block body to a vector of transactions.
 pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
@@ -665,13 +681,15 @@ pub fn miner_loop(
 // ----
 
 impl<C: ProtoComm> Node<C> {
-  fn new(
+  pub fn new(
     data_path: PathBuf,
     network_id: u64,
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEventType>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
+      events::NodeEventType,
+    >,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
 
@@ -1441,16 +1459,14 @@ impl<C: ProtoComm> Node<C> {
       if tx_len == 0 {
         continue;
       }
-      let len_info = transaction.encode_length(); // number we will store as the length
-      if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE {
-        break;
-      }
       if tx_count + 1 > 255 {
         break;
       }
-      body_vec.push(len_info.0);
-      body_vec.push(len_info.1);
-      body_vec.extend_from_slice(&transaction.data);
+      if let Err(_) =
+        build_body_from_transaction(transaction, &mut body_vec)
+      {
+        break;
+      }
       tx_count += 1;
     }
     body_vec[0] = tx_count as u8;
@@ -1641,8 +1657,11 @@ pub fn start<C: ProtoComm + 'static>(
   #[cfg(feature = "events")]
   let event_tx = {
     let addr = comm.get_addr();
-    let (event_tx, event_thrds) =
-      events::spawn_event_handlers(config.ws.unwrap_or_default(), config.ui, addr);
+    let (event_tx, event_thrds) = events::spawn_event_handlers(
+      config.ws.unwrap_or_default(),
+      config.ui,
+      addr,
+    );
     threads.extend(event_thrds);
     event_tx
   };
