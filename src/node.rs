@@ -1131,7 +1131,7 @@ impl<C: ProtoComm> Node<C> {
 
   pub fn get_reg_info(&self, name: Name) -> Option<RegInfo> {
     let ownr = self.runtime.get_owner(&name)?;
-    let ownr = Name::from_u128_unchecked(ownr);
+    let ownr = Name::from(ownr);
     let pred = |c: &Name| c.to_string().starts_with(&format!("{}.", name));
     let ctrs: Vec<Name> =
       self.runtime.get_all_ctr().into_iter().filter(pred).collect();
@@ -1202,7 +1202,7 @@ impl<C: ProtoComm> Node<C> {
         let mut funcs: HashSet<u128> = HashSet::new();
         self.runtime.reduce_with(&mut funcs, |acc, heap| {
           for func in heap.disk.links.keys() {
-            acc.insert(*func);
+            acc.insert(**func);
           }
         });
         handle_ans_err("GetFunctions", tx.send(funcs));

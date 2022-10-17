@@ -2,11 +2,11 @@ use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
   crypto,
-  common::Name,
+  common::{Name, U120},
   hvm::{
-    init_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
-    Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
-    Statement, Store, Term, Var, U120, Indxs,
+    init_map, init_name_map, init_u120_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
+    Heap, Map, NameMap, U120Map,  Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
+    Statement, Store, Term, Var, Indxs,
   },
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
@@ -147,20 +147,45 @@ pub fn map<A: std::fmt::Debug>(
   })
 }
 
+pub fn name_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = NameMap<A>> {
+  vec((name(), s), 0..10).prop_map(|v| {
+    let mut m = init_name_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
+pub fn u120_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = U120Map<A>> {
+  vec((u120(), s), 0..10).prop_map(|v| {
+    let mut m = init_u120_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
 pub fn store() -> impl Strategy<Value = Store> {
-  map(any::<u128>()).prop_map(|m| Store { links: m })
+  u120_map(any::<u128>()).prop_map(|m| Store { links: m })
 }
 
 pub fn arits() -> impl Strategy<Value = Arits> {
-  map(any::<u128>()).prop_map(|m| Arits { arits: m })
+  name_map(any::<u128>()).prop_map(|m| Arits { arits: m })
 }
 
 pub fn ownrs() -> impl Strategy<Value = Ownrs> {
-  map(any::<u128>()).prop_map(|m| Ownrs { ownrs: m })
+  name_map(u120()).prop_map(|m| Ownrs { ownrs: m })
 }
 pub fn indxs() -> impl Strategy<Value = Indxs> {
-  map(any::<u128>()).prop_map(|m| Indxs { indxs: m })
+  name_map(any::<u128>()).prop_map(|m| Indxs { indxs: m })
 }
+
 pub fn hashs() -> impl Strategy<Value = Hashs> {
   map(hash()).prop_map(|m| Hashs { stmt_hashes: m })
 }
@@ -186,7 +211,7 @@ pub fn comp_func() -> impl Strategy<Value = CompFunc> {
 }
 
 pub fn funcs() -> impl Strategy<Value = Funcs> {
-  map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
+  name_map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
 }
 
 pub fn heap() -> impl Strategy<Value = Heap> {
@@ -230,7 +255,7 @@ pub fn heap() -> impl Strategy<Value = Heap> {
         ownr,
         hash,
         indx,
-        file: Funcs { funcs: init_map() }, // TODO, fix?
+        file: Funcs { funcs: init_name_map() }, // TODO, fix?
         uuid,
         memo,
         tick,

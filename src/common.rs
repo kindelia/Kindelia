@@ -4,7 +4,166 @@ use std::string::ToString;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hvm::{EXT_SIZE, U120};
+use crate::hvm::EXT_SIZE;
+
+// U120
+
+/// A unsigned 120 bit integer: the native unboxed integer type
+/// of the Kindelia's HVM.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[serde(into = "String", try_from = "&str")]
+pub struct U120(u128);
+
+impl crate::persistence::DiskSer for U120 {
+  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+    let num = u128::disk_deserialize(source)?;
+    match num {
+      None => Ok(None),
+      Some(num) => {
+        if num >> 120 == 0 {
+          Ok(Some(U120(num)))
+        }
+        else {
+          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+        }
+      }
+    }
+  }
+}
+
+impl U120 {
+  pub const ZERO: U120 = U120(0);
+  pub const MAX: U120 = U120((1_u128 << 120) - 1);
+
+  pub fn new(numb: u128) -> Option<Self> {
+    if numb >> 120 == 0 {
+      Some(U120(numb))
+    }
+    else {
+      None
+    }
+  }
+
+  pub fn from_u128_unchecked(numb: u128) -> Self { 
+    debug_assert_eq!(numb >> 120, 0_u128);
+    U120(numb)
+  }
+
+  pub fn wrapping_add(self, other:U120) -> U120 {
+    let res = self.0 + other.0;
+    U120(res & U120::MAX.0)
+  }
+
+  pub fn wrapping_sub(self, other: U120) -> U120 {
+    let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
+    U120::wrapping_add(self, other_complement)
+  }
+
+  // based off of this answer https://stackoverflow.com/a/1815371
+  // maybe this is too much work for an easy function?
+  // idk, maybe there's a better way to do this
+  pub fn wrapping_mul(self, other: U120) -> U120 {
+    const LO_MASK : u128  =  (1 << 60) - 1;
+    let a = self.0;
+    let b = other.0;
+    let a_lo = a & LO_MASK;
+    let a_hi = a >> 60;
+    let b_lo = b & LO_MASK;
+    let b_hi = b >> 60;
+    let s0 = a_lo * b_lo;
+    let s1 = ((a_hi * b_lo) & LO_MASK) << 60;
+    let s2 = ((b_hi * a_lo) & LO_MASK) << 60;
+    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2))
+  }
+
+  // Wrapping div is just normal division, since
+  // self / other is always smaller than self.
+  // warning: this will panic when other is 0.
+  pub fn wrapping_div(self, other: U120) -> U120 {
+    U120(self.0 / other.0)
+  }
+
+  // Wrapping remainder is just normal remainder
+  // given that self % other is always smaller than other
+  // by definition of the modulo operation.
+  pub fn wrapping_rem(self, other: U120) -> U120 {
+    U120(self.0 % other.0)
+  }
+
+  // Wrapping shift left is only defined for
+  // values `other` between 0 and 120. For values bigger than
+  // that, it will wrap the value module 120 before doing the shift.
+  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
+  pub fn wrapping_shl(self, other: U120) -> U120 {
+    U120((self.0 << (other.0 % 120)) & U120::MAX.0)
+  }
+
+  pub fn wrapping_shr(self, other: U120) -> U120 {
+    U120(self.0 >> (other.0 % 120))
+  }
+
+  pub fn to_hex_literal(&self) -> String {
+    format!("#x{:x}", self.0)
+  }
+}
+
+impl std::ops::Deref for U120 {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl TryFrom<u128> for U120 {
+  type Error = String;
+  fn try_from(numb: u128) -> Result<Self, Self::Error> {
+    if numb >> 120 != 0 {
+      Err(format!("Number {} does not fit in 120-bits.", numb))
+    } else {
+      Ok(U120(numb))
+    }
+  }
+}
+
+impl From<Name> for U120 {
+  fn from(num: Name) -> Self {
+    U120(*num)
+  }
+}
+
+impl fmt::Display for U120 {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      write!(f, "{}", self.0)
+  }
+}
+
+impl From<U120> for String {
+  fn from(num: U120) -> Self {
+      num.to_string()
+  }
+}
+
+
+impl TryFrom<&str> for U120 {
+  type Error = String;
+  fn try_from(numb: &str) -> Result<Self, Self::Error> {
+    fn err_msg<E: fmt::Debug>(e: E) -> String {
+      format!("Invalid number string '{:?}'", e)
+    }
+    let (rest, result) = crate::hvm::read_numb(numb).map_err(err_msg)?;
+    if !rest.is_empty() {
+      Err(err_msg(numb))
+    } else {
+      Ok(result)
+    }
+  }
+}
+
+impl crate::NoHashHasher::IsEnabled for U120 {}
 
 // Name
 // ====
@@ -23,6 +182,8 @@ use crate::hvm::{EXT_SIZE, U120};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
 pub struct Name(u128);
+
+impl crate::NoHashHasher::IsEnabled for Name {}
 
 pub fn char_to_code(chr: char) -> Result<u128, String> {
   let num = match chr {
@@ -147,8 +308,8 @@ impl TryFrom<u128> for Name {
 }
 
 impl From<U120> for Name {
-  // FIXME: convert checked
   fn from(num: U120) -> Self {
+    assert!(*num >> Name::MAX_BITS == 0);
     Name(*num)
   }
 }
@@ -173,5 +334,18 @@ impl FromStr for Name {
   type Err = String;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     s.try_into()
+  }
+}
+
+impl crate::persistence::DiskSer for Name {
+  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+    let num = u128::disk_deserialize(source)?;
+    match num {
+      None => Ok(None),
+      Some(num) => Ok(Name::new(num))
+    }
   }
 }

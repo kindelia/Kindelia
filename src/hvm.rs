@@ -259,14 +259,11 @@ use crate::util::{U128_SIZE, mask};
 use crate::util;
 use crate::NoHashHasher::NoHashHasher;
 
-use crate::common::Name;
+use crate::common::{Name, U120};
 use crate::persistence::DiskSer;
 // Types
 // -----
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "&str")]
-pub struct U120(u128);
 
 // This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 // rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
@@ -319,6 +316,8 @@ pub enum Oper {
 
 // A u64 HashMap
 pub type Map<T> = util::U128Map<T>;
+pub type NameMap<T> = util::NameMap<T>;
+pub type U120Map<T> = util::U120Map<T>;
 
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -369,7 +368,7 @@ pub struct CompFunc {
 // It is used to find a function when it is called, in order to apply its rewrite rules.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Funcs {
-  pub funcs: Map<Arc<CompFunc>>,
+  pub funcs: NameMap<Arc<CompFunc>>,
 }
 
 // TODO: arity with no u128
@@ -378,26 +377,26 @@ pub struct Funcs {
 // It is used in many places to find the arity (argument count) of functions and constructors.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Arits {
-  pub arits: Map<u128>,
+  pub arits: NameMap<u128>,
 }
 
 // A map of `FuncID -> FuncID
 // Stores the owner of the 'FuncID' a namespace.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ownrs {
-  pub ownrs: Map<u128>,
+  pub ownrs: NameMap<U120>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Indxs {
-  pub indxs: Map<u128>
+  pub indxs: NameMap<u128>
 }
 
 // A map of `FuncID -> Ptr`
 // It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Store {
-  pub links: Map<Ptr>,
+  pub links: U120Map<Ptr>,
 }
 
 /// A global statement that alters the state of the blockchain
@@ -551,7 +550,7 @@ pub enum StatementInfo {
     #[serde_as(as = "DisplayFromStr")]
     end_size: u128,
   },
-  Reg { name: Name, ownr: u128 },
+  Reg { name: Name, ownr: U120 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -804,6 +803,14 @@ pub fn init_map<A>() -> Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
+pub fn init_name_map<A>() -> NameMap<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+pub fn init_u120_map<A>() -> U120Map<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
 // Address
 // -------
 
@@ -817,122 +824,6 @@ fn show_addr(addr: U120) -> String {
   addr.to_hex_literal()
 }
 
-// U120
-// ====
-
-impl U120 {
-  pub const ZERO: U120 = U120(0);
-  pub const MAX: U120 = U120(2_u128.pow(120) - 1);
-
-  pub fn wrapping_add(self, other:U120) -> U120 {
-    let res = self.0 + other.0;
-    U120(res & U120::MAX.0)
-  }
-
-  pub fn wrapping_sub(self, other: U120) -> U120 {
-    let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
-    U120::wrapping_add(self, other_complement)
-  }
-
-  // based off of this answer https://stackoverflow.com/a/1815371
-  // maybe this is too much work for an easy function?
-  // idk, maybe there's a better way to do this
-  pub fn wrapping_mul(self, other: U120) -> U120 {
-    const LO_MASK : u128  =  (1 << 60) - 1;
-    let a = self.0;
-    let b = other.0;
-    let a_lo = a & LO_MASK;
-    let a_hi = a >> 60;
-    let b_lo = b & LO_MASK;
-    let b_hi = b >> 60;
-    let s0 = a_lo * b_lo;
-    let s1 = ((a_hi * b_lo) & LO_MASK) << 60;
-    let s2 = ((b_hi * a_lo) & LO_MASK) << 60;
-    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2))
-  }
-
-  // Wrapping div is just normal division, since
-  // self / other is always smaller than self.
-  // warning: this will panic when other is 0.
-  pub fn wrapping_div(self, other: U120) -> U120 {
-    U120(self.0 / other.0)
-  }
-
-  // Wrapping remainder is just normal remainder
-  // given that self % other is always smaller than other
-  // by definition of the modulo operation.
-  pub fn wrapping_rem(self, other: U120) -> U120 {
-    U120(self.0 % other.0)
-  }
-
-  // Wrapping shift left is only defined for
-  // values `other` between 0 and 120. For values bigger than
-  // that, it will wrap the value module 120 before doing the shift.
-  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
-  pub fn wrapping_shl(self, other: U120) -> U120 {
-    U120((self.0 << (other.0 % 120)) & U120::MAX.0)
-  }
-
-  pub fn wrapping_shr(self, other: U120) -> U120 {
-    U120(self.0 >> (other.0 % 120))
-  }
-
-  pub fn to_hex_literal(&self) -> String {
-    format!("#x{:x}", self.0)
-  }
-}
-
-impl std::ops::Deref for U120 {
-  type Target = u128;
-  fn deref(&self) -> &Self::Target {
-    &self.0
-  }
-}
-
-impl TryFrom<u128> for U120 {
-  type Error = String;
-  fn try_from(numb: u128) -> Result<Self, Self::Error> {
-    if numb >> 120 != 0 {
-      Err(format!("Number {} does not fit in 120-bits.", numb))
-    } else {
-      Ok(U120(numb))
-    }
-  }
-}
-
-impl From<Name> for U120 {
-  fn from(num: Name) -> Self {
-    U120(*num)
-  }
-}
-
-impl fmt::Display for U120 {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-      write!(f, "{}", self.0)
-  }
-}
-
-impl From<U120> for String {
-  fn from(num: U120) -> Self {
-      num.to_string()
-  }
-}
-
-
-impl TryFrom<&str> for U120 {
-  type Error = String;
-  fn try_from(numb: &str) -> Result<Self, Self::Error> {
-    fn err_msg<E: fmt::Debug>(e: E) -> String {
-      format!("Invalid number string '{:?}'", e)
-    }
-    let (rest, result) = read_numb(numb).map_err(err_msg)?;
-    if !rest.is_empty() {
-      Err(err_msg(numb))
-    } else {
-      Ok(result)
-    }
-  }
-}
 
 // Oper
 // ====
@@ -1135,10 +1026,10 @@ impl Heap {
     return self.memo.read(idx);
   }
   fn write_disk(&mut self, name: U120, val: Ptr) {
-    return self.disk.write(*name, val);
+    return self.disk.write(name, val);
   }
   fn read_disk(&self, name: U120) -> Option<Ptr> {
-    return self.disk.read(*name);
+    return self.disk.read(name);
   }
   fn write_file(&mut self, name: Name, fun: Arc<CompFunc>) {
     return self.file.write(name, fun);
@@ -1152,10 +1043,10 @@ impl Heap {
   fn read_arit(&self, name: &Name) -> Option<u128> {
     return self.arit.read(name);
   }
-  fn write_ownr(&mut self, name: Name, val: u128) {
+  fn write_ownr(&mut self, name: Name, val: U120) {
     return self.ownr.write(name, val);
   }
-  fn read_ownr(&self, name: &Name) -> Option<u128> {
+  fn read_ownr(&self, name: &Name) -> Option<U120> {
     return self.ownr.read(name);
   }
   fn write_indx(&mut self, name: Name, pos: u128) {
@@ -1317,20 +1208,21 @@ impl Heap {
         .read(true)
         .open(file_path)
     }
-    fn read_hash_map<T: DiskSer>(uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<u128, T, std::hash::BuildHasherDefault<NoHashHasher<u128>>>> {
+    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + crate::NoHashHasher::IsEnabled, V: DiskSer>
+      (uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<K, V, std::hash::BuildHasherDefault<NoHashHasher<K>>>> {
       HashMap::disk_deserialize(&mut open_reader(uuid, path, buffer_name)?)?
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
     fn read_num<T: DiskSer>(file: &mut File) -> std::io::Result<T>{
       T::disk_deserialize(file)?.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
-    let memo = Nodes { nodes: read_hash_map(uuid, path, "memo")? };
-    let disk = Store { links: read_hash_map(uuid, path, "disk")? };
-    let file = Funcs { funcs: read_hash_map(uuid, path, "file")? };
-    let arit = Arits { arits: read_hash_map(uuid, path, "arit")? };
-    let indx = Indxs { indxs: read_hash_map(uuid, path, "indx")? };
-    let hash = Hashs { stmt_hashes: read_hash_map(uuid, path, "stmt_hashes")? };    
-    let ownr = Ownrs { ownrs: read_hash_map(uuid, path, "ownr")? };
+    let memo = Nodes { nodes: read_hash_map_from_file(uuid, path, "memo")? };
+    let disk = Store { links: read_hash_map_from_file(uuid, path, "disk")? };
+    let file = Funcs { funcs: read_hash_map_from_file(uuid, path, "file")? };
+    let arit = Arits { arits: read_hash_map_from_file(uuid, path, "arit")? };
+    let indx = Indxs { indxs: read_hash_map_from_file(uuid, path, "indx")? };
+    let hash = Hashs { stmt_hashes: read_hash_map_from_file(uuid, path, "stmt_hashes")? };    
+    let ownr = Ownrs { ownrs: read_hash_map_from_file(uuid, path, "ownr")? };
     let mut stat = open_reader(uuid, path, "stat")?;
     let tick = read_num(&mut stat)?;
     let time = read_num(&mut stat)?;
@@ -1378,11 +1270,11 @@ pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
     memo: Nodes { nodes: init_map() },
-    disk: Store { links: init_map() },
-    file: Funcs { funcs: init_map() },
-    arit: Arits { arits: init_map() },
-    ownr: Ownrs { ownrs: init_map() },
-    indx: Indxs { indxs: init_map() },
+    disk: Store { links: init_u120_map() },
+    file: Funcs { funcs: init_name_map() },
+    arit: Arits { arits: init_name_map() },
+    ownr: Ownrs { ownrs: init_name_map() },
+    indx: Indxs { indxs: init_name_map() },
     hash: Hashs { stmt_hashes: init_map() },
     tick: U128_NONE,
     time: U128_NONE,
@@ -1420,10 +1312,10 @@ impl Nodes {
 }
 
 impl Store {
-  fn write(&mut self, fid: u128, val: Ptr) {
+  fn write(&mut self, fid: U120, val: Ptr) {
     self.links.insert(fid, val);
   }
-  fn read(&self, fid: u128) -> Option<Ptr> {
+  fn read(&self, fid: U120) -> Option<Ptr> {
     self.links.get(&fid).map(|x| *x)
   }
   fn clear(&mut self) {
@@ -1432,7 +1324,7 @@ impl Store {
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.links.drain() {
       if overwrite || !self.links.contains_key(&fid) {
-        self.write(fid as u128, func);
+        self.write(fid, func);
       }
     }
   }
@@ -1440,7 +1332,7 @@ impl Store {
 
 impl Funcs {
   fn write(&mut self, name: Name, val: Arc<CompFunc>) {
-    self.funcs.entry(*name).or_insert(val);
+    self.funcs.entry(name).or_insert(val);
   }
   fn read(&self, name: &Name) -> Option<Arc<CompFunc>> {
     return self.funcs.get(name).map(|x| x.clone());
@@ -1451,7 +1343,7 @@ impl Funcs {
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.funcs.drain() {
       if overwrite || !self.funcs.contains_key(&fid) {
-        self.write(Name::new_unsafe(fid), func.clone());
+        self.write(fid, func.clone());
       }
     }
   }
@@ -1459,7 +1351,7 @@ impl Funcs {
 
 impl Arits {
   fn write(&mut self, name: Name, val: u128) {
-    self.arits.entry(*name).or_insert(val);
+    self.arits.entry(name).or_insert(val);
   }
   fn read(&self, name: &Name) -> Option<u128> {
     return self.arits.get(name).map(|x| *x);
@@ -1477,10 +1369,10 @@ impl Arits {
 }
 
 impl Ownrs {
-  fn write(&mut self, name: Name, val: u128) {
-    self.ownrs.entry(*name).or_insert(val);
+  fn write(&mut self, name: Name, val: U120) {
+    self.ownrs.entry(name).or_insert(val);
   }
-  fn read(&self, name: &Name) -> Option<u128> {
+  fn read(&self, name: &Name) -> Option<U120> {
     return self.ownrs.get(name).map(|x| *x);
   }
   fn clear(&mut self) {
@@ -1497,7 +1389,7 @@ impl Ownrs {
 
 impl Indxs {
   fn write(&mut self, name: Name, pos: u128) {
-    self.indxs.insert(*name, pos);
+    self.indxs.insert(name, pos);
   }
   fn read(&self, name: &Name) -> Option<u128> {
     return self.indxs.get(name).map(|x| *x);
@@ -1913,11 +1805,14 @@ impl Runtime {
     }
   }
 
-  // Gets the subject of a signature
-  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: &crypto::Hash) -> u128 {
+  /// Gets the subject of a signature
+  /// If there is no subject, return 0.
+  /// If there is a subject but it cannot be parsed correctly, return 1
+  /// Else, return the signature.
+  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: &crypto::Hash) -> U120 {
     match sign {
-      None       => 0,
-      Some(sign) => sign.signer_name(hash).map(|x| *x).unwrap_or(1),
+      None       => U120::from_u128_unchecked(0),
+      Some(sign) => sign.signer_name(hash).map(|x| U120::from_u128_unchecked(*x)).unwrap_or_else(|| U120::from_u128_unchecked(1)),
     }
   }
 
@@ -1938,7 +1833,7 @@ impl Runtime {
   }
 
   // Can this subject deploy this name?
-  pub fn can_deploy(&mut self, subj: u128, name: &Name) -> bool {
+  pub fn can_deploy(&mut self, subj: U120, name: &Name) -> bool {
     if name.is_empty() {
       // No one can deploy the empty name
       false
@@ -1957,7 +1852,7 @@ impl Runtime {
   }
 
   // Can this subject register this namespace?
-  pub fn can_register(&mut self, subj: u128, name: &Name) -> bool {
+  pub fn can_register(&mut self, subj: U120, name: &Name) -> bool {
     if name.is_empty() {
       // Anyone can register the empty namespace (should happen on Genesis Block)
       true
@@ -1994,7 +1889,7 @@ impl Runtime {
         }
         let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
-          return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
+          return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", *subj, name));
         }
         handle_runtime_err(self, "fun", check_func(&func))?;
         let func = compile_func(func, true);
@@ -2018,7 +1913,7 @@ impl Runtime {
         }
         let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
-          return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
+          return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", *subj, name));
         }
         if args.len() > 16 {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
@@ -2037,7 +1932,7 @@ impl Runtime {
         let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
-        let done = self.run_io(U120(subj), U120(0), host, mana_lim);
+        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
@@ -2075,14 +1970,14 @@ impl Runtime {
         // TODO: save run to statement array?
       }
       Statement::Reg { name, ownr, sign } => {
-        let ownr = **ownr;
+        let ownr = *ownr;
 
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
         let subj = self.get_subject(sign, &hash);
         if !(self.can_register(subj, name) || sudo) {
-          return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, name));
+          return error(self, "run", format!("Subject '{}' not allowed to register '{}'.", subj, name));
         }
         let name = *name;
         self.define_register(name, stmt_index, hash);
@@ -2366,11 +2261,11 @@ impl Runtime {
     self.get_heap_mut(self.draw).write_arit(name, arity);
   }
 
-  pub fn get_owner(&self, name: &Name) -> Option<u128> {
+  pub fn get_owner(&self, name: &Name) -> Option<U120> {
     self.get_with(None, None, |heap| heap.read_ownr(name))
   }
 
-  pub fn set_owner(&mut self, name: Name, owner: u128) {
+  pub fn set_owner(&mut self, name: Name, owner: U120) {
     self.get_heap_mut(self.draw).write_ownr(name, owner);
   }
 
@@ -2513,7 +2408,7 @@ impl Runtime {
       let mut heap_funcs: Vec<Name> = 
         heap.file.funcs
           .keys()
-          .map(|f| Name::from_u128_unchecked(*f))
+          .map(|f| *f)
           .collect();
       acc.append(&mut heap_funcs);
     });
@@ -2531,7 +2426,7 @@ impl Runtime {
         heap.arit.arits
           .keys()
           .filter(|s| !heap_funs.contains(s))
-          .map(|c| Name::from_u128_unchecked(*c))
+          .map(|c| *c)
           .collect();
       acc.append(&mut heap_ctrs);
     });
@@ -2544,7 +2439,7 @@ impl Runtime {
       let mut heap_ns: Vec<Name> = 
         heap.ownr.ownrs
           .keys()
-          .map(|n| Name::from_u128_unchecked(*n))
+          .map(|n| *n)
           .collect();
       acc.append(&mut heap_ns);
     });
@@ -2670,7 +2565,7 @@ pub fn get_val(lnk: Ptr) -> u128 {
 }
 
 pub fn get_num(lnk: Ptr) -> U120 {
-  U120(lnk & NUM_MASK)
+  U120::from_u128_unchecked(lnk & NUM_MASK)
 }
 
 //pub fn get_ari(lnk: Ptr) -> u128 {
@@ -3540,13 +3435,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             let res = match op {
-              Oper::Add => a_u.wrapping_add(b_u).0,
-              Oper::Sub => a_u.wrapping_sub(b_u).0,
-              Oper::Mul => a_u.wrapping_mul(b_u).0,
-              Oper::Div => a_u.wrapping_div(b_u).0,
-              Oper::Mod => a_u.wrapping_rem(b_u).0,
-              Oper::Shl => a_u.wrapping_shl(b_u).0,
-              Oper::Shr => a_u.wrapping_shr(b_u).0,
+              Oper::Add => *a_u.wrapping_add(b_u),
+              Oper::Sub => *a_u.wrapping_sub(b_u),
+              Oper::Mul => *a_u.wrapping_mul(b_u),
+              Oper::Div => *a_u.wrapping_div(b_u),
+              Oper::Mod => *a_u.wrapping_rem(b_u),
+              Oper::Shl => *a_u.wrapping_shl(b_u),
+              Oper::Shr => *a_u.wrapping_shr(b_u),
               Oper::And => *a_u & *b_u,
               Oper::Or  => *a_u | *b_u,
               Oper::Xor => *a_u ^ *b_u,

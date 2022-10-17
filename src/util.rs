@@ -10,10 +10,14 @@ pub use primitive_types::U256;
 use bit_vec::BitVec;
 
 use crate::NoHashHasher as NHH;
+use crate::common::{Name, U120};
 
 pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u64 >>>;
+pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U120>>>;
 pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u128>>>;
 pub type U256Map<T> = HashMap<U256, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U256>>>;
+pub type NameMap<T> = HashMap<Name, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<Name>>>;
+
 
 pub type Hash = U256;
 

@@ -7,10 +7,10 @@ use proptest::{collection::vec, strategy::Strategy};
 use rstest::rstest;
 use rstest_reuse::{apply, template};
 
-use crate::common::Name;
+use crate::common::{Name, U120};
 use crate::hvm::{
   self, init_map, read_statements, readback_term, show_term, view_statements,
-  view_term, Rollback, Runtime, StatementInfo, Term, U120, Heap
+  view_term, Rollback, Runtime, StatementInfo, Term, Heap
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
