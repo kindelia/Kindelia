@@ -4,7 +4,7 @@
 use bit_vec::BitVec;
 use std::collections::HashMap;
 
-use crate::common::Name;
+use crate::common::{Name, U120};
 use crate::crypto;
 use crate::hvm::*;
 use crate::net;

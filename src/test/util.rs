@@ -7,10 +7,10 @@ use rstest::fixture;
 use tokio::runtime;
 
 use crate::constants;
-use crate::common::Name;
+use crate::common::{Name, U120};
 use crate::hvm::{
   self, read_term, show_term, Rollback, Runtime, Statement, StatementInfo,
-  Term, U120, U128_NONE,
+  Term, U128_NONE,
 };
 use crate::node;
 
