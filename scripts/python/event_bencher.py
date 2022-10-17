@@ -104,6 +104,9 @@ def run(config: RunConfig):
     print("\n\nRunning tests\n\n")
     for i in range(config.n + config.warmup):  # run n + warmup executions
 
+        # FIXME: doing this way the program runs the expected time, 
+        # but the output is not totally captured as the process is killed by other command
+
         # runs the cargo test
         # doing this way because process doesn't end by itself
         process = subprocess.Popen(
