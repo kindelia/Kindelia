@@ -193,7 +193,7 @@ def main():
 
     parser.add_argument("-n", type=int, default=1)
 
-    parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--warmup", type=int, default=0)
 
     parser.add_argument(
         "--stash", action="store_true"
