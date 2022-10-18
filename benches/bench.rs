@@ -45,16 +45,15 @@ fn max_message() -> node::Message<net::Address> {
 }
 
 #[bench]
-fn serialize_max_message(b: &mut Bencher) {
+fn max_message_serialize(b: &mut Bencher) {
   let max_message = max_message();
   b.iter(|| max_message.proto_serialized())
 }
 
 #[bench]
-fn deserialize_max_message(b: &mut Bencher) {
+fn max_message_deserialize(b: &mut Bencher) {
   let max_message = max_message();
   let bits = max_message.proto_serialized();
-
   b.iter(|| node::Message::<net::Address>::proto_deserialized(&bits).unwrap())
 }
 
