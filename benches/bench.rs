@@ -1,10 +1,4 @@
-#![feature(test)]
-extern crate test;
-
-// use rust_example::fib;
-
-// use kindelia::net::ProtoAddr;
-use test::{Bencher, black_box};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use primitive_types::U256;
 
@@ -42,57 +36,68 @@ fn max_message() -> node::Message<net::Address> {
   }
 }
 
-#[bench]
-fn max_message_serialize(b: &mut Bencher) {
-  let max_message = max_message();
-  b.iter(|| {
-    let se_bits = black_box(&max_message).proto_serialized();
-    // util::bitvec_to_bytes(&se_bits)
-    se_bits
-  })
+fn max_message_serialize(c: &mut Criterion) {
+  c.bench_function("max_message_serialize", |b| {
+    let max_message = max_message();
+    b.iter(|| {
+      // util::bitvec_to_bytes(&se_bits)
+      black_box(&max_message).proto_serialized()
+    })
+  });
 }
 
-#[bench]
-fn max_message_deserialize(b: &mut Bencher) {
-  let max_message = max_message();
-  let se_bits = max_message.proto_serialized();
-  let se_bytes = util::bitvec_to_bytes(&se_bits);
-  b.iter(|| {
-    let se_bits = util::bytes_to_bitvec(black_box(&se_bytes));
-    node::Message::<net::Address>::proto_deserialized(&se_bits).unwrap()
-  })
+fn max_message_deserialize(c: &mut Criterion) {
+  c.bench_function("max_message_deserialize", |b| {
+    let max_message = max_message();
+    let se_bits = max_message.proto_serialized();
+    let se_bytes = util::bitvec_to_bytes(&se_bits);
+    b.iter(|| {
+      let se_bits = util::bytes_to_bitvec(black_box(&se_bytes));
+      node::Message::<net::Address>::proto_deserialized(&se_bits).unwrap()
+    })
+  });
 }
 
 /// Benchmarks deserialization and extraction of statements from a block
-#[bench]
-fn deserialize_block_with_txs(b: &mut Bencher) {
-  let code = include_str!("code/inc.kdl");
+fn block_with_txs_deserialize(c: &mut Criterion) {
+  c.bench_function("deserialize_block_with_txs", |b| {
+    let code = include_str!("code/inc.kdl");
 
-  let (_, base_stmt) = hvm::read_statement(code).unwrap();
-  let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
-  let transaction = node::Transaction::new(bytes);
+    let (_, base_stmt) = hvm::read_statement(code).unwrap();
+    let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
+    let transaction = node::Transaction::new(bytes);
 
-  let body = node::Body::fill_from(std::iter::repeat(transaction));
+    let body = node::Body::fill_from(std::iter::repeat(transaction));
 
-  let block = node::Block {
-    body,
-    hash: U256::MAX,
-    prev: U256::MAX,
-    time: u128::MAX,
-    meta: u128::MAX,
-  };
+    let block = node::Block {
+      body,
+      hash: U256::MAX,
+      prev: U256::MAX,
+      time: u128::MAX,
+      meta: u128::MAX,
+    };
 
-  let se_bits = block.proto_serialized();
-  let se_bytes = util::bitvec_to_bytes(&se_bits);
+    let se_bits = block.proto_serialized();
+    let se_bytes = util::bitvec_to_bytes(&se_bits);
 
-  b.iter(|| {
-    let de_bits = util::bytes_to_bitvec(black_box(&se_bytes));
-    let block = node::Block::proto_deserialized(&de_bits).unwrap();
-    let transactions = node::extract_transactions(&block.body);
-    for transaction in transactions {
-      let de_stmt = transaction.to_statement().unwrap();
-      debug_assert_eq!(base_stmt, de_stmt);
-      drop(de_stmt);
-    }
-  })
+    b.iter(|| {
+      let de_bits = util::bytes_to_bitvec(black_box(&se_bytes));
+      let block = node::Block::proto_deserialized(&de_bits).unwrap();
+      let transactions = node::extract_transactions(&block.body);
+      for transaction in transactions {
+        let de_stmt = transaction.to_statement().unwrap();
+        debug_assert_eq!(base_stmt, de_stmt);
+        drop(de_stmt);
+      }
+    })
+  });
 }
+
+criterion_group!(
+  serialization,
+  max_message_serialize,
+  max_message_deserialize,
+  block_with_txs_deserialize
+);
+
+criterion_main!(serialization);
