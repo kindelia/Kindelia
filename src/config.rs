@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
+use crate::events::NodeEventDiscriminant;
+
 // Node config
 // ===========
 
@@ -39,6 +41,7 @@ pub struct MineConfig {
 #[builder(setter(strip_option))]
 pub struct UiConfig {
   pub json: bool,
+  pub tags: Vec<NodeEventDiscriminant>
 }
 
 // API config

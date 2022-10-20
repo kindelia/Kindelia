@@ -38,12 +38,12 @@ use warp::Future;
 use kindelia::api::{client as api_client, Hash, HexStatement};
 use kindelia::bits::ProtoSerialize;
 use kindelia::common::Name;
-use kindelia::config;
 use kindelia::crypto;
 use kindelia::hvm::{self, view_statement, Statement};
 use kindelia::net;
 use kindelia::node;
 use kindelia::util::bytes_to_bitvec;
+use kindelia::{config, events};
 
 // This client is meant to talk with a node implementing UDP protocol
 // communication (the default)
@@ -694,7 +694,10 @@ pub fn run_cli() -> Result<(), String> {
             network_id,
             data_path,
             mining: config::MineConfig { enabled: mine, slow_mining },
-            ui: Some(config::UiConfig { json }),
+            ui: Some(config::UiConfig {
+              json,
+              tags: [events::NodeEventDiscriminant::Heartbeat].to_vec(),
+            }),
             api: Some(api_config),
             ws: None, // TODO: load from config file
           };

@@ -1,9 +1,10 @@
 // TODO: rename and organize structs and constructors
+use std::convert::Infallible;
+use std::str::FromStr;
 
 use futures_util::{SinkExt, StreamExt};
 use primitive_types::U256;
 use serde;
-use std::convert::Infallible;
 use tokio::{self, sync::broadcast};
 use warp::ws::{Message, WebSocket};
 use warp::{Filter, Rejection, Reply};
@@ -151,6 +152,50 @@ pub struct HeartbeatStatInfo {
   pub current: i64,
   pub limit: i64,
   pub available: i64,
+}
+
+// ========================================================
+// Event discriminant util (used to choose which event we want to listen)
+// * Could be created automatically with a macro *
+
+#[derive(PartialEq, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum NodeEventDiscriminant {
+  AddBlock,
+  HandleMessage,
+  Heartbeat,
+  Mining,
+  Peers,
+}
+
+impl std::str::FromStr for NodeEventDiscriminant {
+  type Err = String;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "add_block" => Ok(NodeEventDiscriminant::AddBlock),
+      "mining" => Ok(NodeEventDiscriminant::Mining),
+      "peers" => Ok(NodeEventDiscriminant::Peers),
+      "handle_message" => Ok(NodeEventDiscriminant::HandleMessage),
+      "heartbeat" => Ok(NodeEventDiscriminant::Heartbeat),
+      _ => Err(format!(
+        "Was not possible to convert from {} to an event discriminant",
+        s
+      )),
+    }
+  }
+}
+
+impl From<&NodeEventType> for NodeEventDiscriminant {
+  fn from(event: &NodeEventType) -> Self {
+    match event {
+      NodeEventType::AddBlock { .. } => NodeEventDiscriminant::AddBlock,
+      NodeEventType::Mining { .. } => NodeEventDiscriminant::Mining,
+      NodeEventType::Peers { .. } => NodeEventDiscriminant::Peers,
+      NodeEventType::HandleMessage { .. } => {
+        NodeEventDiscriminant::HandleMessage
+      }
+      NodeEventType::Heartbeat { .. } => NodeEventDiscriminant::Heartbeat,
+    }
+  }
 }
 
 // ========================================================
@@ -544,17 +589,6 @@ impl NodeEventType {
     };
     NodeEventType::HandleMessage { event }
   }
-
-  // UTILS
-  pub fn get_tag(&self) -> String {
-    match self {
-      NodeEventType::AddBlock { .. } => "add_block".to_string(),
-      NodeEventType::Mining { .. } => "mining".to_string(),
-      NodeEventType::Peers { .. } => "peers".to_string(),
-      NodeEventType::HandleMessage { .. } => "handle_message".to_string(),
-      NodeEventType::Heartbeat { .. } => "heartbeat".to_string(),
-    }
-  }
 }
 
 #[macro_export]
@@ -723,20 +757,27 @@ pub async fn client_connection(
   let mut count = 0;
 
   while let Ok(event) = ws_rx.recv().await {
-    if tags.is_empty() || tags.contains(&event.get_tag()) {
-      let json_stringfied = serde_json::to_string(&event).unwrap();
-      if let Err(err) =
-        client_ws_sender.send(Message::text(json_stringfied)).await
-      {
-        eprintln!("Could not send message through websocket: {}", err);
-        count += 1;
-      } else {
-        count = 0;
-      };
-      // After 10 consecutive fails we close the connection
-      if count == 10 {
-        break;
-      };
+    let tags: Result<Vec<NodeEventDiscriminant>, String> =
+      tags.iter().map(|tag| NodeEventDiscriminant::from_str(tag)).collect();
+
+    if let Ok(tags) = tags {
+      if tags.is_empty() || tags.contains(&(&event).into()) {
+        let json_stringfied = serde_json::to_string(&event).unwrap();
+        if let Err(err) =
+          client_ws_sender.send(Message::text(json_stringfied)).await
+        {
+          eprintln!("Could not send message through websocket: {}", err);
+          count += 1;
+        } else {
+          count = 0;
+        };
+        // After 10 consecutive fails we close the connection
+        if count == 10 {
+          break;
+        };
+      }
+    } else {
+      break;
     }
   }
 
@@ -770,17 +811,16 @@ pub fn spawn_event_handlers<A: ProtoAddr + 'static>(
         };
       }
       // TODO: way to select which logs to print
-      if let (Some(ref ui_cfg), NodeEventType::Heartbeat { .. }) =
-        (&ui_config, &event)
-      {
-        if ui_cfg.json {
-          println!("{}", serde_json::to_string(&event).unwrap());
-        } else {
-          println!("{}", event);
+      if let Some(ref ui_cfg) = &ui_config {
+        if ui_cfg.tags.is_empty() || ui_cfg.tags.contains(&(&event).into()) {
+          let event = NodeEvent { addr, event };
+          if ui_cfg.json {
+            println!("{}", serde_json::to_string(&event).unwrap());
+          } else {
+            println!("{}", event);
+          }
         }
       }
-      let event = NodeEvent { addr, event };
-      println!("{}", serde_json::to_string(&event).unwrap());
     }
   });
 

@@ -62,14 +62,15 @@ fn network() {
         .slow_mining(100)
         .build()
         .unwrap();
-      let ui_cfg =
-        config::UiConfigBuilder::default().json(true).build().unwrap();
-      let node_cfg = config::NodeConfigBuilder::default()
-        .data_path(data_path)
-        .ws(ws_config)
-        .mining(mine_cfg)
-        .build()
-        .unwrap();
+
+      let node_cfg = config::NodeConfig {
+        network_id: 0,
+        data_path,
+        mining: mine_cfg,
+        ui: Some(config::UiConfig { json: true, tags: [].to_vec() }),
+        api: None,
+        ws: None, // Some(ws_config),
+      };
       node::start(node_cfg, socket, initial_peers);
     });
     threads.push(socket_thread);
