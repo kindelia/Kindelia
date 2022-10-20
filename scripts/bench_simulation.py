@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import json
 import sys
@@ -93,7 +95,6 @@ class RunConfig:
     execution_time: int
     benchers: list[Bencher]
 
-
 def run(config: RunConfig):
     # create the list of benchmarkers
 
@@ -104,7 +105,7 @@ def run(config: RunConfig):
     print("\n\nRunning tests\n\n")
     for i in range(config.n + config.warmup):  # run n + warmup executions
 
-        # FIXME: doing this way the program runs the expected time, 
+        # FIXME: doing this way the program runs the expected time,
         # but the output is not totally captured as the process is killed by other command
 
         # runs the cargo test
@@ -115,14 +116,14 @@ def run(config: RunConfig):
 
         # Send the signal to all the process groups
         # https://stackoverflow.com/questions/4789837/how-to-terminate-a-python-subprocess-launched-with-shell-true
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
 
         if process.stdout is None:
             raise Exception("stdout was not captured")
 
         # gets output from stdout
         data = process.stdout.read().decode("utf-8").strip()
-
+        print(data)
         # for each line of the output
         for line in data.splitlines():
             # try to read an event from this line
@@ -158,7 +159,7 @@ def main():
         description="Benchmark on network simulation.")
 
     parser.add_argument(
-        "-n", type=int, default=10
+        "-n", type=int, default=5
     )
 
     parser.add_argument(
@@ -166,7 +167,7 @@ def main():
     )
 
     parser.add_argument(
-        "--execution_time", type=int, default=10
+        "--execution_time", type=int, default=60
     )
 
     benchers: list[Bencher] = [UncleRate(), FailedMining()]
