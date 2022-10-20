@@ -95,6 +95,7 @@ class RunConfig:
     execution_time: int
     benchers: list[Bencher]
 
+
 def run(config: RunConfig):
     # create the list of benchmarkers
 
@@ -110,19 +111,19 @@ def run(config: RunConfig):
 
         # runs the cargo test
         # doing this way because process doesn't end by itself
-        process = subprocess.Popen(
-            ["cargo", "test", "--release", "--", "network::network", "--ignored", "--nocapture"], stdout=subprocess.PIPE, preexec_fn=os.setsid)
-        time.sleep(config.execution_time)
+        process = subprocess.run(
+            ["cargo", "test", "--release", "--", "network::network", "--ignored", "--nocapture"], capture_output=True, env=dict(os.environ, SIMULATION_TIME=str(config.execution_time)))
+        # time.sleep(config.execution_time)
 
         # Send the signal to all the process groups
         # https://stackoverflow.com/questions/4789837/how-to-terminate-a-python-subprocess-launched-with-shell-true
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        # os.killpg(os.getpgid(process.pid), signal.SIGKILL)
 
         if process.stdout is None:
             raise Exception("stdout was not captured")
 
         # gets output from stdout
-        data = process.stdout.read().decode("utf-8").strip()
+        data = process.stdout.decode("utf-8").strip()
         print(data)
         # for each line of the output
         for line in data.splitlines():
