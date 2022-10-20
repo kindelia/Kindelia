@@ -96,14 +96,14 @@ impl bits::ProtoSerialize for u32 {
     bits: &mut bit_vec::BitVec,
     names: &mut bits::Names,
   ) {
-    bits::serialize_number(&u256(*self as u128), bits, names);
+    bits::serialize_number(*self as u128, bits);
   }
   fn proto_deserialize(
     bits: &bit_vec::BitVec,
-    index: &mut u128,
+    index: &mut usize,
     names: &mut bits::Names,
   ) -> Option<Self> {
-    bits::deserialize_number(bits, index, names).map(|n| n.low_u32())
+    bits::deserialize_number(bits, index).map(|n| n.low_u32())
   }
 }
 

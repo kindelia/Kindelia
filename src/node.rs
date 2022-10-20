@@ -129,6 +129,33 @@ pub struct Body {
 }
 
 impl Body {
+  /// Fills block body with first transactions from iterator that fit.
+  pub fn fill_from<I, T>(transactions: I) -> Body
+  where
+    I: IntoIterator<Item = T>,
+    T: Into<Transaction>,
+  {
+    let mut body_vec = vec![0];
+    let mut tx_count = 0;
+    for transaction in transactions.into_iter() {
+      let transaction = transaction.into();
+      let tx_len = transaction.data.len();
+      if tx_len == 0 {
+        continue;
+      }
+      if tx_count + 1 > 255 {
+        break;
+      }
+      if add_transaction_to_body_vec(&mut body_vec, &transaction).is_err()
+      {
+        break;
+      }
+      tx_count += 1;
+    }
+    body_vec[0] = tx_count as u8;
+    Body { data: body_vec }
+  }
+
   /// Build a body from a sequence of transactions.
   /// Fails if they can't fit in a block body.
   pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
@@ -544,9 +571,9 @@ pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
 }
 
 /// Puts transaction inside `body_vec` if space is suficient
-pub fn build_body_from_transaction(
-  transaction: &Transaction,
+pub fn add_transaction_to_body_vec(
   body_vec: &mut Vec<u8>,
+  transaction: &Transaction,
 ) -> Result<(), String> {
   let tx_len = transaction.data.len();
   let len_info = transaction.encode_length();
@@ -1452,25 +1479,8 @@ impl<C: ProtoComm> Node<C> {
   /// Builds the body to be mined.
   /// To convert back to a vector of transactions, use `extract_transactions()`.
   pub fn build_body_from_pool(&self) -> Body {
-    let mut body_vec = vec![0];
-    let mut tx_count = 0;
-    for (transaction, _score) in self.pool.iter() {
-      let tx_len = transaction.data.len();
-      if tx_len == 0 {
-        continue;
-      }
-      if tx_count + 1 > 255 {
-        break;
-      }
-      if let Err(_) =
-        build_body_from_transaction(transaction, &mut body_vec)
-      {
-        break;
-      }
-      tx_count += 1;
-    }
-    body_vec[0] = tx_count as u8;
-    return Body { data: body_vec };
+    let txs = self.pool.iter().map(|(tx, _score)| tx.clone());
+    Body::fill_from(txs)
   }
 
   fn log_heartbeat(&self) {
