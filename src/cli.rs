@@ -696,7 +696,7 @@ pub fn run_cli() -> Result<(), String> {
             mining: config::MineConfig { enabled: mine, slow_mining },
             ui: Some(config::UiConfig {
               json,
-              tags: [events::NodeEventDiscriminant::Heartbeat].to_vec(),
+              tags: vec![events::NodeEventDiscriminant::Heartbeat],
             }),
             api: Some(api_config),
             ws: None, // TODO: load from config file

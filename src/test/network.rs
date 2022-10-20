@@ -67,7 +67,7 @@ fn network() {
         network_id: 0,
         data_path,
         mining: mine_cfg,
-        ui: Some(config::UiConfig { json: true, tags: [].to_vec() }),
+        ui: Some(config::UiConfig { json: true, tags: vec![] }),
         api: None,
         ws: None, // Some(ws_config),
       };
