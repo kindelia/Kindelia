@@ -23,10 +23,8 @@ use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
 
 #[cfg(feature = "events")]
-use crate::{
-  events::{self, NodeEventType},
-  heartbeat,
-};
+use crate::events::{self, NodeEventType};
+use crate::heartbeat;
 
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
@@ -146,8 +144,7 @@ impl Body {
       if tx_count + 1 > 255 {
         break;
       }
-      if add_transaction_to_body_vec(&mut body_vec, &transaction).is_err()
-      {
+      if add_transaction_to_body_vec(&mut body_vec, &transaction).is_err() {
         break;
       }
       tx_count += 1;
@@ -817,7 +814,7 @@ impl<C: ProtoComm> Node<C> {
       if btime >= get_time() + DELAY_TOLERANCE {
         emit_event!(
           self.event_emitter,
-          NodeEventType::too_late(&self, block.hash),
+          NodeEventType::too_late(&block),
           tags = add_block,
           too_late
         );
@@ -825,10 +822,11 @@ impl<C: ProtoComm> Node<C> {
       }
       let bhash = block.hash;
       // If we already registered this block, ignore it
-      if self.block.get(&bhash).is_some() {
+      if let Some(block) = self.block.get(&bhash) {
+        let height = self.height[&block.hash];
         emit_event!(
           self.event_emitter,
-          NodeEventType::already_included(&self, bhash),
+          NodeEventType::already_included(block, height),
           tags = add_block,
           already_included
         );
@@ -934,16 +932,19 @@ impl<C: ProtoComm> Node<C> {
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
+
+              let old = (&self.block[&old_tip], self.height[&old_tip]);
+              let new = (&self.block[&new_tip], self.height[&new_tip]);
+              let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
               emit_event!(
                 self.event_emitter,
-                NodeEventType::reorg(
-                  self, old_tip, new_tip,
-                  old_bhash, // this store the common block
-                ),
+                NodeEventType::reorg(old, new, common, tick),
                 tags = add_block,
                 reorg
               );
+
               self.runtime.rollback(tick);
+
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
               while tick > self.runtime.get_tick() {
@@ -961,15 +962,18 @@ impl<C: ProtoComm> Node<C> {
         } else {
           emit_event!(
             self.event_emitter,
-            NodeEventType::not_enough_work(&self, bhash),
+            NodeEventType::not_enough_work(&self.block[&bhash]),
             tags = add_block,
             not_enough_work
           );
         }
 
+        let height = self.height.get(&block.hash).copied();
+        let siblings: Vec<_> =
+          self.children[&block.prev].iter().copied().collect();
         emit_event!(
           self.event_emitter,
-          NodeEventType::included(self, bhash),
+          NodeEventType::included(&block, height, &siblings),
           tags = add_block,
           block_included
         );
@@ -993,7 +997,7 @@ impl<C: ProtoComm> Node<C> {
         self.wait_list.entry(phash).or_insert_with(|| Vec::new()).push(bhash);
         emit_event!(
           self.event_emitter,
-          NodeEventType::missing_parent(&self, bhash, phash),
+          NodeEventType::missing_parent(&block),
           tags = add_block,
           missing_parent
         );
@@ -1646,15 +1650,10 @@ impl<C: ProtoComm> Node<C> {
   }
 }
 
-// Node Config
-// ===========
-
 // Main Thread
 // ===========
 
-// TODO: move this paramenters to a struct `NodeStartOptions<C>`?
-// TODO: I don't know why 'static is needed and why it works
-// TODO: add api_config e ws_config: Options
+// TODO: I don't know why 'static is needed here or why it works
 #[allow(clippy::too_many_arguments)]
 pub fn start<C: ProtoComm + 'static>(
   config: NodeConfig,

@@ -1,3 +1,5 @@
+// TODO: rename and organize structs and constructors
+
 use futures_util::{SinkExt, StreamExt};
 use primitive_types::U256;
 use serde;
@@ -8,10 +10,15 @@ use warp::{Filter, Rejection, Reply};
 
 use crate::api::Hash;
 use crate::config::{UiConfig, WsConfig};
-use crate::net::{ProtoAddr, ProtoComm};
-use crate::node::{Block, Peer, Node};
+use crate::net::ProtoAddr;
+use crate::node::{Block, Peer};
 
-// TODO: rename and organize structs and constructors
+fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
+  match x {
+    None => "~".to_string(),
+    Some(x) => x.to_string(),
+  }
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct NodeEvent<A: ProtoAddr> {
@@ -46,8 +53,8 @@ pub enum NodeEventType {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlockInfo {
   hash: Hash,
-  height: u128,
   parent: Hash,
+  height: Option<u128>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -282,7 +289,7 @@ impl std::fmt::Display for NodeEventType {
           } else {
             String::new()
           };
-          format!("[add_block] [reorg] old_block {} was reorganized in favor of new_block {}; old height: {}; new height: {} {}", old_tip.hash, block, old_tip.height, block.height, rollback)
+          format!("[add_block] [reorg] old_block {} was reorganized in favor of new_block {}; old height: {}; new height: {} {}", old_tip.hash, block, show_opt(old_tip.height), show_opt(block.height), rollback)
         }
         AddBlockEvent::MissingParent { parent } => {
           format!(
@@ -347,52 +354,37 @@ impl<A: ProtoAddr> std::fmt::Display for NodeEvent<A> {
 
 impl NodeEventType {
   // ADD BLOCK
-  pub fn not_enough_work<C: ProtoComm>(node: &Node<C>, block: U256) -> Self {
-    let height = node.height[&block];
-    let block = &node.block[&block];
-
+  pub fn not_enough_work(block: &Block) -> Self {
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: block.hash.into(),
-        height,
         parent: block.prev.into(),
+        height: None,
       },
       event: Box::new(AddBlockEvent::NotEnoughWork),
     }
   }
-  pub fn included<C: ProtoComm>(node: &Node<C>, block: U256) -> Self {
-    let height = node.height[&block];
-    let block = &node.block[&block];
-
-    let brothers =
-      node.children[&block.prev].iter().map(|hash| (*hash).into()).collect();
-
+  pub fn included(block: &Block, height: Option<u128>, siblings: &[U256]) -> Self {
+    let siblings = siblings.iter().map(|h| (*h).into()).collect();
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: block.hash.into(),
-        height,
         parent: block.prev.into(),
+        height,
       },
-      event: Box::new(AddBlockEvent::Included { siblings: brothers }),
+      event: Box::new(AddBlockEvent::Included { siblings }),
     }
   }
-  pub fn reorg<C: ProtoComm>(
-    node: &Node<C>,
-    old_tip: U256,
-    new_tip: U256,
-    common: U256,
+  pub fn reorg(
+    old: (&Block, u128),
+    new: (&Block, u128),
+    common: (&Block, u128),
+    runtime_tick: u128,
   ) -> Self {
-    let old_height = node.height[&old_tip];
-    let old_block = &node.block[&old_tip];
-
-    let new_height = node.height[&new_tip];
-    let new_block = &node.block[&new_tip];
-
-    let common_height = node.height[&common];
-    let common_block = &node.block[&common];
-
-    let common_tick = node.height[&common];
-    let runtime_tick = node.runtime.get_tick();
+    let (old_block, old_height) = old;
+    let (new_block, new_height) = new;
+    let (common_block, common_height) = common;
+    let common_tick = common_height;
 
     let rollback = {
       if common_tick < runtime_tick {
@@ -405,63 +397,53 @@ impl NodeEventType {
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: new_block.hash.into(),
-        height: new_height,
         parent: new_block.prev.into(),
+        height: Some(new_height),
       },
       event: Box::new(AddBlockEvent::Reorg {
         old_tip: BlockInfo {
-          hash: old_tip.into(),
-          height: old_height,
+          hash: old_block.hash.into(),
           parent: old_block.prev.into(),
+          height: Some(old_height),
         },
         common_block: BlockInfo {
-          hash: common.into(),
-          height: common_height,
+          hash: common_block.hash.into(),
           parent: common_block.prev.into(),
+          height: Some(common_height),
         },
         rollback,
       }),
     }
   }
-  pub fn already_included<C: ProtoComm>(node: &Node<C>, block: U256) -> Self {
-    let height = node.height[&block];
-    let block = &node.block[&block];
-
+  pub fn already_included(block: &Block, height: u128) -> Self {
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: block.hash.into(),
-        height,
         parent: block.prev.into(),
+        height: Some(height),
       },
       event: Box::new(AddBlockEvent::AlreadyIncluded),
     }
   }
-  pub fn missing_parent<C: ProtoComm>(
-    node: &Node<C>,
-    block: U256,
-    parent: U256,
+  pub fn missing_parent(
+    block: &Block,
   ) -> Self {
-    let height = node.height[&block];
-    let block = &node.block[&block];
-
+    let parent: Hash = block.prev.into();
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: block.hash.into(),
-        height,
-        parent: block.prev.into(),
+        parent,
+        height: None,
       },
-      event: Box::new(AddBlockEvent::MissingParent { parent: parent.into() }),
+      event: Box::new(AddBlockEvent::MissingParent { parent }),
     }
   }
-  pub fn too_late<C: ProtoComm>(node: &Node<C>, block: U256) -> Self {
-    let height = node.height[&block];
-    let block = &node.block[&block];
-
+  pub fn too_late(block: &Block) -> Self {
     NodeEventType::AddBlock {
       block: BlockInfo {
         hash: block.hash.into(),
-        height,
         parent: block.prev.into(),
+        height: None,
       },
       event: Box::new(AddBlockEvent::TooLate),
     }
