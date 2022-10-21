@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import statistics
 import sys
 import os
 import signal
@@ -91,7 +92,7 @@ class FailedMining(Bencher):
 
     def get_result(self):
         return self.total
-    
+
     def clear(self):
         self.total = 0
 
@@ -160,11 +161,13 @@ def run(config: RunConfig):
         # throw away warmup executions
         results = bench.get_results()[config.warmup:]
         print(results)
-        mean: float = sum(results) / len(results) if len(results) != 0 else 0
+        mean: float = statistics.mean(results)
+        stdev = statistics.stdev(results)
         result.append({
             'name': bench_info.name,
             'value': mean,
-            'unit': bench_info.unit
+            'unit': bench_info.unit,
+            'range': stdev
         })
 
     with open("bench_simulation_result.json", "w") as file:
