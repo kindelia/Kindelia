@@ -35,6 +35,10 @@ class Bencher(ABC):
     def get_result(self):
         pass
 
+    @abstractmethod
+    def clear(self):
+        pass
+
     def store_result(self):
         self.results.append(self.get_result())
 
@@ -66,6 +70,10 @@ class UncleRate(Bencher):
         else:
             return self.total
 
+    def clear(self):
+        self.total = 0.
+        self.uncle = 0.
+
 
 class FailedMining(Bencher):
     def __init__(self):
@@ -83,6 +91,9 @@ class FailedMining(Bencher):
 
     def get_result(self):
         return self.total
+    
+    def clear(self):
+        self.total = 0
 
 
 # ============================================================
@@ -105,7 +116,7 @@ def run(config: RunConfig):
 
     print("\n\nRunning tests\n\n")
     for i in range(config.n + config.warmup):  # run n + warmup executions
-
+        print(f"Running {i}")
         # FIXME: doing this way the program runs the expected time,
         # but the output is not totally captured as the process is killed by other command
 
@@ -134,9 +145,13 @@ def run(config: RunConfig):
                 # for each bench
                 for bench in config.benchers:
                     bench.calculate(event)
-                    bench.store_result()  # maybe put this inside calculate?
             except json.JSONDecodeError as error:
-                print(error)
+                print(line)
+                pass
+                # print(error)
+        for bench in config.benchers:
+            bench.store_result()
+            bench.clear()
 
     # calculates means with the results of each bencher
     result = []
@@ -144,7 +159,7 @@ def run(config: RunConfig):
         bench_info = bench.info()
         # throw away warmup executions
         results = bench.get_results()[config.warmup:]
-
+        print(results)
         mean: float = sum(results) / len(results) if len(results) != 0 else 0
         result.append({
             'name': bench_info.name,
