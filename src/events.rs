@@ -158,7 +158,7 @@ pub struct HeartbeatStatInfo {
 // Event discriminant util (used to choose which event we want to listen)
 // * Could be created automatically with a macro *
 
-#[derive(PartialEq, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(PartialEq, Eq, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum NodeEventDiscriminant {
   AddBlock,
   HandleMessage,
