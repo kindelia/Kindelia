@@ -19,23 +19,42 @@ jobs:
       - run: rustup toolchain update nightly && rustup default nightly
       # Run benchmark with `go test -bench` and stores the output to a file
       - uses: Swatinem/rust-cache@v1
-      - name: Run benchmark
-        run: cargo +nightly bench | tee output.txt
+      - name: Run rust benchmark
+        run: cargo bench -- --output-format bencher | tee output.txt
       # Download previous benchmark result from cache (if exists)
+      - name: Run event benchmark
+        run: python ./scripts/bench_simulation.py -n 2
       - name: Download previous benchmark data
         uses: actions/cache@v1
         with:
           path: ./cache
           key: ${{ runner.os }}-benchmark
       # Run `github-action-benchmark` action
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
+      - name: Store rust benchmark result
+        uses: racs4/github-action-benchmark@v1
         with:
-          name: Rust Benchmark
+          name: Rust Benchmark 
           # What benchmark tool the output.txt came from
           tool: "cargo"
           # Where the output from the benchmark tool is stored
           output-file-path: output.txt
+          # Workflow will fail when an alert happens
+          fail-on-alert: true
+          # GitHub API token to make a commit comment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Show alert with commit comment on detecting possible performance regression
+          comment-on-alert: true
+          alert-threshold: "200%"
+          # Push and deploy GitHub pages branch automatically
+          auto-push: true
+      - name: Store simulation benchmark result
+        uses: racs4/github-action-benchmark@v1
+        with:
+          name: Simulation Benchmark 
+          # What benchmark tool the output.txt came from
+          tool: "customSmallerIsBetter"
+          # Where the output from the benchmark tool is stored
+          output-file-path: bench_simulation_result.json
           # Workflow will fail when an alert happens
           fail-on-alert: true
           # GitHub API token to make a commit comment
