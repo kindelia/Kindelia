@@ -1,31 +1,24 @@
-use petgraph::{
-  algo::astar, graph::NodeIndices, prelude::UnGraph, visit::IntoNodeIdentifiers,
-};
-use std::{
-  collections::HashMap,
-  path::PathBuf,
-  sync::mpsc::{self, Receiver},
-  thread,
-};
-use tokio::sync::oneshot;
+use petgraph::algo::astar;
+use petgraph::prelude::UnGraph;
 
-use std::sync::mpsc::Sender;
+use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 
-use crate::{
-  bits::{self, deserialize_number, serialize_number},
-  net::{self, ProtoComm},
-  node::{self, Message, MinerCommunication},
-  util::u256, config,
-};
-
+use crate::bits;
+use crate::config;
 #[cfg(feature = "events")]
 use crate::events;
+use crate::net;
+use crate::node;
 
 use super::util::temp_dir;
 
 #[test]
 #[ignore = "network simulation"]
 fn network() {
+  let simulation_time = std::env::var("SIMULATION_TIME").ok();
+
   let mut g = UnGraph::new_undirected();
   let a = g.add_node(0_u32);
   let b = g.add_node(1);
@@ -61,17 +54,28 @@ fn network() {
         .slow_mining(100)
         .build()
         .unwrap();
-      let ui_cfg = config::UiConfigBuilder::default().json(true).build().unwrap();
-      let node_cfg = config::NodeConfigBuilder::default()
-        .data_path(data_path)
-        .build().unwrap();
-      node::start(
-        node_cfg,
-        socket,
-        initial_peers,
-      );
+
+      let node_cfg = config::NodeConfig {
+        network_id: 0,
+        data_path,
+        mining: mine_cfg,
+        ui: Some(config::UiConfig { json: true, tags: vec![] }),
+        api: None,
+        ws: None, // Some(ws_config),
+      };
+      node::start(node_cfg, socket, initial_peers);
     });
     threads.push(socket_thread);
+  }
+
+  if let Some(simulation_time) = simulation_time {
+    if let Ok(simulation_time) = simulation_time.parse() {
+      let killer = thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(simulation_time));
+        std::process::exit(0);
+      });
+      threads.push(killer);
+    }
   }
 
   // Joins all threads

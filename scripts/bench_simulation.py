@@ -1,4 +1,8 @@
+#!/usr/bin/env python3
+
+import argparse
 import json
+import statistics
 import sys
 import os
 import signal
@@ -32,6 +36,10 @@ class Bencher(ABC):
     def get_result(self):
         pass
 
+    @abstractmethod
+    def clear(self):
+        pass
+
     def store_result(self):
         self.results.append(self.get_result())
 
@@ -63,6 +71,10 @@ class UncleRate(Bencher):
         else:
             return self.total
 
+    def clear(self):
+        self.total = 0.
+        self.uncle = 0.
+
 
 class FailedMining(Bencher):
     def __init__(self):
@@ -81,33 +93,49 @@ class FailedMining(Bencher):
     def get_result(self):
         return self.total
 
+    def clear(self):
+        self.total = 0
 
-n = 10
-warmup = 1
-execution_time = 10  # in seconds
 
-if __name__ == "__main__":
+# ============================================================
+# Run
+
+@dataclass
+class RunConfig:
+    n: int
+    warmup: int
+    execution_time: int
+    benchers: list[Bencher]
+
+
+def run(config: RunConfig):
     # create the list of benchmarkers
-    benchers: list[Bencher] = [UncleRate(), FailedMining()]
-    runs_result = []
 
-    for i in range(n + warmup):  # run n + warmup executions
+    print("Building in release mode")
+    # running the command this way makes the thread blocks the execution
+    subprocess.run("cargo test --release --no-run".split())
+
+    print("\n\nRunning tests\n\n")
+    for i in range(config.n + config.warmup):  # run n + warmup executions
+        print(f"Running {i}")
+        # FIXME: doing this way the program runs the expected time,
+        # but the output is not totally captured as the process is killed by other command
 
         # runs the cargo test
         # doing this way because process doesn't end by itself
-        process = subprocess.Popen(
-            ["cargo", "test", "--release", "--", "network::network", "--ignored", "--nocapture"], stdout=subprocess.PIPE, preexec_fn=os.setsid)
-        time.sleep(execution_time)
+        process = subprocess.run(
+            ["cargo", "test", "--release", "--", "network::network", "--ignored", "--nocapture"], capture_output=True, env=dict(os.environ, SIMULATION_TIME=str(config.execution_time)))
+        # time.sleep(config.execution_time)
 
         # Send the signal to all the process groups
         # https://stackoverflow.com/questions/4789837/how-to-terminate-a-python-subprocess-launched-with-shell-true
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        # os.killpg(os.getpgid(process.pid), signal.SIGKILL)
 
         if process.stdout is None:
             raise Exception("stdout was not captured")
 
         # gets output from stdout
-        data = process.stdout.read().decode("utf-8").strip()
+        data = process.stdout.decode("utf-8").strip()
 
         # for each line of the output
         for line in data.splitlines():
@@ -116,23 +144,63 @@ if __name__ == "__main__":
                 event = json.loads(line)
                 event = event['event']  # gets the event
                 # for each bench
-                for bench in benchers:
+                for bench in config.benchers:
                     bench.calculate(event)
-                    bench.store_result()  # maybe put this inside calculate?
             except json.JSONDecodeError as error:
-                print(error)
+                print(line)
+                pass
+                # print(error)
+        for bench in config.benchers:
+            bench.store_result()
+            bench.clear()
 
     # calculates means with the results of each bencher
     result = []
-    for bench in benchers:
+    for bench in config.benchers:
         bench_info = bench.info()
-        results = bench.get_results()[warmup:]  # throw away warmup executions
-
-        mean = sum(results) / len(results)
+        # throw away warmup executions
+        results = bench.get_results()[config.warmup:]
+        print(results)
+        mean: float = statistics.mean(results)
+        stdev = statistics.stdev(results)
         result.append({
             'name': bench_info.name,
             'value': mean,
-            'unit': bench_info.unit
+            'unit': bench_info.unit,
+            'range': stdev
         })
 
-    print(json.dumps(result), file=sys.stderr)
+    with open("bench_simulation_result.json", "w") as file:
+        file.write(json.dumps(result))
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Benchmark on network simulation.")
+
+    parser.add_argument(
+        "-n", type=int, default=5
+    )
+
+    parser.add_argument(
+        "--warmup", type=int, default=1
+    )
+
+    parser.add_argument(
+        "--execution_time", type=int, default=60
+    )
+
+    benchers: list[Bencher] = [UncleRate(), FailedMining()]
+
+    args = parser.parse_args()
+
+    run(RunConfig(
+        n=args.n,
+        warmup=args.warmup,
+        execution_time=args.execution_time,
+        benchers=benchers
+    ))
+
+
+if __name__ == "__main__":
+    main()
