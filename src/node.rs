@@ -923,7 +923,7 @@ impl<C: ProtoComm> Node<C> {
               // 3. Saves overwritten blocks to disk
               for bhash in must_compute.iter().rev() {
                 let file_path = self.get_blocks_path().join(format!(
-                  "{:0>32x}.kindelia_block.bin",
+                  "{:0>16x}.kindelia_block.bin",
                   self.height[bhash]
                 ));
                 let file_buff =
@@ -1428,15 +1428,20 @@ impl<C: ProtoComm> Node<C> {
   fn load_blocks(&mut self) {
     let blocks_dir = self.get_blocks_path();
     std::fs::create_dir_all(&blocks_dir).ok();
-    let mut file_paths: Vec<PathBuf> = vec![];
+    let mut file_paths: Vec<(u64, PathBuf)> = vec![];
     for entry in std::fs::read_dir(&blocks_dir).unwrap() {
-      file_paths.push(entry.unwrap().path());
+      // Extract block height from block file path for fast sort
+      let path = entry.unwrap().path();
+      let name = path.file_name().unwrap().to_str().unwrap();
+      let bnum = name.split('.').nth(0).unwrap();
+      let bnum = u64::from_str_radix(bnum, 16).unwrap();
+      file_paths.push((bnum, path));
     }
-    file_paths.sort();
+    file_paths.sort_unstable();
     let num_blocks = file_paths.len();
     eprintln!("Loading {} blocks from disk...", num_blocks);
-    for file_path in file_paths {
-      let buffer = std::fs::read(file_path.clone()).unwrap();
+    for (_, file_path) in file_paths {
+      let buffer = std::fs::read(&file_path).unwrap();
       let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer));
       if let Some(block) = block {
         self.add_block(&block);
