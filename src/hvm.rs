@@ -306,18 +306,32 @@ pub enum Term {
 // - Gte: greater than or equal
 // - Gtn: greater than
 // - Neq: not equal
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Eq)]
+#[repr(u8)]
 pub enum Oper {
-  Add, Sub, Mul, Div,
-  Mod, And, Or,  Xor,
-  Shl, Shr, Ltn, Lte,
-  Eql, Gte, Gtn, Neq,
+  Add = 0x00,
+  Sub = 0x01,
+  Mul = 0x02,
+  Div = 0x03,
+  Mod = 0x04,
+  And = 0x05,
+  Or  = 0x06,
+  Xor = 0x07,
+  Shl = 0x08,
+  Shr = 0x09,
+  Ltn = 0x0A,
+  Lte = 0x0B,
+  Eql = 0x0C,
+  Gte = 0x0D,
+  Gtn = 0x0E,
+  Neq = 0x0F,
 }
 
 // A u64 HashMap
 pub type Map<T> = util::U128Map<T>;
 pub type NameMap<T> = util::NameMap<T>;
 pub type U120Map<T> = util::U120Map<T>;
+pub type LocMap<T> = util::LocMap<T>;
 
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -333,23 +347,23 @@ pub struct Func {
 }
 
 // The types below are used by the runtime to evaluate rewrite rules. They store the same data as
-// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
+// the types above, except in a semi-compiled, digested form, allowing faster computation.
 
 // Compiled information about a left-hand side variable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
   pub name : Name,         // this variable's name
-  pub param: u128,         // in what parameter is this variable located?
-  pub field: Option<u128>, // in what field is this variable located? (if any)
+  pub param: u64,         // in what parameter is this variable located?
+  pub field: Option<u64>, // in what field is this variable located? (if any)
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<Ptr>,          // left-hand side matching conditions
+  pub cond: Vec<RawCell>,          // left-hand side matching conditions
   pub vars: Vec<Var>,          // left-hand side variable locations
-  pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
+  pub eras: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
   pub body: Term,              // right-hand side body of rule
 }
 
@@ -357,8 +371,8 @@ pub struct CompRule {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   pub func: Func,           // the original function
-  pub arity: u128,          // number of arguments
-  pub redux: Vec<u128>,     // index of strict arguments
+  pub arity: u64,          // number of arguments
+  pub redux: Vec<u64>,     // index of strict arguments
   pub rules: Vec<CompRule>, // vector of rules
 }
 
@@ -377,7 +391,7 @@ pub struct Funcs {
 // It is used in many places to find the arity (argument count) of functions and constructors.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Arits {
-  pub arits: NameMap<u128>,
+  pub arits: NameMap<u64>,
 }
 
 // A map of `FuncID -> FuncID
@@ -396,7 +410,7 @@ pub struct Indxs {
 // It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Store {
-  pub links: U120Map<Ptr>,
+  pub links: U120Map<RawCell>,
 }
 
 /// A global statement that alters the state of the blockchain
@@ -408,13 +422,10 @@ pub enum Statement {
   Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
 }
 
-// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
-pub type Ptr = u128;
-
 // A mergeable vector of u128 values
 #[derive(Debug, Clone, PartialEq)]
 pub struct Nodes {
-  pub nodes: Map<u128>,
+  pub nodes: LocMap<RawCell>,
 }
 
 #[derive(Debug, Clone, PartialEq)] 
@@ -433,18 +444,18 @@ pub struct Heap {
   pub indx: Indxs, // function name to position in heap
   pub hash: Hashs,
   pub ownr: Ownrs, // namespace owners
-  pub tick: u128,  // tick counter
+  pub tick: u64,   // tick counter
   pub time: u128,  // block timestamp
   pub meta: u128,  // block metadata
   pub hax0: u128,  // block hash, part 0
   pub hax1: u128,  // block hash, part 1
-  pub funs: u128,  // total function count
-  pub dups: u128,  // total dups count
-  pub rwts: u128,  // total graph rewrites
-  pub mana: u128,  // total mana cost
-  pub size: i128,  // total used memory (in 64-bit words)
-  pub mcap: u128,  // memory capacity (in 64-bit words)
-  pub next: u128,  // memory index that *may* be empty
+  pub funs: u64,  // total function count
+  pub dups: u64,  // total dups count
+  pub rwts: u64,  // total graph rewrites
+  pub mana: u64,  // total mana cost
+  pub size: u64,  // total used memory (in 64-bit words)
+  pub mcap: u64,  // memory capacity (in 64-bit words)
+  pub next: u64,  // memory index that *may* be empty
   // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
 }
 
@@ -476,7 +487,7 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   DivisionByZero,
-  TermIsInvalidNumber { term: Ptr},
+  TermIsInvalidNumber { term: RawCell},
   CtrOrFunNotDefined { name: Name },
   StmtDoesntExist { stmt_index: u128},
   ArityMismatch { name: Name, expected: usize, got: usize },
@@ -498,16 +509,15 @@ pub enum DefinitionError {
   VarIsNotUsed { name : Name, rule_index: usize },
   NestedMatch { rule_index: usize },
   UnsupportedMatch { rule_index: usize },
-  
 }
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
   StateIsZero { state: U120 },
-  InvalidCallArg {caller: U120, callee: U120, arg: Ptr},
+  InvalidCallArg {caller: U120, callee: U120, arg: RawCell},
   InvalidIOCtr { name: Name },
-  InvalidIONonCtr { ptr: Ptr },
+  InvalidIONonCtr { ptr: RawCell },
 }
 
 // TODO: move to tests?
@@ -546,11 +556,11 @@ pub enum StatementInfo {
   Run {
     done_term: Term,
     #[serde_as(as = "DisplayFromStr")]
-    used_mana: u128,
+    used_mana: u64,
     #[serde_as(as = "DisplayFromStr")]
-    size_diff: i128,
+    size_diff: i64,
     #[serde_as(as = "DisplayFromStr")]
-    end_size: u128,
+    done_size: u64,
   },
   Reg { name: Name, ownr: U120 },
 }
@@ -612,39 +622,85 @@ pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 
 // TODO: refactor to enums with u128 repr
 
-pub const DP0: u128 = 0x0;
-pub const DP1: u128 = 0x1;
-pub const VAR: u128 = 0x2;
-pub const ARG: u128 = 0x3;
-pub const ERA: u128 = 0x4;
-pub const LAM: u128 = 0x5;
-pub const APP: u128 = 0x6;
-pub const SUP: u128 = 0x7;
-pub const CTR: u128 = 0x8;
-pub const FUN: u128 = 0x9;
-pub const OP2: u128 = 0xA;
-pub const NUM: u128 = 0xB;
-pub const NIL: u128 = 0xF;
 
-pub const ADD : u128 = 0x0;
-pub const SUB : u128 = 0x1;
-pub const MUL : u128 = 0x2;
-pub const DIV : u128 = 0x3;
-pub const MOD : u128 = 0x4;
-pub const AND : u128 = 0x5;
-pub const OR  : u128 = 0x6;
-pub const XOR : u128 = 0x7;
-pub const SHL : u128 = 0x8;
-pub const SHR : u128 = 0x9;
-pub const LTN : u128 = 0xA;
-pub const LTE : u128 = 0xB;
-pub const EQL : u128 = 0xC;
-pub const GTE : u128 = 0xD;
-pub const GTN : u128 = 0xE;
-pub const NEQ : u128 = 0xF;
+/// The type of pointers to locations in memory
+/// stored in the first 48 bytes of a RawCell.
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
+#[repr(transparent)]
+pub struct Loc(u64);
+
+/// The numeric representation of a `Cell` to store
+/// in memory
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
+#[repr(transparent)]
+pub struct RawCell(u128);
+
+/// Constructor of a symbolic representation of a term directly
+/// represented in memory.
+///
+/// It is mostly used to correctly construct `RawCell`'s.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Cell {
+  Dp0 { label: u128, loc: Loc },
+  Dp1 { label: u128, loc: Loc },
+  Var { loc: Loc },
+  Arg { loc: Loc },
+  Era,
+  Lam { loc: Loc },
+  App { loc: Loc },
+  Sup { label: u128, loc: Loc },
+  Ctr { name: Name, loc: Loc },
+  Fun { name: Name, loc: Loc },
+  Op2 { oper: Oper, loc: Loc },
+  Num { num: U120 },
+  Nil
+}
+
+
+/// The first 8 bits of a `RawCell` element.
+/// Represents the type of the stored cell.
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum CellTag {
+  DP0 = 0x00,
+  DP1 = 0x01,
+  VAR = 0x02,
+  ARG = 0x03,
+  ERA = 0x04,
+  LAM = 0x05,
+  APP = 0x06,
+  SUP = 0x07,
+  CTR = 0x08,
+  FUN = 0x09,
+  OP2 = 0x0A,
+  NUM = 0x0B,
+  NIL = 0x0F
+}
+
+impl CellTag {
+  const fn from_u8(val: u8) -> Self {
+    match val {
+      0x00 => CellTag::DP0 ,
+      0x01 => CellTag::DP1 ,
+      0x02 => CellTag::VAR ,
+      0x03 => CellTag::ARG ,
+      0x04 => CellTag::ERA ,
+      0x05 => CellTag::LAM ,
+      0x06 => CellTag::APP ,
+      0x07 => CellTag::SUP ,
+      0x08 => CellTag::CTR ,
+      0x09 => CellTag::FUN ,
+      0x0A => CellTag::OP2 ,
+      0x0B => CellTag::NUM ,
+      0x0F => CellTag::NIL,
+      _    => panic!("Unkown cell tag")
+    }
+  }
+}
 
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+pub const U64_NONE : u64 = u64::MAX; //TODO: rewrite as FFF? idk if it is useful
 
 // TODO: r -> U120
 // (IO r:Type) : Type
@@ -671,14 +727,13 @@ const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
 const IO_GIDX : u128 = 0x4533a2; // name_to_u128("GIDX")
 const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
 const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
-// TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u128 = 4_000_000;
+pub const BLOCK_MANA_LIMIT : u64 = 4_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per year
+pub const BLOCK_BITS_LIMIT : u64 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
@@ -703,56 +758,286 @@ pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per 
 // | * M is the alloc count of the right-hand side       |
 // |-----------------------------------------------------|
 
+impl Cell {
 
-fn AppLamMana() -> u128 {
-  return 2;
+  fn AppLamMana() -> u64 {
+    return 2;
+  }
+
+  fn AppSupMana() -> u64 {
+    return 4;
+  }
+
+  fn Op2NumMana() -> u64 {
+    return 2;
+  }
+
+  fn Op2SupMana() -> u64 {
+    return 4;
+  }
+
+  fn FunCtrMana(body: &Term) -> u64 {
+    return 2 + count_allocs(body);
+  }
+
+  fn FunSupMana(arity: u64) -> u64 {
+    return 2 + arity;
+  }
+
+  fn DupLamMana() -> u64 {
+    return 4;
+  }
+
+  fn DupNumMana() -> u64 {
+    return 2;
+  }
+
+  fn DupCtrMana(arity: u64) -> u64 {
+    return 2 + arity;
+  }
+
+  fn DupDupMana() -> u64 {
+    return 4;
+  }
+
+  fn DupSupMana() -> u64 {
+    return 2;
+  }
+
+  fn DupEraMana() -> u64 {
+    return 2;
+  }
+
+  pub const fn var(loc: Loc) -> Self {
+    Cell::Var { loc }
+  } 
+  
+  pub const fn dp0(col: u128, loc: Loc) -> Self {
+    Cell::Dp0 { label: col, loc }
+  }
+
+  pub const fn dp1(col: u128, loc: Loc) -> Self {
+    Cell::Dp1 { label: col, loc }    
+  }
+
+  pub const fn arg(loc: Loc) -> Self {
+    Cell::Arg { loc }
+  }
+
+  pub const fn era() -> Self {
+    Cell::Era
+  }
+
+  pub const fn nil() -> Self {
+    Cell::Nil
+  }
+
+  pub const fn lam(loc: Loc) -> Self {
+    Cell::Lam { loc }
+  }
+
+  pub const fn app(loc: Loc) -> Self {
+    Cell::App { loc }
+  }
+
+  pub const fn sup(col: u128, loc: Loc) -> Self {
+    Cell::Sup { label: col, loc }
+  }
+
+  pub const fn op2(ope: Oper, loc: Loc) -> Self {
+    Cell::Op2 { oper: ope, loc }
+  }
+
+  pub fn num(num: U120) -> Self {
+    debug_assert!((!NUM_MASK & *num) == 0, "Num overflow: `{}`.", *num);
+    //(NUM * TAG_SHL) | (val & NUM_MASK)
+    Cell::Num { num }
+  }
+
+  pub const fn ctr(name: Name, loc: Loc) -> Self {
+    Cell::Ctr { name, loc }
+  }
+
+  pub const fn fun(name: Name, loc: Loc) -> Self {
+    Cell::Fun { name, loc }
+  }
 }
 
-fn AppSupMana() -> u128 {
-  return 4;
+impl RawCell {
+  
+  pub const fn new(num: u128) -> Option<Self> {
+    let tag = num >> (EXT_SIZE + VAL_SIZE);
+    if matches!(tag, CellTag) {
+      Some(RawCell(num))
+    }
+    else {
+      None
+    }
+  }
+  // for testing purposes only
+  // TODO: remove this 
+  pub const fn new_unchecked(num: u128) -> Self {
+    RawCell(num)
+  }
+  
+  pub const fn get_tag(&self) -> CellTag {
+    let tag = (*self).0 / TAG_SHL;
+    CellTag::from_u8(tag as u8)
+  }
+
+  pub const fn get_ext(&self) -> u128 {
+    ((*self).0 / EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
+  }
+
+  pub const fn get_val(&self) -> u128 {
+    (*self).0 & 0xFFFF_FFFF_FFFF
+  }
+
+  pub fn get_num(&self) -> U120 {
+    debug_assert_eq!(self.get_tag(), CellTag::NUM);
+    U120::from_u128_unchecked(**self & NUM_MASK)
+  }
+  
+  //pub fn get_ari(lnk: Ptr) -> u128 {
+  //(lnk / ARI) & 0xF
+  //}
+
+  pub const fn get_loc(self, arg: u64) -> Loc {
+    Loc((self.get_val() as u64) + arg)
+  }
 }
 
-fn Op2NumMana() -> u128 {
-  return 2;
+impl std::ops::Deref for RawCell {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
 }
 
-fn Op2SupMana() -> u128 {
-  return 4;
+impl fmt::Display for RawCell {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", **self)
+  }
 }
 
-fn FunCtrMana(body: &Term) -> u128 {
-  return 2 + count_allocs(body);
+
+impl From<Cell> for RawCell {
+
+  fn from(cell: Cell) -> Self {
+    match cell {
+      Cell::Era => {
+        let tag = (CellTag::ERA as u128) * TAG_SHL;
+        RawCell(tag)
+      },
+      Cell::Nil => {
+        let tag = (CellTag::NIL as u128) * TAG_SHL;
+        RawCell(tag)
+      },
+      Cell::Var { loc } => {
+        let tag = (CellTag::VAR as u128) * TAG_SHL;
+        let val = *loc as u128;
+        RawCell(tag | val)
+      },
+      Cell::Arg { loc } => {
+        let tag = (CellTag::ARG as u128) * TAG_SHL;
+        let val = *loc as u128;
+        RawCell(tag | val)
+      },
+      Cell::Lam { loc } => {
+        let tag = (CellTag::LAM as u128) * TAG_SHL;
+        let val = *loc as u128;
+        RawCell(tag | val)
+      },
+      Cell::App { loc } => {
+        let tag = (CellTag::APP as u128) * TAG_SHL;
+        let val = *loc as u128;
+        RawCell(tag | val)
+      },
+      Cell::Num { num } => {
+        let tag = (CellTag::NUM as u128) * TAG_SHL;
+        let val = *num as u128;
+        RawCell(tag | val)
+      },
+      Cell::Dp0 { label, loc } => {
+        let tag = (CellTag::DP0 as u128) * TAG_SHL;
+        let ext = label * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )
+      },
+      Cell::Dp1 { label, loc } => {
+        let tag = (CellTag::DP1 as u128) * TAG_SHL;
+        let ext = label * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )
+      },      
+      Cell::Sup { label, loc } => {
+        let tag = (CellTag::SUP as u128) * TAG_SHL;
+        let ext = label * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )
+      },
+      Cell::Ctr { name, loc } => {
+        let tag = (CellTag::CTR as u128) * TAG_SHL;
+        let ext = *name * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )
+      },
+      Cell::Fun { name, loc } => {
+        let tag = (CellTag::FUN as u128) * TAG_SHL;
+        let ext = *name * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )
+      },
+      Cell::Op2 { oper, loc } => {
+        let tag = (CellTag::OP2 as u128) * TAG_SHL;
+        let ext = (oper as u128) * EXT_SHL;
+        let val = *loc as u128;
+        RawCell( tag | ext | val )   
+      },
+    }
+  }
 }
 
-fn FunSupMana(arity: u128) -> u128 {
-  return 2 + arity;
+// Loc
+
+
+impl Loc {
+  pub const _MAX : u64 = (1 << VAL_SIZE) -1;
+  pub const MAX : Loc = Loc(Loc::_MAX);
+  
+  pub fn new(num: u64) -> Option<Self> {
+    if num >> VAL_SIZE == 0 {
+      Some(Loc(num))
+    }
+    else {
+      None
+    }
+  }
 }
 
-fn DupLamMana() -> u128 {
-  return 4;
+impl std::ops::Deref for Loc {
+  type Target = u64;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
 }
 
-fn DupNumMana() -> u128 {
-  return 2;
+impl std::ops::Add<u64> for Loc {
+  type Output = Self;
+  fn add(self, other: u64) -> Self::Output {
+    Loc(self.0 + other)
+  }
 }
 
-fn DupCtrMana(arity: u128) -> u128 {
-  return 2 + arity;
+impl std::ops::Add for Loc {
+  type Output = Self;
+  fn add(self, other: Self) -> Self::Output {
+    Loc(self.0 + other.0)
+  }
 }
 
-fn DupDupMana() -> u128 {
-  return 4;
-}
 
-fn DupSupMana() -> u128 {
-  return 2;
-}
-
-fn DupEraMana() -> u128 {
-  return 2;
-}
-
-fn count_allocs(body: &Term) -> u128 {
+fn count_allocs(body: &Term) -> u64 {
   match body {
     Term::Var { name } => {
       0
@@ -772,7 +1057,7 @@ fn count_allocs(body: &Term) -> u128 {
       2 + func + argm
     }
     Term::Fun { name, args } => {
-      let size = args.len() as u128;
+      let size = args.len() as u64;
       let mut count = 0;
       for (i, arg) in args.iter().enumerate() {
         count += count_allocs(arg);
@@ -780,7 +1065,7 @@ fn count_allocs(body: &Term) -> u128 {
       size + count
     }
     Term::Ctr { name, args } => {
-      let size = args.len() as u128;
+      let size = args.len() as u64;
       let mut count = 0;
       for (i, arg) in args.iter().enumerate() {
         count += count_allocs(arg);
@@ -813,6 +1098,10 @@ pub fn init_u120_map<A>() -> U120Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
+pub fn init_loc_map<A>() -> LocMap<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
 // Address
 // -------
 
@@ -834,24 +1123,24 @@ impl TryFrom<u128> for Oper {
   type Error = String;
   fn try_from(value: u128) -> Result<Self, Self::Error> {
       match value {
-        ADD => Ok(Oper::Add),
-        SUB => Ok(Oper::Sub),
-        MUL => Ok(Oper::Mul),
-        DIV => Ok(Oper::Div),
-        MOD => Ok(Oper::Mod),
-        AND => Ok(Oper::And),
-        OR  => Ok(Oper::Or),
-        XOR => Ok(Oper::Xor),
-        SHL => Ok(Oper::Shl),
-        SHR => Ok(Oper::Shr),
-        LTN => Ok(Oper::Ltn),
-        LTE => Ok(Oper::Lte),
-        EQL => Ok(Oper::Eql),
-        GTE => Ok(Oper::Gte),
-        GTN => Ok(Oper::Gtn),
-        NEQ => Ok(Oper::Neq),
+        value if value == (Oper::Add as u128) => Ok(Oper::Add),
+        value if value == (Oper::Sub as u128) => Ok(Oper::Sub),
+        value if value == (Oper::Mul as u128) => Ok(Oper::Mul),
+        value if value == (Oper::Div as u128) => Ok(Oper::Div),
+        value if value == (Oper::Mod as u128) => Ok(Oper::Mod),
+        value if value == (Oper::And as u128) => Ok(Oper::And),
+        value if value == (Oper::Or  as u128) => Ok(Oper::Or),
+        value if value == (Oper::Xor as u128) => Ok(Oper::Xor),
+        value if value == (Oper::Shl as u128) => Ok(Oper::Shl),
+        value if value == (Oper::Shr as u128) => Ok(Oper::Shr),
+        value if value == (Oper::Ltn as u128) => Ok(Oper::Ltn),
+        value if value == (Oper::Lte as u128) => Ok(Oper::Lte),
+        value if value == (Oper::Eql as u128) => Ok(Oper::Eql),
+        value if value == (Oper::Gte as u128) => Ok(Oper::Gte),
+        value if value == (Oper::Gtn as u128) => Ok(Oper::Gtn),
+        value if value == (Oper::Neq as u128) => Ok(Oper::Neq),
         _ => Err(format!("Invalid value for operation: {}", value))
-      }
+      } // this is so ugly
   }
 }
 
@@ -1020,17 +1309,21 @@ fn absorb_i128(a: i128, b: i128, overwrite: bool) -> i128 {
   if b == I128_NONE { a } else if overwrite || a == I128_NONE { b } else { a }
 }
 
+fn absorb_u64(a: u64, b: u64, overwrite: bool) -> u64 {
+  if b == U64_NONE { a } else if overwrite || a == U64_NONE { b } else { a }
+}
+
 impl Heap {
-  fn write(&mut self, idx: u128, val: u128) {
-    return self.memo.write(idx, val);
+  fn write(&mut self, loc: Loc, val: RawCell) {
+    return self.memo.write(loc, val);
   }
-  fn read(&self, idx: u128) -> u128 {
+  fn read(&self, idx: Loc) -> RawCell {
     return self.memo.read(idx);
   }
-  fn write_disk(&mut self, name: U120, val: Ptr) {
+  fn write_disk(&mut self, name: U120, val: RawCell) {
     return self.disk.write(name, val);
   }
-  fn read_disk(&self, name: U120) -> Option<Ptr> {
+  fn read_disk(&self, name: U120) -> Option<RawCell> {
     return self.disk.read(name);
   }
   fn write_file(&mut self, name: Name, fun: Arc<CompFunc>) {
@@ -1039,10 +1332,10 @@ impl Heap {
   fn read_file(&self, name: &Name) -> Option<Arc<CompFunc>> {
     return self.file.read(name);
   }
-  fn write_arit(&mut self, name: Name, val: u128) {
+  fn write_arit(&mut self, name: Name, val: u64) {
     return self.arit.write(name, val);
   }
-  fn read_arit(&self, name: &Name) -> Option<u128> {
+  fn read_arit(&self, name: &Name) -> Option<u64> {
     return self.arit.read(name);
   }
   fn write_ownr(&mut self, name: Name, val: U120) {
@@ -1063,10 +1356,10 @@ impl Heap {
   fn read_stmt_hash(&self, pos: &u128) -> Option<&crypto::Hash> {
     return self.hash.read(pos);
   }
-  fn set_tick(&mut self, tick: u128) {
+  fn set_tick(&mut self, tick: u64) {
     self.tick = tick;
   }
-  fn get_tick(&self) -> u128 {
+  fn get_tick(&self) -> u64 {
     return self.tick;
   }
   fn set_time(&mut self, time: u128) {
@@ -1093,46 +1386,46 @@ impl Heap {
   fn get_hax1(&self) -> u128 {
     return self.hax1;
   }
-  fn set_funs(&mut self, funs: u128) {
+  fn set_funs(&mut self, funs: u64) {
     self.funs = funs;
   }
-  fn get_funs(&self) -> u128 {
+  fn get_funs(&self) -> u64 {
     return self.funs;
   }
-  fn set_dups(&mut self, dups: u128) {
+  fn set_dups(&mut self, dups: u64) {
     self.dups = dups;
   }
-  fn get_dups(&self) -> u128 {
+  fn get_dups(&self) -> u64 {
     return self.dups;
   }
-  fn set_rwts(&mut self, rwts: u128) {
+  fn set_rwts(&mut self, rwts: u64) {
     self.rwts = rwts;
   }
-  fn get_rwts(&self) -> u128 {
+  fn get_rwts(&self) -> u64 {
     return self.rwts;
   }
-  fn set_mana(&mut self, mana: u128) { // TODO: do these counters need to be u128? would u64 suffice?
+  fn set_mana(&mut self, mana: u64) {
     self.mana = mana;
   }
-  fn get_mana(&self) -> u128 {
+  fn get_mana(&self) -> u64 {
     return self.mana;
   }
-  fn set_size(&mut self, size: i128) {
+  fn set_size(&mut self, size: u64) {
     self.size = size;
   }
-  fn get_size(&self) -> i128 {
+  fn get_size(&self) -> u64 {
     return self.size;
   }
-  fn set_mcap(&mut self, mcap: u128) {
+  fn set_mcap(&mut self, mcap: u64) {
     self.mcap = mcap;
   }
-  fn get_mcap(&self) -> u128 {
+  fn get_mcap(&self) -> u64 {
     return self.mcap;
   }
-  fn set_next(&mut self, next: u128) {
+  fn set_next(&mut self, next: u64) {
     self.next = next;
   }
-  fn get_next(&self) -> u128 {
+  fn get_next(&self) -> u64 {
     return self.next;
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
@@ -1140,18 +1433,18 @@ impl Heap {
     self.disk.absorb(&mut other.disk, overwrite);
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
-    self.tick = absorb_u128(self.tick, other.tick, overwrite);
+    self.tick = absorb_u64(self.tick, other.tick, overwrite);
     self.time = absorb_u128(self.time, other.time, overwrite);
     self.meta = absorb_u128(self.meta, other.meta, overwrite);
     self.hax0 = absorb_u128(self.hax0, other.hax0, overwrite);
     self.hax1 = absorb_u128(self.hax1, other.hax1, overwrite);
-    self.funs = absorb_u128(self.funs, other.funs, overwrite);
-    self.dups = absorb_u128(self.dups, other.dups, overwrite);
-    self.rwts = absorb_u128(self.rwts, other.rwts, overwrite);
-    self.mana = absorb_u128(self.mana, other.mana, overwrite);
-    self.size = absorb_i128(self.size, other.size, overwrite);
-    self.mcap = absorb_u128(self.mcap, other.mcap, overwrite);
-    self.next = absorb_u128(self.next, other.next, overwrite);
+    self.funs = absorb_u64(self.funs, other.funs, overwrite);
+    self.dups = absorb_u64(self.dups, other.dups, overwrite);
+    self.rwts = absorb_u64(self.rwts, other.rwts, overwrite);
+    self.mana = absorb_u64(self.mana, other.mana, overwrite);
+    self.size = absorb_u64(self.size, other.size, overwrite);
+    self.mcap = absorb_u64(self.mcap, other.mcap, overwrite);
+    self.next = absorb_u64(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
     self.uuid = fastrand::u128(..);
@@ -1159,18 +1452,18 @@ impl Heap {
     self.disk.clear();
     self.file.clear();
     self.arit.clear();
-    self.tick = U128_NONE;
+    self.tick = U64_NONE;
     self.time = U128_NONE;
     self.meta = U128_NONE;
     self.hax0 = U128_NONE;
     self.hax1 = U128_NONE;
-    self.funs = U128_NONE;
-    self.dups = U128_NONE;
-    self.rwts = U128_NONE;
-    self.mana = U128_NONE;
-    self.size = I128_NONE;
-    self.mcap = U128_NONE;
-    self.next = U128_NONE;
+    self.funs = U64_NONE;
+    self.dups = U64_NONE;
+    self.rwts = U64_NONE;
+    self.mana = U64_NONE;
+    self.size = U64_NONE;
+    self.mcap = U64_NONE;
+    self.next = U64_NONE;
   }
   pub fn serialize(self: &Heap, path: &PathBuf, append: bool) -> std::io::Result<()> {
     fn open_writer(heap: &Heap, path: &PathBuf, buffer_name: &str, append: bool) -> std::io::Result<File> {
@@ -1254,6 +1547,7 @@ impl Heap {
     self.delete_buffer(self.uuid, "arit", path)?;
     self.delete_buffer(self.uuid, "indx", path)?;
     self.delete_buffer(self.uuid, "ownr", path)?;
+    self.delete_buffer(self.uuid, "stmt_hashes", path)?;
     self.delete_buffer(self.uuid, "stat", path)?;
     return Ok(());
   }
@@ -1271,34 +1565,34 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
-    memo: Nodes { nodes: init_map() },
+    memo: Nodes { nodes: init_loc_map() },
     disk: Store { links: init_u120_map() },
     file: Funcs { funcs: init_name_map() },
     arit: Arits { arits: init_name_map() },
     ownr: Ownrs { ownrs: init_name_map() },
     indx: Indxs { indxs: init_name_map() },
     hash: Hashs { stmt_hashes: init_map() },
-    tick: U128_NONE,
+    tick: U64_NONE,
     time: U128_NONE,
     meta: U128_NONE,
     hax0: U128_NONE,
     hax1: U128_NONE,
-    funs: U128_NONE,
-    dups: U128_NONE,
-    rwts: U128_NONE,
-    mana: U128_NONE,
-    size: I128_NONE,
-    mcap: U128_NONE,
-    next: U128_NONE,
+    funs: U64_NONE,
+    dups: U64_NONE,
+    rwts: U64_NONE,
+    mana: U64_NONE,
+    size: U64_NONE,
+    mcap: U64_NONE,
+    next: U64_NONE,
   }
 }
 
 impl Nodes {
-  fn write(&mut self, idx: u128, val: u128) {
-    self.nodes.insert(idx, val);
+  fn write(&mut self, loc: Loc, val: RawCell) {
+    self.nodes.insert(loc, val);
   }
-  fn read(&self, idx: u128) -> u128 {
-    return self.nodes.get(&idx).map(|x| *x).unwrap_or(U128_NONE);
+  fn read(&self, loc: Loc) -> RawCell {
+    return self.nodes.get(&loc).map(|x| *x).unwrap_or(RawCell(U128_NONE));
   }
   fn clear(&mut self) {
     self.nodes.clear();
@@ -1314,10 +1608,10 @@ impl Nodes {
 }
 
 impl Store {
-  fn write(&mut self, fid: U120, val: Ptr) {
+  fn write(&mut self, fid: U120, val: RawCell) {
     self.links.insert(fid, val);
   }
-  fn read(&self, fid: U120) -> Option<Ptr> {
+  fn read(&self, fid: U120) -> Option<RawCell> {
     self.links.get(&fid).map(|x| *x)
   }
   fn clear(&mut self) {
@@ -1352,10 +1646,10 @@ impl Funcs {
 }
 
 impl Arits {
-  fn write(&mut self, name: Name, val: u128) {
+  fn write(&mut self, name: Name, val: u64) {
     self.arits.entry(name).or_insert(val);
   }
-  fn read(&self, name: &Name) -> Option<u128> {
+  fn read(&self, name: &Name) -> Option<u64> {
     return self.arits.get(name).map(|x| *x);
   }
   fn clear(&mut self) {
@@ -1465,7 +1759,7 @@ impl Runtime {
     self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  pub fn define_constructor(&mut self, name: Name, arity: u128, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
+  pub fn define_constructor(&mut self, name: Name, arity: u64, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
     self.save_stmt_name(name, stmt_index, stmt_hash);
   }
@@ -1477,29 +1771,29 @@ impl Runtime {
 
   pub fn save_stmt_name(&mut self, name: Name, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     if let Some(idx) = stmt_index {
-      let tick = self.get_tick();
+      let tick = self.get_tick() as u128;
       let pos = tick.wrapping_shl(60) | (idx as u128); //TODO: refactor to use less bits
       self.get_heap_mut(self.draw).write_indx(name, pos);
       self.get_heap_mut(self.draw).write_stmt_hash(pos, stmt_hash);
     }
   }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
+  pub fn create_term(&mut self, term: &Term, loc: Loc, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<RawCell, RuntimeError> {
     return create_term(self, term, loc, vars_data);
   }
 
-  pub fn alloc_term(&mut self, term: &Term) -> Result<u128, RuntimeError> {
+  pub fn alloc_term(&mut self, term: &Term) -> Result<Loc, RuntimeError> {
     let loc = alloc(self, 1);
-    let ptr = create_term(self, term, loc, &mut init_map())?;
+    let ptr = create_term(self, term, loc, &mut init_name_map())?;
     self.write(loc, ptr);
     Ok(loc)
   }
 
-  pub fn collect(&mut self, term: Ptr) {
+  pub fn collect(&mut self, term: RawCell) {
     collect(self, term)
   }
 
-  pub fn collect_at(&mut self, loc: u128) {
+  pub fn collect_at(&mut self, loc: Loc) {
     collect(self, self.read(loc))
   }
 
@@ -1563,22 +1857,22 @@ impl Runtime {
     }
   }
 
-  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn compute_at(&mut self, loc: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
     compute_at(self, loc, mana)
   }
 
-  pub fn compute(&mut self, lnk: Ptr, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn compute(&mut self, lnk: RawCell, mana: u64) -> Result<RawCell, RuntimeError> {
     let host = alloc_lnk(self, lnk);
     let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Ok(done);
   }
 
-  pub fn show_term(&self, lnk: Ptr) -> String {
+  pub fn show_term(&self, lnk: RawCell) -> String {
     return show_term(self, lnk, None);
   }
 
-  pub fn show_term_at(&self, loc: u128) -> String {
+  pub fn show_term_at(&self, loc: Loc) -> String {
     return show_term(self, self.read(loc), None);
   }
 
@@ -1620,30 +1914,30 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: U120, caller: U120, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn run_io(&mut self, subject: U120, caller: U120, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
     // eprintln!("-- {}", show_term(self, host, None));
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term, None));
-    match get_tag(term) {
-      CTR => {
-        let ext = get_ext(term);
+    match term.get_tag() {
+      CellTag::CTR => {
+        let ext = term.get_ext();
         match ext {
           IO_DONE => {
             let retr = ask_arg(self, term, 0);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return Ok(retr);
           }
           IO_TAKE => {
             //println!("- IO_TAKE subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
             if let Some(state) = self.read_disk(subject) {
-              if state != 0 {
-                self.write_disk(subject, 0);
+              if state != RawCell(0) {
+                self.write_disk(subject, RawCell(0));
                 let cont = alloc_app(self, cont, state);
                 let done = self.run_io(subject, subject, cont, mana);
                 clear(self, host, 1);
-                clear(self, get_loc(term, 0), 1);
+                clear(self, term.get_loc(0), 1);
                 return done;
               } else {
                 return Err(RuntimeError::EffectFailure(
@@ -1660,20 +1954,20 @@ impl Runtime {
             let expr = ask_arg(self, term, 0);
             let save = self.compute(expr, mana)?;
             self.write_disk(subject, save);
-            let cont = ask_arg(self, term, 1);
-            let cont = alloc_app(self, cont, Num(0));
+            let num = U120::from_u128_unchecked(0);
+            let cont = ask_arg(self, term, 1);            
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 2);
+            clear(self, term.get_loc(0), 2);
             return done;
           }
           IO_CALL => {
             let fnid = ask_arg(self, term, 0);
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
-            let fnid = self.check_num(fnid, mana)?;
-            
-            let arg_name = Name::new(get_ext(argm)).ok_or_else(|| RuntimeError::NameTooBig { numb: argm })?;
+            let fnid = self.check_num(fnid, mana)?;            
+            let arg_name = Name::new(argm.get_ext()).ok_or_else(|| RuntimeError::NameTooBig { numb: *argm })?;
             let arg_arit = self
               .get_arity(&arg_name)
               .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: arg_name })?;
@@ -1683,23 +1977,24 @@ impl Runtime {
             // its state. To avoid that, we only allow contracts to communicate by passing flat
             // constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
             for i in 0 .. arg_arit {
-              let argm = reduce(self, get_loc(argm, 0), mana)?;
-              if get_tag(argm) != NUM {
+              let argm = reduce(self, argm.get_loc(0), mana)?;
+              if argm.get_tag() != CellTag::NUM {
                 let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
                 return Err(RuntimeError::EffectFailure(f));
               }
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, *fnid, &[argm]);
+            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let ioxp = alloc_fun(self, name, &[argm]);
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
             let done = self.run_io(subject, caller, cont, mana);
             // Clears memory
             clear(self, host, 1);
-            //clear(self, get_loc(argm, 0), arit);
-            clear(self, get_loc(term, 0), 3);
+            //clear(self, argm.get_loc(0), arit);
+            clear(self, term.get_loc(0), 3);
             return done;
           }
           IO_GIDX => {
@@ -1707,10 +2002,11 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             let name = self.check_name(fnid, mana)?;
             let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
-            let cont = alloc_app(self, cont, Num(indx));
+            let num = U120::from_u128_unchecked(indx); // TODO: remove unchecked
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 2);
+            clear(self, term.get_loc(0), 2);
             return done;
           }
           IO_STH0 => {
@@ -1718,10 +2014,11 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
-            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let num = U120::from_u128_unchecked(stmt_hash); // TODO: remove unchecked
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 2);
+            clear(self, term.get_loc(0), 2);
             return done;
           }
           IO_STH1 => {
@@ -1729,66 +2026,77 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
-            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let num = U120::from_u128_unchecked(stmt_hash); // TODO: remove unchecked
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 2);
+            clear(self, term.get_loc(0), 2);
             return done;
           }
           IO_SUBJ => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(*subject));
+            let cont = alloc_app(self, cont, Cell::num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(*subject));
+            let cont = alloc_app(self, cont, Cell::num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_TICK => {
+            let num = self.get_tick();
+            let num = U120::from_u128_unchecked(num as u128);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_tick()));
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_TIME => {
+            let num = self.get_time();
+            let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_time()));
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_META => {
+            let num = self.get_meta();
+            let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_meta()));
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_HAX0 => {
+            let num = self.get_hax0();
+            let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_hax0()));
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           IO_HAX1 => {
+            let num = self.get_hax1();
+            let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_hax1()));
+            let cont = alloc_app(self, cont, Cell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
-            clear(self, get_loc(term, 0), 1);
+            clear(self, term.get_loc(0), 1);
             return done;
           }
           _ => {
@@ -1818,15 +2126,15 @@ impl Runtime {
     }
   }
 
-  pub fn check_num(&mut self, ptr: u128, mana: u128) -> Result<U120, RuntimeError> {
+  pub fn check_num(&mut self, ptr: RawCell, mana: u64) -> Result<U120, RuntimeError> {
     let num = self.compute(ptr, mana)?;
-    match get_tag(num) {
-      NUM => Ok(get_num(num)),
+    match num.get_tag() {
+      CellTag::NUM => Ok(num.get_num()),
       _ => Err(RuntimeError::TermIsInvalidNumber { term: num })
     }
   }
 
-  pub fn check_name(&mut self, ptr: u128, mana: u128) -> Result<Name, RuntimeError> {
+  pub fn check_name(&mut self, ptr: RawCell, mana: u64) -> Result<Name, RuntimeError> {
     let num = self.check_num(ptr, mana)?;
     match Name::new(*num) {
       None => Err(RuntimeError::NameTooBig { numb: *num }),
@@ -1897,9 +2205,9 @@ impl Runtime {
         let func = compile_func(func, true);
         let func = handle_runtime_err(self, "fun", func)?;
         let name = *name;
-        self.set_arity(name, args.len() as u128);
+        self.set_arity(name, args.len() as u64);
         self.define_function(name, func, stmt_index, hash);
-        let state = self.create_term(init, 0, &mut init_map());
+        let state = self.create_term(init, Loc(0), &mut init_name_map());
         let state = handle_runtime_err(self, "fun", state)?;
         self.write_disk(U120::from(name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
@@ -1917,25 +2225,25 @@ impl Runtime {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
         }
         let name = *name;
-        self.define_constructor(name, args.len() as u128, stmt_index, hash);
+        self.define_constructor(name, args.len() as u64, stmt_index, hash);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Ctr { name, args }
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana();
-        let mana_lim = if !sudo { self.get_mana_limit() } else { u128::MAX }; // ugly
+        let mana_lim = if !sudo { self.get_mana_limit() } else { u64::MAX }; // ugly
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit();
         handle_runtime_err(self, "run", check_term(&expr))?; 
         let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
-        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim);
+        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim as u64);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
-        let done = self.compute(done, mana_lim);
+        let done = self.compute(done, mana_lim as u64);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
@@ -1953,17 +2261,17 @@ impl Runtime {
             Term::num(U120::ZERO)
           };
         self.collect(done);
-        let size_end = self.get_size();
+        let size_end = self.get_size() as u64;
         let mana_dif = self.get_mana() - mana_ini;
-        let size_dif = size_end - size_ini;
-        if size_end > size_lim && !sudo {
+        let size_dif = (size_end as i64) - (size_ini as i64);
+        if size_end > (size_lim as u64) && !sudo {
           return error(self, "run", format!("Not enough space."));
         }
         StatementInfo::Run {
           done_term,
           used_mana: mana_dif,
           size_diff: size_dif,
-          end_size: size_end as u128, // TODO: rename to done_size for consistency?
+          done_size: size_end, // TODO: rename to done_size for consistency?
         }
         // TODO: save run to statement array?
       }
@@ -1990,13 +2298,13 @@ impl Runtime {
   }
 
   // Maximum mana = 42m * block_number
-  pub fn get_mana_limit(&self) -> u128 {
+  pub fn get_mana_limit(&self) -> u64 {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
   }
 
   // Maximum size = 2048 * block_number
-  pub fn get_size_limit(&self) -> i128 {
-    (self.get_tick() as i128 + 1) * (BLOCK_BITS_LIMIT / 128)
+  pub fn get_size_limit(&self) -> u64 {
+    (self.get_tick() + 1) * (BLOCK_BITS_LIMIT / 128)
   }
 
   // Rollback
@@ -2046,7 +2354,7 @@ impl Runtime {
   }
 
   // Rolls back to the earliest state before or equal `tick`
-  pub fn rollback(&mut self, tick: u128) {
+  pub fn rollback(&mut self, tick: u64) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
       eprintln!("- rolling back from {} to {}", self.get_tick(), tick);
@@ -2225,19 +2533,19 @@ impl Runtime {
     }
   }
 
-  pub fn write(&mut self, idx: u128, val: u128) {
-    return self.get_heap_mut(self.draw).write(idx, val);
+  pub fn write<T: Into<RawCell>>(&mut self, loc: Loc, val: T) {
+    return self.get_heap_mut(self.draw).write(loc, val.into());
   }
 
-  pub fn read(&self, idx: u128) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.read(idx));
+  pub fn read(&self, loc: Loc) -> RawCell {
+    return self.get_with(RawCell(0), RawCell(U128_NONE), |heap| heap.read(loc));
   }
 
-  pub fn write_disk(&mut self, name: U120, val: Ptr) {
+  pub fn write_disk(&mut self, name: U120, val: RawCell) {
     return self.get_heap_mut(self.draw).write_disk(name, val);
   }
 
-  pub fn read_disk(&self, name: U120) -> Option<Ptr> {
+  pub fn read_disk(&self, name: U120) -> Option<RawCell> {
     return self.get_with(None, None, |heap| heap.read_disk(name));
   }
 
@@ -2250,12 +2558,11 @@ impl Runtime {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
-  // TODO: return Option
-  pub fn get_arity(&self, name: &Name) -> Option<u128> {
+  pub fn get_arity(&self, name: &Name) -> Option<u64> {
     self.get_with(None, None, |heap| heap.read_arit(name))
   }
 
-  pub fn set_arity(&mut self, name: Name, arity: u128) {
+  pub fn set_arity(&mut self, name: Name, arity: u64) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
   }
 
@@ -2310,32 +2617,32 @@ impl Runtime {
     }
   }
 
-  pub fn get_dups(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.get_dups());
+  pub fn get_dups(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.get_dups());
   }
 
-  pub fn set_rwts(&mut self, rwts: u128) {
+  pub fn set_rwts(&mut self, rwts: u64) {
     self.get_heap_mut(self.draw).set_rwts(rwts);
   }
 
-  pub fn get_rwts(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.rwts);
+  pub fn get_rwts(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.rwts);
   }
 
-  pub fn set_mana(&mut self, mana: u128) {
+  pub fn set_mana(&mut self, mana: u64) {
     self.get_heap_mut(self.draw).set_mana(mana);
   }
 
-  pub fn get_mana(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.mana);
+  pub fn get_mana(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.mana);
   }
 
-  pub fn set_tick(&mut self, tick: u128) {
+  pub fn set_tick(&mut self, tick: u64) {
     self.get_heap_mut(self.draw).set_tick(tick);
   }
 
-  pub fn get_tick(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.tick);
+  pub fn get_tick(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.tick);
   }
 
   pub fn set_time(&mut self, time: u128) {
@@ -2370,31 +2677,31 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.hax1);
   }
 
-  pub fn set_size(&mut self, size: i128) {
+  pub fn set_size(&mut self, size: u64) {
     self.get_heap_mut(self.draw).size = size;
   }
 
-  pub fn get_size(&self) -> i128 {
-    return self.get_with(0, I128_NONE, |heap| heap.size);
+  pub fn get_size(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.size);
   }
 
-  pub fn set_mcap(&mut self, mcap: u128) {
+  pub fn set_mcap(&mut self, mcap: u64) {
     self.get_heap_mut(self.draw).mcap = mcap;
   }
 
-  pub fn get_mcap(&self) -> u128 {
-    return self.get_with(32, U128_NONE, |heap| heap.mcap);
+  pub fn get_mcap(&self) -> u64 {
+    return self.get_with(32, U64_NONE, |heap| heap.mcap);
   }
 
-  pub fn set_next(&mut self, next: u128) {
+  pub fn set_next(&mut self, next: u64) {
     self.get_heap_mut(self.draw).next = next;
   }
 
-  pub fn get_next(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.next);
+  pub fn get_next(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.next);
   }
 
-  pub fn fresh_dups(&mut self) -> u128 {
+  pub fn fresh_dups(&mut self) -> u64 {
     let dups = self.get_dups();
     self.get_heap_mut(self.draw).set_dups(dups + 1);
     return dups & 0x3FFFFFFF;
@@ -2493,111 +2800,38 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 }
 
 
-// Constructors
-// ------------
-
-pub fn Var(pos: u128) -> Ptr {
-  (VAR * TAG_SHL) | pos
-}
-
-pub fn Dp0(col: u128, pos: u128) -> Ptr {
-  (DP0 * TAG_SHL) | (col * EXT_SHL) | pos
-}
-
-pub fn Dp1(col: u128, pos: u128) -> Ptr {
-  (DP1 * TAG_SHL) | (col * EXT_SHL) | pos
-}
-
-pub fn Arg(pos: u128) -> Ptr {
-  (ARG * TAG_SHL) | pos
-}
-
-pub fn Era() -> Ptr {
-  ERA * TAG_SHL
-}
-
-pub fn Lam(pos: u128) -> Ptr {
-  (LAM * TAG_SHL) | pos
-}
-
-pub fn App(pos: u128) -> Ptr {
-  (APP * TAG_SHL) | pos
-}
-
-pub fn Par(col: u128, pos: u128) -> Ptr {
-  (SUP * TAG_SHL) | (col * EXT_SHL) | pos
-}
-
-pub fn Op2(ope: u128, pos: u128) -> Ptr {
-  (OP2 * TAG_SHL) | (ope * EXT_SHL) | pos
-}
-
-pub fn Num(val: u128) -> Ptr {
-  debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG_SHL) | (val & NUM_MASK)
-}
-
-pub fn Ctr(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", Name::new_unsafe(fun));
-  (CTR * TAG_SHL) | (fun * EXT_SHL) | pos
-}
-
-pub fn Fun(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", Name::new_unsafe(fun));
-  (FUN * TAG_SHL) | (fun * EXT_SHL) | pos
-}
-
-// Getters
-// -------
-
-pub fn get_tag(lnk: Ptr) -> u128 {
-  lnk / TAG_SHL
-}
-
-pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
-}
-
-pub fn get_val(lnk: Ptr) -> u128 {
-  lnk & 0xFFFF_FFFF_FFFF
-}
-
-pub fn get_num(lnk: Ptr) -> U120 {
-  U120::from_u128_unchecked(lnk & NUM_MASK)
-}
-
-//pub fn get_ari(lnk: Ptr) -> u128 {
-  //(lnk / ARI) & 0xF
-//}
-
-pub fn get_loc(lnk: Ptr, arg: u128) -> u128 {
-  get_val(lnk) + arg
-}
-
 // Memory
 // ------
 
-pub fn ask_lnk(rt: &Runtime, loc: u128) -> Ptr {
+pub fn ask_lnk(rt: &Runtime, loc: Loc) -> RawCell {
   rt.read(loc)
   //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
-pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
-  ask_lnk(rt, get_loc(term, arg))
+pub fn ask_arg(rt: &Runtime, term: RawCell, arg: u64) -> RawCell {
+  ask_lnk(rt, term.get_loc(arg))
 }
 
-pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
+pub fn link<T: Into<RawCell>>(rt: &mut Runtime, loc: Loc, lnk: T) -> RawCell {
+  let lnk : RawCell = lnk.into();
   rt.write(loc, lnk);
-  if get_tag(lnk) <= VAR { // DPO, DP1 or VAR
-    let pos = get_loc(lnk, get_tag(lnk) & 0x01);
-    rt.write(pos, Arg(loc));
-  }
+  match lnk.get_tag() {
+    CellTag::DP0 | CellTag::VAR => {
+      let pos = lnk.get_loc(0);
+      rt.write(pos, Cell::arg(loc));
+    }
+    CellTag::DP1 => {
+      let pos = lnk.get_loc(1);
+      rt.write(pos, Cell::arg(loc));
+    }
+    _ => {}
+  };
   lnk
 }
 
-pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
+pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
   if arity == 0 {
-    return 0;
+    return Loc(0);
   } else {
     loop {
       // Attempts to allocate enough space, starting from the last index
@@ -2607,7 +2841,7 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
       if index <= mcap - arity {
         let mut has_space = true;
         for i in 0 .. arity {
-          if rt.read(index + i) != 0 {
+          if *rt.read(Loc(index + i)) != 0 {
             has_space = false;
             break;
           }
@@ -2615,19 +2849,19 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
         // If we managed to find enough free space somewhere, return that index
         if has_space {
           rt.set_next(rt.get_next() + arity);
-          rt.set_size(rt.get_size() + arity as i128);
+          rt.set_size(rt.get_size() + arity);
           //println!("{}", show_memo(rt));
           for i in 0 .. arity {
-            rt.write(index + i, NIL); // millions perished for forgetting this line
+            rt.write(Loc(index + i), Cell::nil()); // millions perished for forgetting this line
           }
-          return index;
+          return Loc(index);
         }
       }
       // If we couldn't allocate space...
       // - If less than 50% of the memory is used, jump to a random index and try again
       // - If more than 50% of the memory is used, double the maximum cap and try again
-      if rt.get_size() * 2 < (mcap as i128) {
-        rt.set_next((fastrand::u64(..) % mcap as u64) as u128);
+      if rt.get_size() * 2 < mcap {
+        rt.set_next(fastrand::u64(..) % mcap as u64);
       } else {
         rt.set_mcap(mcap * 2);
       }
@@ -2635,66 +2869,66 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
   }
 }
 
-pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
+pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
   for i in 0 .. size {
-    if rt.read(loc + i) == 0 {
-      panic!("Cleared twice: {}", loc);
+    if rt.read(loc + i) == RawCell(0) {
+      panic!("Cleared twice: {}", *loc);
     }
-    rt.write(loc + i, 0);
+    rt.write(loc + i, RawCell(0));
   }
-  rt.set_size(rt.get_size() - size as i128);
+  rt.set_size(rt.get_size() - size);
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Ptr) {
-  let mut stack : Vec<Ptr> = Vec::new();
-  let mut next = term;
-  let mut dups : Vec<u128> = Vec::new();
+pub fn collect<T: Into<RawCell>>(rt: &mut Runtime, term: T) {
+  let mut stack : Vec<RawCell> = Vec::new();
+  let mut next : RawCell = term.into();
+  let mut dups : Vec<RawCell> = Vec::new();
   loop {
     let term = next;
-    match get_tag(term) {
-      DP0 => {
-        link(rt, get_loc(term, 0), Era());
+    match term.get_tag() {
+      CellTag::DP0 => {
+        link(rt, term.get_loc(0), Cell::era());
         dups.push(term);
       }
-      DP1 => {
-        link(rt, get_loc(term, 1), Era());
+      CellTag::DP1 => {
+        link(rt, term.get_loc(1), Cell::era());
         dups.push(term);
       }
-      VAR => {
-        link(rt, get_loc(term, 0), Era());
+      CellTag::VAR => {
+        link(rt, term.get_loc(0), Cell::era());
       }
-      LAM => {
+      CellTag::LAM => {
         let arg0 = ask_arg(rt, term, 0);
-        if get_tag(arg0) != ERA {
-          debug_assert_eq!(get_tag(arg0), ARG);
-          link(rt, get_loc(arg0, 0), Era());
+        if arg0.get_tag() != CellTag::ERA {
+          debug_assert_eq!(arg0.get_tag(), CellTag::ARG);
+          link(rt, arg0.get_loc(0), Cell::era());
         }
         next = ask_arg(rt, term, 1);
-        clear(rt, get_loc(term, 0), 2);
+        clear(rt, term.get_loc(0), 2);
         continue;
       }
-      APP => {
+      CellTag::APP => {
         stack.push(ask_arg(rt, term, 0));
         next = ask_arg(rt, term, 1);
-        clear(rt, get_loc(term, 0), 2);
+        clear(rt, term.get_loc(0), 2);
         continue;
       }
-      SUP => {
+      CellTag::SUP => {
         stack.push(ask_arg(rt, term, 0));
         next = ask_arg(rt, term, 1);
-        clear(rt, get_loc(term, 0), 2);
+        clear(rt, term.get_loc(0), 2);
         continue;
       }
-      OP2 => {
+      CellTag::OP2 => {
         stack.push(ask_arg(rt, term, 0));
         next = ask_arg(rt, term, 1);
-        clear(rt, get_loc(term, 0), 2);
+        clear(rt, term.get_loc(0), 2);
         continue;
       }
-      NUM => {}
-      CTR | FUN => {
-        let arity = rt.get_arity(&Name::new_unsafe(get_ext(term))).unwrap();
+      CellTag::NUM => {}
+      CellTag::CTR | CellTag::FUN => {
+        let arity = rt.get_arity(&Name::new_unsafe(term.get_ext())).unwrap();
         // NOTE: should never be none, should panic
         // TODO: remove unwrap?
         for i in 0 .. arity {
@@ -2704,7 +2938,7 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
             next = ask_arg(rt, term, i);
           }
         }
-        clear(rt, get_loc(term, 0), arity);
+        clear(rt, term.get_loc(0), arity);
         if arity > 0 {
           continue;
         }
@@ -2720,9 +2954,9 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
   for dup in dups {
     let fst = ask_arg(rt, dup, 0);
     let snd = ask_arg(rt, dup, 1);
-    if get_tag(fst) == ERA && get_tag(snd) == ERA {
+    if fst.get_tag() == CellTag::ERA && snd.get_tag() == CellTag::ERA {
       collect(rt, ask_arg(rt, dup, 2));
-      clear(rt, get_loc(dup, 0), 3);
+      clear(rt, dup.get_loc(0), 3);
     }
   }
 }
@@ -2747,7 +2981,7 @@ pub fn check_func(func: &Func) -> Result<(), RuntimeError> {
 
 
 // Counts how many times the free variable 'name' appears inside Term
-fn count_uses(term: &Term, name: Name) -> u128 {
+fn count_uses(term: &Term, name: Name) -> u64 {
   match term {
     Term::Var { name: var_name } => {
       return if name == *var_name { 1 } else { 0 };
@@ -2852,8 +3086,6 @@ pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
 pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
   if depth > MAX_TERM_DEPTH {
     return Err(RuntimeError::TermExceedsMaxDepth);
-    // this is the stupidest clone of all time, it is a huge waste
-    // but receivin a borrow in an enum is boring
   } else {
     match term {
       Term::Var { name } => {
@@ -2898,20 +3130,20 @@ pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
 }
 
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
-  fn consume(rt: &mut Runtime, loc: u128, name: u128, vars_data: &mut Map<Vec<u128>>) -> Option<Ptr> {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<RawCell, RuntimeError> {
+  fn consume(rt: &mut Runtime, loc: Loc, name: Name, vars_data: &mut NameMap<Vec<RawCell>>) -> Option<RawCell> {
     let got = vars_data.get_mut(&name)?;
     let got = got.pop()?;
     Some(got)
   }
 
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
+  fn bind<T: Into<RawCell>>(rt: &mut Runtime, loc: Loc, name: Name, lnk: T, vars_data: &mut NameMap<Vec<RawCell>>) {
     // println!("~~ bind {} {}", u128_to_name(name), show_ptr(lnk));
-    if name == Name::_NONE {
-      link(rt, loc, Era());
+    if name == Name::NONE {
+      link(rt, loc, Cell::era());
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
-      got.push(lnk);
+      got.push(lnk.into());
       // link(rt, loc, Era()); // will be bound later to an Arg
     }
   }
@@ -2919,7 +3151,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", name, vars_data.len());
-      consume(rt, loc, **name, vars_data).ok_or_else(||
+      consume(rt, loc, *name, vars_data).ok_or_else(||
         RuntimeError::UnboundVar { name: *name })
     }
     Term::Dup { nam0, nam1, expr, body } => {
@@ -2930,17 +3162,17 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       // allowing: `dup x y = x`
       let expr = create_term(rt, expr, node + 2, vars_data)?;
       link(rt, node + 2, expr);
-      bind(rt, node + 0, **nam0, Dp0(dupk, node), vars_data);
-      bind(rt, node + 1, **nam1, Dp1(dupk, node), vars_data);
+      bind(rt, node + 0, *nam0, Cell::dp0(dupk as u128, node), vars_data);
+      bind(rt, node + 1, *nam1, Cell::dp1(dupk as u128, node), vars_data);
       let body = create_term(rt, body, loc, vars_data);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
-      bind(rt, node + 0, **name, Var(node), vars_data);
+      bind(rt, node + 0, *name, RawCell::from(Cell::var(node)), vars_data);
       let body = create_term(rt, body, node + 1, vars_data)?;
       link(rt, node + 1, body);
-      Ok(Lam(node))
+      Ok(Cell::lam(node).into())
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
@@ -2948,7 +3180,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       link(rt, node + 0, func);
       let argm = create_term(rt, argm, node + 1, vars_data)?;
       link(rt, node + 1, argm);
-      Ok(App(node))
+      Ok(Cell::app(node).into())
     }
     Term::Fun { name, args } => {
       let expected = rt.get_arity(name)
@@ -2957,13 +3189,13 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
-        let size = args.len() as u128;
+        let size = args.len() as u64;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
-          link(rt, node + i as u128, arg_lnk);
+          let arg_lnk = create_term(rt, arg, node + (i as u64), vars_data)?;
+          link(rt, node + (i as u64), arg_lnk);
         }
-        Ok(Fun(**name, node))
+        Ok(Cell::fun(*name, node).into())
       }
     }
     Term::Ctr { name, args } => {
@@ -2973,17 +3205,17 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
-        let size = args.len() as u128;
+        let size = args.len() as u64;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
-          link(rt, node + i as u128, arg_lnk);
+          let arg_lnk = create_term(rt, arg, node + (i as u64), vars_data)?;
+          link(rt, node + (i as u64), arg_lnk);
         }
-        Ok(Ctr(**name, node))
+        Ok(RawCell::from(Cell::ctr(*name, node)))
       }
     }
     Term::Num { numb } => {
-      Ok(Num(**numb))
+      Ok(Cell::num(*numb).into())
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
@@ -2991,7 +3223,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       link(rt, node + 0, val0);
       let val1 = create_term(rt, val1, node + 1, vars_data)?;
       link(rt, node + 1, val1);
-      Ok(Op2(*oper as u128, node))
+      Ok(Cell::op2(*oper, node).into())
     }
   }
 }
@@ -3008,7 +3240,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   // Find the function arity
   let arity;
   if let Term::Fun { args, .. } = &rules[0].lhs {
-    arity = args.len() as u128;
+    arity = args.len() as u64;
   } else {
     return Err(RuntimeError::DefinitionError(DefinitionError::LHSIsNotAFunction));
     // TODO: remove this error, should be checked at compile time
@@ -3052,22 +3284,22 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
     if let Term::Fun { ref name, ref args } = rule.lhs {
 
       // If there is an arity mismatch, return None
-      if args.len() as u128 != arity {
+      if args.len() as u64 != arity {
         return Err(RuntimeError::DefinitionError(DefinitionError::LHSArityMismatch { rule_index, expected: arity as usize, got: args.len() }));
         // TODO: should check at compile time, remove this error
       }
 
       // For each lhs argument
-      for i in 0 .. args.len() as u128 {
+      for i in 0 .. args.len() as u64 {
 
         match &args[i as usize] {
           // If it is a constructor...
           Term::Ctr { name: arg_name, args: arg_args } => {
             strict[i as usize] = true;
-            cond.push(Ctr(**arg_name, 0)); // adds its matching condition
-            eras.push((i, arg_args.len() as u128)); // marks its index and arity for freeing
+            cond.push(Cell::ctr(*arg_name, Loc(0)).into()); // adds its matching condition
+            eras.push((i, arg_args.len() as u64)); // marks its index and arity for freeing
             // For each of its fields...
-            for j in 0 .. arg_args.len() as u128 {
+            for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
                 check_var(name, &rule.rhs, &mut seen, rule_index)?;
@@ -3081,13 +3313,13 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
           // If it is a number...
           Term::Num { numb: arg_numb } => {
             strict[i as usize] = true;
-            cond.push(Num(**arg_numb)); // adds its matching condition
+            cond.push(Cell::num(*arg_numb).into()); // adds its matching condition
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
             check_var(*arg_name, &rule.rhs, &mut seen, rule_index)?;
             vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
-            cond.push(Var(0)); // it has no matching condition
+            cond.push(Cell::var(Loc(0)).into()); // it has no matching condition
           }
           _ => {
             return Err(RuntimeError::DefinitionError(DefinitionError::UnsupportedMatch { rule_index } ));
@@ -3111,7 +3343,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   let mut redux = Vec::new();
   for i in 0 .. strict.len() {
     if strict[i] {
-      redux.push(i as u128);
+      redux.push(i as u64);
     }
   }
 
@@ -3123,33 +3355,33 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   });
 }
 
-pub fn create_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> Ptr {
+pub fn create_app<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, func: T, argm: K) -> RawCell {
   let node = alloc(rt, 2);
   link(rt, node + 0, func);
   link(rt, node + 1, argm);
-  App(node)
+  RawCell::from(Cell::app(node))
 }
 
-pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> Ptr {
-  let node = alloc(rt, args.len() as u128);
+pub fn create_fun<T: Into<RawCell> + Copy>(rt: &mut Runtime, fun: Name, args: &[T]) -> RawCell {
+  let node = alloc(rt, args.len() as u64);
   for i in 0 .. args.len() {
-    link(rt, node + i as u128, args[i]);
+    link(rt, node + (i as u64), args[i]);
   }
-  Fun(fun, node)
+  RawCell::from(Cell::fun(fun, node))
 }
 
-pub fn alloc_lnk(rt: &mut Runtime, term: Ptr) -> u128 {
+pub fn alloc_lnk<T: Into<RawCell>>(rt: &mut Runtime, term: T) -> Loc {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
 }
 
-pub fn alloc_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> u128 {
+pub fn alloc_app<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, func: T, argm: K) -> Loc {
   let app = create_app(rt, func, argm);
   return alloc_lnk(rt, app);
 }
 
-pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
+pub fn alloc_fun<T: Into<RawCell> + Copy>(rt: &mut Runtime, fun: Name, args: &[T]) -> Loc {
   let fun = create_fun(rt, fun, args);
   return alloc_lnk(rt, fun);
 }
@@ -3157,20 +3389,21 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
-  if get_tag(lnk) != ERA {
-    debug_assert_eq!(get_tag(lnk), ARG);
-    link(rt, get_loc(lnk, 0), val);
+pub fn subst<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, lnk: T, val: K) {
+  let lnk: RawCell = lnk.into();
+  if lnk.get_tag() != CellTag::ERA {
+    debug_assert_eq!(lnk.get_tag(), CellTag::ARG);
+    link(rt, lnk.get_loc(0), val);
   } else {
     collect(rt, val);
   }
 }
 
 // TODO: document
-pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeError> {
-  let mut vars_data: Map<Vec<u128>> = init_map();
+pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
+  let mut vars_data: NameMap<Vec<RawCell>> = init_name_map();
 
-  let mut stack: Vec<u128> = Vec::new();
+  let mut stack: Vec<Loc> = Vec::new();
 
   // TODO: document `init` / refactor to tuple/struct if no performance impact
   let mut init = 1;
@@ -3192,26 +3425,26 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
     // }
 
     if init == 1 {
-      match get_tag(term) {
-        APP => {
+      match term.get_tag() {
+        CellTag::APP => {
           stack.push(host);
           init = 1;
-          host = get_loc(term, 0);
+          host = term.get_loc(0);
           continue;
         }
-        DP0 | DP1 => {
+        CellTag::DP0 | CellTag::DP1 => {
           stack.push(host);
-          host = get_loc(term, 2);
+          host = term.get_loc(2);
           continue;
         }
-        OP2 => {
+        CellTag::OP2 => {
           stack.push(host);
-          stack.push(get_loc(term, 1) | 0x1_0000_0000_0000);
-          host = get_loc(term, 0);
+          stack.push(Loc(*term.get_loc(1) | 0x1_0000_0000_0000));
+          host = term.get_loc(0);
           continue;
         }
-        FUN => {
-          let name = Name::new_unsafe(get_ext(term));
+        CellTag::FUN => {
+          let name = Name::new_unsafe(term.get_ext());
           let ari = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
           if let Some(func) = &rt.get_func(&name) {
             if ari == func.arity {
@@ -3221,9 +3454,10 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 stack.push(host);
                 for (i, redux) in func.redux.iter().enumerate() {
                   if i < func.redux.len() - 1 {
-                    stack.push(get_loc(term, *redux) | 0x1_0000_0000_0000);
+                    let loc = term.get_loc(*redux as u64);
+                    stack.push(Loc(*loc| 0x1_0000_0000_0000));
                   } else {
-                    host = get_loc(term, *redux);
+                    host = term.get_loc(*redux as u64);
                   }
                 }
               }
@@ -3232,51 +3466,50 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           }
         }
         // We don't need to reduce further
-        CTR | NUM | LAM | VAR | SUP | ERA | ARG => {}
-        _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
+        _ => {}
       }
     } else {
-      match get_tag(term) {
-        APP => {
+      match term.get_tag() {
+        CellTag::APP => {
           let arg0 = ask_arg(rt, term, 0);
           // (@x(body) a)
           // ------------ APP-LAM
           // x <- a
           // body
-          if get_tag(arg0) == LAM {
+          if arg0.get_tag() == CellTag::LAM {
             //println!("app-lam");
-            rt.set_mana(rt.get_mana() + AppLamMana());
+            rt.set_mana(rt.get_mana() + Cell::AppLamMana());
             rt.set_rwts(rt.get_rwts() + 1);
             subst(rt, ask_arg(rt, arg0, 0), ask_arg(rt, term, 1));
             let _done = link(rt, host, ask_arg(rt, arg0, 1));
-            clear(rt, get_loc(term, 0), 2);
-            clear(rt, get_loc(arg0, 0), 2);
+            clear(rt, term.get_loc(0), 2);
+            clear(rt, arg0.get_loc(0), 2);
             init = 1;
             continue;
           // ({a b} c)
           // ----------------- APP-SUP
           // dup x0 x1 = c
           // {(a x0) (b x1)}
-          } else if get_tag(arg0) == SUP {
+          } else if arg0.get_tag() == CellTag::SUP {
             //println!("app-sup");
-            rt.set_mana(rt.get_mana() + AppSupMana());
+            rt.set_mana(rt.get_mana() + Cell::AppSupMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let app0 = get_loc(term, 0);
-            let app1 = get_loc(arg0, 0);
+            let app0 = term.get_loc(0);
+            let app1 = arg0.get_loc(0);
             let let0 = alloc(rt, 3);
             let par0 = alloc(rt, 2);
             link(rt, let0 + 2, ask_arg(rt, term, 1));
-            link(rt, app0 + 1, Dp0(get_ext(arg0), let0));
+            link(rt, app0 + 1, Cell::dp0(arg0.get_ext(), let0));
             link(rt, app0 + 0, ask_arg(rt, arg0, 0));
             link(rt, app1 + 0, ask_arg(rt, arg0, 1));
-            link(rt, app1 + 1, Dp1(get_ext(arg0), let0));
-            link(rt, par0 + 0, App(app0));
-            link(rt, par0 + 1, App(app1));
-            let done = Par(get_ext(arg0), par0);
+            link(rt, app1 + 1, Cell::dp1(arg0.get_ext(), let0));
+            link(rt, par0 + 0, Cell::app(app0));
+            link(rt, par0 + 1, Cell::app(app1));
+            let done = Cell::sup(arg0.get_ext(), par0);
             link(rt, host, done);
           }
         }
-        DP0 | DP1 => {
+        CellTag::DP0 | CellTag::DP1 => {
           let arg0 = ask_arg(rt, term, 2);
           // dup r s = @x(f)
           // --------------- DUP-LAM
@@ -3284,26 +3517,26 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           // r <- @x0(f0)
           // s <- @x1(f1)
           // x <- {x0 x1}
-          if get_tag(arg0) == LAM {
+          if arg0.get_tag() == CellTag::LAM {
             //println!("dup-lam");
-            rt.set_mana(rt.get_mana() + DupLamMana());
+            rt.set_mana(rt.get_mana() + Cell::DupLamMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let let0 = get_loc(term, 0);
-            let par0 = get_loc(arg0, 0);
+            let let0 = term.get_loc(0);
+            let par0 = arg0.get_loc(0);
             let lam0 = alloc(rt, 2);
             let lam1 = alloc(rt, 2);
             link(rt, let0 + 2, ask_arg(rt, arg0, 1));
-            link(rt, par0 + 1, Var(lam1));
+            link(rt, par0 + 1, Cell::var(lam1));
             let arg0_arg_0 = ask_arg(rt, arg0, 0);
-            link(rt, par0 + 0, Var(lam0));
-            subst(rt, arg0_arg_0, Par(get_ext(term), par0));
+            link(rt, par0 + 0, Cell::var(lam0));
+            subst(rt, arg0_arg_0, Cell::sup(term.get_ext(), par0));
             let term_arg_0 = ask_arg(rt, term, 0);
-            link(rt, lam0 + 1, Dp0(get_ext(term), let0));
-            subst(rt, term_arg_0, Lam(lam0));
+            link(rt, lam0 + 1, Cell::dp0(term.get_ext(), let0));
+            subst(rt, term_arg_0, Cell::lam(lam0));
             let term_arg_1 = ask_arg(rt, term, 1);
-            link(rt, lam1 + 1, Dp1(get_ext(term), let0));
-            subst(rt, term_arg_1, Lam(lam1));
-            let done = Lam(if get_tag(term) == DP0 { lam0 } else { lam1 });
+            link(rt, lam1 + 1, Cell::dp1(term.get_ext(), let0));
+            subst(rt, term_arg_1, Cell::lam(lam1));
+            let done = Cell::lam(if term.get_tag() == CellTag::DP0 { lam0 } else { lam1 });
             link(rt, host, done);
             init = 1;
             continue;
@@ -3311,16 +3544,16 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           // --------------- DUP-SUP-E
           // x <- a
           // y <- b
-          } else if get_tag(arg0) == SUP {
-            if get_ext(term) == get_ext(arg0) {
+          } else if arg0.get_tag() == CellTag::SUP {
+            if term.get_ext() == arg0.get_ext() {
               //println!("dup-sup-e");
-              rt.set_mana(rt.get_mana() + DupSupMana());
+              rt.set_mana(rt.get_mana() + Cell::DupSupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               subst(rt, ask_arg(rt, term, 0), ask_arg(rt, arg0, 0));
               subst(rt, ask_arg(rt, term, 1), ask_arg(rt, arg0, 1));
-              let _done = link(rt, host, ask_arg(rt, arg0, if get_tag(term) == DP0 { 0 } else { 1 }));
-              clear(rt, get_loc(term, 0), 3);
-              clear(rt, get_loc(arg0, 0), 2);
+              let _done = link(rt, host, ask_arg(rt, arg0, if term.get_tag() == CellTag::DP0 { 0 } else { 1 }));
+              clear(rt, term.get_loc(0), 3);
+              clear(rt, arg0.get_loc(0), 2);
               init = 1;
               continue;
             // dup x y = {a b}
@@ -3331,23 +3564,23 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             // dup xB yB = b
             } else {
               //println!("dup-sup-d");
-              rt.set_mana(rt.get_mana() + DupDupMana());
+              rt.set_mana(rt.get_mana() + Cell::DupDupMana());
               rt.set_rwts(rt.get_rwts() + 1);
               let par0 = alloc(rt, 2);
-              let let0 = get_loc(term, 0);
-              let par1 = get_loc(arg0, 0);
+              let let0 = term.get_loc(0);
+              let par1 = arg0.get_loc(0);
               let let1 = alloc(rt, 3);
               link(rt, let0 + 2, ask_arg(rt, arg0, 0));
               link(rt, let1 + 2, ask_arg(rt, arg0, 1));
               let term_arg_0 = ask_arg(rt, term, 0);
               let term_arg_1 = ask_arg(rt, term, 1);
-              link(rt, par1 + 0, Dp1(get_ext(term), let0));
-              link(rt, par1 + 1, Dp1(get_ext(term), let1));
-              link(rt, par0 + 0, Dp0(get_ext(term), let0));
-              link(rt, par0 + 1, Dp0(get_ext(term), let1));
-              subst(rt, term_arg_0, Par(get_ext(arg0), par0));
-              subst(rt, term_arg_1, Par(get_ext(arg0), par1));
-              let done = Par(get_ext(arg0), if get_tag(term) == DP0 { par0 } else { par1 });
+              link(rt, par1 + 0, Cell::dp1(term.get_ext(), let0));
+              link(rt, par1 + 1, Cell::dp1(term.get_ext(), let1));
+              link(rt, par0 + 0, Cell::dp0(term.get_ext(), let0));
+              link(rt, par0 + 1, Cell::dp0(term.get_ext(), let1));
+              subst(rt, term_arg_0, Cell::sup(arg0.get_ext(), par0));
+              subst(rt, term_arg_1, Cell::sup(arg0.get_ext(), par1));
+              let done = Cell::sup(arg0.get_ext(), if term.get_tag() == CellTag::DP0 { par0 } else { par1 });
               link(rt, host, done);
             }
           // dup x y = N
@@ -3355,13 +3588,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           // x <- N
           // y <- N
           // ~
-          } else if get_tag(arg0) == NUM {
+          } else if arg0.get_tag() == CellTag::NUM {
             //println!("dup-num");
-            rt.set_mana(rt.get_mana() + DupNumMana());
+            rt.set_mana(rt.get_mana() + Cell::DupNumMana());
             rt.set_rwts(rt.get_rwts() + 1);
             subst(rt, ask_arg(rt, term, 0), arg0);
             subst(rt, ask_arg(rt, term, 1), arg0);
-            clear(rt, get_loc(term, 0), 3);
+            clear(rt, term.get_loc(0), 3);
             let _done = arg0;
             link(rt, host, arg0);
           // dup x y = (K a b c ...)
@@ -3372,69 +3605,69 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
           // ...
           // x <- (K a0 b0 c0 ...)
           // y <- (K a1 b1 c1 ...)
-          } else if get_tag(arg0) == CTR {
+          } else if arg0.get_tag() == CellTag::CTR {
             //println!("dup-ctr");
-            let func = get_ext(arg0);
+            let func = arg0.get_ext();
             let name = Name::new_unsafe(func);
             let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
-            rt.set_mana(rt.get_mana() + DupCtrMana(arit));
+            rt.set_mana(rt.get_mana() + Cell::DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
-              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0));
-              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0));
-              clear(rt, get_loc(term, 0), 3);
-              let _done = link(rt, host, Ctr(func, 0));
+              subst(rt, ask_arg(rt, term, 0), Cell::ctr(name, Loc(0)));
+              subst(rt, ask_arg(rt, term, 1), Cell::ctr(name, Loc(0)));
+              clear(rt, term.get_loc(0), 3);
+              let _done = link(rt, host, Cell::ctr(name, Loc(0)));
             } else {
-              let ctr0 = get_loc(arg0, 0);
+              let ctr0 = arg0.get_loc(0);
               let ctr1 = alloc(rt, arit);
               for i in 0..arit - 1 {
                 let leti = alloc(rt, 3);
                 link(rt, leti + 2, ask_arg(rt, arg0, i));
-                link(rt, ctr0 + i, Dp0(get_ext(term), leti));
-                link(rt, ctr1 + i, Dp1(get_ext(term), leti));
+                link(rt, ctr0 + i, Cell::dp0(term.get_ext(), leti));
+                link(rt, ctr1 + i, Cell::dp1(term.get_ext(), leti));
               }
-              let leti = get_loc(term, 0);
+              let leti = term.get_loc(0);
               link(rt, leti + 2, ask_arg(rt, arg0, arit - 1));
               let term_arg_0 = ask_arg(rt, term, 0);
-              link(rt, ctr0 + arit - 1, Dp0(get_ext(term), leti));
-              subst(rt, term_arg_0, Ctr(func, ctr0));
+              link(rt, ctr0 + (arit - 1), Cell::dp0(term.get_ext(), leti));
+              subst(rt, term_arg_0, Cell::ctr(name, ctr0));
               let term_arg_1 = ask_arg(rt, term, 1);
-              link(rt, ctr1 + arit - 1, Dp1(get_ext(term), leti));
-              subst(rt, term_arg_1, Ctr(func, ctr1));
-              let done = Ctr(func, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
+              link(rt, ctr1 + (arit - 1), Cell::dp1(term.get_ext(), leti));
+              subst(rt, term_arg_1, Cell::ctr(name, ctr1));
+              let done = Cell::ctr(name, if term.get_tag() == CellTag::DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
           // dup x y = *
           // ----------- DUP-ERA
           // x <- *
           // y <- *
-          } else if get_tag(arg0) == ERA {
+          } else if arg0.get_tag() == CellTag::ERA {
             //println!("dup-era");
-            rt.set_mana(rt.get_mana() + DupEraMana());
+            rt.set_mana(rt.get_mana() + Cell::DupEraMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), Era());
-            subst(rt, ask_arg(rt, term, 1), Era());
-            link(rt, host, Era());
-            clear(rt, get_loc(term, 0), 3);
+            subst(rt, ask_arg(rt, term, 0), Cell::era());
+            subst(rt, ask_arg(rt, term, 1), Cell::era());
+            link(rt, host, Cell::era());
+            clear(rt, term.get_loc(0), 3);
             init = 1;
             continue;
           }
         }
-        OP2 => {
+        CellTag::OP2 => {
           let arg0 = ask_arg(rt, term, 0);
           let arg1 = ask_arg(rt, term, 1);
           // (+ a b)
           // --------- OP2-NUM
           // add(a, b)
-          if get_tag(arg0) == NUM && get_tag(arg1) == NUM {
+          if arg0.get_tag() == CellTag::NUM && arg1.get_tag() == CellTag::NUM {
             //eprintln!("op2-num");
-            let op  = get_ext(term).try_into().expect("Invalid operation coming from HVM");
-            let a_u = get_num(arg0);
-            let b_u = get_num(arg1);
+            let op  = term.get_ext().try_into().expect("Invalid operation coming from HVM");
+            let a_u = arg0.get_num();
+            let b_u = arg1.get_num();
             if op == Oper::Div && *b_u == 0 {
               return Err(RuntimeError::DivisionByZero)
             }
-            rt.set_mana(rt.get_mana() + Op2NumMana());
+            rt.set_mana(rt.get_mana() + Cell::Op2NumMana());
             let res = match op {
               Oper::Add => *a_u.wrapping_add(b_u),
               Oper::Sub => *a_u.wrapping_sub(b_u),
@@ -3453,56 +3686,58 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               Oper::Gtn => u128::from(*a_u >  *b_u),
               Oper::Neq => u128::from(*a_u != *b_u),
             };
-            let done = Num(res);
-            clear(rt, get_loc(term, 0), 2);
+            let done = Cell::num(U120::from_u128_unchecked(res));
+            clear(rt, term.get_loc(0), 2);
             link(rt, host, done);
           // (+ {a0 a1} b)
           // --------------------- OP2-SUP-0
           // let b0 b1 = b
           // {(+ a0 b0) (+ a1 b1)}
-          } else if get_tag(arg0) == SUP {
+          } else if arg0.get_tag() == CellTag::SUP {
             //println!("op2-sup-0");
-            rt.set_mana(rt.get_mana() + Op2SupMana());
+            rt.set_mana(rt.get_mana() + Cell::Op2SupMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let op20 = get_loc(term, 0);
-            let op21 = get_loc(arg0, 0);
+            let op20 = term.get_loc(0);
+            let op21 = arg0.get_loc(0);
             let let0 = alloc(rt, 3);
             let par0 = alloc(rt, 2);
+            let term_oper: Oper = term.get_ext().try_into().expect("Invalid operation");
             link(rt, let0 + 2, arg1);
-            link(rt, op20 + 1, Dp0(get_ext(arg0), let0));
+            link(rt, op20 + 1, Cell::dp0(arg0.get_ext(), let0));
             link(rt, op20 + 0, ask_arg(rt, arg0, 0));
             link(rt, op21 + 0, ask_arg(rt, arg0, 1));
-            link(rt, op21 + 1, Dp1(get_ext(arg0), let0));
-            link(rt, par0 + 0, Op2(get_ext(term), op20));
-            link(rt, par0 + 1, Op2(get_ext(term), op21));
-            let done = Par(get_ext(arg0), par0);
+            link(rt, op21 + 1, Cell::dp1(arg0.get_ext(), let0));
+            link(rt, par0 + 0, Cell::op2(term_oper, op20));
+            link(rt, par0 + 1, Cell::op2(term_oper, op21));
+            let done = Cell::sup(arg0.get_ext(), par0);
             link(rt, host, done);
           // (+ a {b0 b1})
           // --------------- OP2-SUP-1
           // dup a0 a1 = a
           // {(+ a0 b0) (+ a1 b1)}
-          } else if get_tag(arg1) == SUP {
+          } else if arg1.get_tag() == CellTag::SUP {
             //println!("op2-sup-1");
-            rt.set_mana(rt.get_mana() + Op2SupMana());
+            rt.set_mana(rt.get_mana() + Cell::Op2SupMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            let op20 = get_loc(term, 0);
-            let op21 = get_loc(arg1, 0);
+            let op20 = term.get_loc(0);
+            let op21 = arg1.get_loc(0);
             let let0 = alloc(rt, 3);
             let par0 = alloc(rt, 2);
+            let term_oper: Oper = term.get_ext().try_into().expect("Invalid operation");
             link(rt, let0 + 2, arg0);
-            link(rt, op20 + 0, Dp0(get_ext(arg1), let0));
+            link(rt, op20 + 0, Cell::dp0(arg1.get_ext(), let0));
             link(rt, op20 + 1, ask_arg(rt, arg1, 0));
             link(rt, op21 + 1, ask_arg(rt, arg1, 1));
-            link(rt, op21 + 0, Dp1(get_ext(arg1), let0));
-            link(rt, par0 + 0, Op2(get_ext(term), op20));
-            link(rt, par0 + 1, Op2(get_ext(term), op21));
-            let done = Par(get_ext(arg1), par0);
+            link(rt, op21 + 0, Cell::dp1(arg1.get_ext(), let0));
+            link(rt, par0 + 0, Cell::op2(term_oper, op20));
+            link(rt, par0 + 1, Cell::op2(term_oper, op21));
+            let done = Cell::sup(arg1.get_ext(), par0);
             link(rt, host, done);
           }
         }
-        FUN => {
+        CellTag::FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<Vec<u128>>) -> Result<bool, RuntimeError> {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: Loc, term: RawCell, mana: u64, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<bool, RuntimeError> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -3511,32 +3746,32 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               // dup c0 c1 = c
               // ...
               // {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
-              if get_tag(ask_arg(rt, term, *idx)) == SUP {
+              if ask_arg(rt, term, *idx).get_tag() == CellTag::SUP {
                 //println!("fun-sup");
-                let funx = get_ext(term);
+                let funx = term.get_ext();
                 let name = Name::new_unsafe(funx);
                 let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
-                rt.set_mana(rt.get_mana() + FunSupMana(arit));
+                rt.set_mana(rt.get_mana() + Cell::FunSupMana(arit));
                 rt.set_rwts(rt.get_rwts() + 1);
                 let argn = ask_arg(rt, term, *idx);
-                let fun0 = get_loc(term, 0);
+                let fun0 = term.get_loc(0);
                 let fun1 = alloc(rt, arit);
-                let par0 = get_loc(argn, 0);
+                let par0 = argn.get_loc(0);
                 for i in 0..arit {
                   if i != *idx {
                     let leti = alloc(rt, 3);
                     let argi = ask_arg(rt, term, i);
-                    link(rt, fun0 + i, Dp0(get_ext(argn), leti));
-                    link(rt, fun1 + i, Dp1(get_ext(argn), leti));
+                    link(rt, fun0 + i, Cell::dp0(argn.get_ext(), leti));
+                    link(rt, fun1 + i, Cell::dp1(argn.get_ext(), leti));
                     link(rt, leti + 2, argi);
                   } else {
                     link(rt, fun0 + i, ask_arg(rt, argn, 0));
                     link(rt, fun1 + i, ask_arg(rt, argn, 1));
                   }
                 }
-                link(rt, par0 + 0, Fun(funx, fun0));
-                link(rt, par0 + 1, Fun(funx, fun1));
-                let done = Par(get_ext(argn), par0);
+                link(rt, par0 + 0, Cell::fun(name, fun0));
+                link(rt, par0 + 1, Cell::fun(name, fun1));
+                let done = Cell::sup(argn.get_ext(), par0);
                 link(rt, host, done);
                 return Ok(true);
               }
@@ -3546,25 +3781,26 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               // Check if the rule matches
               let mut matched = true;
               //println!("- matching rule");
-              // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
-              for i in 0 .. rule.cond.len() as u128 {
+              // Tests each rule condition (ex: `args[0].get_tag() == SUCC`)
+              for i in 0 .. rule.cond.len() as u64{
                 let cond = rule.cond[i as usize];
-                match get_tag(cond) {
-                  NUM => {
+                match cond.get_tag() {
+                  CellTag::NUM => {
                     //println!("Didn't match because of NUM. i={} {} {}", i, get_val(ask_arg(rt, term, i)), get_val(cond));
-                    let same_tag = get_tag(ask_arg(rt, term, i)) == NUM;
-                    let same_val = get_val(ask_arg(rt, term, i)) == get_val(cond);
+                    let same_tag = ask_arg(rt, term, i).get_tag() == CellTag::NUM;
+                    let same_val = ask_arg(rt, term, i).get_val() == cond.get_val();
                     matched = matched && same_tag && same_val;
                   }
-                  CTR => {
-                    //println!("Didn't match because of CTR. i={} {} {}", i, get_tag(ask_arg(rt, term, i)), get_val(cond));
-                    let same_tag = get_tag(ask_arg(rt, term, i)) == CTR;
-                    let same_ext = get_ext(ask_arg(rt, term, i)) == get_ext(cond);
+                  CellTag::CTR => {
+                    //println!("Didn't match because of CTR. i={} {} {}", i, ask_arg(rt, term, i.get_tag()), get_val(cond));
+                    let same_tag = ask_arg(rt, term, i).get_tag() == CellTag::CTR;
+                    let same_ext = ask_arg(rt, term, i).get_ext() == cond.get_ext();
                     matched = matched && same_tag && same_ext;
                   }
-                  VAR => {
+                  CellTag::VAR => {
                     if func.redux.contains(&i) {
-                      let not_var = get_tag(ask_arg(rt, term, i)) > VAR;
+                      let tag = ask_arg(rt, term, i).get_tag();
+                      let not_var = tag != CellTag::VAR && tag != CellTag::DP0 && tag != CellTag::DP1;
                       matched = matched && not_var;
                     }
                   }
@@ -3579,7 +3815,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 //println!("fun-ctr");
                 //println!("- matched");
                 // Increments the gas count
-                rt.set_mana(rt.get_mana() + FunCtrMana(&rule.body));
+                rt.set_mana(rt.get_mana() + Cell::FunCtrMana(&rule.body));
                 rt.set_rwts(rt.get_rwts() + 1);
                 // Gathers matched variables
                 //let mut vars = vec![None; 16]; // FIXME: pre-alloc statically
@@ -3591,7 +3827,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                   }
                   //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_ptr(var));
                   if !rule_var.erase {
-                    let arr = vars_data.entry(*rule_var.name).or_insert(Vec::new());
+                    let arr = vars_data.entry(rule_var.name).or_insert(Vec::new());
                     arr.push(var);
                   } else {
                     // Collects unused argument
@@ -3605,9 +3841,9 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 link(rt, host, done);
                 // Clears the matched ctrs (the `(Succ ...)` and the `(Add ...)` ctrs)
                 for (eras_index, eras_arity) in &rule.eras {
-                  clear(rt, get_loc(ask_arg(rt, term, *eras_index), 0), *eras_arity);
+                  clear(rt, ask_arg(rt, term, *eras_index).get_loc(0), *eras_arity);
                 }
-                clear(rt, get_loc(term, 0), func.arity);
+                clear(rt, term.get_loc(0), func.arity);
                 // // Collects unused variables (none in this example)
                 // for i in 0 .. rule.vars.len() {
                 //   if rule.vars[i].erase {
@@ -3622,7 +3858,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             return Ok(false);
           }
 
-          let fid = get_ext(term);
+          let fid = term.get_ext();
           if let Some(func) = rt.get_func(&Name::new_unsafe(fid)) {
             if call_function(rt, func, host, term, mana, &mut vars_data)? {
               init = 1;
@@ -3632,15 +3868,14 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 
         }
         // We don't need to reduce further
-        CTR | NUM | LAM | VAR | SUP | ERA | ARG => {}
-        _ => panic!("Unexpected term tag `{}` on reduce", get_tag(term)),
+        _ => {}
       }
     }
 
     // When we don't need to reduce the head
     if let Some(item) = stack.pop() {
-      init = item >> 48;
-      host = item & 0x0_FFFF_FFFF_FFFF;
+      init = *item >> 48;
+      host = Loc(*item & 0x0_FFFF_FFFF_FFFF);
       continue;
     }
 
@@ -3657,16 +3892,16 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 /// normal form, though, since it stops on WHNFs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+pub fn compute_at(rt: &mut Runtime, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
   enum StackItem {
-    Compute(u128),
-    Link(u128),
+    Compute(Loc),
+    Link(Loc),
   }
   let mut stack = vec![StackItem::Compute(host)];
   let mut output = vec![];
 
-  let push_arg = |stack: &mut Vec<StackItem>, cell, arg| {
-    let loc = get_loc(cell, arg);
+  let push_arg = |stack: &mut Vec<StackItem>, cell: RawCell, arg| {
+    let loc = cell.get_loc(arg);
     stack.push(StackItem::Link(loc));
     stack.push(StackItem::Compute(loc));
   };
@@ -3678,26 +3913,26 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
         let norm = reduce(rt, host, mana)?;
         output.push(norm);
         if term != norm {
-          match get_tag(norm) {
-            LAM => {
+          match norm.get_tag() {
+            CellTag::LAM => {
               push_arg(&mut stack, norm, 1);
             }
-            APP => {
-              push_arg(&mut stack, norm, 1);
-              push_arg(&mut stack, norm, 0);
-            }
-            SUP => {
+            CellTag::APP => {
               push_arg(&mut stack, norm, 1);
               push_arg(&mut stack, norm, 0);
             }
-            DP0 => {
+            CellTag::SUP => {
+              push_arg(&mut stack, norm, 1);
+              push_arg(&mut stack, norm, 0);
+            }
+            CellTag::DP0 => {
               push_arg(&mut stack, norm, 2);
             }
-            DP1 => {
+            CellTag::DP1 => {
               push_arg(&mut stack, norm, 2);
             }
-            CTR | FUN => {
-              let name = Name::new_unsafe(get_ext(norm));
+            CellTag::CTR | CellTag::FUN => {
+              let name = Name::new_unsafe(norm.get_ext());
               let arity = rt.get_arity(&name);
               let arity = arity.ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
               for i in (0..arity).rev() {
@@ -3725,26 +3960,26 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
 // Debug
 // -----
 
-pub fn show_ptr(x: Ptr) -> String {
-  if x == 0 {
+pub fn show_ptr(x: RawCell) -> String {
+  if x == RawCell(0) {
     String::from("~")
   } else {
-    let tag = get_tag(x);
-    let ext = get_ext(x);
-    let val = get_val(x);
+    let tag = x.get_tag();
+    let ext = x.get_ext();
+    let val = x.get_val();
     let tgs = match tag {
-      DP0 => "DP0",
-      DP1 => "DP1",
-      VAR => "VAR",
-      ARG => "ARG",
-      ERA => "ERA",
-      LAM => "LAM",
-      APP => "APP",
-      SUP => "SUP",
-      CTR => "CTR",
-      FUN => "FUN",
-      OP2 => "OP2",
-      NUM => "NUM",
+      CellTag::DP0 => "DP0",
+      CellTag::DP1 => "DP1",
+      CellTag::VAR => "VAR",
+      CellTag::ARG => "ARG",
+      CellTag::ERA => "ERA",
+      CellTag::LAM => "LAM",
+      CellTag::APP => "APP",
+      CellTag::SUP => "SUP",
+      CellTag::CTR => "CTR",
+      CellTag::FUN => "FUN",
+      CellTag::OP2 => "OP2",
+      CellTag::NUM => "NUM",
       _   => "?",
     };
     let name = Name::new_unsafe(ext);
@@ -3757,7 +3992,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   for i in 0..32 {
     // pushes to the string
     write!(s, "{:x} | ", i).unwrap();
-    s.push_str(&show_ptr(rt.read(i)));
+    s.push_str(&show_ptr(rt.read(Loc(i))));
     s.push('\n');
   }
   s
@@ -3766,69 +4001,69 @@ pub fn show_rt(rt: &Runtime) -> String {
 fn show_memo(rt: &Runtime) -> String {
   let mut txt = String::new();
   for i in 0 .. rt.get_mcap() {
-    txt.push(if rt.read(i) == 0 { '_' } else { 'X' });
+    txt.push(if rt.read(Loc(i)) == RawCell(0) { '_' } else { 'X' });
   }
   return txt;
 }
 
 // TODO: this should be replaced by readback + view_term
-pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
+pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String {
   enum StackItem {
-    Term(Ptr),
+    Term(RawCell),
     Str(String),
   }
-  let mut names: HashMap<u128, String> = HashMap::new();
+  let mut names: HashMap<Loc, String> = HashMap::new();
   fn find_lets(
     rt: &Runtime,
-    term: Ptr,
-    names: &mut HashMap<u128, String>,
-    focus: Option<u128>
+    term: RawCell,
+    names: &mut HashMap<Loc, String>,
+    focus: Option<RawCell>
   ) -> String {
-    let mut lets: HashMap<u128, u128> = HashMap::new();
-    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut lets: HashMap<Loc, Loc> = HashMap::new();
+    let mut kinds: HashMap<Loc, u128> = HashMap::new();
     let mut count: u128 = 0;
     let mut stack = vec![term];
     let mut text = String::new();
     while !stack.is_empty() { 
       let term = stack.pop().unwrap();
-      match get_tag(term) {
-        LAM => {
-          names.insert(get_loc(term, 0), format!("{}", count));
+      match term.get_tag() {
+        CellTag::LAM => {
+          names.insert(term.get_loc(0), format!("{}", count));
           count += 1;
           stack.push(ask_arg(rt, term, 1));
         }
-        APP => {
+        CellTag::APP => {
           stack.push(ask_arg(rt, term, 1));
           stack.push(ask_arg(rt, term, 0));
         }
-        SUP => {
+        CellTag::SUP => {
           stack.push(ask_arg(rt, term, 1));
           stack.push(ask_arg(rt, term, 0));
         }
-        DP0 => {
-          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-            names.insert(get_loc(term, 0), format!("{}", count));
+        CellTag::DP0 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(term.get_loc(0)) {
+            names.insert(term.get_loc(0), format!("{}", count));
             count += 1;
-            kinds.insert(get_loc(term, 0), get_ext(term));
-            e.insert(get_loc(term, 0));
+            kinds.insert(term.get_loc(0), term.get_ext());
+            e.insert(term.get_loc(0));
             stack.push(ask_arg(rt, term, 2));
           }
         }
-        DP1 => {
-          if let hash_map::Entry::Vacant(e) = lets.entry(get_loc(term, 0)) {
-            names.insert(get_loc(term, 0), format!("{}", count));
+        CellTag::DP1 => {
+          if let hash_map::Entry::Vacant(e) = lets.entry(term.get_loc(0)) {
+            names.insert(term.get_loc(0), format!("{}", count));
             count += 1;
-            kinds.insert(get_loc(term, 0), get_ext(term));
-            e.insert(get_loc(term, 0));
+            kinds.insert(term.get_loc(0), term.get_ext());
+            e.insert(term.get_loc(0));
             stack.push(ask_arg(rt, term, 2));
           }
         }
-        OP2 => {
+        CellTag::OP2 => {
           stack.push(ask_arg(rt, term, 1));
           stack.push(ask_arg(rt, term, 0));
         }
-        CTR | FUN => {
-          let name = Name::new_unsafe(get_ext(term));
+        CellTag::CTR | CellTag::FUN => {
+          let name = Name::new_unsafe(term.get_ext());
           let arity = rt.get_arity(&name).unwrap();
           // NOTE: arity should never be None (read from memory), should panic
           // TODO: remove unwrap?
@@ -3845,14 +4080,14 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
       let what = String::from("?h");
       //let kind = kinds.get(&key).unwrap_or(&0);
       let name = names.get(&pos).unwrap_or(&what);
-      let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
-      let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
+      let nam0 = if ask_lnk(rt, pos + 0) == Cell::era().into() { String::from("*") } else { format!("a{}", name) };
+      let nam1 = if ask_lnk(rt, pos + 1) == Cell::era().into() { String::from("*") } else { format!("b{}", name) };
       writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
   }
 
-  fn go(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
+  fn go(rt: &Runtime, term: RawCell, names: &HashMap<Loc, String>, focus: Option<RawCell>) -> String {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {
@@ -3867,38 +4102,38 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               output.push("$".to_string());
             }
           }
-          match get_tag(term) {
-            DP0 => {
-              output.push(format!("a{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?a"))));
+          match term.get_tag() {
+            CellTag::DP0 => {
+              output.push(format!("a{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("?a"))));
             }
-            DP1 => {
-              output.push(format!("b{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?b"))));
+            CellTag::DP1 => {
+              output.push(format!("b{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("?b"))));
             }
-            VAR => {
-              output.push(format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?c"))));
+            CellTag::VAR => {
+              output.push(format!("x{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("?c"))));
             }
-            LAM => {
-              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
+            CellTag::LAM => {
+              let name = format!("x{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("?")));
               output.push(format!("@{}", name));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
             }
-            APP => {
+            CellTag::APP => {
               output.push("(".to_string());
               stack.push(StackItem::Str(")".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Str(" ".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
-            SUP => {
+            CellTag::SUP => {
               output.push("{".to_string());
               stack.push(StackItem::Str("}".to_string()));
-              //let kind = get_ext(term);
+              //let kind = term.get_ext();
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Str(" ".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
-            OP2 => {
-              let oper = get_ext(term).try_into().unwrap();
+            CellTag::OP2 => {
+              let oper = term.get_ext().try_into().unwrap();
               let symb = match oper {
                 Oper::Add => "+",
                 Oper::Sub => "-",
@@ -3923,12 +4158,12 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               stack.push(StackItem::Str(" ".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
-            NUM => {
-              let numb = get_num(term);
+            CellTag::NUM => {
+              let numb = term.get_num();
               output.push(format!("#{}", numb));
             }
-            CTR => {
-              let name = Name::new_unsafe(get_ext(term));
+            CellTag::CTR => {
+              let name = Name::new_unsafe(term.get_ext());
               let mut arit = rt.get_arity(&name).unwrap();
               // NOTE: arity should never be zero (read from memory)
               // TODO: remove unwrap
@@ -3936,8 +4171,8 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               // Pretty print names
               if name == "Name" && arit == 1 {
                 let arg = ask_arg(rt, term, 0);
-                if get_tag(arg) == NUM {
-                  let sugar: Name = get_num(arg).into();
+                if arg.get_tag() == CellTag::NUM {
+                  let sugar: Name = arg.get_num().into();
                   name = format!("Name '{}'", sugar);
                   arit = 0; // erase arit to avoid for
                 }
@@ -3951,8 +4186,8 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
 
               }
             }
-            FUN => {
-              let name = Name::new_unsafe(get_ext(term));
+            CellTag::FUN => {
+              let name = Name::new_unsafe(term.get_ext());
               output.push(format!("({}", name));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(&name).unwrap();
@@ -3961,14 +4196,15 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
                 stack.push(StackItem::Str(" ".to_string()));
               }
             }
-            ERA => {
+            CellTag::ERA => {
               output.push(String::from("*"));
             }
-            _ => {
-              // println!("{}", show_ptr(term));
-              // println!("{}", show_term(rt,  ask_lnk(rt, term), None));
-              output.push(format!("?g({})", get_tag(term)))
-            },
+            CellTag::ARG => {
+              output.push(String::from("?"));
+            }
+            CellTag::NIL => {
+              output.push(String::from("?"));
+            } //TODO: check if Nil and Arg are correct.
           }
         }
       }
@@ -4002,10 +4238,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
         EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'.", show_addr(addr)),
-        EffectFailure::InvalidCallArg { caller, callee, arg } => {
-          let pos = get_val(arg);
-          format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg))
-        },
+        EffectFailure::InvalidCallArg { caller, callee, arg } => format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg)),
         EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
         EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term.", show_ptr(ptr)),
     }
@@ -4024,46 +4257,45 @@ fn show_runtime_error(err: RuntimeError) -> String {
   }
 }
 
-pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Term> {
-  fn find_names(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>) {
+pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option<Term> {
+  fn find_names(rt: &Runtime, term: RawCell, names: &mut LocMap<String>) {
     let mut stack = vec![term];
     while !stack.is_empty() {
       let term = stack.pop().unwrap();
-      match get_tag(term) {
-        LAM => {
+      match term.get_tag() {
+        CellTag::LAM => {
           let param = ask_arg(rt, term, 0);
           let body = ask_arg(rt, term, 1);
           // TODO ask
-          names.insert(get_loc(term, 0), format!("{}", names.len()));
+          names.insert(term.get_loc(0), format!("{}", names.len()));
           stack.push(body);
         }
-        APP => {
+        CellTag::APP => {
           let lam = ask_arg(rt, term, 0);
           let arg = ask_arg(rt, term, 1);
           stack.push(arg);
           stack.push(lam);
         }
-        SUP => {
+        CellTag::SUP => {
           let arg0 = ask_arg(rt, term, 0);
           let arg1 = ask_arg(rt, term, 1);
           stack.push(arg1);
           stack.push(arg0);
         }
-        DP0 | DP1 => {
-          if let hash_map::Entry::Vacant(e) = names.entry(get_loc(term, 0)) {
-            names.insert(get_loc(term, 0), format!("{}", names.len()));
+        CellTag::DP0 | CellTag::DP1 => {
+          if let hash_map::Entry::Vacant(e) = names.entry(term.get_loc(0)) {
+            names.insert(term.get_loc(0), format!("{}", names.len()));
             stack.push(ask_arg(rt, term, 2));
           }
         }
-        OP2 => {
+        CellTag::OP2 => {
           let arg0 = ask_arg(rt, term, 0);
           let arg1 = ask_arg(rt, term, 1);
           stack.push(arg1);
           stack.push(arg0);
         }
-        NUM => {}
-        CTR | FUN => {
-          let name = Name::new_unsafe(get_ext(term));
+        CellTag::CTR | CellTag::FUN => {
+          let name = Name::new_unsafe(term.get_ext());
           let arity = rt.get_arity(&name).unwrap();
           // NOTE: should never be None, should panic.
           // TODO: remove unwrap?
@@ -4076,23 +4308,23 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
       }
     }
  }
-
+   
   struct DupStore {
-    stacks: HashMap<Ptr, Vec<bool>>,
+    stacks: HashMap<u128, Vec<bool>>,
   }
 
   impl DupStore {
     fn new() -> DupStore {
       DupStore { stacks: HashMap::new() }
     }
-    fn get(&self, col: Ptr) -> Option<&Vec<bool>> {
+    fn get(&self, col: u128) -> Option<&Vec<bool>> {
       self.stacks.get(&col)
     }
-    fn pop(&mut self, col: Ptr) -> bool {
+    fn pop(&mut self, col: u128) -> bool {
       let stack = self.stacks.entry(col).or_insert_with(Vec::new);
       stack.pop().unwrap_or(false)
     }
-    fn push(&mut self, col: Ptr, val: bool) {
+    fn push(&mut self, col: u128, val: bool) {
       let stack = self.stacks.entry(col).or_insert_with(Vec::new);
       stack.push(val);
     }
@@ -4100,17 +4332,17 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
 
   fn readback(
     rt: &Runtime,
-    term: Ptr,
-    names: &mut HashMap<Ptr, String>,
-    seen: &mut HashSet<Ptr>,
+    term: RawCell,
+    names: &mut LocMap<String>,
+    seen: &mut HashSet<RawCell>,
     dup_store: &mut DupStore,
     limit: Option<usize>
   ) -> Option<Term> {
     enum StackItem {
-      Term(Ptr),
-      Resolver(Ptr),
-      SUPResolverSome(Ptr, bool), // auxiliar case when in SUP does not have a DUP to evaluate
-      SUPResolverNone(Ptr), // auxiliar case when in SUP does not have a DUP to evaluate
+      Term(RawCell),
+      Resolver(RawCell),
+      SUPResolverSome(RawCell, bool), // auxiliar case when in SUP does not have a DUP to evaluate
+      SUPResolverNone(RawCell), // auxiliar case when in SUP does not have a DUP to evaluate
     }
 
     let mut output = Vec::new();
@@ -4128,7 +4360,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
         if i == 0 {
           println!("{} {}", prefix, show_term(rt, *term, None));
         } else {
-          println!("{} {}", prefix, term);
+          println!("{} {}", prefix, **term);
         }
       }
     };
@@ -4152,14 +4384,14 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
       }
       match item {
         StackItem::Term(term) => {
-          debug_assert!(term != 0);
-          match get_tag(term) {
-            DP0 | DP1 => {
+          debug_assert!(term != RawCell(0));
+          match term.get_tag() {
+            CellTag::DP0 | CellTag::DP1 => {
               if !seen.contains(&term) { // this avoids looping when term doesnt exist
                 seen.insert(term);
-                let col = get_ext(term);
+                let col = term.get_ext();
                 let val = ask_arg(rt, term, 2);
-                if get_tag(term) == DP0 {
+                if term.get_tag() == CellTag::DP0 {
                   dup_store.push(col, false);
                 } else {
                   dup_store.push(col, true);
@@ -4168,12 +4400,12 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
                 stack.push(StackItem::Term(val));
               }
             }
-            SUP => {
-              let col = get_ext(term);
+            CellTag::SUP => {
+              let col = term.get_ext();
               let empty = &Vec::new();
               let dup_stack = dup_store.get(col).unwrap_or(empty);
               if let Some(val) = dup_stack.last() {
-                let arg_idx = *val as u128;
+                let arg_idx = *val as u64; // good god this is terrible
                 let val = ask_arg(rt, term, arg_idx);
                 let old = dup_store.pop(col);
                 stack.push(StackItem::SUPResolverSome(term, old));
@@ -4189,22 +4421,22 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
                 // let val1 = readback(rt, val1, names, dup_store);
               }
             }
-            VAR => {
-              let name = &format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
-              let name: Name = (name as &str).try_into().unwrap(); 
+            CellTag::VAR => {
+              let name = &format!("x{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("_")));
+              let name: Name = (name as &str).try_into().unwrap();  // TODO: remove this mess
               output.push(Term::var(name));
             }
-            NUM => {
-              let numb = get_num(term);
+            CellTag::NUM => {
+              let numb = term.get_num();
               output.push(Term::num(numb));
             }
-            OP2 => {
+            CellTag::OP2 => {
               stack.push(StackItem::Resolver(term));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
-            CTR | FUN => {
-              let name = Name::new_unsafe(get_ext(term));
+            CellTag::CTR | CellTag::FUN => {
+              let name = Name::new_unsafe(term.get_ext());
               let arit = rt.get_arity(&name).unwrap();
               // NOTE: arity cant be None, should panic
               // TODO: remove unwrap?
@@ -4213,11 +4445,11 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
               }
             }
-            LAM => {
+            CellTag::LAM => {
               stack.push(StackItem::Resolver(term));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
             }
-            APP => {
+            CellTag::APP => {
               stack.push(StackItem::Resolver(term));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
@@ -4226,7 +4458,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
           }
         }
         StackItem::SUPResolverSome(term, old) => {
-          let col = get_ext(term); 
+          let col = term.get_ext(); 
           dup_store.push(col, old);
         }
         StackItem::SUPResolverNone(term) => {
@@ -4239,37 +4471,37 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
           return Some(Term::ctr(name, args));
         }
         StackItem::Resolver(term) => {
-          match get_tag(term) {
-            DP0 | DP1 => {
-              let col = get_ext(term);
+          match term.get_tag() {
+            CellTag::DP0 | CellTag::DP1 => {
+              let col = term.get_ext();
               dup_store.pop(col);
             }
-            CTR | FUN => {
-              let name = Name::new_unsafe(get_ext(term));
+            CellTag::CTR | CellTag::FUN => {
+              let name = Name::new_unsafe(term.get_ext());
               let arit = rt.get_arity(&name).unwrap();
               let mut args = Vec::new();
               for i in 0..arit {
                 args.push(output.pop().unwrap());
               }
-              if get_tag(term) == CTR {
+              if term.get_tag() == CellTag::CTR {
                 output.push(Term::ctr(name, args));
               } else {
                 output.push(Term::fun(name, args));
               }
             },
-            LAM => {
-              let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("_")));
+            CellTag::LAM => {
+              let name = format!("x{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("_")));
               let name = Name::from_str(&name).unwrap();
               let body = Box::new(output.pop().unwrap());
               output.push(Term::lam(name, body));
             }
-            APP => {
+            CellTag::APP => {
               let argm = Box::new(output.pop().unwrap());
               let func = Box::new(output.pop().unwrap());
               output.push(Term::app(func, argm));
             }
-            OP2 => {
-              let oper = get_ext(term);
+            CellTag::OP2 => {
+              let oper = term.get_ext();
               let oper = oper.try_into().unwrap();
               let val1 = Box::new(output.pop().unwrap());
               let val0 = Box::new(output.pop().unwrap());
@@ -4288,8 +4520,8 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
     }
   }
 
-  let mut names: HashMap<Ptr, String> = HashMap::new();
-  let mut seen: HashSet<Ptr> = HashSet::new();
+  let mut names = init_loc_map();
+  let mut seen: HashSet<RawCell> = HashSet::new();
   let mut dup_store = DupStore::new();
   find_names(rt, term, &mut names);
   readback(rt, term, &mut names, &mut seen, &mut dup_store, limit)

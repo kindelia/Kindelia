@@ -4,9 +4,9 @@ use crate::{
   crypto,
   common::{Name, U120},
   hvm::{
-    init_map, init_name_map, init_u120_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
-    Heap, Map, NameMap, U120Map,  Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
-    Statement, Store, Term, Var, Indxs,
+    init_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
+    Heap, Map, NameMap, U120Map, LocMap, Nodes, Oper, Loc, RawCell,
+    Ownrs, Rollback, Rule, Runtime, Statement, Store, Term, Var, Indxs,
   },
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
@@ -34,6 +34,14 @@ pub fn name() -> impl Strategy<Value = Name> {
 
 pub fn u120() -> impl Strategy<Value = U120> {
   (0_u128..*(U120::MAX) + 1).prop_map(|n| n.try_into().unwrap())
+}
+
+pub fn loc() -> impl Strategy<Value = Loc> {
+  (0_u64..Loc::_MAX+1).prop_map(|n| Loc::new(n).unwrap())
+}
+
+pub fn rawcell() -> impl Strategy<Value = RawCell> {
+  (any::<u128>()).prop_map(|n| RawCell::new_unchecked(n))
 }
 
 pub fn small_name() -> impl Strategy<Value = Name> {
@@ -132,7 +140,7 @@ pub fn hash() -> impl Strategy<Value = crypto::Hash> {
 }
 
 pub fn nodes() -> impl Strategy<Value = Nodes> {
-  (map(any::<u128>())).prop_map(|m| Nodes { nodes: m })
+  (loc_map(rawcell())).prop_map(|m| Nodes { nodes: m })
 }
 
 pub fn map<A: std::fmt::Debug>(
@@ -171,12 +179,24 @@ pub fn u120_map<A: std::fmt::Debug>(
   })
 }
 
+pub fn loc_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = LocMap<A>> {
+  vec((loc(), s), 0..10).prop_map(|v| {
+    let mut m = init_loc_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
 pub fn store() -> impl Strategy<Value = Store> {
-  u120_map(any::<u128>()).prop_map(|m| Store { links: m })
+  u120_map(rawcell()).prop_map(|m| Store { links: m })
 }
 
 pub fn arits() -> impl Strategy<Value = Arits> {
-  name_map(any::<u128>()).prop_map(|m| Arits { arits: m })
+  name_map(any::<u64>()).prop_map(|m| Arits { arits: m })
 }
 
 pub fn ownrs() -> impl Strategy<Value = Ownrs> {
@@ -191,22 +211,22 @@ pub fn hashs() -> impl Strategy<Value = Hashs> {
 }
 
 pub fn var() -> impl Strategy<Value = Var> {
-  (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>())
+  (name(), any::<u64>(), option::of(any::<u64>()), any::<bool>())
     .prop_map(|(n, p, f, e)| Var { name: n, param: p, field: f, erase: e })
 }
 
 pub fn comp_rule() -> impl Strategy<Value = CompRule> {
   (
-    vec(any::<u128>(), 0..32),
+    vec(rawcell(), 0..32),
     vec(var(), 0..32),
-    vec((any::<u128>(), any::<u128>()), 0..32),
+    vec((any::<u64>(), any::<u64>()), 0..32),
     term(),
   )
     .prop_map(|(c, v, e, b)| CompRule { cond: c, vars: v, eras: e, body: b })
 }
 
 pub fn comp_func() -> impl Strategy<Value = CompFunc> {
-  (func(), any::<u128>(), vec(any::<u128>(), 0..32), vec(comp_rule(), 0..32))
+  (func(), any::<u64>(), vec(any::<u64>(), 0..32), vec(comp_rule(), 0..32))
     .prop_map(|(f, a, r, s)| CompFunc { func: f, arity: a, redux: r, rules: s })
 }
 
@@ -215,8 +235,13 @@ pub fn funcs() -> impl Strategy<Value = Funcs> {
 }
 
 pub fn heap() -> impl Strategy<Value = Heap> {
-  let tuple_strategy = (
-    any::<u128>(),
+  let u64_tuple_strategy = (
+    any::<u64>(),
+    any::<u64>(),
+    any::<u64>(),
+    any::<u64>(),
+  );
+  let u128_tuple_strategy = (
     any::<u128>(),
     any::<u128>(),
     any::<u128>(),
@@ -225,9 +250,9 @@ pub fn heap() -> impl Strategy<Value = Heap> {
   );
 
   (
-    tuple_strategy,
-    tuple_strategy,
-    any::<i128>(),
+    u64_tuple_strategy,
+    u64_tuple_strategy,
+    u128_tuple_strategy,
     nodes(),
     store(),
     arits(),
@@ -238,9 +263,9 @@ pub fn heap() -> impl Strategy<Value = Heap> {
   )
     .prop_map(
       |(
-        (uuid, mcap, tick, funs, dups, rwts),
-        (mana, next, meta, hax1, hax0, time),
-        size,
+        (mcap, tick, funs, dups),
+        (mana, next, size, rwts),
+        (uuid, meta, hax1, hax0, time),
         memo,
         disk,
         arit,

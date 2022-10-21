@@ -943,11 +943,11 @@ impl<C: ProtoComm> Node<C> {
                 reorg
               );
 
-              self.runtime.rollback(tick);
+              self.runtime.rollback(tick as u64);
 
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
-              while tick > self.runtime.get_tick() {
+              while tick as u64 > self.runtime.get_tick() {
                 must_compute.push(new_bhash);
                 new_bhash = self.block[&new_bhash].prev;
                 tick -= 1;
@@ -1119,9 +1119,9 @@ impl<C: ProtoComm> Node<C> {
     // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
     match request {
       NodeRequest::GetStats { tx: answer } => {
-        let tick = self.runtime.get_tick().try_into().unwrap();
-        let mana = self.runtime.get_mana().try_into().unwrap();
-        let size = self.runtime.get_size().try_into().unwrap();
+        let tick = self.runtime.get_tick();
+        let mana = self.runtime.get_mana();
+        let size = self.runtime.get_size();
         let mut fun_count = 0;
         self.runtime.reduce_with(&mut fun_count, |acc, heap| {
           *acc += heap.get_fn_count();

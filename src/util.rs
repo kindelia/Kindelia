@@ -11,7 +11,9 @@ use bit_vec::BitVec;
 
 use crate::NoHashHasher as NHH;
 use crate::common::{Name, U120};
+use crate::hvm::Loc;
 
+pub type LocMap <T> = HashMap<Loc , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<Loc >>>;
 pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u64 >>>;
 pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U120>>>;
 pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u128>>>;

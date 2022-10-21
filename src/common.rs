@@ -13,6 +13,7 @@ use crate::hvm::EXT_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
+#[repr(transparent)]
 pub struct U120(u128);
 
 impl crate::persistence::DiskSer for U120 {
@@ -181,6 +182,7 @@ impl crate::NoHashHasher::IsEnabled for U120 {}
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
+#[repr(transparent)]
 pub struct Name(u128);
 
 impl crate::NoHashHasher::IsEnabled for Name {}

@@ -150,7 +150,7 @@ pub fn persistence1(
   pre_code: &str,
   code: &str,
   validators: &[util::Validator],
-  #[values(1000, 1500, 2000)] tick: u128,
+  #[values(1000, 1500, 2000)] tick: u64,
   temp_dir: TempPath,
 ) {
   let mut rt = init_runtime(&temp_dir.path);
@@ -726,14 +726,14 @@ pub const COUNTER: &'static str = "
 ";
 
 fn counter_validators() -> [util::Validator; 2] {
-  fn count_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
+  fn count_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
     let counter = tick;
     assert_eq!(view_term(term), format!("#{}", counter));
     view_term(term) == format!("#{}", counter)
   }
-  fn store_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
+  fn store_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
     let counter = tick;
-    view_term(term).matches("Succ").count() as u128 == counter
+    view_term(term).matches("Succ").count() as u64 == counter
   }
   [("Count", count_validator), ("Store", store_validator)]
 }
@@ -820,9 +820,9 @@ pub const BANK: &'static str = "
 ";
 
 fn bank_validators() -> [util::Validator; 1] {
-  fn tree_validator(tick: u128, term: &Term, _: &mut Runtime) -> bool {
+  fn tree_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
     let counter = tick;
-    view_term(term).matches("Node").count() as u128 == counter
+    view_term(term).matches("Node").count() as u64 == counter
   }
   [("Bank", tree_validator)]
 }
