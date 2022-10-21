@@ -1562,6 +1562,10 @@ impl Runtime {
   // API
   // ---
 
+  pub fn clear(&mut self) {
+    self.clear_heap(self.draw);
+  }
+
   pub fn define_function(&mut self, name: Name, func: CompFunc, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, func.arity);
     self.get_heap_mut(self.draw).write_file(name, Arc::new(func));
@@ -2023,7 +2027,7 @@ impl Runtime {
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana();
-        let mana_lim = self.get_mana_limit();
+        let mana_lim = if !sudo { self.get_mana_limit() } else { u128::MAX }; // ugly
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit();
         handle_runtime_err(self, "run", check_term(&expr))?; 

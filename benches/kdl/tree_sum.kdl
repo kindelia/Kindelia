@@ -1,0 +1,3 @@
+run {
+  (Done (Sum (Gen #10)))
+}

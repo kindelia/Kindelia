@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use primitive_types::U256;
@@ -7,6 +9,42 @@ use kindelia::hvm;
 use kindelia::net;
 use kindelia::node;
 use kindelia::util;
+
+// KHVM
+// ====
+
+// Util
+// ----
+
+pub fn temp_dir() -> PathBuf {
+  let path = std::env::temp_dir().join(format!("crate.{:x}", fastrand::u128(..)));
+  std::fs::create_dir_all(&path).unwrap();
+  path
+}
+
+pub fn init_runtime(path: PathBuf) -> hvm::Runtime {
+  let genesis_stmts =
+    hvm::parse_code(kindelia::constants::GENESIS_CODE).expect("Genesis code parses.");
+  hvm::init_runtime(path, &genesis_stmts)
+}
+
+fn khvm_benches(c: &mut Criterion) {
+  c.bench_function("kvm_tree_sum", |b| {
+    let pre_code = include_str!("kdl/tree_sum.pre.kdl");
+    let code = include_str!("kdl/tree_sum.kdl");
+    let dir_path = temp_dir();
+    let mut runtime = init_runtime(dir_path);
+    runtime.run_statements_from_code(pre_code, true, true);
+    b.iter(|| {
+      runtime.run_statements_from_code(code, true, true);
+    })
+  });
+}
+
+criterion_group!(khvm, khvm_benches);
+
+// Serialization
+// =============
 
 fn max_message() -> node::Message<net::Address> {
   let max_block = node::Block {
@@ -61,7 +99,7 @@ fn max_message_deserialize(c: &mut Criterion) {
 /// Benchmarks deserialization and extraction of statements from a block
 fn block_with_txs_deserialize(c: &mut Criterion) {
   c.bench_function("deserialize_block_with_txs", |b| {
-    let code = include_str!("code/inc.kdl");
+    let code = include_str!("kdl/inc.kdl");
 
     let (_, base_stmt) = hvm::read_statement(code).unwrap();
     let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
@@ -100,4 +138,4 @@ criterion_group!(
   block_with_txs_deserialize
 );
 
-criterion_main!(serialization);
+criterion_main!(khvm, serialization);
