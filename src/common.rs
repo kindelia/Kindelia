@@ -100,6 +100,10 @@ impl Name {
     }
     Name(num)
   }
+
+  pub fn show_hex(&self) -> String {
+    format!("#x{:0>30x}", **self)
+  }
 }
 
 impl std::ops::Deref for Name {
