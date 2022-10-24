@@ -3,7 +3,6 @@
 ## Networking
 
 - [ ] inversion of TX_COUNT bit order
-- [ ] 2 bits for statement tag serialization
 
 ## Chain state
 

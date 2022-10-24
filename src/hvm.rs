@@ -2005,6 +2005,8 @@ impl Runtime {
         self.define_function(name, func, stmt_index, hash);
         let state = self.create_term(init, 0, &mut init_map());
         let state = handle_runtime_err(self, "fun", state)?;
+        let state = self.compute(state, self.get_mana_limit());
+        let state = handle_runtime_err(self, "fun", state)?;
         self.write_disk(U120::from(name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Fun { name, args }
