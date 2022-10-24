@@ -807,60 +807,6 @@ impl Cell {
   fn DupEraMana() -> u64 {
     return 2;
   }
-
-  pub const fn var(loc: Loc) -> Self {
-    Cell::Var { loc }
-  } 
-  
-  pub const fn dp0(col: u128, loc: Loc) -> Self {
-    Cell::Dp0 { label: col, loc }
-  }
-
-  pub const fn dp1(col: u128, loc: Loc) -> Self {
-    Cell::Dp1 { label: col, loc }    
-  }
-
-  pub const fn arg(loc: Loc) -> Self {
-    Cell::Arg { loc }
-  }
-
-  pub const fn era() -> Self {
-    Cell::Era
-  }
-
-  pub const fn nil() -> Self {
-    Cell::Nil
-  }
-
-  pub const fn lam(loc: Loc) -> Self {
-    Cell::Lam { loc }
-  }
-
-  pub const fn app(loc: Loc) -> Self {
-    Cell::App { loc }
-  }
-
-  pub const fn sup(col: u128, loc: Loc) -> Self {
-    Cell::Sup { label: col, loc }
-  }
-
-  pub const fn op2(ope: Oper, loc: Loc) -> Self {
-    Cell::Op2 { oper: ope, loc }
-  }
-
-  pub fn num(num: U120) -> Self {
-    debug_assert!((!NUM_MASK & *num) == 0, "Num overflow: `{}`.", *num);
-    //(NUM * TAG_SHL) | (val & NUM_MASK)
-    Cell::Num { num }
-  }
-
-  pub const fn ctr(name: Name, loc: Loc) -> Self {
-    Cell::Ctr { name, loc }
-  }
-
-  pub const fn fun(name: Name, loc: Loc) -> Self {
-    Cell::Fun { name, loc }
-  }
 }
 
 impl RawCell {
@@ -905,6 +851,150 @@ impl RawCell {
   pub const fn get_loc(self, arg: u64) -> Loc {
     Loc((self.get_val() as u64) + arg)
   }
+
+  
+  pub const fn var(loc: Loc) -> Self {
+    let tag = (CellTag::VAR as u128) * TAG_SHL;
+    let val = loc.0 as u128;
+    RawCell(tag | val)
+  } 
+  
+  pub const fn dp0(col: u128, loc: Loc) -> Self {
+    let tag = (CellTag::DP0 as u128) * TAG_SHL;
+    let ext = col * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )
+  }
+
+  pub const fn dp1(col: u128, loc: Loc) -> Self {
+    let tag = (CellTag::DP1 as u128) * TAG_SHL;
+    let ext = col * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )
+  }
+
+  pub const fn arg(loc: Loc) -> Self {
+    let tag = (CellTag::ARG as u128) * TAG_SHL;
+    let val = loc.0 as u128;
+    RawCell(tag | val)
+  }
+
+  pub const fn era() -> Self {
+    let tag = (CellTag::ERA as u128) * TAG_SHL;
+    RawCell(tag)
+  }
+
+  pub const fn nil() -> Self {
+    let tag = (CellTag::NIL as u128) * TAG_SHL;
+    RawCell(tag)
+  }
+
+  pub const fn lam(loc: Loc) -> Self {
+    let tag = (CellTag::LAM as u128) * TAG_SHL;
+    let val = loc.0 as u128;
+    RawCell(tag | val)
+  }
+
+  pub const fn app(loc: Loc) -> Self {
+    let tag = (CellTag::APP as u128) * TAG_SHL;
+    let val = loc.0 as u128;
+    RawCell(tag | val)
+  }
+
+  pub const fn sup(col: u128, loc: Loc) -> Self {
+    let tag = (CellTag::SUP as u128) * TAG_SHL;
+    let ext = col * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )
+  }
+
+  pub const fn op2(ope: Oper, loc: Loc) -> Self {
+    let tag = (CellTag::OP2 as u128) * TAG_SHL;
+    let ext = (ope as u128) * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )    
+  }
+
+  pub fn num(num: U120) -> Self {
+    let tag = (CellTag::NUM as u128) * TAG_SHL;
+    let val = *num as u128;
+    RawCell(tag | val)
+  }
+
+  pub fn ctr(name: Name, loc: Loc) -> Self {
+    let tag = (CellTag::CTR as u128) * TAG_SHL;
+    let ext = *name * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )
+  }
+
+  pub fn fun(name: Name, loc: Loc) -> Self {
+    let tag = (CellTag::FUN as u128) * TAG_SHL;
+    let ext = *name * EXT_SHL;
+    let val = loc.0 as u128;
+    RawCell( tag | ext | val )
+  }
+
+  pub fn to_cell(&self) -> Cell {
+    match self.get_tag() {
+      CellTag::DP0 => {
+        let col = self.get_ext();
+        let loc = self.get_val();
+        Cell::Dp0 { label: col, loc: Loc(loc) }
+      },
+      CellTag::DP1 => {
+        let col = self.get_ext();
+        let loc = self.get_val();
+        Cell::Dp1 { label: col, loc: Loc(loc) }
+      },
+      CellTag::VAR => {
+        let loc = self.get_val();
+        Cell::Var { loc: Loc(loc) }
+      },
+      CellTag::ARG => {
+        let loc = self.get_val();
+        Cell::Var { loc: Loc(loc) }
+      },
+      CellTag::ERA => {
+        Cell::Era
+      },
+      CellTag::LAM => {
+        let loc = self.get_val();
+        Cell::Lam { loc: Loc(loc) }
+      },
+      CellTag::APP => {
+        let loc = self.get_val();
+        Cell::App { loc: Loc(loc) }
+      },
+      CellTag::SUP => {
+        let label = self.get_ext();
+        let loc = self.get_val();
+        Cell::Sup { label, loc: Loc(loc) }
+      },
+      CellTag::CTR => {
+        let name = Name::from_u128_unchecked(self.get_ext());
+        let loc = self.get_val();
+        Cell::Ctr { name, loc: Loc(loc) }
+      },
+      CellTag::FUN => {
+        let name = Name::from_u128_unchecked(self.get_ext());
+        let loc = self.get_val();
+        Cell::Fun { name, loc : Loc(loc) }
+      },
+      CellTag::OP2 => {
+        let oper = self.get_ext().try_into().unwrap();
+        let loc = self.get_val();
+        Cell::Op2 { oper, loc: Loc(loc) }
+      },
+      CellTag::NUM => {
+        let num = self.get_num();
+        Cell::Num { num }
+      },
+      CellTag::NIL => {
+        Cell::Nil
+      },
+    }
+  }
 }
 
 impl std::ops::Deref for RawCell {
@@ -919,85 +1009,6 @@ impl fmt::Display for RawCell {
     write!(f, "{}", **self)
   }
 }
-
-
-impl From<Cell> for RawCell {
-
-  fn from(cell: Cell) -> Self {
-    match cell {
-      Cell::Era => {
-        let tag = (CellTag::ERA as u128) * TAG_SHL;
-        RawCell(tag)
-      },
-      Cell::Nil => {
-        let tag = (CellTag::NIL as u128) * TAG_SHL;
-        RawCell(tag)
-      },
-      Cell::Var { loc } => {
-        let tag = (CellTag::VAR as u128) * TAG_SHL;
-        let val = *loc as u128;
-        RawCell(tag | val)
-      },
-      Cell::Arg { loc } => {
-        let tag = (CellTag::ARG as u128) * TAG_SHL;
-        let val = *loc as u128;
-        RawCell(tag | val)
-      },
-      Cell::Lam { loc } => {
-        let tag = (CellTag::LAM as u128) * TAG_SHL;
-        let val = *loc as u128;
-        RawCell(tag | val)
-      },
-      Cell::App { loc } => {
-        let tag = (CellTag::APP as u128) * TAG_SHL;
-        let val = *loc as u128;
-        RawCell(tag | val)
-      },
-      Cell::Num { num } => {
-        let tag = (CellTag::NUM as u128) * TAG_SHL;
-        let val = *num as u128;
-        RawCell(tag | val)
-      },
-      Cell::Dp0 { label, loc } => {
-        let tag = (CellTag::DP0 as u128) * TAG_SHL;
-        let ext = label * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )
-      },
-      Cell::Dp1 { label, loc } => {
-        let tag = (CellTag::DP1 as u128) * TAG_SHL;
-        let ext = label * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )
-      },      
-      Cell::Sup { label, loc } => {
-        let tag = (CellTag::SUP as u128) * TAG_SHL;
-        let ext = label * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )
-      },
-      Cell::Ctr { name, loc } => {
-        let tag = (CellTag::CTR as u128) * TAG_SHL;
-        let ext = *name * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )
-      },
-      Cell::Fun { name, loc } => {
-        let tag = (CellTag::FUN as u128) * TAG_SHL;
-        let ext = *name * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )
-      },
-      Cell::Op2 { oper, loc } => {
-        let tag = (CellTag::OP2 as u128) * TAG_SHL;
-        let ext = (oper as u128) * EXT_SHL;
-        let val = *loc as u128;
-        RawCell( tag | ext | val )   
-      },
-    }
-  }
-}
-
 // Loc
 
 
@@ -1956,7 +1967,7 @@ impl Runtime {
             self.write_disk(subject, save);
             let num = U120::from_u128_unchecked(0);
             let cont = ask_arg(self, term, 1);            
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
@@ -2003,7 +2014,7 @@ impl Runtime {
             let name = self.check_name(fnid, mana)?;
             let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             let num = U120::from_u128_unchecked(indx); // TODO: remove unchecked
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
@@ -2015,7 +2026,7 @@ impl Runtime {
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let num = U120::from_u128_unchecked(stmt_hash); // TODO: remove unchecked
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
@@ -2027,7 +2038,7 @@ impl Runtime {
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let num = U120::from_u128_unchecked(stmt_hash); // TODO: remove unchecked
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
@@ -2035,7 +2046,7 @@ impl Runtime {
           }
           IO_SUBJ => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(subject));
+            let cont = alloc_app(self, cont, RawCell::num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2043,7 +2054,7 @@ impl Runtime {
           }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(subject));
+            let cont = alloc_app(self, cont, RawCell::num(subject));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2053,7 +2064,7 @@ impl Runtime {
             let num = self.get_tick();
             let num = U120::from_u128_unchecked(num as u128);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2063,7 +2074,7 @@ impl Runtime {
             let num = self.get_time();
             let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2073,7 +2084,7 @@ impl Runtime {
             let num = self.get_meta();
             let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2083,7 +2094,7 @@ impl Runtime {
             let num = self.get_hax0();
             let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2093,7 +2104,7 @@ impl Runtime {
             let num = self.get_hax1();
             let num = U120::from_u128_unchecked(num);
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Cell::num(num));
+            let cont = alloc_app(self, cont, RawCell::num(num));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
@@ -2818,11 +2829,11 @@ pub fn link<T: Into<RawCell>>(rt: &mut Runtime, loc: Loc, lnk: T) -> RawCell {
   match lnk.get_tag() {
     CellTag::DP0 | CellTag::VAR => {
       let pos = lnk.get_loc(0);
-      rt.write(pos, Cell::arg(loc));
+      rt.write(pos, RawCell::arg(loc));
     }
     CellTag::DP1 => {
       let pos = lnk.get_loc(1);
-      rt.write(pos, Cell::arg(loc));
+      rt.write(pos, RawCell::arg(loc));
     }
     _ => {}
   };
@@ -2852,7 +2863,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
           rt.set_size(rt.get_size() + arity);
           //println!("{}", show_memo(rt));
           for i in 0 .. arity {
-            rt.write(Loc(index + i), Cell::nil()); // millions perished for forgetting this line
+            rt.write(Loc(index + i), RawCell::nil()); // millions perished for forgetting this line
           }
           return Loc(index);
         }
@@ -2888,21 +2899,21 @@ pub fn collect<T: Into<RawCell>>(rt: &mut Runtime, term: T) {
     let term = next;
     match term.get_tag() {
       CellTag::DP0 => {
-        link(rt, term.get_loc(0), Cell::era());
+        link(rt, term.get_loc(0), RawCell::era());
         dups.push(term);
       }
       CellTag::DP1 => {
-        link(rt, term.get_loc(1), Cell::era());
+        link(rt, term.get_loc(1), RawCell::era());
         dups.push(term);
       }
       CellTag::VAR => {
-        link(rt, term.get_loc(0), Cell::era());
+        link(rt, term.get_loc(0), RawCell::era());
       }
       CellTag::LAM => {
         let arg0 = ask_arg(rt, term, 0);
         if arg0.get_tag() != CellTag::ERA {
           debug_assert_eq!(arg0.get_tag(), CellTag::ARG);
-          link(rt, arg0.get_loc(0), Cell::era());
+          link(rt, arg0.get_loc(0), RawCell::era());
         }
         next = ask_arg(rt, term, 1);
         clear(rt, term.get_loc(0), 2);
@@ -3140,7 +3151,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
   fn bind<T: Into<RawCell>>(rt: &mut Runtime, loc: Loc, name: Name, lnk: T, vars_data: &mut NameMap<Vec<RawCell>>) {
     // println!("~~ bind {} {}", u128_to_name(name), show_ptr(lnk));
     if name == Name::NONE {
-      link(rt, loc, Cell::era());
+      link(rt, loc, RawCell::era());
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
       got.push(lnk.into());
@@ -3162,17 +3173,17 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
       // allowing: `dup x y = x`
       let expr = create_term(rt, expr, node + 2, vars_data)?;
       link(rt, node + 2, expr);
-      bind(rt, node + 0, *nam0, Cell::dp0(dupk as u128, node), vars_data);
-      bind(rt, node + 1, *nam1, Cell::dp1(dupk as u128, node), vars_data);
+      bind(rt, node + 0, *nam0, RawCell::dp0(dupk as u128, node), vars_data);
+      bind(rt, node + 1, *nam1, RawCell::dp1(dupk as u128, node), vars_data);
       let body = create_term(rt, body, loc, vars_data);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
-      bind(rt, node + 0, *name, RawCell::from(Cell::var(node)), vars_data);
+      bind(rt, node + 0, *name, RawCell::var(node), vars_data);
       let body = create_term(rt, body, node + 1, vars_data)?;
       link(rt, node + 1, body);
-      Ok(Cell::lam(node).into())
+      Ok(RawCell::lam(node))
     }
     Term::App { func, argm } => {
       let node = alloc(rt, 2);
@@ -3180,7 +3191,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
       link(rt, node + 0, func);
       let argm = create_term(rt, argm, node + 1, vars_data)?;
       link(rt, node + 1, argm);
-      Ok(Cell::app(node).into())
+      Ok(RawCell::app(node))
     }
     Term::Fun { name, args } => {
       let expected = rt.get_arity(name)
@@ -3195,7 +3206,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
           let arg_lnk = create_term(rt, arg, node + (i as u64), vars_data)?;
           link(rt, node + (i as u64), arg_lnk);
         }
-        Ok(Cell::fun(*name, node).into())
+        Ok(RawCell::fun(*name, node))
       }
     }
     Term::Ctr { name, args } => {
@@ -3211,11 +3222,11 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
           let arg_lnk = create_term(rt, arg, node + (i as u64), vars_data)?;
           link(rt, node + (i as u64), arg_lnk);
         }
-        Ok(RawCell::from(Cell::ctr(*name, node)))
+        Ok(RawCell::ctr(*name, node))
       }
     }
     Term::Num { numb } => {
-      Ok(Cell::num(*numb).into())
+      Ok(RawCell::num(*numb))
     }
     Term::Op2 { oper, val0, val1 } => {
       let node = alloc(rt, 2);
@@ -3223,7 +3234,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
       link(rt, node + 0, val0);
       let val1 = create_term(rt, val1, node + 1, vars_data)?;
       link(rt, node + 1, val1);
-      Ok(Cell::op2(*oper, node).into())
+      Ok(RawCell::op2(*oper, node))
     }
   }
 }
@@ -3296,7 +3307,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
           // If it is a constructor...
           Term::Ctr { name: arg_name, args: arg_args } => {
             strict[i as usize] = true;
-            cond.push(Cell::ctr(*arg_name, Loc(0)).into()); // adds its matching condition
+            cond.push(RawCell::ctr(*arg_name, Loc(0))); // adds its matching condition
             eras.push((i, arg_args.len() as u64)); // marks its index and arity for freeing
             // For each of its fields...
             for j in 0 .. arg_args.len() as u64 {
@@ -3313,13 +3324,13 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
           // If it is a number...
           Term::Num { numb: arg_numb } => {
             strict[i as usize] = true;
-            cond.push(Cell::num(*arg_numb).into()); // adds its matching condition
+            cond.push(RawCell::num(*arg_numb)); // adds its matching condition
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
             check_var(*arg_name, &rule.rhs, &mut seen, rule_index)?;
             vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
-            cond.push(Cell::var(Loc(0)).into()); // it has no matching condition
+            cond.push(RawCell::var(Loc(0))); // it has no matching condition
           }
           _ => {
             return Err(RuntimeError::DefinitionError(DefinitionError::UnsupportedMatch { rule_index } ));
@@ -3355,33 +3366,33 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   });
 }
 
-pub fn create_app<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, func: T, argm: K) -> RawCell {
+pub fn create_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> RawCell {
   let node = alloc(rt, 2);
   link(rt, node + 0, func);
   link(rt, node + 1, argm);
-  RawCell::from(Cell::app(node))
+  RawCell::app(node)
 }
 
-pub fn create_fun<T: Into<RawCell> + Copy>(rt: &mut Runtime, fun: Name, args: &[T]) -> RawCell {
+pub fn create_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> RawCell {
   let node = alloc(rt, args.len() as u64);
   for i in 0 .. args.len() {
     link(rt, node + (i as u64), args[i]);
   }
-  RawCell::from(Cell::fun(fun, node))
+  RawCell::fun(fun, node)
 }
 
-pub fn alloc_lnk<T: Into<RawCell>>(rt: &mut Runtime, term: T) -> Loc {
+pub fn alloc_lnk(rt: &mut Runtime, term: RawCell) -> Loc {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
 }
 
-pub fn alloc_app<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, func: T, argm: K) -> Loc {
+pub fn alloc_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> Loc {
   let app = create_app(rt, func, argm);
   return alloc_lnk(rt, app);
 }
 
-pub fn alloc_fun<T: Into<RawCell> + Copy>(rt: &mut Runtime, fun: Name, args: &[T]) -> Loc {
+pub fn alloc_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> Loc {
   let fun = create_fun(rt, fun, args);
   return alloc_lnk(rt, fun);
 }
@@ -3389,8 +3400,7 @@ pub fn alloc_fun<T: Into<RawCell> + Copy>(rt: &mut Runtime, fun: Name, args: &[T
 // Reduction
 // ---------
 
-pub fn subst<T: Into<RawCell>, K: Into<RawCell>>(rt: &mut Runtime, lnk: T, val: K) {
-  let lnk: RawCell = lnk.into();
+pub fn subst(rt: &mut Runtime, lnk: RawCell, val: RawCell) {
   if lnk.get_tag() != CellTag::ERA {
     debug_assert_eq!(lnk.get_tag(), CellTag::ARG);
     link(rt, lnk.get_loc(0), val);
@@ -3499,13 +3509,13 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             let let0 = alloc(rt, 3);
             let par0 = alloc(rt, 2);
             link(rt, let0 + 2, ask_arg(rt, term, 1));
-            link(rt, app0 + 1, Cell::dp0(arg0.get_ext(), let0));
+            link(rt, app0 + 1, RawCell::dp0(arg0.get_ext(), let0));
             link(rt, app0 + 0, ask_arg(rt, arg0, 0));
             link(rt, app1 + 0, ask_arg(rt, arg0, 1));
-            link(rt, app1 + 1, Cell::dp1(arg0.get_ext(), let0));
-            link(rt, par0 + 0, Cell::app(app0));
-            link(rt, par0 + 1, Cell::app(app1));
-            let done = Cell::sup(arg0.get_ext(), par0);
+            link(rt, app1 + 1, RawCell::dp1(arg0.get_ext(), let0));
+            link(rt, par0 + 0, RawCell::app(app0));
+            link(rt, par0 + 1, RawCell::app(app1));
+            let done = RawCell::sup(arg0.get_ext(), par0);
             link(rt, host, done);
           }
         }
@@ -3526,17 +3536,17 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             let lam0 = alloc(rt, 2);
             let lam1 = alloc(rt, 2);
             link(rt, let0 + 2, ask_arg(rt, arg0, 1));
-            link(rt, par0 + 1, Cell::var(lam1));
+            link(rt, par0 + 1, RawCell::var(lam1));
             let arg0_arg_0 = ask_arg(rt, arg0, 0);
-            link(rt, par0 + 0, Cell::var(lam0));
-            subst(rt, arg0_arg_0, Cell::sup(term.get_ext(), par0));
+            link(rt, par0 + 0, RawCell::var(lam0));
+            subst(rt, arg0_arg_0, RawCell::sup(term.get_ext(), par0));
             let term_arg_0 = ask_arg(rt, term, 0);
-            link(rt, lam0 + 1, Cell::dp0(term.get_ext(), let0));
-            subst(rt, term_arg_0, Cell::lam(lam0));
+            link(rt, lam0 + 1, RawCell::dp0(term.get_ext(), let0));
+            subst(rt, term_arg_0, RawCell::lam(lam0));
             let term_arg_1 = ask_arg(rt, term, 1);
-            link(rt, lam1 + 1, Cell::dp1(term.get_ext(), let0));
-            subst(rt, term_arg_1, Cell::lam(lam1));
-            let done = Cell::lam(if term.get_tag() == CellTag::DP0 { lam0 } else { lam1 });
+            link(rt, lam1 + 1, RawCell::dp1(term.get_ext(), let0));
+            subst(rt, term_arg_1, RawCell::lam(lam1));
+            let done = RawCell::lam(if term.get_tag() == CellTag::DP0 { lam0 } else { lam1 });
             link(rt, host, done);
             init = 1;
             continue;
@@ -3574,13 +3584,13 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
               link(rt, let1 + 2, ask_arg(rt, arg0, 1));
               let term_arg_0 = ask_arg(rt, term, 0);
               let term_arg_1 = ask_arg(rt, term, 1);
-              link(rt, par1 + 0, Cell::dp1(term.get_ext(), let0));
-              link(rt, par1 + 1, Cell::dp1(term.get_ext(), let1));
-              link(rt, par0 + 0, Cell::dp0(term.get_ext(), let0));
-              link(rt, par0 + 1, Cell::dp0(term.get_ext(), let1));
-              subst(rt, term_arg_0, Cell::sup(arg0.get_ext(), par0));
-              subst(rt, term_arg_1, Cell::sup(arg0.get_ext(), par1));
-              let done = Cell::sup(arg0.get_ext(), if term.get_tag() == CellTag::DP0 { par0 } else { par1 });
+              link(rt, par1 + 0, RawCell::dp1(term.get_ext(), let0));
+              link(rt, par1 + 1, RawCell::dp1(term.get_ext(), let1));
+              link(rt, par0 + 0, RawCell::dp0(term.get_ext(), let0));
+              link(rt, par0 + 1, RawCell::dp0(term.get_ext(), let1));
+              subst(rt, term_arg_0, RawCell::sup(arg0.get_ext(), par0));
+              subst(rt, term_arg_1, RawCell::sup(arg0.get_ext(), par1));
+              let done = RawCell::sup(arg0.get_ext(), if term.get_tag() == CellTag::DP0 { par0 } else { par1 });
               link(rt, host, done);
             }
           // dup x y = N
@@ -3613,28 +3623,28 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             rt.set_mana(rt.get_mana() + Cell::DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
-              subst(rt, ask_arg(rt, term, 0), Cell::ctr(name, Loc(0)));
-              subst(rt, ask_arg(rt, term, 1), Cell::ctr(name, Loc(0)));
+              subst(rt, ask_arg(rt, term, 0), RawCell::ctr(name, Loc(0)));
+              subst(rt, ask_arg(rt, term, 1), RawCell::ctr(name, Loc(0)));
               clear(rt, term.get_loc(0), 3);
-              let _done = link(rt, host, Cell::ctr(name, Loc(0)));
+              let _done = link(rt, host, RawCell::ctr(name, Loc(0)));
             } else {
               let ctr0 = arg0.get_loc(0);
               let ctr1 = alloc(rt, arit);
               for i in 0..arit - 1 {
                 let leti = alloc(rt, 3);
                 link(rt, leti + 2, ask_arg(rt, arg0, i));
-                link(rt, ctr0 + i, Cell::dp0(term.get_ext(), leti));
-                link(rt, ctr1 + i, Cell::dp1(term.get_ext(), leti));
+                link(rt, ctr0 + i, RawCell::dp0(term.get_ext(), leti));
+                link(rt, ctr1 + i, RawCell::dp1(term.get_ext(), leti));
               }
               let leti = term.get_loc(0);
               link(rt, leti + 2, ask_arg(rt, arg0, arit - 1));
               let term_arg_0 = ask_arg(rt, term, 0);
-              link(rt, ctr0 + (arit - 1), Cell::dp0(term.get_ext(), leti));
-              subst(rt, term_arg_0, Cell::ctr(name, ctr0));
+              link(rt, ctr0 + (arit - 1), RawCell::dp0(term.get_ext(), leti));
+              subst(rt, term_arg_0, RawCell::ctr(name, ctr0));
               let term_arg_1 = ask_arg(rt, term, 1);
-              link(rt, ctr1 + (arit - 1), Cell::dp1(term.get_ext(), leti));
-              subst(rt, term_arg_1, Cell::ctr(name, ctr1));
-              let done = Cell::ctr(name, if term.get_tag() == CellTag::DP0 { ctr0 } else { ctr1 });
+              link(rt, ctr1 + (arit - 1), RawCell::dp1(term.get_ext(), leti));
+              subst(rt, term_arg_1, RawCell::ctr(name, ctr1));
+              let done = RawCell::ctr(name, if term.get_tag() == CellTag::DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
           // dup x y = *
@@ -3645,9 +3655,9 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             //println!("dup-era");
             rt.set_mana(rt.get_mana() + Cell::DupEraMana());
             rt.set_rwts(rt.get_rwts() + 1);
-            subst(rt, ask_arg(rt, term, 0), Cell::era());
-            subst(rt, ask_arg(rt, term, 1), Cell::era());
-            link(rt, host, Cell::era());
+            subst(rt, ask_arg(rt, term, 0), RawCell::era());
+            subst(rt, ask_arg(rt, term, 1), RawCell::era());
+            link(rt, host, RawCell::era());
             clear(rt, term.get_loc(0), 3);
             init = 1;
             continue;
@@ -3686,7 +3696,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
               Oper::Gtn => u128::from(*a_u >  *b_u),
               Oper::Neq => u128::from(*a_u != *b_u),
             };
-            let done = Cell::num(U120::from_u128_unchecked(res));
+            let done = RawCell::num(U120::from_u128_unchecked(res));
             clear(rt, term.get_loc(0), 2);
             link(rt, host, done);
           // (+ {a0 a1} b)
@@ -3703,13 +3713,13 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             let par0 = alloc(rt, 2);
             let term_oper: Oper = term.get_ext().try_into().expect("Invalid operation");
             link(rt, let0 + 2, arg1);
-            link(rt, op20 + 1, Cell::dp0(arg0.get_ext(), let0));
+            link(rt, op20 + 1, RawCell::dp0(arg0.get_ext(), let0));
             link(rt, op20 + 0, ask_arg(rt, arg0, 0));
             link(rt, op21 + 0, ask_arg(rt, arg0, 1));
-            link(rt, op21 + 1, Cell::dp1(arg0.get_ext(), let0));
-            link(rt, par0 + 0, Cell::op2(term_oper, op20));
-            link(rt, par0 + 1, Cell::op2(term_oper, op21));
-            let done = Cell::sup(arg0.get_ext(), par0);
+            link(rt, op21 + 1, RawCell::dp1(arg0.get_ext(), let0));
+            link(rt, par0 + 0, RawCell::op2(term_oper, op20));
+            link(rt, par0 + 1, RawCell::op2(term_oper, op21));
+            let done = RawCell::sup(arg0.get_ext(), par0);
             link(rt, host, done);
           // (+ a {b0 b1})
           // --------------- OP2-SUP-1
@@ -3725,13 +3735,13 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             let par0 = alloc(rt, 2);
             let term_oper: Oper = term.get_ext().try_into().expect("Invalid operation");
             link(rt, let0 + 2, arg0);
-            link(rt, op20 + 0, Cell::dp0(arg1.get_ext(), let0));
+            link(rt, op20 + 0, RawCell::dp0(arg1.get_ext(), let0));
             link(rt, op20 + 1, ask_arg(rt, arg1, 0));
             link(rt, op21 + 1, ask_arg(rt, arg1, 1));
-            link(rt, op21 + 0, Cell::dp1(arg1.get_ext(), let0));
-            link(rt, par0 + 0, Cell::op2(term_oper, op20));
-            link(rt, par0 + 1, Cell::op2(term_oper, op21));
-            let done = Cell::sup(arg1.get_ext(), par0);
+            link(rt, op21 + 0, RawCell::dp1(arg1.get_ext(), let0));
+            link(rt, par0 + 0, RawCell::op2(term_oper, op20));
+            link(rt, par0 + 1, RawCell::op2(term_oper, op21));
+            let done = RawCell::sup(arg1.get_ext(), par0);
             link(rt, host, done);
           }
         }
@@ -3761,17 +3771,17 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
                   if i != *idx {
                     let leti = alloc(rt, 3);
                     let argi = ask_arg(rt, term, i);
-                    link(rt, fun0 + i, Cell::dp0(argn.get_ext(), leti));
-                    link(rt, fun1 + i, Cell::dp1(argn.get_ext(), leti));
+                    link(rt, fun0 + i, RawCell::dp0(argn.get_ext(), leti));
+                    link(rt, fun1 + i, RawCell::dp1(argn.get_ext(), leti));
                     link(rt, leti + 2, argi);
                   } else {
                     link(rt, fun0 + i, ask_arg(rt, argn, 0));
                     link(rt, fun1 + i, ask_arg(rt, argn, 1));
                   }
                 }
-                link(rt, par0 + 0, Cell::fun(name, fun0));
-                link(rt, par0 + 1, Cell::fun(name, fun1));
-                let done = Cell::sup(argn.get_ext(), par0);
+                link(rt, par0 + 0, RawCell::fun(name, fun0));
+                link(rt, par0 + 1, RawCell::fun(name, fun1));
+                let done = RawCell::sup(argn.get_ext(), par0);
                 link(rt, host, done);
                 return Ok(true);
               }
@@ -4080,8 +4090,8 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
       let what = String::from("?h");
       //let kind = kinds.get(&key).unwrap_or(&0);
       let name = names.get(&pos).unwrap_or(&what);
-      let nam0 = if ask_lnk(rt, pos + 0) == Cell::era().into() { String::from("*") } else { format!("a{}", name) };
-      let nam1 = if ask_lnk(rt, pos + 1) == Cell::era().into() { String::from("*") } else { format!("b{}", name) };
+      let nam0 = if ask_lnk(rt, pos + 0) == RawCell::era() { String::from("*") } else { format!("a{}", name) };
+      let nam1 = if ask_lnk(rt, pos + 1) == RawCell::era() { String::from("*") } else { format!("b{}", name) };
       writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
