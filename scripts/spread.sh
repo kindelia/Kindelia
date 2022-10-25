@@ -6,5 +6,5 @@ peers="$(kindelia get peers)"
 for p in $peers; do
   p=$(echo -n "$p" | grep -P -o "(.+)(?=:)")
   echo "Publishing to $p..."
-  KINDELIA_API_URL="http://$p"  kindelia publish "$@"
+  KINDELIA_API_URL="http://$p"  kindelia publish "$@" || true
 done
