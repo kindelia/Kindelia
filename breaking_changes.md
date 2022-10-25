@@ -2,7 +2,7 @@
 
 ## Serialization
 
-- [ ] inversion of TX_COUNT bit order
+- [X] reversion of TX_COUNT bit order
 - [X] `fun` initial state is optional
 
 ## Chain state

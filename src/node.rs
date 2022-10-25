@@ -149,7 +149,7 @@ impl Body {
       }
       tx_count += 1;
     }
-    body_vec[0] = tx_count as u8;
+    body_vec[0] = (tx_count as u8).reverse_bits();
     Body { data: body_vec }
   }
 
@@ -186,7 +186,7 @@ impl Body {
       data.extend_from_slice(&transaction.data);
     }
     // Finally stores resulting transaction count on the first byte
-    data[0] = tx_count as u8;
+    data[0] = (tx_count as u8).reverse_bits();
     Ok(Body { data })
   }
 }
@@ -587,7 +587,7 @@ pub fn add_transaction_to_body_vec(
 pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
   let mut transactions = Vec::new();
   let mut index = 1;
-  let tx_count = body.data[0];
+  let tx_count = body.data[0].reverse_bits();
   for _ in 0..tx_count {
     if index >= body.data.len() {
       break;
@@ -877,6 +877,7 @@ impl<C: ProtoComm> Node<C> {
             self.target.insert(bhash, self.target[&phash]);
           }
           // Removes this block's transactions from mempool
+          // TODO: should actually only remove txs on tip update
           for tx in extract_transactions(&block.body) {
             self.pool.remove(&tx);
           }
