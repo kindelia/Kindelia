@@ -5,7 +5,7 @@ use bit_vec::BitVec;
 use std::collections::HashMap;
 
 use crate::common::Name;
-use crate::crypto;
+use crate::crypto::Signature;
 use crate::hvm::*;
 use crate::net;
 use crate::net::ProtoAddr;
@@ -25,21 +25,13 @@ fn num_bits(n: u128) -> usize {
 
 // A number with a known amount of bits
 
-pub fn serialize_fixlen(
-  size: usize,
-  value: u64,
-  bits: &mut BitVec,
-) {
+pub fn serialize_fixlen(size: usize, value: u64, bits: &mut BitVec) {
   for i in 0..size {
     bits.push((value >> i) & 1 == 1);
   }
 }
 
-pub fn serialize_fixlen_big(
-  size: usize,
-  value: &U256,
-  bits: &mut BitVec,
-) {
+pub fn serialize_fixlen_big(size: usize, value: &U256, bits: &mut BitVec) {
   for i in 0..size {
     bits.push((value >> i).low_u128() & 1 == 1);
   }
@@ -91,10 +83,7 @@ pub fn serialize_varlen(value: u128, bits: &mut BitVec) {
   bits.push(false);
 }
 
-pub fn deserialize_varlen(
-  bits: &BitVec,
-  index: &mut usize,
-) -> Option<u128> {
+pub fn deserialize_varlen(bits: &BitVec, index: &mut usize) -> Option<u128> {
   let mut val: u128 = 0;
   let mut add: u128 = 1;
   while bits.get(*index as usize)? {
@@ -114,10 +103,7 @@ pub fn serialize_number(value: u128, bits: &mut BitVec) {
   serialize_fixlen_big(size, &U256::from(value), bits);
 }
 
-pub fn deserialize_number(
-  bits: &BitVec,
-  index: &mut usize,
-) -> Option<U256> {
+pub fn deserialize_number(bits: &BitVec, index: &mut usize) -> Option<U256> {
   let size = deserialize_varlen(&bits, index)? as usize;
   let numb = deserialize_fixlen_big(size, &bits, index)?;
   Some(numb)
@@ -216,11 +202,7 @@ pub fn serialized_block_size(block: &Block) -> u128 {
 
 // Bytes
 
-pub fn serialize_bytes(
-  size: u128,
-  bytes: &[u8],
-  bits: &mut BitVec,
-) {
+pub fn serialize_bytes(size: u128, bytes: &[u8], bits: &mut BitVec) {
   if size as usize != bytes.len() {
     panic!("Incorrect serialize_bytes size.");
   }
@@ -259,37 +241,6 @@ where
   }
   fn proto_deserialized(bits: &BitVec) -> Option<Self> {
     Self::proto_deserialize(bits, &mut 0, &mut HashMap::new())
-  }
-}
-
-impl ProtoSerialize for Option<crypto::Signature> {
-  fn proto_serialize(&self, bits: &mut BitVec, _names: &mut Names) {
-    if let Some(sign) = self {
-      serialize_fixlen(1, 1, bits);
-      serialize_bytes(65, &sign.0, bits);
-    } else {
-      serialize_fixlen(1, 0, bits);
-    }
-  }
-
-  // The double Option layer keeps it consistent, since the returned value IS an Option
-  fn proto_deserialize(
-    bits: &BitVec,
-    index: &mut usize,
-    _names: &mut Names,
-  ) -> Option<Self> {
-    match deserialize_fixlen(1, bits, index)? {
-      1 => {
-        let data: Option<[u8; 65]> =
-          deserialize_bytes(65, bits, index)?.try_into().ok();
-        if let Some(data) = data {
-          Some(Some(crypto::Signature(data)))
-        } else {
-          None
-        }
-      }
-      _ => Some(None),
-    }
   }
 }
 
@@ -524,7 +475,7 @@ impl ProtoSerialize for Statement {
         let args = deserialize_list(bits, index, names)?;
         let func = Func::proto_deserialize(bits, index, names)?;
         let init = Term::proto_deserialize(bits, index, names)?;
-        let sign = Option::proto_deserialize(bits, index, names)?;
+        let sign = Option::<Signature>::proto_deserialize(bits, index, names)?;
         Some(Statement::Fun { name, args, func, init, sign })
       }
       1 => {
@@ -546,6 +497,37 @@ impl ProtoSerialize for Statement {
         Some(Statement::Reg { name, ownr, sign })
       }
       _ => None,
+    }
+  }
+}
+
+impl ProtoSerialize for Option<Signature> {
+  fn proto_serialize(&self, bits: &mut BitVec, _names: &mut Names) {
+    if let Some(sign) = self {
+      serialize_fixlen(1, 1, bits);
+      serialize_bytes(65, &sign.0, bits);
+    } else {
+      serialize_fixlen(1, 0, bits);
+    }
+  }
+
+  // The double Option layer keeps it consistent, since the returned value IS an Option
+  fn proto_deserialize(
+    bits: &BitVec,
+    index: &mut usize,
+    _names: &mut Names,
+  ) -> Option<Self> {
+    match deserialize_fixlen(1, bits, index)? {
+      1 => {
+        let data: Option<[u8; 65]> =
+          deserialize_bytes(65, bits, index)?.try_into().ok();
+        if let Some(data) = data {
+          Some(Some(Signature(data)))
+        } else {
+          None
+        }
+      }
+      _ => Some(None),
     }
   }
 }
@@ -607,10 +589,10 @@ impl ProtoSerialize for net::Address {
     match self {
       net::Address::IPv4 { val0, val1, val2, val3, port } => {
         bits.push(false);
-        serialize_fixlen(8,  *val0 as u64, bits);
-        serialize_fixlen(8,  *val1 as u64, bits);
-        serialize_fixlen(8,  *val2 as u64, bits);
-        serialize_fixlen(8,  *val3 as u64, bits);
+        serialize_fixlen(8, *val0 as u64, bits);
+        serialize_fixlen(8, *val1 as u64, bits);
+        serialize_fixlen(8, *val2 as u64, bits);
+        serialize_fixlen(8, *val3 as u64, bits);
         serialize_fixlen(16, *port as u64, bits);
       }
     }
