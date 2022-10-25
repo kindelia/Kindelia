@@ -2,7 +2,7 @@ ctr {Succ p}
 ctr {Zero}
 
 fun (Add n) {
-  (Add n) = {Succ n}
+  (Add n) = {Succ n} 
 } = #0
 
 fun (Sub n) {
