@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666705446611,
+  "lastUpdate": 1666724434083,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -97,6 +97,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "c1346b9e82e91e73c8023941d25f7744cc604e10": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "c1346b9e82e91e73c8023941d25f7744cc604e10",
+          "message": "reverse TX_COUNT bits",
+          "timestamp": "2022-10-25T15:45:11-03:00",
+          "tree_id": "71b79069a15133b9173f931b4f450cee63e806fd",
+          "url": "https://github.com/Kindelia/Kindelia/commit/c1346b9e82e91e73c8023941d25f7744cc604e10",
+          "original_ref": "dev",
+          "parent": "7c8b1c8fb4224d098eaac3ec0f3c3a80329ba4e7"
+        },
+        "date": 1666724433542,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2187940,
+            "range": "± 23504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 32898,
+            "range": "± 58",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 39798,
+            "range": "± 142",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 159164,
+            "range": "± 226",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -176,6 +226,6 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "7c8b1c8fb4224d098eaac3ec0f3c3a80329ba4e7"
+    "dev": "c1346b9e82e91e73c8023941d25f7744cc604e10"
   }
 }
