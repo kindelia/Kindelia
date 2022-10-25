@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666705444674,
+  "lastUpdate": 1666705446611,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -130,6 +130,44 @@ window.BENCHMARK_DATA = {
             "value": 2046,
             "unit": "Logs",
             "range": 1132.7850634608492
+          }
+        ]
+      },
+      "7c8b1c8fb4224d098eaac3ec0f3c3a80329ba4e7": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7c8b1c8fb4224d098eaac3ec0f3c3a80329ba4e7",
+          "message": "Merge pull request #197 from Kindelia/continuous-benchmark\n\nAdds github action for continuous benchmark",
+          "timestamp": "2022-10-25T10:29:06-03:00",
+          "tree_id": "72c44257586252a64fdc8ba58b5a1d6f032f334e",
+          "url": "https://github.com/Kindelia/Kindelia/commit/7c8b1c8fb4224d098eaac3ec0f3c3a80329ba4e7",
+          "original_ref": "dev",
+          "parent": "8f80194bf99bd8852d46c090683cb5fac98946a2"
+        },
+        "date": 1666705445901,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.17094017094017094,
+            "unit": "Percent",
+            "range": 0.08461106783428775
+          },
+          {
+            "name": "Failed Mining",
+            "value": 1835,
+            "unit": "Logs",
+            "range": 28.284271247461902
           }
         ]
       }
