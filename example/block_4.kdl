@@ -32,11 +32,11 @@ reg Foo.Bar {
 fun (Foo.Bar.cats) {
   (Foo.Bar.cats) = #42
 } sign {
-  0178f2cc0b6a326640029b64f9
-  7a414d388f24676090f1371857
-  81cc615dc49fff08396c429613
-  9420ff9d45c417bbf0224b5586
-  de4149b06405587de4615c780a
+  0086aaeabced7015e46b34187d
+  ab9519432c4f14ce7929a404f5
+  7a40f3602e01c510b8b09b9aa0
+  c053767259b41b0fddd91317b8
+  c09af270ab406ea78433dcfa92
 }
 
 // Runs Bob's cats function!

@@ -250,7 +250,7 @@ mod cli {
     (Test a b) = #1
   } with { #42 }";
 
-  fn fun_response_1() -> (api::FuncInfo, hvm::Term) {
+  fn fun_response_1() -> (api::FuncInfo, Option<hvm::Term>) {
     let code = FUN_CODE;
     let func = hvm::read_statement(code).unwrap().1;
     if let hvm::Statement::Fun { func, init, .. } = func {

@@ -121,6 +121,8 @@ ctr {Get}
 fun (Count action) {
   (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
   (Count {Get}) = ((Load) @x {DONE x})
+} with {
+  #0
 }
 
 // Registers the empty namespace.

@@ -432,6 +432,32 @@ impl ProtoSerialize for Func {
   }
 }
 
+impl<T: ProtoSerialize> ProtoSerialize for Option<T> {
+  fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
+    if let Some(value) = self {
+      serialize_fixlen(1, 1, bits);
+      value.proto_serialize(bits, names);
+    } else {
+      serialize_fixlen(1, 0, bits);
+    }
+  }
+
+  fn proto_deserialize(
+    bits: &BitVec,
+    index: &mut usize,
+    names: &mut Names,
+  ) -> Option<Self> {
+    let has = deserialize_fixlen(1, bits, index)?;
+    let result = if has == 0 {
+      None
+    } else {
+      let value = T::proto_deserialize(bits, index, names)?;
+      Some(value)
+    };
+    Some(result)
+  }
+}
+
 impl ProtoSerialize for Statement {
   fn proto_serialize(&self, bits: &mut BitVec, names: &mut Names) {
     match self {
@@ -474,7 +500,7 @@ impl ProtoSerialize for Statement {
         let name = Name::proto_deserialize(bits, index, names)?;
         let args = deserialize_list(bits, index, names)?;
         let func = Func::proto_deserialize(bits, index, names)?;
-        let init = Term::proto_deserialize(bits, index, names)?;
+        let init = Option::<Term>::proto_deserialize(bits, index, names)?;
         let sign = Option::<Signature>::proto_deserialize(bits, index, names)?;
         Some(Statement::Fun { name, args, func, init, sign })
       }

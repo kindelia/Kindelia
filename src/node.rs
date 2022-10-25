@@ -1654,7 +1654,6 @@ impl<C: ProtoComm> Node<C> {
 // ===========
 
 // TODO: I don't know why 'static is needed here or why it works
-#[allow(clippy::too_many_arguments)]
 pub fn start<C: ProtoComm + 'static>(
   config: NodeConfig,
   comm: C,

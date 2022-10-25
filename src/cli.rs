@@ -784,7 +784,7 @@ pub async fn get_info(
             name,
             args: vec![Name::NONE],
             func,
-            init: hvm::Term::var(Name::NONE),
+            init: Some(hvm::Term::var(Name::NONE)), // to show that we are actually not returning the initial state
             sign: None,
           };
           println!("{}", statement);

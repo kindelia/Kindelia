@@ -1,8 +1,9 @@
 # Breaking changes for next deploy
 
-## Networking
+## Serialization
 
 - [ ] inversion of TX_COUNT bit order
+- [X] `fun` initial state is optional
 
 ## Chain state
 

@@ -403,7 +403,7 @@ pub struct Store {
 /// A global statement that alters the state of the blockchain
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
-  Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
+  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
   Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
@@ -505,7 +505,6 @@ pub enum DefinitionError {
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
-  StateIsZero { state: U120 },
   InvalidCallArg {caller: U120, callee: U120, arg: Ptr},
   InvalidIOCtr { name: Name },
   InvalidIONonCtr { ptr: Ptr },
@@ -1745,8 +1744,8 @@ impl Runtime {
             //println!("- IO_TAKE subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
             if let Some(state) = self.read_disk(subject) {
-              if state != 0 {
-                self.write_disk(subject, 0);
+              if state != U128_NONE {
+                self.write_disk(subject, U128_NONE);
                 let cont = alloc_app(self, cont, state);
                 let done = self.run_io(subject, subject, cont, mana);
                 clear(self, host, 1);
@@ -1754,7 +1753,7 @@ impl Runtime {
                 return done;
               } else {
                 return Err(RuntimeError::EffectFailure(
-                  EffectFailure::StateIsZero { state: subject },
+                  EffectFailure::NoSuchState { state: subject },
                 ));
               }
             }
@@ -2003,11 +2002,13 @@ impl Runtime {
         let name = *name;
         self.set_arity(name, args.len() as u128);
         self.define_function(name, func, stmt_index, hash);
-        let state = self.create_term(init, 0, &mut init_map());
-        let state = handle_runtime_err(self, "fun", state)?;
-        let state = self.compute(state, self.get_mana_limit());
-        let state = handle_runtime_err(self, "fun", state)?;
-        self.write_disk(U120::from(name), state);
+        if let Some(state) = init {
+          let state = self.create_term(state, 0, &mut init_map());
+          let state = handle_runtime_err(self, "fun", state)?;
+          let state = self.compute(state, self.get_mana_limit());
+          let state = handle_runtime_err(self, "fun", state)?;
+          self.write_disk(U120::from(name), state);
+        }
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Fun { name, args }
       }
@@ -4118,7 +4119,6 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
-        EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'.", show_addr(addr)),
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
           let pos = get_val(arg);
           format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg))
@@ -4820,9 +4820,9 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         let (code, unit) = read_char(code, '{')?;
         let (code, init) = read_term(code)?;
         let (code, unit) = read_char(code, '}')?;
-        (code, init)
+        (code, Some(init))
       } else {
-        (code, Term::num(U120::ZERO))
+        (code, None)
       };
       let (code, sign) = read_sign(code)?;
       let func = Func { rules: ruls };
@@ -5045,8 +5045,12 @@ pub fn view_statement(statement: &Statement) -> String {
       let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
       let func = func.collect::<Vec<String>>().join("");
       let args = args.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(" ");
-      let init = view_term(init);
-      let init = format!(" with {{\n  {}\n}}", init);
+      let init = if let Some(init) = init {
+        let init = view_term(init);
+        format!(" with {{\n  {}\n}}", init)
+      } else {
+        "\n".to_string()
+      };
       let sign = view_sign(sign);
       return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
     }

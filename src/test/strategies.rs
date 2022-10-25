@@ -117,7 +117,7 @@ pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
     (small_name(), vec(name(), 0..10), func(), term(), option::of(sign()))
       .prop_map(|(name, args, func, init, sign)| {
-        Statement::Fun { name, args, func, init, sign }
+        Statement::Fun { name, args, func, init: Some(init), sign }
       }),
     (small_name(), vec(name(), 0..10), option::of(sign()))
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
