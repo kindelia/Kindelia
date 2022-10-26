@@ -606,7 +606,7 @@ impl ProtoSerialize for Block {
     let size = deserialize_fixlen(16, bits, index)?;
     let data = deserialize_bytes(size, bits, index)?;
     let body = Body { data };
-    return Some(new_block(prev, time, meta, body));
+    return Some(Block::new(prev, time, meta, body));
   }
 }
 

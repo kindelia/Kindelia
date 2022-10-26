@@ -49,7 +49,6 @@ criterion_group!(khvm, khvm_benches);
 fn max_message() -> node::Message<net::Address> {
   let max_block = node::Block {
     body: node::Body { data: vec![u8::MAX; node::MAX_BODY_SIZE] },
-    hash: U256::MAX,
     prev: U256::MAX,
     time: u128::MAX,
     meta: u128::MAX,
@@ -109,7 +108,6 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
 
     let block = node::Block {
       body,
-      hash: U256::MAX,
       prev: U256::MAX,
       time: u128::MAX,
       meta: u128::MAX,

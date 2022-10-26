@@ -11,8 +11,8 @@ use warp::{Filter, Rejection, Reply};
 
 use crate::api::Hash;
 use crate::config::{UiConfig, WsConfig};
-use crate::net::{ProtoAddr};
-use crate::node::{Block, Peer};
+use crate::net::ProtoAddr;
+use crate::node::{HashedBlock, Peer};
 
 fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
   match x {
@@ -398,32 +398,33 @@ impl<A: ProtoAddr> std::fmt::Display for NodeEvent<A> {
 // Constructors
 
 impl NodeEventType {
-  // ADD BLOCK
-  pub fn not_enough_work(block: &Block) -> Self {
+  pub fn not_enough_work(block: &HashedBlock) -> Self {
+    let hash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
       block: BlockInfo {
-        hash: block.hash.into(),
+        hash: hash.into(),
         parent: block.prev.into(),
         height: None,
       },
       event: Box::new(AddBlockEvent::NotEnoughWork),
     }
   }
-  pub fn included(block: &Block, height: Option<u128>, siblings: &[U256]) -> Self {
+  pub fn included(
+    block: &HashedBlock,
+    height: Option<u128>,
+    siblings: &[U256],
+  ) -> Self {
+    let hash = U256::from(block.get_hash());
     let siblings = siblings.iter().map(|h| (*h).into()).collect();
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: block.hash.into(),
-        parent: block.prev.into(),
-        height,
-      },
+      block: BlockInfo { hash: hash.into(), parent: block.prev.into(), height },
       event: Box::new(AddBlockEvent::Included { siblings }),
     }
   }
   pub fn reorg(
-    old: (&Block, u128),
-    new: (&Block, u128),
-    common: (&Block, u128),
+    old: (&HashedBlock, u128),
+    new: (&HashedBlock, u128),
+    common: (&HashedBlock, u128),
     runtime_tick: u128,
   ) -> Self {
     let (old_block, old_height) = old;
@@ -439,20 +440,24 @@ impl NodeEventType {
       }
     };
 
+    let new_hash = U256::from(new_block.get_hash());
+    let old_hash = U256::from(old_block.get_hash());
+    let common_hash = U256::from(common_block.get_hash());
+
     NodeEventType::AddBlock {
       block: BlockInfo {
-        hash: new_block.hash.into(),
+        hash: new_hash.into(),
         parent: new_block.prev.into(),
         height: Some(new_height),
       },
       event: Box::new(AddBlockEvent::Reorg {
         old_tip: BlockInfo {
-          hash: old_block.hash.into(),
+          hash: old_hash.into(),
           parent: old_block.prev.into(),
           height: Some(old_height),
         },
         common_block: BlockInfo {
-          hash: common_block.hash.into(),
+          hash: common_hash.into(),
           parent: common_block.prev.into(),
           height: Some(common_height),
         },
@@ -460,33 +465,30 @@ impl NodeEventType {
       }),
     }
   }
-  pub fn already_included(block: &Block, height: u128) -> Self {
+  pub fn already_included(block: &HashedBlock, height: u128) -> Self {
+    let bhash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
       block: BlockInfo {
-        hash: block.hash.into(),
+        hash: bhash.into(),
         parent: block.prev.into(),
         height: Some(height),
       },
       event: Box::new(AddBlockEvent::AlreadyIncluded),
     }
   }
-  pub fn missing_parent(
-    block: &Block,
-  ) -> Self {
+  pub fn missing_parent(block: &HashedBlock) -> Self {
+    let bhash = U256::from(block.get_hash());
     let parent: Hash = block.prev.into();
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: block.hash.into(),
-        parent,
-        height: None,
-      },
+      block: BlockInfo { hash: bhash.into(), parent, height: None },
       event: Box::new(AddBlockEvent::MissingParent { parent }),
     }
   }
-  pub fn too_late(block: &Block) -> Self {
+  pub fn too_late(block: &HashedBlock) -> Self {
+    let bhash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
       block: BlockInfo {
-        hash: block.hash.into(),
+        hash: bhash.into(),
         parent: block.prev.into(),
         height: None,
       },
@@ -566,13 +568,13 @@ impl NodeEventType {
   pub fn notice_blocks<A: ProtoAddr>(
     magic: u64,
     gossip: bool,
-    blocks: &[Block],
+    blocks: &[HashedBlock],
     peers: &[Peer<A>],
   ) -> Self {
     let event = HandleMessageEvent::NoticeTheseBlocks {
       magic,
       gossip,
-      blocks: blocks.iter().map(|b| b.hash.into()).collect(),
+      blocks: blocks.iter().map(|b| U256::from(b.get_hash()).into()).collect(),
       peers: peers.iter().map(|p| format!("{}", p.address)).collect(),
     };
     NodeEventType::HandleMessage { event }

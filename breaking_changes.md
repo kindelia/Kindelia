@@ -7,7 +7,7 @@
 
 ## Chain state
 
-- [ ] genesis code on genesis block
-- [ ] prev of genesis block is zero (0x00)
-- [ ] genesis block with computed hash, instead of arbitrary number (as it now
+- [X] genesis code on genesis block
+- [X] prev of genesis block is zero (0x00)
+- [X] genesis block with computed hash, instead of arbitrary number (as it now
       has contents)

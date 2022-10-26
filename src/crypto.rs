@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::ops::Deref;
 
+use primitive_types::U256;
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 use secp256k1::rand::rngs::OsRng;
 use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
@@ -16,20 +17,42 @@ use crate::common::Name;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hash(pub [u8; 32]);
 
+impl Deref for Hash {
+  type Target = [u8; 32];
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl From<&Hash> for U256 {
+  fn from(value: &Hash) -> Self {
+    U256::from_little_endian(&value.0)
+  }
+}
+
 // Keccak256
 // ---------
 
-pub fn keccak256(data: &[u8]) -> Hash {
-  let mut hasher = tiny_keccak::Keccak::v256();
-  let mut output = [0u8; 32];
-  hasher.update(data);
-  hasher.finalize(&mut output);
-  Hash(output)
+impl Hash {
+  pub fn keccak256_from_bytes(data: &[u8]) -> Hash {
+    let mut hasher = tiny_keccak::Keccak::v256();
+    let mut output = [0u8; 32];
+    hasher.update(data);
+    hasher.finalize(&mut output);
+    Hash(output)
+  }
 }
 
 /// Can be hashed with Keccak256.
-trait Keccakable {
+pub trait Keccakable {
   fn keccak256(&self) -> Hash;
+
+  fn hashed(self) -> Hashed<Self>
+  where
+    Self: Sized,
+  {
+    Hashed::from(self)
+  }
 }
 
 // Hashed
@@ -37,13 +60,16 @@ trait Keccakable {
 
 /// Wrapper that caches the Hash of some value
 #[derive(Debug, Clone)]
-struct Hashed<T> {
+pub struct Hashed<T> {
   data: T,
   hash: Hash,
 }
 
 impl<T> Hashed<T> {
-  fn get_hash(&self) -> &Hash {
+  pub fn take(self) -> T {
+    self.data
+  }
+  pub fn get_hash(&self) -> &Hash {
     &self.hash
   }
 }
@@ -111,7 +137,8 @@ impl Account {
   }
 
   pub fn hash_public_key(pubk: &PublicKey) -> Hash {
-    keccak256(&pubk.serialize_uncompressed()[1..65])
+    let pubk_bytes = &pubk.serialize_uncompressed()[1..65];
+    Hash::keccak256_from_bytes(pubk_bytes)
   }
 
   pub fn from_private_key(key: &[u8; 32]) -> Self {
@@ -232,7 +259,7 @@ pub fn main() {
   println!("addr: {}", hex::encode(account.address.0));
 
   // A message to sign
-  let hash = keccak256(b"Hello!");
+  let hash = Hash::keccak256_from_bytes(b"Hello!");
 
   // The signature
   let sign = account.sign(&hash);

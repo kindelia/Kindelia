@@ -5100,11 +5100,11 @@ impl fmt::Display for Statement {
 // -------
 
 pub fn hash_term(term: &Term) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&term.proto_serialized()))
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
 }
 
 pub fn hash_statement(statement: &Statement) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
 }
 
 // Tests

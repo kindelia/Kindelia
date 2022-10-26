@@ -18,11 +18,11 @@ use crate::bits::{serialized_block_size, ProtoSerialize};
 use crate::common::Name;
 use crate::config::{MineConfig, NodeConfig};
 use crate::constants;
+use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
 
-#[cfg(feature = "events")]
 use crate::events::{self, NodeEventType};
 use crate::heartbeat;
 
@@ -194,6 +194,8 @@ impl Body {
 // The Block itself
 // ----------------
 
+pub type HashedBlock = Hashed<Block>;
+
 #[derive(Debug, Clone)]
 pub struct Block {
   /// 32 bytes hash of previous block.
@@ -204,9 +206,23 @@ pub struct Block {
   pub meta: u128,
   /// Block contents. 1280 bytes max.
   pub body: Body,
-  /// Cached block hash.
-  /// TODO: refactor out
-  pub hash: U256,
+}
+
+impl Block {
+  pub fn new(prev: U256, time: u128, meta: u128, body: Body) -> Block {
+    Block { prev, time, meta, body }
+  }
+}
+
+impl crypto::Keccakable for Block {
+  fn keccak256(&self) -> crypto::Hash {
+    let mut bytes: Vec<u8> = Vec::new();
+    bytes.extend_from_slice(&u256_to_bytes(self.prev));
+    bytes.extend_from_slice(&u128_to_bytes(self.time));
+    bytes.extend_from_slice(&u128_to_bytes(self.meta));
+    bytes.extend_from_slice(&self.body.data);
+    crypto::Hash::keccak256_from_bytes(&bytes)
+  }
 }
 
 // Node
@@ -240,8 +256,8 @@ pub struct Node<C: ProtoComm> {
   pub pool       : PriorityQueue<Transaction, u64>,   // transactions to be mined
   pub peers      : PeersStore<C::Address>,            // peers store and state control
   pub tip        : U256,                              // current tip
-  pub block      : U256Map<Block>,                 // block hash -> block
-  pub pending    : U256Map<Block>,                 // block hash -> downloaded block, waiting for ancestors
+  pub block      : U256Map<HashedBlock>,           // block hash -> block
+  pub pending    : U256Map<HashedBlock>,           // block hash -> downloaded block, waiting for ancestors
   pub ancestor   : U256Map<U256>,                  // block hash -> hash of its most recent missing ancestor (shortcut jump table)
   pub wait_list  : U256Map<Vec<U256>>,             // block hash -> hashes of blocks that are waiting for this one
   pub children   : U256Map<Vec<U256>>,             // block hash -> hashes of this block's children
@@ -378,7 +394,7 @@ impl<A: ProtoAddr> PeersStore<A> {
 #[derive(Debug, Clone)]
 pub enum MinerMessage {
   Request { prev: U256, body: Body, targ: U256 },
-  Answer { block: Block },
+  Answer { block: HashedBlock },
   Stop,
 }
 
@@ -552,21 +568,6 @@ pub fn hash_bytes(bytes: &[u8]) -> U256 {
   return U256::from_little_endian(&hash);
 }
 
-// Creates a new block.
-pub fn new_block(prev: U256, time: u128, meta: u128, body: Body) -> Block {
-  let hash = if time == 0 {
-    hash_bytes(&[])
-  } else {
-    let mut bytes: Vec<u8> = Vec::new();
-    bytes.extend_from_slice(&u256_to_bytes(prev));
-    bytes.extend_from_slice(&u128_to_bytes(time));
-    bytes.extend_from_slice(&u128_to_bytes(meta));
-    bytes.extend_from_slice(&body.data);
-    hash_bytes(&bytes)
-  };
-  return Block { prev, time, meta, body, hash };
-}
-
 /// Puts transaction inside `body_vec` if space is suficient
 pub fn add_transaction_to_body_vec(
   body_vec: &mut Vec<u8>,
@@ -620,7 +621,7 @@ pub fn zero_hash() -> U256 {
 pub fn build_genesis_block(stmts: &[Statement]) -> Block {
   let body = Body::from_transactions_iter(stmts)
     .expect("Genesis statements should fit in a block body");
-  new_block(zero_hash(), 0, 0, body)
+  Block::new(u256(0), 0, 0, body)
 }
 
 // Mining
@@ -632,19 +633,23 @@ pub fn try_mine(
   body: Body,
   targ: U256,
   max_attempts: u128,
-) -> Option<Block> {
+) -> Option<HashedBlock> {
   let rand = rand::random::<u128>();
   let time = get_time();
-  let mut block = new_block(prev, time, rand, body);
+  let mut block = Block::new(prev, time, rand, body);
   for _i in 0..max_attempts {
-    if block.hash >= targ {
-      return Some(block);
-    } else {
+    block = {
+      let hashed = block.hashed();
+      let hash_n = U256::from(hashed.get_hash());
+      if hash_n >= targ {
+        return Some(hashed);
+      }
+      let mut block = hashed.take();
       block.meta = block.meta.wrapping_add(1);
-      // FIXME: not updating block hash.
+      block
     }
   }
-  return None;
+  None
 }
 
 impl MinerCommunication {
@@ -677,7 +682,7 @@ pub fn miner_loop(
       if let Some(block) = mined {
         emit_event!(
           event_emitter,
-          NodeEventType::mined(block.hash, targ),
+          NodeEventType::mined(block.get_hash().into(), targ),
           tags = mining,
           mined
         );
@@ -720,14 +725,14 @@ impl<C: ProtoComm> Node<C> {
     let genesis_stmts =
       hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
     let genesis_block = build_genesis_block(&genesis_stmts);
+    let genesis_block = genesis_block.hashed();
+    let genesis_hash = genesis_block.get_hash().into();
 
     let runtime = init_runtime(data_path.join("heaps"), &genesis_stmts);
 
-    let zero_hash = zero_hash();
-    // TODO: genesis prev = 0 ; computed genesis hash
-    // let genesis_hash = genesis_block.hash;
-    // println!("genesis hash: {:#34x}", genesis_hash);
-    // println!("   zero hash: {:#34x}", genesis_hash);
+    // eprintln!("genesis hash: {:#34x}", genesis_hash);
+    // eprintln!("   zero hash: {:#34x}", hash_u256(u256(0)));
+    // eprintln!("  empty hash: {:#34x}", hash_bytes(&[]));
 
     #[rustfmt::skip]
     let mut node = Node {
@@ -739,16 +744,16 @@ impl<C: ProtoComm> Node<C> {
       pool     : PriorityQueue:: new(),
       peers    : PeersStore:: new(),
 
-      tip      : zero_hash,
-      block    : u256map_from([(zero_hash, genesis_block)]),
+      tip      : genesis_hash,
+      block    : u256map_from([(genesis_hash, genesis_block)]),
       pending  : u256map_new(),
       ancestor : u256map_new(),
       wait_list: u256map_new(),
-      children : u256map_from([(zero_hash, vec![]          )]),
-      work     : u256map_from([(zero_hash, u256(0)         )]),
-      height   : u256map_from([(zero_hash, 0               )]),
-      target   : u256map_from([(zero_hash, initial_target())]),
-      results  : u256map_from([(zero_hash, vec![]          )]),
+      children : u256map_from([(genesis_hash, vec![]          )]),
+      work     : u256map_from([(genesis_hash, u256(0)         )]),
+      height   : u256map_from([(genesis_hash, 0               )]),
+      target   : u256map_from([(genesis_hash, initial_target())]),
+      results  : u256map_from([(genesis_hash, vec![]          )]),
 
       #[cfg(feature = "events")]
       event_emitter: event_emitter.clone(),
@@ -801,7 +806,7 @@ impl<C: ProtoComm> Node<C> {
   //     - In case of a reorg, rollback to the block before it
   //     - Run that block's code, updating the HVM state
   //     - Updates the longest chain saved on disk
-  pub fn add_block(&mut self, block: &Block) {
+  pub fn add_block(&mut self, block: &HashedBlock) {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
 
@@ -820,10 +825,10 @@ impl<C: ProtoComm> Node<C> {
         );
         continue;
       }
-      let bhash = block.hash;
+      let bhash = block.get_hash().into();
       // If we already registered this block, ignore it
       if let Some(block) = self.block.get(&bhash) {
-        let height = self.height[&block.hash];
+        let height = self.height[&bhash];
         emit_event!(
           self.event_emitter,
           NodeEventType::already_included(block, height),
@@ -920,13 +925,14 @@ impl<C: ProtoComm> Node<C> {
                 new_bhash = self.block[&new_bhash].prev;
               }
               // 3. Saves overwritten blocks to disk
-              for bhash in must_compute.iter().rev() {
+              // TODO: on separate thread
+              for bhash_comp in must_compute.iter().rev() {
                 let file_path = self.get_blocks_path().join(format!(
                   "{:0>16x}.kindelia_block.bin",
-                  self.height[bhash]
+                  self.height[bhash_comp]
                 ));
                 let file_buff =
-                  bitvec_to_bytes(&self.block[bhash].proto_serialized());
+                  bitvec_to_bytes(&self.block[bhash_comp].proto_serialized());
                 std::fs::write(file_path, file_buff)
                   .expect("Couldn't save block to disk.");
               }
@@ -955,8 +961,9 @@ impl<C: ProtoComm> Node<C> {
               }
               // 6. Computes every block after that on the new timeline
               //    On the example above, we'd compute `C, D, P, Q, R, S, T`
-              for block in must_compute.iter().rev() {
-                self.compute_block(&self.block[block].clone());
+              for bhash_comp in must_compute.iter().rev() {
+                let block_comp = &self.block[bhash_comp];
+                self.compute_block(&block_comp.clone()); // TODO: avoid clone
               }
             }
           }
@@ -969,7 +976,7 @@ impl<C: ProtoComm> Node<C> {
           );
         }
 
-        let height = self.height.get(&block.hash).copied();
+        let height = self.height.get(&bhash).copied();
         let siblings: Vec<_> =
           self.children[&block.prev].iter().copied().collect();
         emit_event!(
@@ -1006,7 +1013,7 @@ impl<C: ProtoComm> Node<C> {
     }
   }
 
-  pub fn compute_block(&mut self, block: &Block) {
+  pub fn compute_block(&mut self, block: &HashedBlock) {
     let transactions = extract_transactions(&block.body);
     let mut statements = Vec::new();
     for transaction in transactions {
@@ -1014,13 +1021,14 @@ impl<C: ProtoComm> Node<C> {
         statements.push(statement);
       }
     }
+    let bhash = U256::from(block.get_hash());
     self.runtime.set_time(block.time >> 8);
     self.runtime.set_meta(block.meta >> 8);
-    self.runtime.set_hax0((block.hash >> 000).low_u128() >> 8);
-    self.runtime.set_hax1((block.hash >> 120).low_u128() >> 8);
+    self.runtime.set_hax0((bhash >> 000).low_u128() >> 8);
+    self.runtime.set_hax1((bhash >> 120).low_u128() >> 8);
     self.runtime.open();
     let result = self.runtime.run_statements(&statements, false, false);
-    self.results.insert(block.hash, result);
+    self.results.insert(bhash, result);
     self.runtime.commit();
   }
 
@@ -1083,8 +1091,12 @@ impl<C: ProtoComm> Node<C> {
     let height = self.height.get(hash).expect("Missing block height.");
     let height: u64 = (*height).try_into().expect("Block height is too big.");
     let results = self.results.get(hash).map(|r| r.clone());
-    let info =
-      BlockInfo { block: block.into(), hash: (*hash).into(), height, results };
+    let info = BlockInfo {
+      block: (&**block).into(),
+      hash: (*hash).into(),
+      height,
+      results,
+    };
     Some(info)
   }
 
@@ -1338,6 +1350,7 @@ impl<C: ProtoComm> Node<C> {
               break;
             }
             if *bhash == zero_hash() {
+              // FIXME: genesis block hash
               break;
             }
             let block = &self.block[bhash];
@@ -1345,7 +1358,7 @@ impl<C: ProtoComm> Node<C> {
             if tsize + bsize > MAX_UDP_SIZE_SLOW {
               break;
             }
-            chunk.push(block.clone());
+            chunk.push((**block).clone());
             tsize += bsize;
             bhash = &block.prev;
           }
@@ -1353,9 +1366,11 @@ impl<C: ProtoComm> Node<C> {
         }
         // Someone sent us some blocks
         Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
+          let blocks: Vec<_> =
+            blocks.iter().cloned().map(|block| block.hashed()).collect();
           emit_event!(
             self.event_emitter,
-            NodeEventType::notice_blocks(*magic, *gossip, blocks, peers),
+            NodeEventType::notice_blocks(*magic, *gossip, &blocks, peers),
             tags = handle_message,
             notice_blocks
           );
@@ -1372,13 +1387,14 @@ impl<C: ProtoComm> Node<C> {
           }
 
           // Adds the block to the database
-          for block in blocks {
-            self.add_block(block);
+          for block in &blocks {
+            self.add_block(&block);
           }
 
           // Requests missing ancestors
           if *gossip && blocks.len() > 0 {
-            self.request_missing_ancestor(addr, &blocks[0].hash);
+            let bhash = U256::from(&blocks[0].keccak256());
+            self.request_missing_ancestor(addr, &bhash);
           }
         }
         // Someone sent us a transaction to mine
@@ -1415,7 +1431,7 @@ impl<C: ProtoComm> Node<C> {
   fn broadcast_tip_block(&mut self) {
     let addrs: Vec<C::Address> =
       self.peers.get_all_active().iter().map(|x| x.address).collect();
-    let blocks = vec![self.block[&self.tip].clone()];
+    let blocks = vec![(*self.block[&self.tip]).clone()];
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
@@ -1426,7 +1442,7 @@ impl<C: ProtoComm> Node<C> {
       .iter()
       .map(|x| x.address)
       .collect();
-    let blocks = vec![self.block[&self.tip].clone()];
+    let blocks = vec![(*self.block[&self.tip]).clone()];
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
@@ -1449,7 +1465,7 @@ impl<C: ProtoComm> Node<C> {
       let buffer = std::fs::read(&file_path).unwrap();
       let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer));
       if let Some(block) = block {
-        self.add_block(&block);
+        self.add_block(&block.hashed());
       } else {
         eprintln!(
           "WARN: Could not load block from file '{}'",

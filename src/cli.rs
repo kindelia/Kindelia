@@ -1,19 +1,3 @@
-// TODO: `subject` command
-
-// TODO: list names inside of .kdl file
-// TODO: kindelia get name
-
-// TODO: command to get number of txs on mempool
-
-// TODO: way to check if transaction fits in a block
-// TODO: publish to multiple nodes
-
-// TODO: flag enable logging statements results (disabled by default)
-// TODO: limit readback computational resources on aforementioned log and API calls
-
-// TODO: flag to enable printing events (heartbeat) ?
-// TODO: some way to pretty-print events (heartbeat) ?
-
 use std::fmt;
 use std::io::Read;
 use std::net::UdpSocket;
@@ -24,16 +8,6 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use warp::Future;
-
-// use crate::api::{client as api_client, Hash, HexStatement};
-// use crate::bits::ProtoSerialize;
-// use crate::common::Name;
-// use crate::{crypto};
-// use crate::config;
-// use crate::hvm::{self, view_statement, Statement};
-// use crate::net;
-// use crate::node;
-// use crate::util::bytes_to_bitvec;
 
 use kindelia::api::{client as api_client, Hash, HexStatement};
 use kindelia::bits::ProtoSerialize;

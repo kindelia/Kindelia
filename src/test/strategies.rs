@@ -258,7 +258,7 @@ pub fn body() -> impl Strategy<Value = Body> {
 
 pub fn block() -> impl Strategy<Value = Block> {
   (any::<u128>(), any::<u128>(), u256(), body())
-    .prop_map(|(t, m, p, b)| crate::node::new_block(p, m, t, b))
+    .prop_map(|(t, m, p, b)| crate::node::Block::new(p, m, t, b))
 }
 
 pub fn address() -> impl Strategy<Value = Address> {
