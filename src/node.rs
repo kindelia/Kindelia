@@ -675,10 +675,16 @@ pub fn miner_loop(
   slow_mining: Option<u64>,
   #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEventType>,
 ) {
-  let mut before = std::time::Instant::now();
   loop {
     if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
+      let before = std::time::Instant::now();
       let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
+      // Slow down mining, for debugging pourposes, if enabled
+      if let Some(slow_ratio) = slow_mining {
+        let elapsed = before.elapsed();
+        let sleep_time = elapsed.saturating_mul(slow_ratio as u32);
+        std::thread::sleep(sleep_time);
+      }
       if let Some(block) = mined {
         emit_event!(
           event_emitter,
@@ -687,13 +693,6 @@ pub fn miner_loop(
           mined
         );
         miner_comm.write(MinerMessage::Answer { block });
-        // Slow down mining, for debugging mode
-        if let Some(slow_ratio) = slow_mining {
-          let elapsed = before.elapsed();
-          let sleep_time = elapsed.saturating_mul(slow_ratio as u32);
-          std::thread::sleep(sleep_time);
-          before = std::time::Instant::now();
-        }
       } else {
         emit_event!(
           event_emitter,
