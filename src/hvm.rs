@@ -952,7 +952,7 @@ impl RawCell {
       },
       CellTag::ARG => {
         let loc = self.get_val();
-        Cell::Var { loc: Loc(loc) }
+        Cell::Arg { loc: Loc(loc) }
       },
       CellTag::ERA => {
         Cell::Era
@@ -2828,12 +2828,9 @@ pub fn ask_arg(rt: &Runtime, term: RawCell, arg: u64) -> RawCell {
 pub fn link(rt: &mut Runtime, loc: Loc, lnk: RawCell) -> RawCell {
   rt.write(loc, lnk);
   match lnk.to_cell() {
-    Cell::Dp0 { label, loc: pos} => {
+    Cell::Dp0 { label:_, loc: pos} | Cell::Var { loc: pos } => {
       rt.write(pos, RawCell::arg(loc))
     },
-    Cell::Var { loc: pos } => {
-      rt.write(pos, RawCell::arg(loc));
-    }
     Cell::Dp1 { label, loc: pos } => {
       rt.write(pos + 1, RawCell::arg(loc));
     }
@@ -2914,9 +2911,10 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
       Cell::Lam { loc } => {
         let arg0 = ask_arg(rt, term, 0);
         // arg0 should only be ARG or ERA.
-        if arg0.get_tag() != CellTag::ERA {
-          debug_assert_eq!(arg0.get_tag(), CellTag::ARG, "Argument to lambda is not arg nor erased.");
-          link(rt, arg0.get_loc(0), RawCell::era());
+        match arg0.to_cell() {
+          Cell::Arg {loc: arg_loc} => { link(rt, arg_loc, RawCell::era()); }
+          Cell::Era => {}
+          _ => panic!("Memory corruption: lambda argument is not erased nor arg cell: {}.", show_ptr(arg0))
         }
         next = ask_arg(rt, term, 1);
         clear(rt, loc, 2);
@@ -4242,7 +4240,7 @@ fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist.", stmt_index),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}.", name, expected, got),
     RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
-    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", view_term(&term), var),
+    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear in '{}'.", var, view_term(&term)),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
