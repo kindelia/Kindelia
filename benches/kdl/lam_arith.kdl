@@ -1,0 +1,5 @@
+run {
+  let a = (U120ToBit #120 (<< #4 #5));
+  let b = (U120ToBit #120 (<< #3 #5));
+  (Done (BitToU120 (MulBits a b)))
+}

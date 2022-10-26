@@ -1,0 +1,67 @@
+fun (End) {
+  (End) = @e @~ @~ e
+}
+
+fun (B0 p) {
+  (B0 p) = @~ @o @~ (o p)
+}
+
+fun (B1 p) {
+  (B1 p) = @~ @~ @i (i p)
+}
+
+fun (IncBits xs) {
+  (IncBits xs) = @ex @ox @ix
+    let e = ex;
+    let o = ix;
+    let i = @p (ox (IncBits p));
+    (((xs e) o) i)
+}
+
+fun (AppBits xs f x) {
+  (AppBits xs f x) =
+    let e = @~ @x x;
+    let o = @p @f @x
+      dup f1 f2 = f;
+      (AppBits p @k(f1 (f2 k)) x);
+    let i = @p @f @x
+      dup f f1 = f;
+      dup f2 f3 = f;
+      (AppBits p @k(f1 (f2 k)) (f3 x));
+    (((((xs e) o) i) f) x)
+}
+
+fun (AddBits xs ys) {
+  (AddBits xs ys) = (AppBits xs @x (IncBits x) ys)
+}
+
+fun (MulBits xs ys) {
+  (MulBits xs ys) =
+    dup ys1 ys  = ys;
+    let e = (End);
+    let o = @p (B0 (MulBits p ys1));
+    let i = @p
+      dup ys2 ys3 = ys;
+      (AddBits ys2 (B0 (MulBits p ys3)));
+    (((xs e) o) i)
+}
+
+fun (BitToU120 ys) {
+  (BitToU120 ys) =
+    let e = #0;
+    let o = @p (+ #0 (* #2 (BitToU120 p)));
+    let i = @p (+ #1 (* #2 (BitToU120 p)));
+    (((ys e) o) i)
+}
+
+fun (U120ToBit s i) {
+  (U120ToBit #0 ~) = (End)
+  (U120ToBit  s i) =
+    dup i1 i2 = i;
+    (U120ToBit1 (- s #1) (% i1 #2) (/ i2 #2))
+}
+
+fun (U120ToBit1 s p i) {
+  (U120ToBit1 s #0 i) = (B0 (U120ToBit s i))
+  (U120ToBit1 s #1 i) = (B1 (U120ToBit s i))
+}

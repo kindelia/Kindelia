@@ -39,6 +39,16 @@ fn khvm_benches(c: &mut Criterion) {
       runtime.run_statements_from_code(code, true, true);
     })
   });
+  c.bench_function("lambda_arithmetic", |b| {
+    let pre_code = include_str!("kdl/lam_arith.pre.kdl");
+    let code = include_str!("kdl/lam_arith.kdl");
+    let dir_path = temp_dir();
+    let mut runtime = init_runtime(dir_path);
+    runtime.run_statements_from_code(pre_code, true, true);
+    b.iter(|| {
+      runtime.run_statements_from_code(code, true, true);
+    })
+  });
 }
 
 criterion_group!(khvm, khvm_benches);

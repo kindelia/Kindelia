@@ -516,6 +516,26 @@ fn shadowing(temp_dir: TempPath) {
 }
 
 #[rstest]
+fn lam_arithmetic(temp_dir: TempPath) {
+  let code = include_str!("../../benches/kdl/lam_arith.pre.kdl");
+  let mut rt = init_runtime(&temp_dir.path);
+  let results = rt.run_statements_from_code(code, false, true);
+  let run = "run {
+  let a = (U120ToBit #120 (<< #4 #58));
+  let b = (U120ToBit #120 (<< #3 #58));
+  (Done (BitToU120 (MulBits a b)))
+}";
+  let results = rt.run_statements_from_code(run, false, true);
+  let result_term = results.last().unwrap().clone().unwrap();
+  if let StatementInfo::Run { done_term, ..} = result_term {
+    assert_eq!(format!("#{}", (4_u128 << 58) * (3_u128 << 58)), view_term(&done_term));
+  }
+  else {
+    panic!("Wrong result");
+  }
+}
+
+#[rstest]
 #[case("@~ dup a ~ = #2; a", "@x0 #2")]
 #[case("@~ {Cons #4 {Nil}}", "@x0 {Cons #4 {Nil}}")]
 #[case("dup a ~ = (! @x @y {Pair (+ x #1) y} #2); (!a #10)", "{Pair #3 #10}")]
