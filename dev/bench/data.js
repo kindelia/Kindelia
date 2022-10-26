@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666726389930,
+  "lastUpdate": 1666786789424,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -197,6 +197,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "c1756cdaaf587bc4b08c477adf9518c3d45267d5": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "c1756cdaaf587bc4b08c477adf9518c3d45267d5",
+          "message": "slow mining sleep done on `try_mine` elapsed time\n\ninstead of on successful mine event",
+          "timestamp": "2022-10-26T09:11:59-03:00",
+          "tree_id": "44d0e9dde93d9073720f6f0a73e53c9f794cfa26",
+          "url": "https://github.com/Kindelia/Kindelia/commit/c1756cdaaf587bc4b08c477adf9518c3d45267d5",
+          "original_ref": "dev",
+          "parent": "830d3b30b6be9f720ba9e0b1d7426c63d5214298"
+        },
+        "date": 1666786788951,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2627493,
+            "range": "± 46637",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 37479,
+            "range": "± 278",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 32981,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 135359,
+            "range": "± 124",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -352,6 +402,6 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "830d3b30b6be9f720ba9e0b1d7426c63d5214298"
+    "dev": "c1756cdaaf587bc4b08c477adf9518c3d45267d5"
   }
 }
