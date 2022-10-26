@@ -1628,9 +1628,13 @@ impl<C: ProtoComm> Node<C> {
       let miner_tasks = vec![
         // Asks the miner thread to mine a block
         Task {
-          delay: 1000,
+          delay: 25,
           action: |node| {
-            node.do_ask_mine(node.build_body_from_pool());
+            if let Some(comm) = &mut node.miner_comm {
+              if let MinerMessage::Stop { .. } = comm.read() {
+                node.do_ask_mine(node.build_body_from_pool());
+              }
+            }
           },
         },
         // If the miner mined a block, adds it
