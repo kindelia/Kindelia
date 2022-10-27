@@ -248,7 +248,7 @@ pub enum InclusionState {
 #[rustfmt::skip]
 pub struct Node<C: ProtoComm> {
   pub data_path  : PathBuf,                           // path where files are saved
-  pub network_id : u64,                               // Network ID / magic number
+  pub network_id : u32,                               // Network ID / magic number
   pub comm       : C,                                 // UDP socket
   pub addr       : C::Address,                        // UDP port
   pub runtime    : Runtime,                           // Kindelia's runtime
@@ -410,17 +410,17 @@ pub struct MinerCommunication {
 #[derive(Debug, Clone)]
 pub enum Message<A: ProtoAddr> {
   NoticeTheseBlocks {
-    magic: u64,
+    magic: u32,
     gossip: bool,
     blocks: Vec<Block>,
     peers: Vec<Peer<A>>,
   },
   GiveMeThatBlock {
-    magic: u64,
+    magic: u32,
     bhash: Hash,
   },
   PleaseMineThisTransaction {
-    magic: u64,
+    magic: u32,
     tx: Transaction,
   },
 }
@@ -710,7 +710,7 @@ pub fn miner_loop(
 impl<C: ProtoComm> Node<C> {
   pub fn new(
     data_path: PathBuf,
-    network_id: u64,
+    network_id: u32,
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,

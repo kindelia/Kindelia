@@ -13,7 +13,7 @@ use crate::events::NodeEventDiscriminant;
 pub struct NodeConfig {
   pub data_path: PathBuf, // TODO: abstract node file handling
   #[builder(default)]
-  pub network_id: u64,
+  pub network_id: u32,
   #[builder(default)]
   pub mining: MineConfig,
   #[builder(default)]

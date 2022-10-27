@@ -108,17 +108,17 @@ pub enum SeePeerResult {
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum HandleMessageEvent {
   NoticeTheseBlocks {
-    magic: u64,
+    magic: u32,
     gossip: bool,
     blocks: Vec<Hash>,
     peers: Vec<String>, // peer not used to avoid type parameter
   },
   GiveMeThatBlock {
-    magic: u64,
+    magic: u32,
     bhash: Hash,
   },
   PleaseMineThisTransaction {
-    magic: u64,
+    magic: u32,
     trans: Hash, // shoul we guard the data of transaction too?
   },
 }
@@ -566,7 +566,7 @@ impl NodeEventType {
 
   // HANDLE MESSAGE
   pub fn notice_blocks<A: ProtoAddr>(
-    magic: u64,
+    magic: u32,
     gossip: bool,
     blocks: &[HashedBlock],
     peers: &[Peer<A>],
@@ -579,12 +579,12 @@ impl NodeEventType {
     };
     NodeEventType::HandleMessage { event }
   }
-  pub fn give_me_block(magic: u64, block: U256) -> Self {
+  pub fn give_me_block(magic: u32, block: U256) -> Self {
     let event =
       HandleMessageEvent::GiveMeThatBlock { magic, bhash: block.into() };
     NodeEventType::HandleMessage { event }
   }
-  pub fn mine_trans(magic: u64, trans: U256) -> Self {
+  pub fn mine_trans(magic: u32, trans: U256) -> Self {
     let event = HandleMessageEvent::PleaseMineThisTransaction {
       magic,
       trans: trans.into(),

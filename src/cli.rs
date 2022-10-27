@@ -212,7 +212,7 @@ pub enum NodeCommand {
   Start {
     /// Network id / magic number.
     #[clap(long)]
-    network_id: Option<u64>,
+    network_id: Option<u32>,
     /// Initial peer nodes.
     #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
@@ -1091,9 +1091,30 @@ impl ArgumentFrom<String> for String {
   }
 }
 
+impl ArgumentFrom<String> for u32 {
+  fn arg_from(t: String) -> Result<Self, String> {
+    t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  }
+}
+
 impl ArgumentFrom<String> for u64 {
   fn arg_from(t: String) -> Result<Self, String> {
     t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  }
+}
+
+impl ArgumentFrom<toml::Value> for u32 {
+  fn arg_from(value: toml::Value) -> Result<Self, String> {
+    match value {
+      toml::Value::Integer(i) => Ok(i as Self),
+      toml::Value::String(s) => {
+        let s = s.trim_start_matches("0x");
+        let num = u32::from_str_radix(s, 16)
+          .map_err(|e| format!("Invalid hexadecimal '{}': {}", s, e))?;
+        Ok(num)
+      }
+      _ => Err(format!("Invalid integer '{}'", value)),
+    }
   }
 }
 

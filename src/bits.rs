@@ -665,19 +665,19 @@ impl<A: ProtoAddr> ProtoSerialize for Message<A> {
     match self {
       // This is supposed to use < 1500 bytes when blocks = 1, to avoid UDP fragmentation
       Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
-        serialize_fixlen(64, *magic, bits);
+        serialize_fixlen(32, *magic as u64, bits);
         serialize_fixlen(4, 0, bits);
         serialize_fixlen(1, *gossip as u64, bits);
         serialize_list(&blocks, bits, names);
         serialize_list(peers, bits, names);
       }
       Message::GiveMeThatBlock { magic, bhash } => {
-        serialize_fixlen(64, *magic, bits);
+        serialize_fixlen(32, *magic as u64, bits);
         serialize_fixlen(4, 1, bits);
         bhash.proto_serialize(bits, names);
       }
       Message::PleaseMineThisTransaction { magic, tx } => {
-        serialize_fixlen(64, *magic, bits);
+        serialize_fixlen(32, *magic as u64, bits);
         let tx_len = tx.len();
         if tx_len == 0 {
           panic!("Invalid transaction length.");
@@ -694,7 +694,7 @@ impl<A: ProtoAddr> ProtoSerialize for Message<A> {
     index: &mut usize,
     names: &mut Names,
   ) -> Option<Self> {
-    let magic = deserialize_fixlen(64, bits, index)?;
+    let magic = deserialize_fixlen(32, bits, index)? as u32;
     let code = deserialize_fixlen(4, bits, index)?;
     match code {
       0 => {

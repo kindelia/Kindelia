@@ -66,7 +66,7 @@ fn max_message() -> node::Message<net::Address> {
   };
 
   node::Message::NoticeTheseBlocks {
-    magic: u64::MAX,
+    magic: u32::MAX,
     gossip: true,
     blocks: vec![max_block],
     peers: vec![max_peer, max_peer, max_peer],
