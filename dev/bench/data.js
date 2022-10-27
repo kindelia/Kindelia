@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666872095665,
+  "lastUpdate": 1666898277717,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -347,6 +347,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "4e39261db41ff7fdec52e1ac5a0609c52d2abc52": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "4e39261db41ff7fdec52e1ac5a0609c52d2abc52",
+          "message": "do not unwrap on result of node request answer",
+          "timestamp": "2022-10-27T16:10:10-03:00",
+          "tree_id": "3a7402756ea284845ce1b1732b2c6fce3523bb9a",
+          "url": "https://github.com/Kindelia/Kindelia/commit/4e39261db41ff7fdec52e1ac5a0609c52d2abc52",
+          "original_ref": "dev",
+          "parent": "905abfb0927169829d6a1230945b89abdb019574"
+        },
+        "date": 1666898277170,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2125837,
+            "range": "± 63486",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 33780,
+            "range": "± 71",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 23941,
+            "range": "± 204",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 109911,
+            "range": "± 81",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -616,6 +666,6 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "905abfb0927169829d6a1230945b89abdb019574"
+    "dev": "4e39261db41ff7fdec52e1ac5a0609c52d2abc52"
   }
 }
