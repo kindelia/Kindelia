@@ -1127,10 +1127,15 @@ impl<C: ProtoComm> Node<C> {
   }
 
   pub fn handle_request(&mut self, request: NodeRequest<C>) {
+    fn handle_ans_err<T>(req_txt: &str, res: Result<(), T>) {
+      if let Err(_) = res {
+        eprintln!("WARN: failed to send node request {} answer back", req_txt);
+      }
+    }
     // TODO: handle unwraps
     // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
     match request {
-      NodeRequest::GetStats { tx: answer } => {
+      NodeRequest::GetStats { tx } => {
         let tick = self.runtime.get_tick().try_into().unwrap();
         let mana = self.runtime.get_mana().try_into().unwrap();
         let size = self.runtime.get_size().try_into().unwrap();
@@ -1154,9 +1159,9 @@ impl<C: ProtoComm> Node<C> {
           ctr_count,
           reg_count,
         };
-        answer.send(stats).unwrap();
+        handle_ans_err("GetStats", tx.send(stats));
       }
-      NodeRequest::GetBlocks { range, tx: answer } => {
+      NodeRequest::GetBlocks { range, tx } => {
         let (start, end) = range;
         debug_assert!(start <= end);
         debug_assert!(end == -1);
@@ -1166,15 +1171,15 @@ impl<C: ProtoComm> Node<C> {
           .iter()
           .map(|h| self.get_block_info(h).expect("Missing block."))
           .collect();
-        answer.send(infos).unwrap();
+        handle_ans_err("GetBlocks", tx.send(infos));
       }
-      NodeRequest::GetBlock { hash, tx: answer } => {
+      NodeRequest::GetBlock { hash, tx } => {
         let info = self.get_block_info(&hash);
-        answer.send(info).unwrap();
+        handle_ans_err("GetBlock", tx.send(info));
       }
-      NodeRequest::GetBlockHash { index, tx: answer } => {
+      NodeRequest::GetBlockHash { index, tx } => {
         let info = self.get_block_hash_by_index(index);
-        answer.send(info).unwrap();
+        handle_ans_err("GetBlockHash", tx.send(info));
       }
       NodeRequest::GetFunctions { tx } => {
         let mut funcs: HashSet<u128> = HashSet::new();
@@ -1183,34 +1188,34 @@ impl<C: ProtoComm> Node<C> {
             acc.insert(*func);
           }
         });
-        tx.send(funcs).unwrap();
+        handle_ans_err("GetFunctions", tx.send(funcs));
       }
-      NodeRequest::GetFunction { name, tx: answer } => {
+      NodeRequest::GetFunction { name, tx } => {
         let info = self.get_func_info(&name);
-        answer.send(info).unwrap();
+        handle_ans_err("GetFunction", tx.send(info));
       }
-      NodeRequest::GetState { name, tx: answer } => {
+      NodeRequest::GetState { name, tx } => {
         let state = self.runtime.read_disk_as_term(name.into(), Some(1 << 16));
-        answer.send(state).unwrap();
+        handle_ans_err("GetState", tx.send(state));
       }
-      NodeRequest::GetPeers { all, tx: answer } => {
+      NodeRequest::GetPeers { all, tx } => {
         let peers =
           if all { self.peers.get_all() } else { self.peers.get_all_active() };
-        answer.send(peers).unwrap();
+        handle_ans_err("GetPeers", tx.send(peers));
       }
-      NodeRequest::GetConstructor { name, tx: answer } => {
+      NodeRequest::GetConstructor { name, tx } => {
         let info = self.get_ctr_info(&name);
-        answer.send(info).unwrap();
+        handle_ans_err("GetConstructor", tx.send(info));
       }
-      NodeRequest::GetReg { name, tx: answer } => {
+      NodeRequest::GetReg { name, tx } => {
         let info = self.get_reg_info(name);
-        answer.send(info).unwrap();
+        handle_ans_err("GetReg", tx.send(info));
       }
-      NodeRequest::RunCode { code, tx: answer } => {
+      NodeRequest::RunCode { code, tx } => {
         let result = self.runtime.test_statements_from_code(&code);
-        answer.send(result).unwrap();
+        handle_ans_err("RunCode", tx.send(result));
       }
-      NodeRequest::PublishCode { code, tx: answer } => {
+      NodeRequest::PublishCode { code, tx } => {
         let statements =
           hvm::read_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
         let res = match statements {
@@ -1227,11 +1232,11 @@ impl<C: ProtoComm> Node<C> {
             Ok(results)
           }
         };
-        answer.send(res).unwrap();
+        handle_ans_err("PublishCode", tx.send(res));
       }
-      NodeRequest::Run { code, tx: answer } => {
+      NodeRequest::Run { code, tx } => {
         let result = self.runtime.test_statements(&code);
-        answer.send(result).unwrap();
+        handle_ans_err("Run", tx.send(result));
       }
       NodeRequest::Publish { code, tx } => {
         let result: Vec<_> = code
@@ -1242,7 +1247,7 @@ impl<C: ProtoComm> Node<C> {
             self.add_transaction(t)
           })
           .collect();
-        tx.send(result).unwrap();
+        handle_ans_err("Publish", tx.send(result));
       }
     }
   }
