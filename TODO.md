@@ -2,14 +2,16 @@
 
 ## 1
 
-- write block to disk on compute on separate thread
 - remove txs from mempool only on tip update
+- fix 1 tick rollback request causing 256 ticks rollback
+- don't write to disk while loading blocks
 - show space (and mana?) usage on fun definition
 - `kindelia subject`
 - command to publish to multiple nodes
 
 ## 2
 
+- write state files to disk on separate thread
 - way to check if transaction(s) fit on a block
 - `kindelia get name`
 - command to list names defined inside of `.kdl` file

@@ -145,6 +145,7 @@ pub fn stack_overflow2(temp_dir: TempPath) {
 }
 
 #[apply(hvm_cases)]
+#[ignore = "heap persistence disabled"]
 pub fn persistence1(
   fn_names: &[&str],
   pre_code: &str,

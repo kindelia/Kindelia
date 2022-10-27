@@ -2134,13 +2134,13 @@ impl Runtime {
     if included {
       self.save_state_metadata().expect("Error saving state metadata.");
       let path = &self.get_dir_path();
-      let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers.");
+      // let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers."); // heap persistence disabled
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          let _ = self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers.");
+          // let _ = self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers."); // heap persistence disabled
         }
-        self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers.");
+        // self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers."); // heap persistence disabled
         self.clear_heap(deleted);
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
@@ -2164,7 +2164,7 @@ impl Runtime {
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
         if let Rollback::Cons { keep, life, head, tail } = &*self.back.clone() {
-          self.heap[*head as usize].delete_buffers(&path).expect("Couldn't delete buffers.");
+          // self.heap[*head as usize].delete_buffers(&path).expect("Couldn't delete buffers."); // heap persistence disabled
           self.clear_heap(*head);
           self.nuls.push(*head);
           self.back = tail.clone();
