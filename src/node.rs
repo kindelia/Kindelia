@@ -612,16 +612,15 @@ pub fn initial_target() -> U256 {
 }
 
 /// The hash of the genesis block's parent.
-/// TODO: actual zero.
 pub fn zero_hash() -> U256 {
-  hash_u256(u256(0)) // why though
+  u256(0)
 }
 
 /// Builds the Genesis Block.
 pub fn build_genesis_block(stmts: &[Statement]) -> Block {
   let body = Body::from_transactions_iter(stmts)
     .expect("Genesis statements should fit in a block body");
-  Block::new(u256(0), 0, 0, body)
+  Block::new(zero_hash(), 0, 0, body)
 }
 
 // Mining
@@ -1036,16 +1035,16 @@ impl<C: ProtoComm> Node<C> {
     self.target[&self.tip]
   }
 
-  pub fn get_longest_chain(&self, num: Option<usize>) -> Vec<U256> {
+  pub fn get_longest_chain(&self, max: Option<usize>) -> Vec<U256> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
-    while self.block.contains_key(&bhash) && bhash != zero_hash() {
+    while self.block.contains_key(&bhash) && bhash != zero_hash() { // TODO: zero check seems redundant
       let block = self.block.get(&bhash).unwrap();
       longest.push(bhash);
       bhash = block.prev;
       count += 1;
-      if let Some(num) = num {
+      if let Some(num) = max {
         if count >= num {
           break;
         }
@@ -1349,7 +1348,8 @@ impl<C: ProtoComm> Node<C> {
               break;
             }
             if *bhash == zero_hash() {
-              // FIXME: genesis block hash
+              // TODO: this check seems redundant
+              // Stops when it reaches genesis block non-existing parent
               break;
             }
             let block = &self.block[bhash];
