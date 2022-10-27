@@ -515,7 +515,7 @@ impl NodeEventType {
       event: MiningEvent::AskMine { target: target.into() },
     }
   }
-  pub fn stopped() -> Self {
+  pub fn stop_mining() -> Self {
     NodeEventType::Mining { event: MiningEvent::Stop }
   }
 

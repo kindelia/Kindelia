@@ -2,7 +2,6 @@
 
 ## 1
 
-- remove txs from mempool only on tip update
 - fix 1 tick rollback request causing 256 ticks rollback
 - don't write to disk while loading blocks
 - show space (and mana?) usage on fun definition

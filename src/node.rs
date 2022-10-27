@@ -879,22 +879,23 @@ impl<C: ProtoComm> Node<C> {
           } else {
             self.target.insert(bhash, self.target[&phash]);
           }
-          // Removes this block's transactions from mempool
-          // TODO: should actually only remove txs on tip update
-          for tx in extract_transactions(&block.body) {
-            self.pool.remove(&tx);
-          }
           // Updates the tip work and block hash
-          let old_tip = self.tip;
+          let cur_tip = self.tip;
           let new_tip = bhash;
-          if self.work[&new_tip] > self.work[&old_tip] {
+          if self.work[&new_tip] > self.work[&cur_tip] {
+            // When the tip updates, stop mining the last built block, which is
+            // based on the outdated tip
             self.send_to_miner(MinerMessage::Stop);
             emit_event!(
               self.event_emitter,
-              NodeEventType::stopped(),
+              NodeEventType::stop_mining(),
               tags = mining,
               stopped
             );
+            // Removes this block's transactions from mempool
+            for tx in extract_transactions(&block.body) {
+              self.pool.remove(&tx);
+            }
             self.tip = bhash;
             if true {
               // Block reorganization (* marks blocks for which we have runtime snapshots):
@@ -904,7 +905,7 @@ impl<C: ProtoComm> Node<C> {
               //               |         '-> highest common block shared by both timelines
               //               '-----> highest runtime snapshot before block D
               let mut must_compute = Vec::new();
-              let mut old_bhash = old_tip;
+              let mut old_bhash = cur_tip;
               let mut new_bhash = new_tip;
               // 1. Finds the highest block with same height on both timelines
               //    On the example above, we'd have `H, S`
@@ -938,7 +939,7 @@ impl<C: ProtoComm> Node<C> {
               //    On the example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
 
-              let old = (&self.block[&old_tip], self.height[&old_tip]);
+              let old = (&self.block[&cur_tip], self.height[&cur_tip]);
               let new = (&self.block[&new_tip], self.height[&new_tip]);
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
               emit_event!(
