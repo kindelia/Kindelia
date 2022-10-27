@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666872094331,
+  "lastUpdate": 1666872095665,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -570,6 +570,44 @@ window.BENCHMARK_DATA = {
             "value": 617.5,
             "unit": "Logs",
             "range": 26.16295090390226
+          }
+        ]
+      },
+      "905abfb0927169829d6a1230945b89abdb019574": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "905abfb0927169829d6a1230945b89abdb019574",
+          "message": "remove txs from mempool only on tip update",
+          "timestamp": "2022-10-27T08:53:51-03:00",
+          "tree_id": "ca5ee6a29f31f41aad527dceb9b925f26ef75eef",
+          "url": "https://github.com/Kindelia/Kindelia/commit/905abfb0927169829d6a1230945b89abdb019574",
+          "original_ref": "dev",
+          "parent": "91b715f837604970900cdbc276b7aa3faf34b934"
+        },
+        "date": 1666872095256,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.09313725490196079,
+            "unit": "Percent",
+            "range": 0.03466209711698762
+          },
+          {
+            "name": "Failed Mining",
+            "value": 1001,
+            "unit": "Logs",
+            "range": 9.899494936611665
           }
         ]
       }
