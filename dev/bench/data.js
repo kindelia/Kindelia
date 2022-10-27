@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666789229665,
+  "lastUpdate": 1666872094331,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -297,6 +297,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "905abfb0927169829d6a1230945b89abdb019574": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "905abfb0927169829d6a1230945b89abdb019574",
+          "message": "remove txs from mempool only on tip update",
+          "timestamp": "2022-10-27T08:53:51-03:00",
+          "tree_id": "ca5ee6a29f31f41aad527dceb9b925f26ef75eef",
+          "url": "https://github.com/Kindelia/Kindelia/commit/905abfb0927169829d6a1230945b89abdb019574",
+          "original_ref": "dev",
+          "parent": "91b715f837604970900cdbc276b7aa3faf34b934"
+        },
+        "date": 1666872093670,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2088736,
+            "range": "± 21259",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 33563,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 23742,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 109629,
+            "range": "± 107",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -528,6 +578,6 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "91b715f837604970900cdbc276b7aa3faf34b934"
+    "dev": "905abfb0927169829d6a1230945b89abdb019574"
   }
 }
