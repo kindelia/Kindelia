@@ -23,6 +23,7 @@ fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct NodeEvent<A: ProtoAddr> {
+  pub time: u128,
   pub addr: A,
   pub event: NodeEventType,
 }
@@ -48,8 +49,17 @@ pub enum NodeEventType {
     tip: HeartbeatTip,
     blocks: HeartbeatBlocks,
     runtime: HeartbeatRuntime,
+    chain: Vec<Hash>,
   },
 }
+
+/// This represents the emitted event 
+/// by the node channel, in the form of:
+/// `(event_type, timestamp)`.
+/// 
+/// With this information the `NodeEvent` is formed on channel.recv
+/// in the function `spawn_event_handlers`.
+pub type NodeEventEmittedInfo = (NodeEventType, u128);
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlockInfo {
@@ -66,9 +76,14 @@ pub enum AddBlockEvent {
     old_tip: BlockInfo,             // old network's tip
     common_block: BlockInfo,        // first common block in both timelines
     rollback: Option<RollbackInfo>, // if ocurred a rollback, store its info
+    work: Hash,
   },
   Included {
     siblings: Vec<Hash>,
+    work: Hash,
+  },
+  Computed {
+    blocks: Vec<Hash>,
   },
   MissingParent {
     parent: Hash,
@@ -80,6 +95,7 @@ pub enum AddBlockEvent {
 pub struct RollbackInfo {
   runtime_tick: u128,
   common_tick: u128,
+  rolled_to: u128,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -351,6 +367,11 @@ impl std::fmt::Display for NodeEventType {
         AddBlockEvent::Included { .. } => {
           format!("[included] block {}", block)
         }
+        AddBlockEvent::Computed { blocks } => {
+          let blocks: String =
+            blocks.iter().map(|b| format!("{}", b)).collect();
+          format!("[computed] block {} | computed_blocks: {}", block, blocks)
+        }
       },
       NodeEventType::Mining { event } => match event {
         MiningEvent::Success { block, target } => {
@@ -379,8 +400,13 @@ impl std::fmt::Display for NodeEventType {
       NodeEventType::HandleMessage { event } => {
         format!("[handle_message] {}", event)
       }
-      NodeEventType::Heartbeat { peers, tip, blocks, runtime } => {
-        format!("[heartbeat] {} {} {} {}", peers, tip, blocks, runtime)
+      NodeEventType::Heartbeat { peers, tip, blocks, runtime, chain } => {
+        let chain: String =
+          chain.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(",");
+        format!(
+          "[heartbeat] {} {} {} {} {}",
+          peers, tip, blocks, runtime, chain
+        )
       }
     };
 
@@ -413,28 +439,47 @@ impl NodeEventType {
     block: &HashedBlock,
     height: Option<u128>,
     siblings: &[U256],
+    work: U256,
   ) -> Self {
     let hash = U256::from(block.get_hash());
     let siblings = siblings.iter().map(|h| (*h).into()).collect();
     NodeEventType::AddBlock {
       block: BlockInfo { hash: hash.into(), parent: block.prev.into(), height },
-      event: Box::new(AddBlockEvent::Included { siblings }),
+      event: Box::new(AddBlockEvent::Included { siblings, work: work.into() }),
+    }
+  }
+  pub fn computed(block: &HashedBlock, height: u128, blocks: &[U256]) -> Self {
+    let hash = U256::from(block.get_hash());
+    let blocks = blocks.iter().map(|b| (*b).into()).collect();
+    NodeEventType::AddBlock {
+      block: BlockInfo {
+        hash: hash.into(),
+        parent: block.prev.into(),
+        height: Some(height),
+      },
+      event: Box::new(AddBlockEvent::Computed { blocks }),
     }
   }
   pub fn reorg(
     old: (&HashedBlock, u128),
     new: (&HashedBlock, u128),
     common: (&HashedBlock, u128),
-    runtime_tick: u128,
+    ticks: (u128, u128), // (old tick, new tick)
+    work: U256,
   ) -> Self {
     let (old_block, old_height) = old;
     let (new_block, new_height) = new;
     let (common_block, common_height) = common;
+    let (old_runtime_tick, new_runtime_tick) = ticks;
     let common_tick = common_height;
 
     let rollback = {
-      if common_tick < runtime_tick {
-        Some(RollbackInfo { common_tick, runtime_tick })
+      if common_tick < old_runtime_tick {
+        Some(RollbackInfo {
+          common_tick,
+          runtime_tick: old_runtime_tick,
+          rolled_to: new_runtime_tick,
+        })
       } else {
         None
       }
@@ -462,6 +507,7 @@ impl NodeEventType {
           height: Some(common_height),
         },
         rollback,
+        work: work.into(),
       }),
     }
   }
@@ -617,7 +663,8 @@ macro_rules! heartbeat {
         limit: $size_lim:expr,
         available: $size_avail:expr,
       }
-    }
+    },
+    chain: $chain:expr
   ) => {
     NodeEventType::Heartbeat {
       peers: $crate::events::HeartbeatPeers { num: $peers_num },
@@ -642,6 +689,7 @@ macro_rules! heartbeat {
           available: $size_avail,
         },
       },
+      chain: $chain.iter().map(|x: &U256| (*x).into()).collect(),
     }
   };
 }
@@ -793,9 +841,12 @@ pub fn spawn_event_handlers<A: ProtoAddr + 'static>(
   ws_config: WsConfig,
   ui_config: Option<UiConfig>,
   addr: A,
-) -> (std::sync::mpsc::Sender<NodeEventType>, Vec<std::thread::JoinHandle<()>>)
-{
-  let (event_tx, event_rx) = std::sync::mpsc::channel::<NodeEventType>();
+) -> (
+  std::sync::mpsc::Sender<(NodeEventType, u128)>,
+  Vec<std::thread::JoinHandle<()>>,
+) {
+  let (event_tx, event_rx) =
+    std::sync::mpsc::channel::<(NodeEventType, u128)>();
   let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
 
   eprintln!("Events WS on port: {}", ws_config.port);
@@ -806,16 +857,15 @@ pub fn spawn_event_handlers<A: ProtoAddr + 'static>(
 
   let ws_tx2 = ws_tx;
   let thread_2 = std::thread::spawn(move || {
-    while let Ok(event) = event_rx.recv() {
+    while let Ok((event, time)) = event_rx.recv() {
       if ws_tx2.receiver_count() > 0 {
         if let Err(err) = ws_tx2.send(event.clone()) {
           eprintln!("Could not send event to websocket: {}", err);
         };
       }
-      // TODO: way to select which logs to print
       if let Some(ref ui_cfg) = &ui_config {
         if ui_cfg.tags.is_empty() || ui_cfg.tags.contains(&(&event).into()) {
-          let event = NodeEvent { addr, event };
+          let event = NodeEvent { time, addr, event };
           if ui_cfg.json {
             println!("{}", serde_json::to_string(&event).unwrap());
           } else {
