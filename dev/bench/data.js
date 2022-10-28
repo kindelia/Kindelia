@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666992250119,
+  "lastUpdate": 1666992251746,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1442,6 +1442,86 @@ window.BENCHMARK_DATA = {
             "value": 90.5,
             "unit": "blocks",
             "range": 3.5355339059327378
+          }
+        ]
+      },
+      "f6cd027297077e214d35c33e7c9b473b33f35bb6": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "f6cd027297077e214d35c33e7c9b473b33f35bb6",
+          "message": "change `chain` field of heartbeat to `tip_blocks`\n\n- now it only shows the last 10 blocks of the chain, starting with the tip",
+          "timestamp": "2022-10-28T18:16:18-03:00",
+          "tree_id": "9894fe1fed566a7eeb42c4a08d4f0c0fcd4d8f12",
+          "url": "https://github.com/Kindelia/Kindelia/commit/f6cd027297077e214d35c33e7c9b473b33f35bb6",
+          "original_ref": "dev",
+          "parent": "cb92ca1e3ee30109eaed37dec98f80cf04813e7d"
+        },
+        "date": 1666992251147,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.1505026633433054,
+            "unit": "Percent",
+            "range": 0.007107682829366826
+          },
+          {
+            "name": "Failed Mining",
+            "value": 2480,
+            "unit": "Logs",
+            "range": 36.76955262170047
+          },
+          {
+            "name": "Rollback count in node 0",
+            "value": 12.5,
+            "unit": "rollbacks",
+            "range": 0.7071067811865476
+          },
+          {
+            "name": "Rollback distance mean in node 0",
+            "value": 1.7756410256410255,
+            "unit": "blocks",
+            "range": 0.5529937647740948
+          },
+          {
+            "name": "Real rollback distance mean in node 0",
+            "value": 10.307692307692307,
+            "unit": "blocks",
+            "range": 3.8074980525429485
+          },
+          {
+            "name": "Blocks between rollbacks in node 0",
+            "value": 7.477272727272727,
+            "unit": "blocks",
+            "range": 0.03214121732666154
+          },
+          {
+            "name": "Computed blocks in node 0",
+            "value": 229,
+            "unit": "blocks",
+            "range": 45.254833995939045
+          },
+          {
+            "name": "Height of node 0",
+            "value": 97,
+            "unit": "blocks",
+            "range": 4.242640687119285
+          },
+          {
+            "name": "Mean height",
+            "value": 97,
+            "unit": "blocks",
+            "range": 4.242640687119285
           }
         ]
       }
