@@ -269,6 +269,7 @@ pub struct Node<C: ProtoComm> {
 
   #[cfg(feature = "events")]
   pub event_emitter : mpsc::Sender<NodeEventEmittedInfo>,
+  pub file_writter  : mpsc::Sender<BlockFile>,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -719,6 +720,7 @@ impl<C: ProtoComm> Node<C> {
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
+    file_writter: mpsc::Sender<BlockFile>,
     #[cfg(feature = "events")] event_emitter: mpsc::Sender<
       NodeEventEmittedInfo,
     >,
@@ -757,6 +759,7 @@ impl<C: ProtoComm> Node<C> {
 
       #[cfg(feature = "events")]
       event_emitter: event_emitter.clone(),
+      file_writter: file_writter,
       query_recv : query_receiver,
       miner_comm,
     };
@@ -932,10 +935,15 @@ impl<C: ProtoComm> Node<C> {
                   "{:0>16x}.kindelia_block.bin",
                   self.height[bhash_comp]
                 ));
-                let file_buff =
-                  bitvec_to_bytes(&self.block[bhash_comp].proto_serialized());
-                std::fs::write(file_path, file_buff)
-                  .expect("Couldn't save block to disk.");
+                let file_writter_result = self
+                  .file_writter
+                  .send((file_path, self.block[bhash_comp].clone()));
+                if let Err(err) = file_writter_result {
+                  eprintln!(
+                    "Could not save block {:x} in disk: {}",
+                    bhash_comp, err
+                  );
+                }
               }
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
@@ -947,7 +955,8 @@ impl<C: ProtoComm> Node<C> {
               let old = (&self.block[&cur_tip], self.height[&cur_tip]);
               let new = (&self.block[&new_tip], self.height[&new_tip]);
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
-              let ticks = (runtime_old_tick as u128, self.runtime.get_tick() as u128);
+              let ticks =
+                (runtime_old_tick as u128, self.runtime.get_tick() as u128);
               emit_event!(
                 self.event_emitter,
                 NodeEventType::reorg(old, new, common, ticks, work),
@@ -1055,7 +1064,8 @@ impl<C: ProtoComm> Node<C> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
-    while self.block.contains_key(&bhash) && bhash != zero_hash() { // TODO: zero check seems redundant
+    while self.block.contains_key(&bhash) && bhash != zero_hash() {
+      // TODO: zero check seems redundant
       let block = self.block.get(&bhash).unwrap();
       longest.push(bhash);
       bhash = block.prev;
@@ -1706,6 +1716,21 @@ impl<C: ProtoComm> Node<C> {
 
 // Main Thread
 // ===========
+
+type BlockFile = (PathBuf, HashedBlock);
+
+pub fn spawn_file_writter() -> (mpsc::Sender<BlockFile>, JoinHandle<()>) {
+  let (file_writter_tx, file_writter_rx) = mpsc::channel::<BlockFile>();
+  let thread_handle = std::thread::spawn(move || {
+    while let Ok((file_path, block)) = file_writter_rx.recv() {
+      let file_buff = bitvec_to_bytes(&block.proto_serialized());
+      std::fs::write(file_path, file_buff)
+        .expect("Couldn't save block to disk.");
+    }
+  });
+
+  (file_writter_tx, thread_handle)
+}
 
 pub fn spawn_miner(
   mine_config: MineConfig,

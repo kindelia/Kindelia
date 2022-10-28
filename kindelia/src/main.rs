@@ -26,7 +26,7 @@ use kindelia_core::events;
 use kindelia_core::hvm::{self, view_statement, Statement};
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
-use kindelia_core::node;
+use kindelia_core::node::{self, spawn_file_writter};
 use kindelia_core::node::{spawn_miner, Node};
 use kindelia_core::util::bytes_to_bitvec;
 use util::{
@@ -649,6 +649,10 @@ pub fn start_node<C: ProtoComm + 'static>(
     spawn_miner(node_config.mining, event_tx.clone());
   threads.extend(miner_thrds.into_iter());
 
+  // File writter
+  let (file_writter_tx, file_writter_thread) = spawn_file_writter();
+  threads.insert(0, file_writter_thread);
+
   // Node state object
   let (node_query_sender, node) = Node::new(
     node_config.data_path,
@@ -656,6 +660,7 @@ pub fn start_node<C: ProtoComm + 'static>(
     initial_peers,
     comm,
     miner_comm,
+    file_writter_tx,
     #[cfg(feature = "events")]
     event_tx,
   );
