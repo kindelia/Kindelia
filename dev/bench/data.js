@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666991274833,
+  "lastUpdate": 1666992250119,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -694,6 +694,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 114530,
             "range": "± 129",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "f6cd027297077e214d35c33e7c9b473b33f35bb6": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "f6cd027297077e214d35c33e7c9b473b33f35bb6",
+          "message": "change `chain` field of heartbeat to `tip_blocks`\n\n- now it only shows the last 10 blocks of the chain, starting with the tip",
+          "timestamp": "2022-10-28T18:16:18-03:00",
+          "tree_id": "9894fe1fed566a7eeb42c4a08d4f0c0fcd4d8f12",
+          "url": "https://github.com/Kindelia/Kindelia/commit/f6cd027297077e214d35c33e7c9b473b33f35bb6",
+          "original_ref": "dev",
+          "parent": "cb92ca1e3ee30109eaed37dec98f80cf04813e7d"
+        },
+        "date": 1666992249234,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2190197,
+            "range": "± 6319",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 41913,
+            "range": "± 198",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 28399,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 118143,
+            "range": "± 90",
             "unit": "ns/iter"
           }
         ]
@@ -1400,7 +1450,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "cb92ca1e3ee30109eaed37dec98f80cf04813e7d",
+    "dev": "f6cd027297077e214d35c33e7c9b473b33f35bb6",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "0bd087ed715d543fc310eb64335698b54f5b56ae"
   }
