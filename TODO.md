@@ -2,6 +2,7 @@
 
 ## 1
 
+- sugar big numbers in hex format
 - fix 1 tick rollback request causing 256 ticks rollback
 - don't write to disk while loading blocks
 - show space (and mana?) usage on fun definition
