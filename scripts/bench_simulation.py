@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from audioop import add
 import json
 import statistics
 import sys
@@ -29,7 +30,7 @@ class Bencher(ABC):
         pass
 
     @abstractmethod
-    def calculate(self, event):
+    def calculate(self, event, addr):
         pass
 
     # TODO: add generic type?
@@ -57,7 +58,7 @@ class UncleRate(Bencher):
     def info(self) -> BencherInfo:
         return BencherInfo(name="Uncle Rate", unit="Percent")
 
-    def calculate(self, event):
+    def calculate(self, event, addr):
         if 'AddBlock' in event:
             data = event['AddBlock']
             if type(data['event']) is dict and 'Included' in data['event']:
@@ -77,6 +78,191 @@ class UncleRate(Bencher):
         self.uncle = 0.
 
 
+class RollbackCount(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.total: float = 0.
+        self.addr = addr
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Rollback count in node {self.addr}", unit="rollbacks")
+
+    def calculate(self, event, addr):
+        if addr == self.addr:
+            if 'AddBlock' in event:
+                data = event['AddBlock']
+                if 'Reorg' in data['event']:
+                    data = data['event']['Reorg']
+                    if data['rollback'] is not None:
+                        self.total += 1
+
+    def get_result(self):
+        return self.total
+
+    def clear(self):
+        self.total = 0.
+
+
+class RollbackDistanceMean(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.total: float = 0.
+        self.sum: float = 0.
+        self.addr = addr
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Rollback distance mean in node {self.addr}", unit="blocks")
+
+    def calculate(self, event, addr):
+        if addr == self.addr:
+            if 'AddBlock' in event:
+                data = event['AddBlock']
+                if 'Reorg' in data['event']:
+                    data = data['event']['Reorg']
+                    if data['rollback'] is not None:
+                        self.total += 1
+                        self.sum += data['rollback']['runtime_tick'] - \
+                            data['rollback']['common_tick']
+
+    def get_result(self):
+        return 0. if self.total == 0 else self.sum / self.total
+
+    def clear(self):
+        self.total = 0.
+        self.sum = 0.
+
+
+class RealRollbackDistanceMean(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.total: float = 0.
+        self.sum: float = 0.
+        self.addr = addr
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Real rollback distance mean in node {self.addr}", unit="blocks")
+
+    def calculate(self, event, addr):
+        if addr == self.addr:
+            if 'AddBlock' in event:
+                data = event['AddBlock']
+                if 'Reorg' in data['event']:
+                    data = data['event']['Reorg']
+                    if data['rollback'] is not None:
+                        self.total += 1
+                        self.sum += data['rollback']['runtime_tick'] - \
+                            data['rollback']['rolled_to']
+
+    def get_result(self):
+        return 0. if self.total == 0 else self.sum / self.total
+
+    def clear(self):
+        self.total = 0.
+        self.sum = 0.
+
+
+class BlocksBetweenRollbacks(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.addr = addr
+        self.last_height = -1
+        self.total = 0.
+        self.sum = 0.
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Blocks between rollbacks in node {self.addr}", unit="blocks")
+
+    def calculate(self, event, addr):
+        if addr == self.addr:
+            if 'AddBlock' in event:
+                data = event['AddBlock']
+                if 'Reorg' in data['event']:
+                    data = data['event']['Reorg']
+                    if data['rollback'] is not None:
+                        if self.last_height != -1:
+                            distance = abs(data['old_tip']['height'] -
+                                           self.last_height)
+                            self.sum += distance
+                            self.total += 1
+                        self.last_height = data['old_tip']['height']
+
+    def get_result(self):
+        return 0. if self.total == 0 else self.sum / self.total
+
+    def clear(self):
+        self.last_height = -1
+        self.total = 0.
+        self.sum = 0.
+
+
+class ComputedBlocks(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.total = 0.
+        self.addr = addr
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Computed blocks in node {self.addr}", unit="blocks")
+
+    def calculate(self, event, addr):
+        if addr == self.addr:
+            if 'AddBlock' in event:
+                data = event['AddBlock']
+                if 'Computed' in data['event']:
+                    data = data['event']['Computed']
+                    blocks = data['blocks']
+                    self.total += len(blocks)
+
+    def get_result(self):
+        return self.total
+
+    def clear(self):
+        self.total = 0.
+
+
+class Height(Bencher):
+    def __init__(self, addr):
+        super().__init__()
+        self.height = 0
+        self.addr = addr
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name=f"Height of node {self.addr}", unit="blocks")
+
+    def calculate(self, event, addr):
+        if 'Heartbeat' in event:
+            data = event['Heartbeat']
+            height = data['tip']['height']
+            self.height = height
+
+    def get_result(self):
+        return self.height
+
+    def clear(self):
+        self.height = 0
+
+
+class MeanHeight(Bencher):
+    def __init__(self):
+        super().__init__()
+        self.heights = {}
+
+    def info(self) -> BencherInfo:
+        return BencherInfo(name="Mean height", unit="blocks")
+
+    def calculate(self, event, addr):
+        if 'Heartbeat' in event:
+            data = event['Heartbeat']
+            height = data['tip']['height']
+            self.heights[addr] = height
+
+    def get_result(self):
+        return statistics.fmean(self.heights.values())
+
+    def clear(self):
+        self.heights = {}
+
+
 class FailedMining(Bencher):
     def __init__(self):
         super().__init__()
@@ -85,7 +271,7 @@ class FailedMining(Bencher):
     def info(self) -> BencherInfo:
         return BencherInfo(name="Failed Mining", unit="Logs")
 
-    def calculate(self, event):
+    def calculate(self, event, addr):
         if 'Mining' in event:
             data = event['Mining']
             if 'Failure' in data['event']:
@@ -143,10 +329,11 @@ def run(config: RunConfig):
             # try to read an event from this line
             try:
                 event = json.loads(line)
+                addr = event['addr']
                 event = event['event']  # gets the event
                 # for each bench
                 for bench in config.benchers:
-                    bench.calculate(event)
+                    bench.calculate(event, addr)
             except json.JSONDecodeError as error:
                 print(line)
                 pass
@@ -162,7 +349,7 @@ def run(config: RunConfig):
         # throw away warmup executions
         results = bench.get_results()[config.warmup:]
         print(results)
-        mean: float = statistics.mean(results)
+        mean: float = statistics.fmean(results)
         stdev = statistics.stdev(results)
         result.append({
             'name': bench_info.name,
@@ -191,7 +378,17 @@ def main():
         "--execution_time", type=int, default=60
     )
 
-    benchers: List[Bencher] = [UncleRate(), FailedMining()]
+    benchers: List[Bencher] = [
+        UncleRate(),
+        FailedMining(),
+        RollbackCount(0),
+        RollbackDistanceMean(0),
+        RealRollbackDistanceMean(0),
+        BlocksBetweenRollbacks(0),
+        ComputedBlocks(0),
+        Height(0),
+        MeanHeight(),
+    ]
 
     args = parser.parse_args()
 
