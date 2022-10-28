@@ -1851,7 +1851,7 @@ impl Runtime {
           }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(*subject));
+            let cont = alloc_app(self, cont, Num(*caller));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
