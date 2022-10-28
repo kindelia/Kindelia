@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666898279010,
+  "lastUpdate": 1666962294721,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -397,6 +397,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "cc4efdfa274e16ea5b6ee18c07cbc9796c4f7de8": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "cc4efdfa274e16ea5b6ee18c07cbc9796c4f7de8",
+          "message": "add rollback measures in `bench_simulation.py`",
+          "timestamp": "2022-10-28T09:52:12-03:00",
+          "tree_id": "9c09f1e37ababf5851d53d144db07ecaa3a98239",
+          "url": "https://github.com/Kindelia/Kindelia/commit/cc4efdfa274e16ea5b6ee18c07cbc9796c4f7de8",
+          "original_ref": "rollback-bench",
+          "parent": "95ae9491cdba7d1ba69f1ef8bef1967ed8e8c993"
+        },
+        "date": 1666962294009,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2160552,
+            "range": "± 9740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 31698,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 27351,
+            "range": "± 207",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 113971,
+            "range": "± 133",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -704,6 +754,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "4e39261db41ff7fdec52e1ac5a0609c52d2abc52"
+    "dev": "4e39261db41ff7fdec52e1ac5a0609c52d2abc52",
+    "rollback-bench": "cc4efdfa274e16ea5b6ee18c07cbc9796c4f7de8"
   }
 }
