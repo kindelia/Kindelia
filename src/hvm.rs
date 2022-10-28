@@ -3982,7 +3982,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
         StackItem::Term(term) => {
           if let Some(focus) = focus {
             if focus == term {
-              output.push("^".to_string());
+              output.push("$".to_string());
             }
           }
           match get_tag(term) {
@@ -4001,7 +4001,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
             }
             APP => {
-              output.push("(".to_string());
+              output.push("(!".to_string());
               stack.push(StackItem::Str(")".to_string()));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
               stack.push(StackItem::Str(" ".to_string()));
@@ -4071,7 +4071,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
             }
             FUN => {
               let name = Name::new_unsafe(get_ext(term));
-              output.push(format!("(${}", name));
+              output.push(format!("({}", name));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(&name).unwrap();
               for i in (0..arit).rev() {
@@ -4637,7 +4637,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let term = Term::lam(name, Box::new(body));
       return Ok((code, term));
     },
-    // Function/Lambda/Oper application
+    // Redex
     '(' => {
       let code = skip(tail(code));
       let (code, oper) = read_oper(code);
@@ -4649,7 +4649,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let term = Term::op2(oper, Box::new(val0), Box::new(val1));
         return Ok((code, term));
       }
-      // Explicit lambda application
+      // Lambda application
       else if head(code) == '!' {
         let code = tail(code);
         let (code, func) = read_term(code)?;
@@ -4658,27 +4658,11 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         let term = Term::app(Box::new(func), Box::new(argm));
         return Ok((code, term));
       }
-      // Explicit function application
-      else if head(code) == '$' {
-        let code = tail(code);
+      // Function application
+      else {
         let (code, name) = read_strict_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
         let term = Term::fun(name, args);
-        return Ok((code, term));
-      }
-      // Implicit function application
-      else if ('A'..='Z').contains(&head(code)) {
-        let (code, name) = read_name(code)?;
-        let (code, args) = read_until(code, ')', read_term)?;
-        let term = Term::fun(name, args);
-        return Ok((code, term));
-      }
-      // Implicit lambda application
-      else {
-        let (code, func) = read_term(code)?;
-        let (code, argm) = read_term(code)?;
-        let (code, unit) = read_char(code, ')')?;
-        let term = Term::app(Box::new(func), Box::new(argm));
         return Ok((code, term));
       }
     },
@@ -4995,7 +4979,7 @@ pub fn view_term(term: &Term) -> String {
             stack.push(StackItem::Term(body));
           }
           Term::App { func, argm } => {
-            output.push("(".to_string());
+            output.push("(!".to_string());
             stack.push(StackItem::Str(")".to_string()));
             stack.push(StackItem::Term(argm));
             stack.push(StackItem::Str(" ".to_string()));
@@ -5020,7 +5004,7 @@ pub fn view_term(term: &Term) -> String {
           }
           Term::Fun { name, args } => {
             let name = view_name(*name);
-            output.push("($".to_string());
+            output.push("(".to_string());
             output.push(name);
             stack.push(StackItem::Str(")".to_string()));
             for arg in args.iter().rev() {

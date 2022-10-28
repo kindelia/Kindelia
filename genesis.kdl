@@ -112,7 +112,7 @@ fun (Hax1) {
 
 // LOAD works like TAKE, but clones the state
 fun (Load) {
-  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (cont x1)}}
+  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (!cont x1)}}
 }
 
 // This is here for debugging. Will be removed.
@@ -120,7 +120,7 @@ ctr {Inc}
 ctr {Get}
 fun (Count action) {
   (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
-  (Count {Get}) = ((Load) @x {DONE x})
+  (Count {Get}) = (!(Load) @x {DONE x})
 } with {
   #0
 }
