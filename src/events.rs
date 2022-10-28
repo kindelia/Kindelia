@@ -53,10 +53,10 @@ pub enum NodeEventType {
   },
 }
 
-/// This represents the emitted event 
+/// This represents the emitted event
 /// by the node channel, in the form of:
 /// `(event_type, timestamp)`.
-/// 
+///
 /// With this information the `NodeEvent` is formed on channel.recv
 /// in the function `spawn_event_handlers`.
 pub type NodeEventEmittedInfo = (NodeEventType, u128);
@@ -400,13 +400,8 @@ impl std::fmt::Display for NodeEventType {
       NodeEventType::HandleMessage { event } => {
         format!("[handle_message] {}", event)
       }
-      NodeEventType::Heartbeat { peers, tip, blocks, runtime, chain } => {
-        let chain: String =
-          chain.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(",");
-        format!(
-          "[heartbeat] {} {} {} {} {}",
-          peers, tip, blocks, runtime, chain
-        )
+      NodeEventType::Heartbeat { peers, tip, blocks, runtime, .. } => {
+        format!("[heartbeat] {} {} {} {}", peers, tip, blocks, runtime)
       }
     };
 
