@@ -23,13 +23,13 @@ fn network() {
   let mut graph = UnGraph::new_undirected();
   let a = graph.add_node(0_u32);
   let b = graph.add_node(1);
-  // let c = graph.add_node(2);
-  // let d = graph.add_node(3);
-  // let e = graph.add_node(4);
+  let c = graph.add_node(2);
+  let d = graph.add_node(3);
+  let e = graph.add_node(4);
   graph.extend_with_edges(&[(a, b, RouterMockConnection::new(20, 0.5))]);
-  // graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
-  // graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
-  // graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
 
   // creates the router
   let (router_mock, sockets) = RouterMock::from_graph(graph.clone());
