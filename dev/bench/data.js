@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666980631125,
+  "lastUpdate": 1666980632472,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1094,6 +1094,44 @@ window.BENCHMARK_DATA = {
             "value": 99,
             "unit": "blocks",
             "range": 2.8284271247461903
+          }
+        ]
+      },
+      "0bd087ed715d543fc310eb64335698b54f5b56ae": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "0bd087ed715d543fc310eb64335698b54f5b56ae",
+          "message": "write block file in separate thread",
+          "timestamp": "2022-10-28T14:58:17-03:00",
+          "tree_id": "e56186ec91a025b661c439a622bd7ddcdc779fad",
+          "url": "https://github.com/Kindelia/Kindelia/commit/0bd087ed715d543fc310eb64335698b54f5b56ae",
+          "original_ref": "thread-file",
+          "parent": "0000000000000000000000000000000000000000"
+        },
+        "date": 1666980632145,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.07508116883116883,
+            "unit": "Percent",
+            "range": 0.030419366398447254
+          },
+          {
+            "name": "Failed Mining",
+            "value": 888.5,
+            "unit": "Logs",
+            "range": 4.949747468305833
           }
         ]
       }
