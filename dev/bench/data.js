@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666980632472,
+  "lastUpdate": 1666980662074,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -597,6 +597,56 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
+      },
+      "2c7da30bb2056db87d48901a753aaa76f2dff8fa": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2c7da30bb2056db87d48901a753aaa76f2dff8fa",
+          "message": "Merge pull request #202 from Kindelia/rollback-bench\n\nRollback bench",
+          "timestamp": "2022-10-28T15:03:39-03:00",
+          "tree_id": "5f182182df911e590e1b0d32cf25e1dad031eb47",
+          "url": "https://github.com/Kindelia/Kindelia/commit/2c7da30bb2056db87d48901a753aaa76f2dff8fa",
+          "original_ref": "dev",
+          "parent": "d9064b1de64a9b92b04042889ee341f542b6c9cb"
+        },
+        "date": 1666980661263,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2188249,
+            "range": "± 14453",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 32177,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 27445,
+            "range": "± 615",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 114730,
+            "range": "± 162",
+            "unit": "ns/iter"
+          }
+        ]
       }
     },
     "Simulation Benchmark": {
@@ -1140,7 +1190,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "d9064b1de64a9b92b04042889ee341f542b6c9cb",
+    "dev": "2c7da30bb2056db87d48901a753aaa76f2dff8fa",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "0bd087ed715d543fc310eb64335698b54f5b56ae"
   }
