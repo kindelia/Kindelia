@@ -1561,16 +1561,16 @@ impl<C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
-    let mut chain = vec![];
+    let mut tip_blocks = vec![];
     let mut block = &self.block[&self.tip];
-    // eprintln!("hash tip {:?}", block.get_hash());
-    while block.prev != u256(0) {
-      chain.push(block.get_hash().into());
+    let mut count = 0;
+    while block.prev != u256(0) && count < 10 {
+      tip_blocks.push(block.get_hash().into());
       // eprintln!("prev {}", block.prev);
       block = &self.block[&block.prev];
+      count += 1;
     }
-    chain.push(block.get_hash().into());
-    chain.reverse();
+    tip_blocks.reverse();
 
     let event = heartbeat! {
       peers: { num: peers_num },
@@ -1595,7 +1595,7 @@ impl<C: ProtoComm> Node<C> {
           available: size_avail,
         }
       },
-      chain: chain
+      tip_blocks: tip_blocks
     };
 
     emit_event!(self.event_emitter, event, tags = heartbeat);

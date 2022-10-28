@@ -49,7 +49,7 @@ pub enum NodeEventType {
     tip: HeartbeatTip,
     blocks: HeartbeatBlocks,
     runtime: HeartbeatRuntime,
-    chain: Vec<Hash>,
+    tip_blocks: Vec<Hash>,
   },
 }
 
@@ -659,7 +659,7 @@ macro_rules! heartbeat {
         available: $size_avail:expr,
       }
     },
-    chain: $chain:expr
+    tip_blocks: $tip_blocks:expr
   ) => {
     NodeEventType::Heartbeat {
       peers: $crate::events::HeartbeatPeers { num: $peers_num },
@@ -684,7 +684,7 @@ macro_rules! heartbeat {
           available: $size_avail,
         },
       },
-      chain: $chain.iter().map(|x: &U256| (*x).into()).collect(),
+      tip_blocks: $tip_blocks.iter().map(|x: &U256| (*x).into()).collect(),
     }
   };
 }
