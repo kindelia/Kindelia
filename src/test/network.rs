@@ -1,3 +1,4 @@
+use futures_util::future::join_all;
 use petgraph::algo::astar;
 use petgraph::prelude::UnGraph;
 
@@ -19,13 +20,19 @@ use super::util::temp_dir;
 fn network() {
   let simulation_time = std::env::var("SIMULATION_TIME").ok();
 
-  let mut g = UnGraph::new_undirected();
-  let a = g.add_node(0_u32);
-  let b = g.add_node(1);
-  g.extend_with_edges(&[(a, b, RouterMockConnection::new(2, 0.5))]);
+  let mut graph = UnGraph::new_undirected();
+  let a = graph.add_node(0_u32);
+  let b = graph.add_node(1);
+  // let c = graph.add_node(2);
+  // let d = graph.add_node(3);
+  // let e = graph.add_node(4);
+  graph.extend_with_edges(&[(a, b, RouterMockConnection::new(20, 0.5))]);
+  // graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
+  // graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
+  // graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
 
   // creates the router
-  let (router_mock, sockets) = RouterMock::from_graph(g.clone());
+  let (router_mock, sockets) = RouterMock::from_graph(graph.clone());
   let mut threads = vec![];
 
   // Spawns the router thread
@@ -35,11 +42,12 @@ fn network() {
     }
   });
   threads.push(router_thread);
-
   // Spawns the nodes threads
   for (socket, idx) in sockets {
-    let initial_peers =
-      g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
+    let initial_peers = graph
+      .neighbors(idx)
+      .map(|node| *graph.node_weight(node).unwrap())
+      .collect();
     let addr = socket.addr;
     let socket_thread = thread::spawn(move || {
       let data_path =
@@ -61,7 +69,7 @@ fn network() {
         mining: mine_cfg,
         ui: Some(config::UiConfig { json: true, tags: vec![] }),
         api: None,
-        ws: None, // Some(ws_config),
+        ws: Some(ws_config), // Some(ws_config),
       };
       node::start(node_cfg, socket, initial_peers);
     });
@@ -262,9 +270,12 @@ impl RouterMock {
 
   fn send(&self, router_message: &RouterMessage) {
     let RouterMessage { to_addr, from_addr, msg } = router_message;
+    let to_addr = *to_addr;
+    let from_addr = *from_addr;
+    let msg = msg.clone();
     let tx = self.sockets.get(&to_addr).unwrap();
 
-    let connection = self.connection(*to_addr, *from_addr);
+    let connection = self.connection(to_addr, from_addr);
     if let Some(connection) = connection {
       let chance: f32 = rand::random();
       // println!(
@@ -272,17 +283,16 @@ impl RouterMock {
       //   connection.error, from_addr, to_addr
       // );
       if chance > connection.error {
-        // println!(
-        //   "Awaiting {} from {} to {}",
-        //   connection.delay, from_addr, to_addr
-        // );
-        thread::sleep(std::time::Duration::from_millis(connection.delay));
-        tx.send(RouterMessage {
-          to_addr: *to_addr,
-          from_addr: *from_addr,
-          msg: msg.to_owned(),
-        })
-        .unwrap()
+        let tx = tx.clone();
+        thread::spawn(move || {
+          // println!(
+          //   "Awaiting {} from {} to {}",
+          //   connection.delay, from_addr, to_addr
+          // );
+          thread::sleep(std::time::Duration::from_millis(connection.delay));
+          // println!("Sending from {} to {}", from_addr, to_addr);
+          tx.send(RouterMessage { to_addr, from_addr, msg }).unwrap()
+        });
       } else {
         // println!("Not sending from {} to {}", from_addr, to_addr);
       }
