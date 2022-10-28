@@ -3982,7 +3982,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
         StackItem::Term(term) => {
           if let Some(focus) = focus {
             if focus == term {
-              output.push("$".to_string());
+              output.push("^".to_string());
             }
           }
           match get_tag(term) {
@@ -4071,7 +4071,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
             }
             FUN => {
               let name = Name::new_unsafe(get_ext(term));
-              output.push(format!("({}", name));
+              output.push(format!("(${}", name));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(&name).unwrap();
               for i in (0..arit).rev() {
@@ -4574,6 +4574,35 @@ pub fn read_name(code: &str) -> ParseResult<Name> {
   }
 }
 
+// Like read_name, but we're sure it's an actual name and not something else
+pub fn read_strict_name(code: &str) -> ParseResult<Name> {
+  let code = skip(code);
+  let mut name = String::new();
+  let mut code = code;
+  while is_name_char(head(code)) {
+    name.push(head(code));
+    code = tail(code);
+  }
+  if name.is_empty() {
+    return Err(ParseErr {
+      code: code.to_string(),
+      erro: format!("Expected identifier, found `{}`.", head(code))
+    });
+  }
+  let name = Name::from_str(&name);
+  let name =
+    match name {
+      Ok(name) => name,
+      Err(msg) => {
+        return Err(ParseErr {
+          code: code.to_string(),
+          erro: format!("Identifier too long: {}", msg),
+        });
+      }
+    };
+  return Ok((code, name));
+}
+
 pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
   let mut data : Vec<u8> = Vec::new();
   let mut code = skip(code);
@@ -4600,6 +4629,7 @@ pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -
 pub fn read_term(code: &str) -> ParseResult<Term> {
   let code = skip(code);
   match head(code) {
+    // Lambda definition
     '@' => {
       let code         = tail(code);
       let (code, name) = read_name(code)?;
@@ -4607,28 +4637,44 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       let term = Term::lam(name, Box::new(body));
       return Ok((code, term));
     },
+    // Function/Lambda/Oper application
     '(' => {
       let code = skip(tail(code));
       let (code, oper) = read_oper(code);
+      // Native number operation
       if let Some(oper) = oper {
         let (code, val0) = read_term(code)?;
         let (code, val1) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
         let term = Term::op2(oper, Box::new(val0), Box::new(val1));
         return Ok((code, term));
-      } else if head(code) == '!' {
+      }
+      // Explicit lambda application
+      else if head(code) == '!' {
         let code = tail(code);
         let (code, func) = read_term(code)?;
         let (code, argm) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
         let term = Term::app(Box::new(func), Box::new(argm));
         return Ok((code, term));
-      } else if ('A'..='Z').contains(&head(code)) {
+      }
+      // Explicit function application
+      else if head(code) == '$' {
+        let code = tail(code);
+        let (code, name) = read_strict_name(code)?;
+        let (code, args) = read_until(code, ')', read_term)?;
+        let term = Term::fun(name, args);
+        return Ok((code, term));
+      }
+      // Implicit function application
+      else if ('A'..='Z').contains(&head(code)) {
         let (code, name) = read_name(code)?;
         let (code, args) = read_until(code, ')', read_term)?;
         let term = Term::fun(name, args);
         return Ok((code, term));
-      } else {
+      }
+      // Implicit lambda application
+      else {
         let (code, func) = read_term(code)?;
         let (code, argm) = read_term(code)?;
         let (code, unit) = read_char(code, ')')?;
@@ -4636,13 +4682,15 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         return Ok((code, term));
       }
     },
+    // Constructor
     '{' => {
       let code = tail(code);
-      let (code, name) = read_name(code)?;
+      let (code, name) = read_strict_name(code)?;
       let (code, args) = read_until(code, '}', read_term)?;
       let term = Term::ctr(name, args);
       return Ok((code, term));
     },
+    // Tuple sugar
     '[' => {
       let code = tail(code);
       let (code, vals) = read_until(code, ']', read_term)?;
@@ -4655,15 +4703,17 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
         return Err(ParseErr { code: code.to_string(), erro: "Tuple too long".to_string() });
       }
     },
+    // Number
     '#' => {
       let code = tail(code);
       let (code, numb) = read_numb(code)?;
       let term = Term::num(numb);
       return Ok((code, term));
     },
+    // Name to number sugar
     '\'' => {
       let code = tail(code);
-      let (code, name) = read_name(code)?;
+      let (code, name) = read_strict_name(code)?;
       let (code, unit) = read_char(code, '\'')?;
       let numb = *name;
       let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
@@ -4810,7 +4860,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
     ('f','u','n') => {
       let code = drop(code,3);
       let (code, unit) = read_char(code, '(')?;
-      let (code, name) = read_name(code)?;
+      let (code, name) = read_strict_name(code)?;
       let (code, args) = read_until(code, ')', read_name)?;
       let (code, unit) = read_char(code, '{')?;
       let (code, ruls) = read_until(code, '}', read_rule)?;
@@ -4831,7 +4881,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
     ('c','t','r') => {
       let code = drop(code,3);
       let (code, unit) = read_char(code, '{')?;
-      let (code, name) = read_name(code)?;
+      let (code, name) = read_strict_name(code)?;
       let (code, args) = read_until(code, '}', read_name)?;
       let (code, sign) = read_sign(code)?;
       return Ok((code, Statement::Ctr { name, args, sign }));
@@ -4851,7 +4901,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         if nth(code, 0) == '{' {
           (code, Name::EMPTY)
         } else {
-          read_name(code)?
+          read_strict_name(code)?
         };
       let (code, unit) = read_char(code, '{')?;
       let code = skip(code);
@@ -4862,7 +4912,7 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         },
         '\'' => {
           let code = tail(code);
-          let (code, name) = read_name(code)?;
+          let (code, name) = read_strict_name(code)?;
           let (code, unit) = read_char(code, '\'')?;
           let numb: U120 = name.into();
           (code, numb)
@@ -4970,7 +5020,7 @@ pub fn view_term(term: &Term) -> String {
           }
           Term::Fun { name, args } => {
             let name = view_name(*name);
-            output.push("(".to_string());
+            output.push("($".to_string());
             output.push(name);
             stack.push(StackItem::Str(")".to_string()));
             for arg in args.iter().rev() {

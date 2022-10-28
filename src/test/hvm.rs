@@ -305,7 +305,7 @@ fn test_stmt_hash(temp_dir: TempPath){
   let sth1 = rt.get_sth1(indx).unwrap();
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+    assert_eq!(format!("($T2 #{} #{})", sth0, sth1), view_term(&done_term));
   } else {
     panic!("Wrong result");
   } 
@@ -343,7 +343,7 @@ fn test_two_stmt_hash(temp_dir: TempPath){
   let sth2 = rt.get_sth0(indx2).unwrap();
   let sth3 = rt.get_sth1(indx2).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
+    assert_eq!(format!("($T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
   } else {
     panic!("Wrong result");
   } 
@@ -378,7 +378,7 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
   let sth0 = rt.get_sth0(indx).unwrap();
   let sth1 = rt.get_sth1(indx).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+    assert_eq!(format!("($T2 #{} #{})", sth0, sth1), view_term(&done_term));
   } else {
     panic!("Wrong result");
   } 
@@ -404,7 +404,7 @@ fn test_name_sanitizing(temp_dir: TempPath) {
   rt.commit();
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #5 #5)"), view_term(&done_term));
+    assert_eq!(format!("($T2 #5 #5)"), view_term(&done_term));
   } else {
     panic!("Wrong result");
   }
@@ -439,7 +439,7 @@ fn compute_at_funs(temp_dir: TempPath) {
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("@x0 @x1 (Add x0 x1)", view_term(&done_term));
+    assert_eq!("@x0 @x1 ($Add x0 x1)", view_term(&done_term));
   } else {
     panic!("Wrong result");
   }
