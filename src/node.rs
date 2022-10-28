@@ -23,13 +23,13 @@ use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
 
-use crate::events::{self, NodeEventType};
+use crate::events::{self, NodeEventEmittedInfo, NodeEventType};
 use crate::heartbeat;
 
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
     #[cfg(feature = "events")]
-    if let Err(_) = $tx.send($event) {
+    if let Err(_) = $tx.send(($event, get_time_micro())) {
       println!("Could not send event");
     }
   };
@@ -37,7 +37,7 @@ macro_rules! emit_event {
   ($tx: expr, $event: expr, tags = $($tag:ident),+) => {
     #[cfg(feature = "events")]
     // #[cfg(any(all, $($tag),+))] // TODO: all
-    if let Err(_) = $tx.send($event) {
+    if let Err(_) = $tx.send(($event, get_time_micro())) {
       println!("Could not send event");
     }
   };
@@ -267,7 +267,7 @@ pub struct Node<C: ProtoComm> {
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
 
   #[cfg(feature = "events")]
-  pub event_emitter : mpsc::Sender<NodeEventType>,
+  pub event_emitter : mpsc::Sender<NodeEventEmittedInfo>,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -302,7 +302,9 @@ impl<A: ProtoAddr> PeersStore<A> {
   pub fn see_peer(
     &mut self,
     peer: Peer<A>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventType>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
+      NodeEventEmittedInfo,
+    >,
   ) {
     let addr = peer.address;
     match self.seen.get(&addr) {
@@ -349,7 +351,9 @@ impl<A: ProtoAddr> PeersStore<A> {
 
   fn timeout(
     &mut self,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventType>,
+    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
+      NodeEventEmittedInfo,
+    >,
   ) {
     let mut forget = Vec::new();
     for (_, peer) in &self.active {
@@ -672,7 +676,7 @@ impl MinerCommunication {
 pub fn miner_loop(
   mut miner_comm: MinerCommunication,
   slow_mining: Option<u64>,
-  #[cfg(feature = "events")] event_emitter: mpsc::Sender<events::NodeEventType>,
+  #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventEmittedInfo>,
 ) {
   loop {
     if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
@@ -715,7 +719,7 @@ impl<C: ProtoComm> Node<C> {
     comm: C,
     miner_comm: Option<MinerCommunication>,
     #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      events::NodeEventType,
+      NodeEventEmittedInfo,
     >,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -939,17 +943,19 @@ impl<C: ProtoComm> Node<C> {
               //    On the example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
 
+              let runtime_old_tick = self.runtime.get_tick();
+              self.runtime.rollback(tick);
+
               let old = (&self.block[&cur_tip], self.height[&cur_tip]);
               let new = (&self.block[&new_tip], self.height[&new_tip]);
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
+              let ticks = (runtime_old_tick, self.runtime.get_tick());
               emit_event!(
                 self.event_emitter,
-                NodeEventType::reorg(old, new, common, tick),
+                NodeEventType::reorg(old, new, common, ticks, work),
                 tags = add_block,
                 reorg
               );
-
-              self.runtime.rollback(tick);
 
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
@@ -958,6 +964,17 @@ impl<C: ProtoComm> Node<C> {
                 new_bhash = self.block[&new_bhash].prev;
                 tick -= 1;
               }
+              emit_event!(
+                self.event_emitter,
+                NodeEventType::computed(
+                  &block,
+                  self.height[&self.tip],
+                  &must_compute
+                ),
+                tags = add_block,
+                computed
+              ); // emitting computed blocks for measurement
+
               // 6. Computes every block after that on the new timeline
               //    On the example above, we'd compute `C, D, P, Q, R, S, T`
               for bhash_comp in must_compute.iter().rev() {
@@ -980,7 +997,7 @@ impl<C: ProtoComm> Node<C> {
           self.children[&block.prev].iter().copied().collect();
         emit_event!(
           self.event_emitter,
-          NodeEventType::included(&block, height, &siblings),
+          NodeEventType::included(&block, height, &siblings, work),
           tags = add_block,
           block_included
         );
@@ -1544,6 +1561,17 @@ impl<C: ProtoComm> Node<C> {
 
     let peers_num = self.peers.get_all_active().len();
 
+    let mut chain = vec![];
+    let mut block = &self.block[&self.tip];
+    // eprintln!("hash tip {:?}", block.get_hash());
+    while block.prev != u256(0) {
+      chain.push(block.get_hash().into());
+      // eprintln!("prev {}", block.prev);
+      block = &self.block[&block.prev];
+    }
+    chain.push(block.get_hash().into());
+    chain.reverse();
+
     let event = heartbeat! {
       peers: { num: peers_num },
       tip: {
@@ -1566,7 +1594,8 @@ impl<C: ProtoComm> Node<C> {
           limit: size_lim,
           available: size_avail,
         }
-      }
+      },
+      chain: chain
     };
 
     emit_event!(self.event_emitter, event, tags = heartbeat);
@@ -1742,7 +1771,7 @@ pub fn start<C: ProtoComm + 'static>(
 
 fn spawn_miner(
   mine_config: MineConfig,
-  #[cfg(feature = "events")] event_tx: mpsc::Sender<events::NodeEventType>,
+  #[cfg(feature = "events")] event_tx: mpsc::Sender<NodeEventEmittedInfo>,
 ) -> (Option<MinerCommunication>, Vec<JoinHandle<()>>) {
   // Only spaws thread if mining is enabled
   if mine_config.enabled {
