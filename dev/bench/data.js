@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1666992251746,
+  "lastUpdate": 1667243190545,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -744,6 +744,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 118143,
             "range": "± 90",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "d51d3f6e493041641f46469fe125ab6a22f50f22": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "d51d3f6e493041641f46469fe125ab6a22f50f22",
+          "message": "change file writing in node\n\na trait was created in `persistence.rs` to decouple the node from the block file writting",
+          "timestamp": "2022-10-31T15:58:39-03:00",
+          "tree_id": "6cfc7aa7cbca7930c80ebfe4f59fa398860c0149",
+          "url": "https://github.com/Kindelia/Kindelia/commit/d51d3f6e493041641f46469fe125ab6a22f50f22",
+          "original_ref": "thread-file",
+          "parent": "0bd087ed715d543fc310eb64335698b54f5b56ae"
+        },
+        "date": 1667243189606,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2466359,
+            "range": "± 72491",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 47306,
+            "range": "± 2304",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 32595,
+            "range": "± 1112",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 137552,
+            "range": "± 4895",
             "unit": "ns/iter"
           }
         ]
@@ -1532,6 +1582,6 @@ window.BENCHMARK_DATA = {
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "dev": "f6cd027297077e214d35c33e7c9b473b33f35bb6",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
-    "thread-file": "0bd087ed715d543fc310eb64335698b54f5b56ae"
+    "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22"
   }
 }
