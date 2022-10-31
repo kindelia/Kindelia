@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667243190545,
+  "lastUpdate": 1667243192315,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1572,6 +1572,44 @@ window.BENCHMARK_DATA = {
             "value": 97,
             "unit": "blocks",
             "range": 4.242640687119285
+          }
+        ]
+      },
+      "d51d3f6e493041641f46469fe125ab6a22f50f22": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "d51d3f6e493041641f46469fe125ab6a22f50f22",
+          "message": "change file writing in node\n\na trait was created in `persistence.rs` to decouple the node from the block file writting",
+          "timestamp": "2022-10-31T15:58:39-03:00",
+          "tree_id": "6cfc7aa7cbca7930c80ebfe4f59fa398860c0149",
+          "url": "https://github.com/Kindelia/Kindelia/commit/d51d3f6e493041641f46469fe125ab6a22f50f22",
+          "original_ref": "thread-file",
+          "parent": "0bd087ed715d543fc310eb64335698b54f5b56ae"
+        },
+        "date": 1667243191640,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.09468431513511227,
+            "unit": "Percent",
+            "range": 0.03791649674565663
+          },
+          {
+            "name": "Failed Mining",
+            "value": 570.5,
+            "unit": "Logs",
+            "range": 16.263455967290593
           }
         ]
       }
