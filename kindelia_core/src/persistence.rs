@@ -1,11 +1,14 @@
-use std::io::{Read, Write, Result as IoResult, Error, ErrorKind};
-use std::hash::{Hash, BuildHasher};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::hash::{BuildHasher, Hash};
+use std::io::{Error, ErrorKind, Read, Result as IoResult, Write};
 use std::ops::Deref;
-use crate::hvm::{CompFunc, Func, compile_func};
-use crate::bits::ProtoSerialize;
+use std::path::PathBuf;
+use std::sync::{mpsc, Arc};
 
+use crate::bits::ProtoSerialize;
+use crate::hvm::{compile_func, CompFunc, Func};
+use crate::node::HashedBlock;
+use crate::util::bitvec_to_bytes;
 
 /// Trait that represents serialization of a type to memory.
 /// `disk_serialize` expects a sink to write to and returns the amount of bytes written
@@ -28,8 +31,8 @@ impl DiskSer for u8 {
     let mut buf = [0; 1];
     let bytes_read = source.read(&mut buf)?;
     match bytes_read {
-      0 => { Ok(None) }
-      _ => { Ok(Some(u8::from_le_bytes(buf))) }
+      0 => Ok(None),
+      _ => Ok(Some(u8::from_le_bytes(buf))),
     }
   }
 }
@@ -38,14 +41,14 @@ impl DiskSer for i128 {
     sink.write(&self.to_le_bytes())
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<i128>> {
-    const BYTES : usize = (i128::BITS / 8) as usize;
-    const AT_MOST : usize = BYTES-1;
+    const BYTES: usize = (i128::BITS / 8) as usize;
+    const AT_MOST: usize = BYTES - 1;
     let mut buf = [0; BYTES];
     let bytes_read = source.read(&mut buf)?;
     match bytes_read {
-      0 => { Ok(None) }
-      1..=AT_MOST => { Err(Error::from(ErrorKind::UnexpectedEof)) }
-      _ => { Ok(Some(i128::from_le_bytes(buf))) }
+      0 => Ok(None),
+      1..=AT_MOST => Err(Error::from(ErrorKind::UnexpectedEof)),
+      _ => Ok(Some(i128::from_le_bytes(buf))),
     }
   }
 }
@@ -58,14 +61,14 @@ impl DiskSer for u128 {
     sink.write(&self.to_le_bytes())
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<u128>> {
-    const BYTES : usize = (u128::BITS / 8) as usize;
-    const AT_MOST : usize = BYTES-1;
+    const BYTES: usize = (u128::BITS / 8) as usize;
+    const AT_MOST: usize = BYTES - 1;
     let mut buf = [0; BYTES];
     let bytes_read = source.read(&mut buf)?;
     match bytes_read {
-      0 => { Ok(None) }
-      1..=AT_MOST => { Err(Error::from(ErrorKind::UnexpectedEof)) }
-      _ => { Ok(Some(u128::from_le_bytes(buf))) }
+      0 => Ok(None),
+      1..=AT_MOST => Err(Error::from(ErrorKind::UnexpectedEof)),
+      _ => Ok(Some(u128::from_le_bytes(buf))),
     }
   }
 }
@@ -75,14 +78,14 @@ impl DiskSer for u64 {
     sink.write(&self.to_le_bytes())
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<u64>> {
-    const BYTES : usize = (u64::BITS / 8) as usize;
-    const AT_MOST : usize = BYTES-1;
+    const BYTES: usize = (u64::BITS / 8) as usize;
+    const AT_MOST: usize = BYTES - 1;
     let mut buf = [0; BYTES];
     let bytes_read = source.read(&mut buf)?;
     match bytes_read {
-      0 => { Ok(None) }
-      1..=AT_MOST => { Err(Error::from(ErrorKind::UnexpectedEof)) }
-      _ => { Ok(Some(u64::from_le_bytes(buf))) }
+      0 => Ok(None),
+      1..=AT_MOST => Err(Error::from(ErrorKind::UnexpectedEof)),
+      _ => Ok(Some(u64::from_le_bytes(buf))),
     }
   }
 }
@@ -110,16 +113,15 @@ where
       let val = V::disk_deserialize(source)?;
       if let Some(val) = val {
         slf.insert(key, val);
-      }
-      else {
+      } else {
         return Err(Error::from(ErrorKind::UnexpectedEof));
-      }     
+      }
     }
     Ok(Some(slf))
   }
 }
 
-impl <K> DiskSer for Vec<K>
+impl<K> DiskSer for Vec<K>
 where
   K: DiskSer,
 {
@@ -129,12 +131,12 @@ where
       let elem_size = elem.disk_serialize(sink)?;
       total_written += elem_size;
     }
-    Ok(total_written)      
+    Ok(total_written)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
     let mut res = Vec::new();
     while let Some(elem) = K::disk_deserialize(source)? {
-        res.push(elem);
+      res.push(elem);
     }
     Ok(Some(res))
   }
@@ -155,7 +157,7 @@ where
 }
 
 impl DiskSer for CompFunc {
-  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     let func_buff = self.func.proto_serialized().to_bytes();
     let size = func_buff.len() as u128;
     let written1 = size.disk_serialize(sink)?;
@@ -174,16 +176,16 @@ impl DiskSer for CompFunc {
       let func = &Func::proto_deserialized(&bit_vec::BitVec::from_bytes(&buf))
         .ok_or_else(|| Error::from(ErrorKind::InvalidData))?; // invalid data? which error is better?
       let func = compile_func(func, false)
-        .map_err(|_| Error::from(ErrorKind::InvalidData))?; // TODO: return error in deserialization? 
+        .map_err(|_| Error::from(ErrorKind::InvalidData))?; // TODO: return error in deserialization?
       Ok(Some(func))
-    }
-    else {
+    } else {
       Ok(None)
     }
   }
-} 
+}
 
-impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer for [T; N]
+impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer
+  for [T; N]
 {
   fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     let mut total_written = 0;
@@ -191,7 +193,7 @@ impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer for [T; N
       let elem_size = elem.disk_serialize(sink)?;
       total_written += elem_size;
     }
-    Ok(total_written)      
+    Ok(total_written)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
     let mut res: [T; N] = [T::default(); N];
@@ -204,11 +206,11 @@ impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer for [T; N
       }
     }
     Ok(Some(res))
-  } 
+  }
 }
 
 impl DiskSer for crate::crypto::Hash {
-  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{ 
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     self.0.disk_serialize(sink)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
@@ -251,6 +253,62 @@ impl DiskSer for crate::hvm::Loc {
           None => Err(Error::from(ErrorKind::InvalidData))
         }
       }
+    }
+  }
+}
+
+// Node persistence
+// ================
+
+/// A block writter interface, used to tell the node
+/// how it should write a block (in file system, in a mocked container, etc).
+pub trait BlockWritter {
+  fn write_block(&self, height: u128, block: HashedBlock);
+}
+
+/// Represents the information passed in the FileWritter channels.
+type FileWritterChannelInfo = (u128, HashedBlock);
+
+/// A file system writter for the node
+pub struct FileWritter {
+  tx: mpsc::Sender<FileWritterChannelInfo>,
+}
+
+impl FileWritter {
+  /// This function spawns a thread that will receive the blocks
+  /// from the node and will write them in the filesystem. As the
+  /// thread is not joined here, it will become detached, only ending
+  /// when the process execution ends.
+  ///
+  /// But this function is only used in `node start` function, therefore
+  /// this thread will be terminated together with the other node threads (mining, events, etc).
+  pub fn new(path: PathBuf) -> Self {
+    let (tx, rx) = mpsc::channel::<FileWritterChannelInfo>();
+    std::thread::spawn(move || {
+      let blocks_path = path.join("blocks"); // where the blocks is saved
+                                             // for each message received
+      while let Ok((height, block)) = rx.recv() {
+        // create file path
+        let file_path =
+          blocks_path.join(format!("{:0>16x}.kindelia_block.bin", height));
+        // create file buffer
+        let file_buff = bitvec_to_bytes(&block.proto_serialized());
+        // write file
+        std::fs::write(file_path, file_buff)
+          .expect("Couldn't save block to disk.");
+      }
+    });
+
+    FileWritter { tx }
+  }
+}
+
+impl BlockWritter for FileWritter {
+  fn write_block(&self, height: u128, block: HashedBlock) {
+    // try to send the info for the file writter
+    // if an error occurr, print it
+    if let Err(err) = self.tx.send((height, block)) {
+      eprintln!("Could not save block of height {}: {}", height, err);
     }
   }
 }

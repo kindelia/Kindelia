@@ -21,6 +21,7 @@ use crate::constants;
 use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
+use crate::persistence::{BlockWritter, FileWritter};
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
@@ -246,7 +247,7 @@ pub enum InclusionState {
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 #[rustfmt::skip]
-pub struct Node<C: ProtoComm> {
+pub struct Node<C: ProtoComm, W: BlockWritter> {
   pub data_path    : PathBuf,                           // path where files are saved
   pub network_id   : u32,                               // Network ID / magic number
   pub comm         : C,                                 // UDP socket
@@ -269,7 +270,7 @@ pub struct Node<C: ProtoComm> {
 
   #[cfg(feature = "events")]
   pub event_emitter : mpsc::Sender<NodeEventEmittedInfo>,
-  pub file_writter  : mpsc::Sender<BlockFile>,
+  pub block_writter : W,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -713,14 +714,14 @@ pub fn miner_loop(
 // Node
 // ----
 
-impl<C: ProtoComm> Node<C> {
+impl<C: ProtoComm, W: BlockWritter> Node<C, W> {
   pub fn new(
     data_path: PathBuf,
     network_id: u32,
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
-    file_writter: mpsc::Sender<BlockFile>,
+    block_writter: W,
     #[cfg(feature = "events")] event_emitter: mpsc::Sender<
       NodeEventEmittedInfo,
     >,
@@ -759,7 +760,7 @@ impl<C: ProtoComm> Node<C> {
 
       #[cfg(feature = "events")]
       event_emitter: event_emitter.clone(),
-      file_writter: file_writter,
+      block_writter,
       query_recv : query_receiver,
       miner_comm,
     };
@@ -931,19 +932,10 @@ impl<C: ProtoComm> Node<C> {
               // 3. Saves overwritten blocks to disk
               // TODO: on separate thread
               for bhash_comp in must_compute.iter().rev() {
-                let file_path = self.get_blocks_path().join(format!(
-                  "{:0>16x}.kindelia_block.bin",
-                  self.height[bhash_comp]
-                ));
-                let file_writter_result = self
-                  .file_writter
-                  .send((file_path, self.block[bhash_comp].clone()));
-                if let Err(err) = file_writter_result {
-                  eprintln!(
-                    "Could not save block {:x} in disk: {}",
-                    bhash_comp, err
-                  );
-                }
+                let block_height = self.height[bhash_comp];
+                self
+                  .block_writter
+                  .write_block(block_height, self.block[bhash_comp].clone());
               }
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
@@ -1620,9 +1612,9 @@ impl<C: ProtoComm> Node<C> {
     self.load_blocks();
 
     // A task that is executed continuously on the main loop
-    struct Task<C: ProtoComm> {
+    struct Task<C: ProtoComm, W: BlockWritter> {
       pub delay: u128,
-      pub action: fn(&mut Node<C>) -> (),
+      pub action: fn(&mut Node<C, W>) -> (),
     }
 
     // The vector of tasks
@@ -1716,21 +1708,6 @@ impl<C: ProtoComm> Node<C> {
 
 // Main Thread
 // ===========
-
-type BlockFile = (PathBuf, HashedBlock);
-
-pub fn spawn_file_writter() -> (mpsc::Sender<BlockFile>, JoinHandle<()>) {
-  let (file_writter_tx, file_writter_rx) = mpsc::channel::<BlockFile>();
-  let thread_handle = std::thread::spawn(move || {
-    while let Ok((file_path, block)) = file_writter_rx.recv() {
-      let file_buff = bitvec_to_bytes(&block.proto_serialized());
-      std::fs::write(file_path, file_buff)
-        .expect("Couldn't save block to disk.");
-    }
-  });
-
-  (file_writter_tx, thread_handle)
-}
 
 pub fn spawn_miner(
   mine_config: MineConfig,
