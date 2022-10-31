@@ -247,15 +247,16 @@ pub enum InclusionState {
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 #[rustfmt::skip]
 pub struct Node<C: ProtoComm> {
-  pub data_path  : PathBuf,                           // path where files are saved
-  pub network_id : u32,                               // Network ID / magic number
-  pub comm       : C,                                 // UDP socket
-  pub addr       : C::Address,                        // UDP port
-  pub runtime    : Runtime,                           // Kindelia's runtime
+  pub data_path    : PathBuf,                           // path where files are saved
+  pub network_id   : u32,                               // Network ID / magic number
+  pub comm         : C,                                 // UDP socket
+  pub addr         : C::Address,                        // UDP port
+  pub runtime      : Runtime,                           // Kindelia's runtime
   pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
-  pub pool       : PriorityQueue<Transaction, u64>,   // transactions to be mined
-  pub peers      : PeersStore<C::Address>,            // peers store and state control
-  pub tip        : U256,                              // current tip
+  pub pool         : PriorityQueue<Transaction, u64>,   // transactions to be mined
+  pub peers        : PeersStore<C::Address>,            // peers store and state control
+  pub genesis_hash : U256,
+  pub tip        : U256,                           // current tip
   pub block      : U256Map<HashedBlock>,           // block hash -> block
   pub pending    : U256Map<HashedBlock>,           // block hash -> downloaded block, waiting for ancestors
   pub ancestor   : U256Map<U256>,                  // block hash -> hash of its most recent missing ancestor (shortcut jump table)
@@ -732,10 +733,6 @@ impl<C: ProtoComm> Node<C> {
 
     let runtime = init_runtime(data_path.join("heaps"), &genesis_stmts);
 
-    // eprintln!("genesis hash: {:#34x}", genesis_hash);
-    // eprintln!("   zero hash: {:#34x}", hash_u256(u256(0)));
-    // eprintln!("  empty hash: {:#34x}", hash_bytes(&[]));
-
     #[rustfmt::skip]
     let mut node = Node {
       data_path,
@@ -746,6 +743,7 @@ impl<C: ProtoComm> Node<C> {
       pool     : PriorityQueue:: new(),
       peers    : PeersStore:: new(),
 
+      genesis_hash,
       tip      : genesis_hash,
       block    : u256map_from([(genesis_hash, genesis_block)]),
       pending  : u256map_new(),
@@ -1602,6 +1600,7 @@ impl<C: ProtoComm> Node<C> {
   }
 
   pub fn main(mut self) -> ! {
+    eprintln!("Genesis hash: {:#34x}", self.genesis_hash);
     eprintln!("UDP/protocol port: {}", self.addr);
     eprintln!("Initial peers: ");
     for peer in self.peers.get_all_active() {

@@ -68,6 +68,7 @@ pub struct BlockInfo {
   height: Option<u128>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum AddBlockEvent {
   AlreadyIncluded,
