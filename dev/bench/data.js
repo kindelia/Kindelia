@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667339293306,
+  "lastUpdate": 1667339479356,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -866,34 +866,34 @@ window.BENCHMARK_DATA = {
           "timestamp": "2022-11-01T18:35:05-03:00",
           "tree_id": "4120f31b513f7828e92e207c7dc73a5860c28e49",
           "url": "https://github.com/Kindelia/Kindelia/commit/84d820a8b1cb7b36acb87489c35ce252669d5d71",
-          "original_ref": "dev",
-          "parent": "cc230f03466d02026ebe8bb0a7a1abdb45328ff3"
+          "original_ref": "v0.1.5",
+          "parent": "0000000000000000000000000000000000000000"
         },
-        "date": 1667339290777,
+        "date": 1667339477434,
         "tool": "cargo",
         "benches": [
           {
             "name": "kvm_tree_sum",
-            "value": 1723890,
-            "range": "± 36662",
+            "value": 2207986,
+            "range": "± 85900",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_serialize",
-            "value": 33845,
-            "range": "± 195",
+            "value": 50450,
+            "range": "± 23",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_deserialize",
-            "value": 24059,
-            "range": "± 17",
+            "value": 35107,
+            "range": "± 19",
             "unit": "ns/iter"
           },
           {
             "name": "deserialize_block_with_txs",
-            "value": 110819,
-            "range": "± 135",
+            "value": 146357,
+            "range": "± 180",
             "unit": "ns/iter"
           }
         ]
@@ -1880,6 +1880,7 @@ window.BENCHMARK_DATA = {
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "dev": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
-    "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22"
+    "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22",
+    "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
   }
 }
