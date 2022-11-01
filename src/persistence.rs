@@ -216,3 +216,41 @@ impl DiskSer for crate::crypto::Hash {
     Ok(hash.map(crate::crypto::Hash))
   }
 }
+
+impl DiskSer for crate::hvm::RawCell {
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{
+    (**self).disk_serialize(sink)
+  }
+  fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
+    let cell = u128::disk_deserialize(source)?;
+    match cell {
+      None => Ok(None),
+      Some(num) => {
+        let rawcell = crate::hvm::RawCell::new(num);
+        match rawcell {
+          Some(rawcell) => Ok(Some(rawcell)),
+          None => Err(Error::from(ErrorKind::InvalidData))
+        }
+      }
+    }
+  }
+}
+
+impl DiskSer for crate::hvm::Loc {
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{ 
+    (**self).disk_serialize(sink)
+  }
+  fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
+    let loc = u64::disk_deserialize(source)?;
+    match loc {
+      None => Ok(None),
+      Some(num) => {
+        let loc = crate::hvm::Loc::new(num);
+        match loc {
+          Some(loc) => Ok(Some(loc)),
+          None => Err(Error::from(ErrorKind::InvalidData))
+        }
+      }
+    }
+  }
+}

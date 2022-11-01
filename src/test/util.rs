@@ -10,7 +10,7 @@ use crate::constants;
 use crate::common::{Name, U120};
 use crate::hvm::{
   self, read_term, show_term, Rollback, Runtime, Statement, StatementInfo,
-  Term, U128_NONE,
+  Term, U128_NONE, U64_NONE,
 };
 use crate::node;
 
@@ -24,7 +24,7 @@ pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
 // Aux types
 
 pub type Validator =
-  (&'static str, fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool);
+  (&'static str, fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -45,7 +45,7 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
   fn view_rollback_ticks_go(
     rt: &Runtime,
     back: &Arc<Rollback>,
-  ) -> Vec<Option<u128>> {
+  ) -> Vec<Option<u64>> {
     match &**back {
       Rollback::Nil => return Vec::new(),
       Rollback::Cons { keep, head, tail, life } => {
@@ -64,7 +64,7 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
     .rev()
     .map(|x| {
       if let Some(x) = x {
-        format!("{}", if *x != U128_NONE { *x } else { 0 })
+        format!("{}", if *x != U64_NONE { *x } else { 0 })
       } else {
         "___________".to_string()
       }
@@ -81,8 +81,8 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct RuntimeStateTest {
   checksum: u64,
-  mana: u128,
-  size: i128,
+  mana: u64,
+  size: u64,
 }
 impl RuntimeStateTest {
   pub fn new(fn_names: &[&str], rt: &mut Runtime) -> RuntimeStateTest {
@@ -117,7 +117,7 @@ pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
 // RUNTIME ROLLBACK
 pub fn rollback(
   rt: &mut Runtime,
-  tick: u128,
+  tick: u64,
   pre_code: Option<&str>,
   code: Option<&str>,
   validators: &[Validator],
@@ -141,7 +141,7 @@ pub fn rollback(
 
 pub fn advance(
   rt: &mut Runtime,
-  tick: u128,
+  tick: u64,
   code: Option<&str>,
   validators: &[Validator],
 ) {
@@ -171,7 +171,7 @@ pub fn rollback_simple(
   code: &str,
   fn_names: &[&str],
   total_tick: u128,
-  rollback_tick: u128,
+  rollback_tick: u64,
   validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
@@ -212,11 +212,11 @@ pub fn rollback_path(
   pre_code: &str,
   code: &str,
   fn_names: &[&str],
-  path: &[u128],
+  path: &[u64],
   validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
-  let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
+  let mut states_store: HashMap<u64, Vec<RuntimeStateTest>> = HashMap::new();
   let mut insert_state = |rt: &mut Runtime| {
     let state = RuntimeStateTest::new(fn_names, rt);
     let vec = states_store.get_mut(&rt.get_tick());
@@ -275,7 +275,7 @@ where
 // ===========
 // validations
 
-fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
+fn validate<P: Fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool>(
   rt: &mut Runtime,
   name: &str,
   predicate: P,

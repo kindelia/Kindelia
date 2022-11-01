@@ -210,6 +210,7 @@ impl IsEnabled for i16 {}
 impl IsEnabled for i32 {}
 impl IsEnabled for i64 {}
 impl IsEnabled for isize {}
+impl IsEnabled for crate::hvm::Loc {}
 
 #[cfg(not(debug_assertions))]
 impl<T: IsEnabled> Hasher for NoHashHasher<T> {

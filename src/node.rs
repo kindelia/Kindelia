@@ -944,12 +944,12 @@ impl<C: ProtoComm> Node<C> {
               let mut tick = self.height[&old_bhash];
 
               let runtime_old_tick = self.runtime.get_tick();
-              self.runtime.rollback(tick);
+              self.runtime.rollback(tick as u64);
 
               let old = (&self.block[&cur_tip], self.height[&cur_tip]);
               let new = (&self.block[&new_tip], self.height[&new_tip]);
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
-              let ticks = (runtime_old_tick, self.runtime.get_tick());
+              let ticks = (runtime_old_tick as u128, self.runtime.get_tick() as u128);
               emit_event!(
                 self.event_emitter,
                 NodeEventType::reorg(old, new, common, ticks, work),
@@ -959,7 +959,7 @@ impl<C: ProtoComm> Node<C> {
 
               // 5. Finds the last block included on the reverted runtime state
               //    On the example above, we'd find `new_bhash = B`
-              while tick > self.runtime.get_tick() {
+              while tick as u64 > self.runtime.get_tick() {
                 must_compute.push(new_bhash);
                 new_bhash = self.block[&new_bhash].prev;
                 tick -= 1;
