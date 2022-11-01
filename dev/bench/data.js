@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667243192315,
+  "lastUpdate": 1667318305471,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -794,6 +794,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 137552,
             "range": "± 4895",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "cc230f03466d02026ebe8bb0a7a1abdb45328ff3": {
+        "commit": {
+          "author": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "committer": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "distinct": true,
+          "id": "cc230f03466d02026ebe8bb0a7a1abdb45328ff3",
+          "message": "adding Loc and RawCell types",
+          "timestamp": "2022-11-01T12:50:42-03:00",
+          "tree_id": "2ad7958ba922776f1956253b0fdaf9a13d4f9290",
+          "url": "https://github.com/Kindelia/Kindelia/commit/cc230f03466d02026ebe8bb0a7a1abdb45328ff3",
+          "original_ref": "dev",
+          "parent": "f6cd027297077e214d35c33e7c9b473b33f35bb6"
+        },
+        "date": 1667318304696,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 1720184,
+            "range": "± 24586",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 31554,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 27568,
+            "range": "± 78",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 113789,
+            "range": "± 180",
             "unit": "ns/iter"
           }
         ]
@@ -1618,7 +1668,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "f6cd027297077e214d35c33e7c9b473b33f35bb6",
+    "dev": "cc230f03466d02026ebe8bb0a7a1abdb45328ff3",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22"
   }
