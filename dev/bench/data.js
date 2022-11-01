@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667339482637,
+  "lastUpdate": 1667339576823,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -860,40 +860,40 @@ window.BENCHMARK_DATA = {
             "name": "Kelvin Steiner",
             "username": "steinerkelvin"
           },
-          "distinct": true,
+          "distinct": false,
           "id": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
           "message": "bump version to 0.1.5",
           "timestamp": "2022-11-01T18:35:05-03:00",
           "tree_id": "4120f31b513f7828e92e207c7dc73a5860c28e49",
           "url": "https://github.com/Kindelia/Kindelia/commit/84d820a8b1cb7b36acb87489c35ce252669d5d71",
-          "original_ref": "v0.1.5",
-          "parent": "0000000000000000000000000000000000000000"
+          "original_ref": "master",
+          "parent": "cce0b57f7913842dcd51f047c7bd3b0d27c608a2"
         },
-        "date": 1667339477434,
+        "date": 1667339574965,
         "tool": "cargo",
         "benches": [
           {
             "name": "kvm_tree_sum",
-            "value": 2207986,
-            "range": "± 85900",
+            "value": 2240988,
+            "range": "± 94691",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_serialize",
-            "value": 50450,
-            "range": "± 23",
+            "value": 40617,
+            "range": "± 3961",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_deserialize",
-            "value": 35107,
-            "range": "± 19",
+            "value": 30578,
+            "range": "± 2597",
             "unit": "ns/iter"
           },
           {
             "name": "deserialize_block_with_txs",
-            "value": 146357,
-            "range": "± 180",
+            "value": 134552,
+            "range": "± 5976",
             "unit": "ns/iter"
           }
         ]
@@ -1881,6 +1881,7 @@ window.BENCHMARK_DATA = {
     "dev": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22",
-    "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
+    "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
+    "master": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
   }
 }
