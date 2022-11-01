@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::hvm::EXT_SIZE;
 
 // U120
+// ====
 
 /// A unsigned 120 bit integer: the native unboxed integer type
 /// of the Kindelia's HVM.
@@ -15,26 +16,6 @@ use crate::hvm::EXT_SIZE;
 #[serde(into = "String", try_from = "&str")]
 #[repr(transparent)]
 pub struct U120(u128);
-
-impl crate::persistence::DiskSer for U120 {
-  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
-    self.0.disk_serialize(sink)
-  }
-  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
-    let num = u128::disk_deserialize(source)?;
-    match num {
-      None => Ok(None),
-      Some(num) => {
-        if num >> 120 == 0 {
-          Ok(Some(U120(num)))
-        }
-        else {
-          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-        }
-      }
-    }
-  }
-}
 
 impl U120 {
   pub const ZERO: U120 = U120(0);
@@ -310,6 +291,7 @@ impl TryFrom<u128> for Name {
 }
 
 impl From<U120> for Name {
+  // FIXME: checked conversion (TryFrom)
   fn from(num: U120) -> Self {
     assert!(*num >> Name::MAX_BITS == 0);
     Name(*num)
@@ -336,6 +318,29 @@ impl FromStr for Name {
   type Err = String;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     s.try_into()
+  }
+}
+
+// Persistence
+// ===========
+
+impl crate::persistence::DiskSer for U120 {
+  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+    let num = u128::disk_deserialize(source)?;
+    match num {
+      None => Ok(None),
+      Some(num) => {
+        if num >> 120 == 0 {
+          Ok(Some(U120(num)))
+        }
+        else {
+          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+        }
+      }
+    }
   }
 }
 

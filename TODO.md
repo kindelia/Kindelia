@@ -2,6 +2,8 @@
 
 ## 1
 
+- separate khvm language module
+- split to multiple crates
 - sugar big numbers in hex format
 - fix 1 tick rollback request causing 256 ticks rollback
 - don't write to disk while loading blocks

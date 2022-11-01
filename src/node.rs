@@ -1151,9 +1151,9 @@ impl<C: ProtoComm> Node<C> {
     // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
     match request {
       NodeRequest::GetStats { tx } => {
-        let tick = self.runtime.get_tick().try_into().unwrap();
-        let mana = self.runtime.get_mana().try_into().unwrap();
-        let size = self.runtime.get_size().try_into().unwrap();
+        let tick = self.runtime.get_tick();
+        let mana = self.runtime.get_mana();
+        let size = self.runtime.get_size();
         let mut fun_count = 0;
         self.runtime.reduce_with(&mut fun_count, |acc, heap| {
           *acc += heap.get_fn_count();

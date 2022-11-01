@@ -9,7 +9,7 @@ use rstest_reuse::{apply, template};
 
 use crate::common::{Name, U120};
 use crate::hvm::{
-  self, init_map, read_statements, readback_term, show_term, view_statements,
+  self, init_u128_map, read_statements, readback_term, show_term, view_statements,
   view_term, Rollback, Runtime, StatementInfo, Term, Heap
 };
 use crate::node;

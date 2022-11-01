@@ -4,10 +4,11 @@ use crate::{
   crypto,
   common::{Name, U120},
   hvm::{
-    init_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
-    Heap, Map, NameMap, U120Map, LocMap, Nodes, Oper, Ownrs, Rollback, Rule, Runtime, Loc, RawCell,
+    init_u128_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
+    Heap, Nodes, Oper, Ownrs, Rollback, Rule, Runtime, Loc, RawCell,
     Statement, Store, Term, Var, Indxs,
   },
+  util::{U128Map, NameMap, U120Map, LocMap},
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
 };
@@ -145,9 +146,9 @@ pub fn nodes() -> impl Strategy<Value = Nodes> {
 
 pub fn map<A: std::fmt::Debug>(
   s: impl Strategy<Value = A>,
-) -> impl Strategy<Value = Map<A>> {
+) -> impl Strategy<Value = U128Map<A>> {
   vec((any::<u128>(), s), 0..10).prop_map(|v| {
-    let mut m = init_map();
+    let mut m = init_u128_map();
     for (k, v) in v {
       m.insert(k, v);
     }

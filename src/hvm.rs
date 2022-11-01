@@ -6,11 +6,11 @@
 //
 // Kindelia-HVM's memory model
 // ---------------------------
-// 
+//
 // The runtime memory consists of just a vector of u128 pointers. That is:
 //
 //   Mem ::= Vec<Ptr>
-// 
+//
 // A pointer has 3 parts:
 //
 //   Ptr ::= TT AAAAAAAAAAAAAAAAAA BBBBBBBBBBBB
@@ -23,7 +23,7 @@
 //
 // There are 12 possible tags:
 //
-//   Tag | Val | Meaning  
+//   Tag | Val | Meaning
 //   ----| --- | -------------------------------
 //   DP0 |   0 | a variable, bound to the 1st argument of a duplication
 //   DP1 |   1 | a variable, bound to the 2nd argument of a duplication
@@ -72,7 +72,7 @@
 //   Lambda Node:
 //   - [0] => either and ERA or an ERA pointing to the variable location
 //   - [1] => pointer to the lambda's body
-//   
+//
 //   Application Node:
 //   - [0] => pointer to the lambda
 //   - [1] => pointer to the argument
@@ -255,28 +255,25 @@ use serde_with::{serde_as, DisplayFromStr};
 use crate::bits::ProtoSerialize;
 use crate::constants;
 use crate::crypto;
-use crate::util::{U128_SIZE, mask};
-use crate::util;
+use crate::util::{self, U128_SIZE, mask};
+use crate::util::{LocMap, NameMap, U128Map, U120Map};
 use crate::NoHashHasher::NoHashHasher;
 
 use crate::common::{Name, U120};
 use crate::persistence::DiskSer;
-// Types
-// -----
 
+/// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
+/// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
+/// later on. Below is a description of each variant:
+/// - Var: variable. It stores up to 12 6-bit letters.
+/// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
+/// - Lam: an affine lambda. Written as: `@var body`.
+/// - App: a lambda application. Written as: `(!f x)`.
+/// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
+/// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
+/// - Num: an unsigned integer.
+/// - Op2: a numeric operation.
 
-// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
-// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
-// later on. Below is a description of each variant:
-// - Var: variable. Note an u128 is used instead of a string. It stores up to 12 6-bit letters.
-// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
-// - Lam: an affine lambda. Written as: `λvar body`.
-// - App: a lambda application. Written as: `(f x)`.
-// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
-// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
-// - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
-// - Op2: a numeric operation.
-/// A native HVM term
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Term {
   Var { name: Name },
@@ -289,23 +286,24 @@ pub enum Term {
   Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
 }
 
-// A native HVM 120-bit machine integer operation
-// - Add: addition
-// - Sub: subtraction
-// - Mul: multiplication
-// - Div: division
-// - Mod: modulo
-// - And: bitwise and
-// - Or : bitwise or
-// - Xor: bitwise xor
-// - Shl: shift left
-// - Shr: shift right
-// - Ltn: less than
-// - Lte: less than or equal
-// - Eql: equal
-// - Gte: greater than or equal
-// - Gtn: greater than
-// - Neq: not equal
+/// A native HVM 120-bit machine integer operation.
+/// - Add: addition
+/// - Sub: subtraction
+/// - Mul: multiplication
+/// - Div: division
+/// - Mod: modulo
+/// - And: bitwise and
+/// - Or : bitwise or
+/// - Xor: bitwise xor
+/// - Shl: shift left
+/// - Shr: shift right
+/// - Ltn: less than
+/// - Lte: less than or equal
+/// - Eql: equal
+/// - Gte: greater than or equal
+/// - Gtn: greater than
+/// - Neq: not equal
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Oper {
   Add, Sub, Mul, Div,
@@ -313,12 +311,6 @@ pub enum Oper {
   Shl, Shr, Ltn, Lte,
   Eql, Gte, Gtn, Neq,
 }
-
-// A u64 HashMap
-pub type Map<T> = util::U128Map<T>;
-pub type NameMap<T> = util::NameMap<T>;
-pub type U120Map<T> = util::U120Map<T>;
-pub type LocMap<T> = util::LocMap<T>;
 
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -410,7 +402,11 @@ pub enum Statement {
   Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
 }
 
-// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
+/// RawCell
+/// =======
+
+/// An HVM memory cell/word.
+/// It can point to an HVM node, a variable ocurrence, or store an unboxed U120.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
 #[repr(transparent)]
 pub struct RawCell(u128);
@@ -423,36 +419,41 @@ impl std::ops::Deref for RawCell {
 }
 
 impl RawCell {
-  
-  pub const fn new(num: u128) -> Option<Self> {
-    let tag = num >> (EXT_SIZE + VAL_SIZE);
-    if matches!(tag, CellTag) {
-      Some(RawCell(num))
-    }
-    else {
-      None
-    }
+  pub const fn new(value: u128) -> Option<Self> {
+    // TODO: CellTag
+    // let tag = num >> (EXT_SIZE + VAL_SIZE);
+    // if matches!(tag, CellTag) {
+    //   Some(RawCell(num))
+    // } else {
+    //   None
+    // }
+    Some(RawCell(value))
   }
-  // for testing purposes only
-  // TODO: remove this 
-  pub const fn new_unchecked(num: u128) -> Self {
-    RawCell(num)
+  /// For testing purposes only. TODO: remove.
+  pub const fn new_unchecked(value: u128) -> Self {
+    RawCell(value)
   }
 }
+
+// Loc
+// ===
+
+/// A HVM memory location, or "pointer".
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
 #[repr(transparent)]
 pub struct Loc(u64);
 
+impl crate::NoHashHasher::IsEnabled for crate::hvm::Loc {}
+
 impl Loc {
-  pub const _MAX : u64 = (1 << VAL_SIZE) -1;
-  pub const MAX : Loc = Loc(Loc::_MAX);
+  pub const _MAX: u64 = (1 << VAL_SIZE) - 1;
+  pub const MAX: Loc = Loc(Loc::_MAX);
 
   pub fn new(num: u64) -> Option<Self> {
     if num >> VAL_SIZE == 0 {
       Some(Loc(num))
-    }
-    else {
+    } else {
       None
     }
   }
@@ -488,7 +489,7 @@ pub struct Nodes {
 
 #[derive(Debug, Clone, PartialEq)] 
 pub struct Hashs {
-  pub stmt_hashes: Map<crypto::Hash>,
+  pub stmt_hashes: U128Map<crypto::Hash>,
 }
 
 // HVM's memory state (nodes, functions, metadata, statistics)
@@ -677,7 +678,7 @@ pub const EXT_MASK: u128 = mask(EXT_SIZE, EXT_POS);
 pub const TAG_MASK: u128 = mask(TAG_SIZE, TAG_POS);
 pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 
-// TODO: refactor to enums with u128 repr
+// TODO: refactor to enums with u8 / u128 repr
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -869,11 +870,13 @@ fn count_allocs(body: &Term) -> u64 {
 // Utils
 // -----
 
-pub fn init_map<A>() -> Map<A> {
+// TODO: is this necessary? could it be genetic at least..?
+
+pub fn init_name_map<A>() -> NameMap<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
-pub fn init_name_map<A>() -> NameMap<A> {
+pub fn init_u128_map<A>() -> U128Map<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
@@ -1350,7 +1353,7 @@ pub fn init_heap() -> Heap {
     arit: Arits { arits: init_name_map() },
     ownr: Ownrs { ownrs: init_name_map() },
     indx: Indxs { indxs: init_name_map() },
-    hash: Hashs { stmt_hashes: init_map() },
+    hash: Hashs { stmt_hashes: init_u128_map() },
     tick: U64_NONE,
     time: U128_NONE,
     meta: U128_NONE,
@@ -1881,10 +1884,12 @@ impl Runtime {
     }
   }
 
-  /// Gets the subject of a signature
-  /// If there is no subject, return 0.
-  /// If there is a subject but it cannot be parsed correctly, return 1
-  /// Else, return the signature.
+  /// Gets the subject of a signature.
+  ///
+  /// - If there is no signature, returns `0`.
+  /// - If there is a signature, but subject cannot be retrieved correctly,
+  ///   returns `1`.
+  /// - Else, returns the subject.
   pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: &crypto::Hash) -> U120 {
     match sign {
       None       => U120::from_u128_unchecked(0),
