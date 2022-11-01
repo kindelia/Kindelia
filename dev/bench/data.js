@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667318307131,
+  "lastUpdate": 1667339291671,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -844,6 +844,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 113789,
             "range": "± 180",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "84d820a8b1cb7b36acb87489c35ce252669d5d71": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "distinct": true,
+          "id": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
+          "message": "bump version to 0.1.5",
+          "timestamp": "2022-11-01T18:35:05-03:00",
+          "tree_id": "4120f31b513f7828e92e207c7dc73a5860c28e49",
+          "url": "https://github.com/Kindelia/Kindelia/commit/84d820a8b1cb7b36acb87489c35ce252669d5d71",
+          "original_ref": "dev",
+          "parent": "cc230f03466d02026ebe8bb0a7a1abdb45328ff3"
+        },
+        "date": 1667339290777,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 1723890,
+            "range": "± 36662",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 33845,
+            "range": "± 195",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 24059,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 110819,
+            "range": "± 135",
             "unit": "ns/iter"
           }
         ]
@@ -1748,7 +1798,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "cc230f03466d02026ebe8bb0a7a1abdb45328ff3",
+    "dev": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22"
   }
