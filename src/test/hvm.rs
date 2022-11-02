@@ -534,10 +534,10 @@ fn shadowing(temp_dir: TempPath) {
 )]
 #[case(
   "dup a b = (! @x @y {Pair (+ x #1) y} #2); {Pair (!a #10) (!b #20)}",
-  "{Pair ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #10) ((@x1 @x2 {Pair (+ x1 #1) x2} #2) #20)}"
+  "{Pair (!(!@x1 @x2 {Pair (+ x1 #1) x2} #2) #10) (!(!@x1 @x2 {Pair (+ x1 #1) x2} #2) #20)}"
 )]
 #[case("dup a ~ = @~ #2; a", "@x0 #2")]
-#[case("dup a ~ = @x (!x #4); a", "@x0 (x0 #4)")]
+#[case("dup a ~ = @x (!x #4); a", "@x0 (!x0 #4)")]
 #[case("dup a ~ = @x dup b ~ = x; b; a", "@x0 x0")]
 #[case("dup a ~ = @x dup ~ b = x; b; a", "@x0 x0")]
 #[case("dup a ~ = dup b ~ = @x (+ x #2); b; a", "@x0 (+ x0 #2)")]
