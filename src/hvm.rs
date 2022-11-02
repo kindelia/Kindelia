@@ -3632,8 +3632,8 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
                   NUM => {
                     //println!("Didn't match because of NUM. i={} {} {}", i, get_val(ask_arg(rt, term, i)), get_val(cond));
                     let same_tag = get_tag(ask_arg(rt, term, i)) == NUM;
-                    let same_val = get_val(ask_arg(rt, term, i)) == get_val(cond);
-                    matched = matched && same_tag && same_val;
+                    let same_num = get_num(ask_arg(rt, term, i)) == get_num(cond);
+                    matched = matched && same_tag && same_num;
                   }
                   CTR => {
                     //println!("Didn't match because of CTR. i={} {} {}", i, get_tag(ask_arg(rt, term, i)), get_val(cond));
