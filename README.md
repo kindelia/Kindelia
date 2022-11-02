@@ -1,19 +1,27 @@
 Kindelia: a minimal peer-to-peer computer that isn't a cryptocurrency
----------------------------------------------------------------------
+=====================================================================
 
-Kindelia is a peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a minimalist redesign of Ethereum's idea, built upon type theoretic foundations. Differences include:
+Kindelia is a peer-to-peer functional computer capable of hosting decentralized
+apps that stay up forever. Essentially, it is a minimalist redesign of
+Ethereum's idea, built upon type-theoretic foundations. Differences include:
 
-- There is **no native coin**. It is not a cryptocurrency. It is a cryptocomputer.
+- There is **no native coin**. It is not a cryptocurrency. It is a
+  crypto-computer.
 
-- It can host **functional apps** cheaply, thanks to the [HVM](https://github.com/kindelia/hvm) and its functional opcodes.
+- It can host **functional apps** cheaply, thanks to the
+  [HVM](https://github.com/kindelia/hvm) and its functional opcodes.
 
-- It can host **real-time apps** cheaply, thanks to 1s blocks, reversible heaps and zero-cost SSTOREs.
+- It can host **real-time apps** cheaply, thanks to 1s blocks, reversible heaps
+  and zero-cost SSTOREs.
 
-- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+ LOC used by Go Ethereum.
+- It is **extremely minimalist**. The Rust client has about 10k LOC, vs 600k+
+  LOC used by Go Ethereum.
 
-- It is **maximally decentralized**, not just tech-wise. Political and economical centralization are addressed.
+- It is **maximally decentralized**, not just tech-wise. Political and
+  economical centralization are addressed.
 
-- It is **PoW-based**, forever. In fact, PoS isn't even possible, since there is no built-in currency.
+- It is **PoW-based**, forever. PoS isn't even possible, since there is no
+  built-in currency.
 
 Resources
 ---------
