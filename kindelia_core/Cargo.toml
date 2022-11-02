@@ -1,5 +1,5 @@
 [package]
-name = "kindelia"
+name = "kindelia_core"
 version = "0.1.5"
 edition = "2021"
 description = "An efficient, secure cryptocomputer."
@@ -10,16 +10,22 @@ repository = "https://github.com/Kindelia/Kindelia"
 default = ["events"]
 events = ["dep:futures-util"]
 
+[lib]
+bench = false
+
 [[bin]]
 name = "kindelia"
 path = "src/main.rs"
 bench = false
 
+[[bench]]
+name = "bench"
+harness = false
+
 # Docs: https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
 [dependencies]
-kindelia_core = { path = "../kindelia_core" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"

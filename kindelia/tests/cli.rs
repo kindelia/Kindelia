@@ -3,9 +3,9 @@ mod cli {
   use std::convert::TryInto;
   use std::env::temp_dir;
 
-  use kindelia::api;
-  use kindelia::common;
-  use kindelia::hvm;
+  use kindelia_core::api;
+  use kindelia_core::common;
+  use kindelia_core::hvm;
 
   const CRATE_NAME: &str = assert_cmd::crate_name!();
 
@@ -103,7 +103,7 @@ mod cli {
   #[case("example/block_5.kdl")]
   #[case("genesis.kdl")]
   fn test_ser_deser(#[case] file: &str) {
-    use kindelia::bits::ProtoSerialize;
+    use kindelia_core::bits::ProtoSerialize;
     let txt = std::fs::read_to_string(file).unwrap();
     let stmts = hvm::parse_code(&txt).unwrap();
     let str_0 = hvm::view_statements(&stmts);
