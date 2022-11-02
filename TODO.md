@@ -2,8 +2,10 @@
 
 ## 1
 
-- separate khvm language module
 - split to multiple crates
+- separate khvm language module
+- organize `kindelia_code::config`
+- split HTTP client, server and websockets crate
 - add total work field to heartbeat event
 - sugar big numbers in hex format
 - fix 1 tick rollback request causing 256 ticks rollback

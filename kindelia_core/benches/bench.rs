@@ -4,11 +4,12 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use primitive_types::U256;
 
-use kindelia::bits::ProtoSerialize;
-use kindelia::hvm;
-use kindelia::net;
-use kindelia::node;
-use kindelia::util;
+use kindelia_core::bits::ProtoSerialize;
+use kindelia_core::constants;
+use kindelia_core::hvm;
+use kindelia_core::net;
+use kindelia_core::node;
+use kindelia_core::util;
 
 // KHVM
 // ====
@@ -17,14 +18,15 @@ use kindelia::util;
 // ----
 
 pub fn temp_dir() -> PathBuf {
-  let path = std::env::temp_dir().join(format!("crate.{:x}", fastrand::u128(..)));
+  let path =
+    std::env::temp_dir().join(format!("crate.{:x}", fastrand::u128(..)));
   std::fs::create_dir_all(&path).unwrap();
   path
 }
 
 pub fn init_runtime(path: PathBuf) -> hvm::Runtime {
   let genesis_stmts =
-    hvm::parse_code(kindelia::constants::GENESIS_CODE).expect("Genesis code parses.");
+    hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
   hvm::init_runtime(path, &genesis_stmts)
 }
 
@@ -106,12 +108,8 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
 
     let body = node::Body::fill_from(std::iter::repeat(transaction));
 
-    let block = node::Block {
-      body,
-      prev: U256::MAX,
-      time: u128::MAX,
-      meta: u128::MAX,
-    };
+    let block =
+      node::Block { body, prev: U256::MAX, time: u128::MAX, meta: u128::MAX };
 
     let se_bits = block.proto_serialized();
     let se_bytes = util::bitvec_to_bytes(&se_bits);

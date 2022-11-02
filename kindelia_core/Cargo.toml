@@ -13,11 +13,6 @@ events = ["dep:futures-util"]
 [lib]
 bench = false
 
-[[bin]]
-name = "kindelia"
-path = "src/main.rs"
-bench = false
-
 [[bench]]
 name = "bench"
 harness = false

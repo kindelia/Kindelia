@@ -16,14 +16,14 @@ use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
 use crate::bits::{serialized_block_size, ProtoSerialize};
 use crate::common::Name;
-use crate::config::{MineConfig, NodeConfig};
+use crate::config::MineConfig;
 use crate::constants;
 use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::util::*;
 
-use crate::events::{self, NodeEventEmittedInfo, NodeEventType};
+use crate::events::{NodeEventEmittedInfo, NodeEventType};
 use crate::heartbeat;
 
 macro_rules! emit_event {
@@ -1707,68 +1707,7 @@ impl<C: ProtoComm> Node<C> {
 // Main Thread
 // ===========
 
-// TODO: I don't know why 'static is needed here or why it works
-pub fn start<C: ProtoComm + 'static>(
-  config: NodeConfig,
-  comm: C,
-  initial_peers: Vec<C::Address>,
-) {
-  eprintln!("Starting Kindelia node...");
-  eprintln!("Store path: {:?}", config.data_path);
-  eprintln!("Network ID: {:#X}", config.network_id);
-
-  // Threads
-  let mut threads = vec![];
-
-  // Events
-  #[cfg(feature = "events")]
-  let event_tx = {
-    let addr = comm.get_addr();
-    let (event_tx, event_thrds) = events::spawn_event_handlers(
-      config.ws.unwrap_or_default(),
-      config.ui,
-      addr,
-    );
-    threads.extend(event_thrds);
-    event_tx
-  };
-
-  // Mining
-  let (miner_comm, miner_thrds) = spawn_miner(config.mining, event_tx.clone());
-  threads.extend(miner_thrds.into_iter());
-
-  // Node state object
-  let (node_query_sender, node) = Node::new(
-    config.data_path,
-    config.network_id,
-    initial_peers,
-    comm,
-    miner_comm,
-    #[cfg(feature = "events")]
-    event_tx,
-  );
-
-  // Spawns the API thread
-  if let Some(api_config) = config.api {
-    let api_thread = std::thread::spawn(move || {
-      crate::api::server::http_api_loop(node_query_sender, api_config);
-    });
-    threads.push(api_thread);
-  }
-
-  // Spawns the node thread
-  let node_thread = std::thread::spawn(move || {
-    node.main();
-  });
-  threads.insert(0, node_thread);
-
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
-  }
-}
-
-fn spawn_miner(
+pub fn spawn_miner(
   mine_config: MineConfig,
   #[cfg(feature = "events")] event_tx: mpsc::Sender<NodeEventEmittedInfo>,
 ) -> (Option<MinerCommunication>, Vec<JoinHandle<()>>) {

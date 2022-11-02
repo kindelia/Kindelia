@@ -19,8 +19,6 @@ pub struct NodeConfig {
   #[builder(default)]
   pub ui: Option<UiConfig>,
   #[builder(default)]
-  pub api: Option<ApiConfig>,
-  #[builder(default)]
   pub ws: Option<WsConfig>,
 }
 
