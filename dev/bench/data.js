@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667393009288,
+  "lastUpdate": 1667393010571,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1920,6 +1920,86 @@ window.BENCHMARK_DATA = {
             "value": 97.5,
             "unit": "blocks",
             "range": 6.363961030678928
+          }
+        ]
+      },
+      "dbad136730793ee607693441faaa967464f52926": {
+        "commit": {
+          "author": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "committer": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "distinct": true,
+          "id": "dbad136730793ee607693441faaa967464f52926",
+          "message": "fix matching on numbers\n\n`get_val` only returns the first 48 bits of a number, and if we only\ncompare that part, all number matching will be done modulo 2^48 (which\nis really bad).",
+          "timestamp": "2022-11-02T09:33:08-03:00",
+          "tree_id": "cd0bcfa4ca6dcd5228c1461b6f6ddb2d756adb10",
+          "url": "https://github.com/Kindelia/Kindelia/commit/dbad136730793ee607693441faaa967464f52926",
+          "original_ref": "dev",
+          "parent": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
+        },
+        "date": 1667393010222,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.1572231068648266,
+            "unit": "Percent",
+            "range": 0.008250830187412034
+          },
+          {
+            "name": "Failed Mining",
+            "value": 2064.5,
+            "unit": "Logs",
+            "range": 13.435028842544403
+          },
+          {
+            "name": "Rollback count in node 0",
+            "value": 9.5,
+            "unit": "rollbacks",
+            "range": 3.5355339059327378
+          },
+          {
+            "name": "Rollback distance mean in node 0",
+            "value": 2.0297619047619047,
+            "unit": "blocks",
+            "range": 1.254272742818995
+          },
+          {
+            "name": "Real rollback distance mean in node 0",
+            "value": 8.244047619047619,
+            "unit": "blocks",
+            "range": 0.46298658291976286
+          },
+          {
+            "name": "Blocks between rollbacks in node 0",
+            "value": 7.946969696969697,
+            "unit": "blocks",
+            "range": 1.72491199653082
+          },
+          {
+            "name": "Computed blocks in node 0",
+            "value": 177.5,
+            "unit": "blocks",
+            "range": 28.991378028648448
+          },
+          {
+            "name": "Height of node 0",
+            "value": 95,
+            "unit": "blocks",
+            "range": 1.4142135623730951
+          },
+          {
+            "name": "Mean height",
+            "value": 95,
+            "unit": "blocks",
+            "range": 1.4142135623730951
           }
         ]
       }
