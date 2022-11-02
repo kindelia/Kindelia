@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667393010571,
+  "lastUpdate": 1667402212821,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -944,6 +944,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 133848,
             "range": "± 2320",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "8d9555a80a08ad7db93d2710a8fb28c9aa8d3fa4": {
+        "commit": {
+          "author": {
+            "email": "me@steinerkelvin.dev",
+            "name": "Kelvin Steiner",
+            "username": "steinerkelvin"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8d9555a80a08ad7db93d2710a8fb28c9aa8d3fa4",
+          "message": "Merge pull request #205 from developedby/mandatory-excl\n\nMake ! obligatory before lambda application. Allow any function and ctr name",
+          "timestamp": "2022-11-02T12:08:35-03:00",
+          "tree_id": "396e816f452259d0289c8d1f0b111c32e7544ff9",
+          "url": "https://github.com/Kindelia/Kindelia/commit/8d9555a80a08ad7db93d2710a8fb28c9aa8d3fa4",
+          "original_ref": "dev",
+          "parent": "dbad136730793ee607693441faaa967464f52926"
+        },
+        "date": 1667402211552,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2197523,
+            "range": "± 69578",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 38459,
+            "range": "± 1029",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 34009,
+            "range": "± 1712",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 137573,
+            "range": "± 157",
             "unit": "ns/iter"
           }
         ]
@@ -2008,7 +2058,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "dbad136730793ee607693441faaa967464f52926",
+    "dev": "8d9555a80a08ad7db93d2710a8fb28c9aa8d3fa4",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
