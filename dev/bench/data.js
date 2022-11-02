@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667339579566,
+  "lastUpdate": 1667393009288,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -894,6 +894,56 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 134552,
             "range": "± 5976",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "dbad136730793ee607693441faaa967464f52926": {
+        "commit": {
+          "author": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "committer": {
+            "email": "leonardo.ribeiro.santiago@gmail.com",
+            "name": "santi",
+            "username": "o-santi"
+          },
+          "distinct": true,
+          "id": "dbad136730793ee607693441faaa967464f52926",
+          "message": "fix matching on numbers\n\n`get_val` only returns the first 48 bits of a number, and if we only\ncompare that part, all number matching will be done modulo 2^48 (which\nis really bad).",
+          "timestamp": "2022-11-02T09:33:08-03:00",
+          "tree_id": "cd0bcfa4ca6dcd5228c1461b6f6ddb2d756adb10",
+          "url": "https://github.com/Kindelia/Kindelia/commit/dbad136730793ee607693441faaa967464f52926",
+          "original_ref": "dev",
+          "parent": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
+        },
+        "date": 1667393008728,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 2108748,
+            "range": "± 37703",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 37683,
+            "range": "± 698",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 32814,
+            "range": "± 476",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 133848,
+            "range": "± 2320",
             "unit": "ns/iter"
           }
         ]
@@ -1878,7 +1928,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
+    "dev": "dbad136730793ee607693441faaa967464f52926",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
