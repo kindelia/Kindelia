@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667404055058,
+  "lastUpdate": 1667484612621,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1044,6 +1044,38 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 136088,
             "range": "± 6103",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
+          "message": "make mock impl for `BlockStorage` and `ProtoComm`\n\nalso adds a benchmarking for loading 10000 blocks in a Node",
+          "timestamp": "2022-11-03T11:01:45-03:00",
+          "tree_id": "012fd4e51c98fc19cc910fb59322e96feb046dc4",
+          "url": "https://github.com/Kindelia/Kindelia/commit/59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
+          "original_ref": "thread-file",
+          "parent": "d51d3f6e493041641f46469fe125ab6a22f50f22"
+        },
+        "date": 1667484611322,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "block_loading",
+            "value": 421695374,
+            "range": "± 840328",
             "unit": "ns/iter"
           }
         ]
@@ -2270,7 +2302,7 @@ window.BENCHMARK_DATA = {
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "dev": "70751b889009c61c82a442e469b10d1a160cb022",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
-    "thread-file": "d51d3f6e493041641f46469fe125ab6a22f50f22",
+    "thread-file": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
     "master": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
   }
