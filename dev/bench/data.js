@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667484614636,
+  "lastUpdate": 1667504314535,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1076,6 +1076,56 @@ window.BENCHMARK_DATA = {
             "name": "block_loading",
             "value": 421695374,
             "range": "± 840328",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "ca0f37c462f343719af383fc5e55f9598d460aa2": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "ca0f37c462f343719af383fc5e55f9598d460aa2",
+          "message": "fix network test",
+          "timestamp": "2022-11-03T16:29:35-03:00",
+          "tree_id": "fdafef3263941150a161a07e4424a05aa609ac3d",
+          "url": "https://github.com/Kindelia/Kindelia/commit/ca0f37c462f343719af383fc5e55f9598d460aa2",
+          "original_ref": "fix-network-simulation",
+          "parent": "0000000000000000000000000000000000000000"
+        },
+        "date": 1667504313454,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 1772258,
+            "range": "± 16445",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 31604,
+            "range": "± 53",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 27424,
+            "range": "± 155",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 111894,
+            "range": "± 115",
             "unit": "ns/iter"
           }
         ]
@@ -2342,6 +2392,7 @@ window.BENCHMARK_DATA = {
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
-    "master": "84d820a8b1cb7b36acb87489c35ce252669d5d71"
+    "master": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
+    "fix-network-simulation": "ca0f37c462f343719af383fc5e55f9598d460aa2"
   }
 }
