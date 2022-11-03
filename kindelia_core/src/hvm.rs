@@ -2989,7 +2989,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut Name
     if name == Name::NONE {
       link(rt, loc, Era());
     } else {
-      let got = vars_data.entry(name).or_insert(Vec::new());
+      let got = vars_data.entry(name).or_default();
       got.push(lnk);
       link(rt, loc, Era());
     }
@@ -3670,7 +3670,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
                   }
                   //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_ptr(var));
                   if !rule_var.erase {
-                    let arr = vars_data.entry(rule_var.name).or_insert(Vec::new());
+                    let arr = vars_data.entry(rule_var.name).or_default();
                     arr.push(var);
                   } else {
                     // Collects unused argument

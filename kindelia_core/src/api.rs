@@ -77,7 +77,7 @@ impl Display for Hash {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut be_bytes = [0u8; 32];
     self.value.to_big_endian(&mut be_bytes);
-    f.write_fmt(format_args!("0x{}", hex::encode(&be_bytes)))
+    f.write_fmt(format_args!("0x{}", hex::encode(be_bytes)))
   }
 }
 
@@ -140,7 +140,7 @@ impl Display for HexStatement {
 impl TryFrom<&str> for HexStatement {
   type Error = String;
   fn try_from(value: &str) -> Result<Self, Self::Error> {
-    let bytes = hex::decode(&value).map_err(|e| e.to_string())?;
+    let bytes = hex::decode(value).map_err(|e| e.to_string())?;
     let bits = util::bytes_to_bitvec(&bytes);
     let stmt =
       hvm::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())

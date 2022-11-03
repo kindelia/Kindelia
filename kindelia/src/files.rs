@@ -44,7 +44,7 @@ impl FileInput {
     match self {
       FileInput::Path { path } => {
         // read from file
-        std::fs::read_to_string(&path)
+        std::fs::read_to_string(path)
           .map_err(|e| format!("Cannot read from '{:?}' file: {}", path, e))
       }
       FileInput::Stdin => {

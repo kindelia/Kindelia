@@ -120,7 +120,7 @@ where
     // Doing this way because of issue #469 toml-rs
     let props: Vec<_> = prop_path.split('.').collect();
     for prop in props {
-      value = value.get(&prop)?;
+      value = value.get(prop)?;
     }
     Some(value.clone())
   }
