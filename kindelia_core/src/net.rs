@@ -138,3 +138,41 @@ impl ProtoComm for UdpSocket {
     }
   }
 }
+
+/// Created for testing purposes
+pub struct EmptySocket;
+
+/// Created for testing purposes
+#[derive(Eq, Hash, Debug, Copy, Clone, PartialEq, serde::Serialize)]
+pub struct EmptyAddress;
+
+impl std::fmt::Display for EmptyAddress {
+  fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    Ok(())
+  }
+}
+
+impl ProtoSerialize for EmptyAddress {
+  fn proto_deserialize(
+    _: &BitVec,
+    _: &mut usize,
+    _: &mut crate::bits::Names,
+  ) -> Option<Self> {
+    Some(EmptyAddress)
+  }
+  fn proto_serialize(&self, _: &mut BitVec, _: &mut crate::bits::Names) {}
+}
+
+impl ProtoAddr for EmptyAddress {}
+
+impl ProtoComm for EmptySocket {
+  type Address = EmptyAddress;
+
+  fn get_addr(&self) -> Self::Address {
+    EmptyAddress
+  }
+  fn proto_recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)> {
+    vec![]
+  }
+  fn proto_send(&mut self, _: Vec<Self::Address>, _: &Message<Self::Address>) {}
+}

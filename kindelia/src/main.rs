@@ -647,7 +647,7 @@ pub fn start_node<C: ProtoComm + 'static>(
 
   // Mining
   let (miner_comm, miner_thrds) =
-    spawn_miner(node_config.mining, event_tx.clone());
+    spawn_miner(node_config.mining, Some(event_tx.clone()));
   threads.extend(miner_thrds.into_iter());
 
   // File writter
@@ -662,7 +662,7 @@ pub fn start_node<C: ProtoComm + 'static>(
     miner_comm,
     file_writter,
     #[cfg(feature = "events")]
-    event_tx,
+    Some(event_tx),
   );
 
   // Spawns the API thread

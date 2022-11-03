@@ -361,3 +361,13 @@ impl BlockStorage for SimpleFileStorage {
     self.enabled = true
   }
 }
+
+#[derive(Clone)]
+struct EmptyStorage;
+
+impl BlockStorage for EmptyStorage {
+  fn enable(&mut self) {}
+  fn disable(&mut self) {}
+  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, _: F) {}
+  fn write_block(&self, _: u128, _: HashedBlock) {}
+}

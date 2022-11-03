@@ -30,16 +30,20 @@ use crate::heartbeat;
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
     #[cfg(feature = "events")]
-    if let Err(_) = $tx.send(($event, get_time_micro())) {
-      eprintln!("Could not send event");
+    if let Some(ref tx) = $tx {
+      if let Err(_) = tx.send(($event, get_time_micro())) {
+        eprintln!("Could not send event");
+      }
     }
   };
 
   ($tx: expr, $event: expr, tags = $($tag:ident),+) => {
     #[cfg(feature = "events")]
     // #[cfg(any(all, $($tag),+))]
-    if let Err(_) = $tx.send(($event, get_time_micro())) {
-      eprintln!("Could not send event");
+    if let Some(ref tx) = $tx {
+      if let Err(_) = tx.send(($event, get_time_micro())) {
+        eprintln!("Could not send event");
+      }
     }
   };
 }
@@ -251,6 +255,7 @@ pub struct Node<C: ProtoComm, S: BlockStorage> {
   pub network_id : u32,                               // Network ID / magic number
   pub comm       : C,                                 // UDP socket
   pub addr       : C::Address,                        // UDP port
+  pub storage    : S,                                 // A `BlockStorage` implementation
   pub runtime    : Runtime,                           // Kindelia's runtime
   pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
   pub pool         : PriorityQueue<Transaction, u64>,   // transactions to be mined
@@ -268,8 +273,7 @@ pub struct Node<C: ProtoComm, S: BlockStorage> {
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
 
   #[cfg(feature = "events")]
-  pub event_emitter : mpsc::Sender<NodeEventEmittedInfo>,
-  pub storage : S,
+  pub event_emitter : Option<mpsc::Sender<NodeEventEmittedInfo>>,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -304,8 +308,8 @@ impl<A: ProtoAddr> PeersStore<A> {
   pub fn see_peer(
     &mut self,
     peer: Peer<A>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) {
     let addr = peer.address;
@@ -353,8 +357,8 @@ impl<A: ProtoAddr> PeersStore<A> {
 
   fn timeout(
     &mut self,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) {
     let mut forget = Vec::new();
@@ -678,7 +682,9 @@ impl MinerCommunication {
 pub fn miner_loop(
   mut miner_comm: MinerCommunication,
   slow_mining: Option<u64>,
-  #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventEmittedInfo>,
+  #[cfg(feature = "events")] event_emitter: Option<
+    mpsc::Sender<NodeEventEmittedInfo>,
+  >,
 ) {
   loop {
     if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
@@ -721,8 +727,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     comm: C,
     miner_comm: Option<MinerCommunication>,
     storage: S,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -1692,7 +1698,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
 
 pub fn spawn_miner(
   mine_config: MineConfig,
-  #[cfg(feature = "events")] event_tx: mpsc::Sender<NodeEventEmittedInfo>,
+  #[cfg(feature = "events")] event_tx: Option<
+    mpsc::Sender<NodeEventEmittedInfo>,
+  >,
 ) -> (Option<MinerCommunication>, Vec<JoinHandle<()>>) {
   // Only spaws thread if mining is enabled
   if mine_config.enabled {

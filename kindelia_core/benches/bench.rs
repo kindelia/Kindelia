@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-
+use kindelia_core::crypto::Keccakable;
+use kindelia_core::persistence;
+use kindelia_core::persistence::BlockStorage;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
@@ -47,15 +49,17 @@ criterion_group!(khvm, khvm_benches);
 
 // Serialization
 // =============
-
-fn max_message() -> node::Message<net::Address> {
-  let max_block = node::Block {
+fn max_block() -> node::Block {
+  node::Block {
     body: node::Body { data: vec![u8::MAX; node::MAX_BODY_SIZE] },
     prev: U256::MAX,
     time: u128::MAX,
     meta: u128::MAX,
-  };
+  }
+}
 
+fn max_message() -> node::Message<net::Address> {
+  let max_block = max_block();
   let max_peer = node::Peer {
     address: net::Address::IPv4 {
       val0: u8::MAX,
@@ -134,4 +138,33 @@ criterion_group!(
   block_with_txs_deserialize
 );
 
-criterion_main!(khvm, serialization);
+fn block_loading(c: &mut Criterion) {
+  // creates a temporary directory
+  let dir = temp_dir();
+  // creates the storage with temp dir
+  let storage = persistence::SimpleFileStorage::new(dir.clone());
+
+  // writes `n` max blocks in disk
+  let n = 1000;
+  let block = max_block();
+  for i in 0..n {
+    storage.write_block(i, block.clone().hashed());
+  }
+
+  // empty `ProtoComm` to pass the created node
+  let comm = net::EmptySocket;
+
+  // create Node
+  let (_, mut node) =
+    node::Node::new(dir.clone(), 0, vec![], comm, None, storage, None);
+
+  // benchmark block loading
+  c.bench_function("block_loading", |b| b.iter(|| node.load_blocks()));
+
+  // removes all the blocks
+  std::fs::remove_dir_all(&dir).unwrap();
+}
+
+criterion_group!(node, block_loading);
+
+criterion_main!(khvm, serialization, node);
