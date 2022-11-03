@@ -7,8 +7,8 @@ use std::sync::{mpsc, Arc};
 
 use crate::bits::ProtoSerialize;
 use crate::hvm::{compile_func, CompFunc, Func};
-use crate::node::HashedBlock;
-use crate::util::bitvec_to_bytes;
+use crate::node::{self, HashedBlock};
+use crate::util::{self, bitvec_to_bytes};
 
 /// Trait that represents serialization of a type to memory.
 /// `disk_serialize` expects a sink to write to and returns the amount of bytes written
@@ -262,19 +262,28 @@ impl DiskSer for crate::hvm::Loc {
 
 /// A block writter interface, used to tell the node
 /// how it should write a block (in file system, in a mocked container, etc).
-pub trait BlockWritter {
+pub trait BlockStorage
+where
+  Self: Clone,
+{
   fn write_block(&self, height: u128, block: HashedBlock);
+  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, then: F);
+  fn disable(&mut self);
+  fn enable(&mut self);
 }
 
 /// Represents the information passed in the FileWritter channels.
 type FileWritterChannelInfo = (u128, HashedBlock);
 
+#[derive(Clone)]
 /// A file system writter for the node
-pub struct FileWritter {
+pub struct SimpleFileStorage {
   tx: mpsc::Sender<FileWritterChannelInfo>,
+  path: PathBuf,
+  enabled: bool,
 }
 
-impl FileWritter {
+impl SimpleFileStorage {
   /// This function spawns a thread that will receive the blocks
   /// from the node and will write them in the filesystem. As the
   /// thread is not joined here, it will become detached, only ending
@@ -283,32 +292,72 @@ impl FileWritter {
   /// But this function is only used in `node start` function, therefore
   /// this thread will be terminated together with the other node threads (mining, events, etc).
   pub fn new(path: PathBuf) -> Self {
+    // create channel
     let (tx, rx) = mpsc::channel::<FileWritterChannelInfo>();
+    // blocks are stored in `blocks` dir
+    let blocks_path = path.join("blocks");
+    std::fs::create_dir_all(&blocks_path)
+      .expect("Could not create block storage folder");
+
+    let moved_path = blocks_path.clone();
+    // spawn thread for write the blocks files
     std::thread::spawn(move || {
-      let blocks_path = path.join("blocks"); // where the blocks is saved
-                                             // for each message received
+      // for each message received
       while let Ok((height, block)) = rx.recv() {
         // create file path
         let file_path =
-          blocks_path.join(format!("{:0>16x}.kindelia_block.bin", height));
+          moved_path.join(format!("{:0>16x}.kindelia_block.bin", height));
         // create file buffer
         let file_buff = bitvec_to_bytes(&block.proto_serialized());
         // write file
         std::fs::write(file_path, file_buff)
-          .expect("Couldn't save block to disk.");
+          .expect("Couldn't save block to disk."); // remove panick?
       }
     });
 
-    FileWritter { tx }
+    SimpleFileStorage { tx, path: blocks_path, enabled: true }
   }
 }
 
-impl BlockWritter for FileWritter {
+impl BlockStorage for SimpleFileStorage {
   fn write_block(&self, height: u128, block: HashedBlock) {
-    // try to send the info for the file writter
-    // if an error occurr, print it
-    if let Err(err) = self.tx.send((height, block)) {
-      eprintln!("Could not save block of height {}: {}", height, err);
+    // if file storage is enabled
+    if self.enabled {
+      // try to send the info for the file writter
+      // if an error occurr, print it
+      if let Err(err) = self.tx.send((height, block)) {
+        eprintln!("Could not save block of height {}: {}", height, err);
+      }
     }
+  }
+  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, then: F) {
+    let mut file_paths = std::fs::read_dir(&self.path)
+      .unwrap()
+      .map(|entry| {
+        // Extract block height from block file path for fast sort
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let bnum = name.split('.').next().unwrap();
+        let bnum = u64::from_str_radix(bnum, 16).unwrap();
+        (bnum, path)
+      })
+      .collect::<Vec<_>>();
+    file_paths.sort_unstable();
+
+    file_paths
+      .into_iter()
+      .map(|(_, file_path)| {
+        let buffer = std::fs::read(&file_path).unwrap();
+        let block =
+          node::Block::proto_deserialized(&util::bytes_to_bitvec(&buffer));
+        (block, file_path)
+      })
+      .for_each(then);
+  }
+  fn disable(&mut self) {
+    self.enabled = false;
+  }
+  fn enable(&mut self) {
+    self.enabled = true
   }
 }

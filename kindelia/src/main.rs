@@ -28,7 +28,7 @@ use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node;
 use kindelia_core::node::{spawn_miner, Node};
-use kindelia_core::persistence::FileWritter;
+use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
@@ -651,7 +651,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   threads.extend(miner_thrds.into_iter());
 
   // File writter
-  let file_writter = FileWritter::new(node_config.data_path.clone());
+  let file_writter = SimpleFileStorage::new(node_config.data_path.clone());
 
   // Node state object
   let (node_query_sender, node) = Node::new(
