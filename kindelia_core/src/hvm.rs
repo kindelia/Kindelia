@@ -3736,83 +3736,74 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 /// normal form, though, since it stops on WHNFs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
+pub fn compute_at(rt: &mut Runtime, loc: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
   enum StackItem {
-    LinkResolver(Loc),
-    Host(Loc, u64)
+    LinkResolver { loc: Loc },
+    ComputeAt { loc: Loc },
   }
-  let mut stack = vec![StackItem::Host(host, mana)];
-  let mut output = vec![];
-  while !stack.is_empty() {
-    let item = stack.pop().unwrap();
-    match item {
-      StackItem::Host(host, mana) => {
-        let term = ask_lnk(rt, host);
-        let norm = reduce(rt, host, mana)?;
+  fn compute_and_link_arg(stack: &mut Vec<StackItem>, cell: RawCell, arg: u64) {
+    let loc = get_loc(cell, arg);
+    stack.push(StackItem::LinkResolver { loc });
+    stack.push(StackItem::ComputeAt { loc });
+  }
 
-        if term == norm {
-          output.push(Some(term));
-        } else {
+  let mut stack = vec![StackItem::ComputeAt { loc }];
+  let mut output = vec![];
+
+  while let Some(item) = stack.pop() {
+    match item {
+      StackItem::ComputeAt { loc } => {
+        let term = ask_lnk(rt, loc);
+        let norm = reduce(rt, loc, mana)?;
+
+        // if matches!(get_tag(norm), APP) {
+        //   stack.push(StackItem::LinkResolver{ loc: host });
+        //   stack.push(StackItem::ComputeAt { loc: host });
+        // } else {
+        //   output.push(norm);
+        // };
+
+        output.push(norm);
+
+        if term != norm {
           match get_tag(norm) {
             LAM => {
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
+              compute_and_link_arg(&mut stack, norm, 1);
             }
             APP => {
-              let loc_0 = get_loc(norm, 0);
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
-              stack.push(StackItem::LinkResolver(loc_0));
-              stack.push(StackItem::Host(loc_0, mana));
+              compute_and_link_arg(&mut stack, norm, 1);
+              compute_and_link_arg(&mut stack, norm, 0);
             }
             SUP => {
-              let loc_0 = get_loc(norm, 0);
-              let loc_1 = get_loc(norm, 1);
-              stack.push(StackItem::LinkResolver(loc_1));
-              stack.push(StackItem::Host(loc_1, mana));
-              stack.push(StackItem::LinkResolver(loc_0));
-              stack.push(StackItem::Host(loc_0, mana));
+              compute_and_link_arg(&mut stack, norm, 1);
+              compute_and_link_arg(&mut stack, norm, 0);
             }
             DP0 => {
-              let loc_2 = get_loc(norm, 2);
-              stack.push(StackItem::LinkResolver(loc_2));
-              stack.push(StackItem::Host(loc_2, mana));
+              compute_and_link_arg(&mut stack, norm, 2);
             }
             DP1 => {
-              let loc_2 = get_loc(norm, 2);
-              stack.push(StackItem::LinkResolver(loc_2));
-              stack.push(StackItem::Host(loc_2, mana));
+              compute_and_link_arg(&mut stack, norm, 2);
             }
             CTR | FUN => {
               let name = Name::new_unsafe(get_ext(norm));
               let arity = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
               for i in (0..arity).rev() {
-                let loc_i = get_loc(norm, i);
-                stack.push(StackItem::LinkResolver(loc_i));
-                stack.push(StackItem::Host(loc_i, mana));
+                compute_and_link_arg(&mut stack, norm, i);
               }
             }
             _ => {}
           };
-          output.push(Some(norm));
         }
       },
-      StackItem::LinkResolver(loc) => {
-        match output.pop() {
-          Some(lnk) => {
-            if let Some(lnk) = lnk {
-              link(rt, loc, lnk);
-            }
-          }
-          None => panic!("No term to resolve link"),
-        }
+      StackItem::LinkResolver { loc } => {
+        let cell = output.pop().expect("No term to resolve link");
+        link(rt, loc, cell);
       }
     }
   }
+  debug_assert!(output.len() == 1);
   // FIXME: is this always safe? if no, create a runtime error for what could go wrong
-  Ok(output.pop().unwrap().unwrap())
+  Ok(output.pop().expect("Output stack is empty"))
 }
 
 // Debug
@@ -3864,7 +3855,6 @@ fn show_memo(rt: &Runtime) -> String {
   return txt;
 }
 
-// TODO: this should be replaced by readback + view_term
 pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String {
   enum StackItem {
     Term(RawCell),
@@ -3940,7 +3930,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
       let name = names.get(&pos).unwrap_or(&what);
       let nam0 = if ask_lnk(rt, pos + 0) == Era() { String::from("*") } else { format!("a{}", name) };
       let nam1 = if ask_lnk(rt, pos + 1) == Era() { String::from("*") } else { format!("b{}", name) };
-      writeln!(text, "dup {} {} = {};\n", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
+      write!(text, "dup {} {} = {}; ", nam0, nam1, go(rt, ask_lnk(rt, pos + 2), &names, focus)).unwrap();
     }
     text
   }
@@ -3972,7 +3962,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
             }
             LAM => {
               let name = format!("x{}", names.get(&get_loc(term, 0)).unwrap_or(&String::from("?")));
-              output.push(format!("@{}", name));
+              output.push(format!("@{} ", name));
               stack.push(StackItem::Term(ask_arg(rt, term, 1)));
             }
             APP => {
