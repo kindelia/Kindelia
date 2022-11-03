@@ -5,30 +5,36 @@ on:
 
 jobs:
 
-  cargo_check:
-    name: 👁️‍🗨️ Cargo Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+  # # Not needed as we run `cargo clippy`
+  # cargo_check:
+  #   name: 👁️‍🗨️ Cargo Check
+  #   runs-on: ${{ matrix.os }}
+  #   strategy:
+  #     matrix:
+  #       os: [macos-latest, ubuntu-latest, windows-latest]
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: stable
+  #         override: true
+  #     - uses: Swatinem/rust-cache@v1
+  #     - uses: actions-rs/cargo@v1
+  #       with:
+  #         command: check
 
   cargo_test:
     name: 🧪 Cargo Test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [
+          ubuntu-latest,
+          # TODO: run test/clippy on Windows and macOS nightly instead
+          # macos-latest,
+          # windows-latest,
+        ]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

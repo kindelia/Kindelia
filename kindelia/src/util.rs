@@ -51,7 +51,7 @@ pub fn init_config_file(path: &Path) -> Result<(), String> {
     format!("Failed to resolve parent directory for '{}'", path.display())
   })?;
   let default_content = include_str!("../default.toml");
-  std::fs::create_dir_all(&dir_path).map_err(|e| {
+  std::fs::create_dir_all(dir_path).map_err(|e| {
     format!("Could not create '{}' directory: {}", dir_path.display(), e)
   })?;
   std::fs::write(path, default_content)
