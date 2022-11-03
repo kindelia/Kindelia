@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667484612621,
+  "lastUpdate": 1667484614636,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -2292,6 +2292,44 @@ window.BENCHMARK_DATA = {
             "value": 99.1,
             "unit": "blocks",
             "range": 4.6669047558312196
+          }
+        ]
+      },
+      "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
+          "message": "make mock impl for `BlockStorage` and `ProtoComm`\n\nalso adds a benchmarking for loading 10000 blocks in a Node",
+          "timestamp": "2022-11-03T11:01:45-03:00",
+          "tree_id": "012fd4e51c98fc19cc910fb59322e96feb046dc4",
+          "url": "https://github.com/Kindelia/Kindelia/commit/59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
+          "original_ref": "thread-file",
+          "parent": "d51d3f6e493041641f46469fe125ab6a22f50f22"
+        },
+        "date": 1667484613859,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.06225434101199065,
+            "unit": "Percent",
+            "range": 0.016974925216304747
+          },
+          {
+            "name": "Failed Mining",
+            "value": 881,
+            "unit": "Logs",
+            "range": 7.0710678118654755
           }
         ]
       }
