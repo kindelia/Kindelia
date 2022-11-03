@@ -10,7 +10,7 @@ use crate::hvm::{self, Term};
 use crate::net::ProtoComm;
 use crate::node;
 
-use super::{
+use kindelia_core::api::{
   BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, RegInfo, Stats,
 };
 

@@ -15,15 +15,15 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
-use super::NodeRequest;
-use super::u256_to_hex;
-use crate::api::{HexStatement, ReqAnsRecv};
-use crate::bits::ProtoSerialize;
-use crate::config::{ApiConfig};
-use crate::common::Name;
-use crate::hvm::{self, StatementErr, StatementInfo};
-use crate::net::ProtoComm;
-use crate::util::U256;
+use kindelia_core::api::u256_to_hex;
+use kindelia_core::api::NodeRequest;
+use kindelia_core::api::{HexStatement, ReqAnsRecv};
+use kindelia_core::bits::ProtoSerialize;
+use kindelia_core::common::Name;
+use kindelia_core::config::ApiConfig;
+use kindelia_core::hvm::{self, StatementErr, StatementInfo};
+use kindelia_core::net::ProtoComm;
+use kindelia_core::util::U256;
 
 // Util
 // ====
@@ -81,8 +81,7 @@ fn u128_names_to_strings(names: &[u128]) -> Vec<String> {
 
 fn bitvec_to_hex(bits: &BitVec) -> String {
   let bytes = bits.to_bytes();
-  let hex = hex::encode(bytes);
-  hex
+  hex::encode(bytes)
 }
 
 // Errors
@@ -172,8 +171,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
   ) -> T {
     let (request, rx) = req;
     node_query_tx.send(request).unwrap();
-    let result = rx.await.expect("Node query channel closed");
-    result
+    rx.await.expect("Node query channel closed")
   }
 
   let root = warp::path::end().map(|| "UP");

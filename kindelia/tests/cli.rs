@@ -1,11 +1,12 @@
 mod cli {
-  use rstest::rstest;
   use std::convert::TryInto;
   use std::env::temp_dir;
 
-  use kindelia::api;
-  use kindelia::common;
-  use kindelia::hvm;
+  use rstest::rstest;
+
+  use kindelia_core::api;
+  use kindelia_core::common;
+  use kindelia_core::hvm;
 
   const CRATE_NAME: &str = assert_cmd::crate_name!();
 
@@ -40,11 +41,11 @@ mod cli {
   }
 
   #[rstest]
-  #[case("example/block_1.kdl")]
-  #[case("example/block_2.kdl")]
-  #[case("example/block_3.kdl")]
-  #[case("example/block_4.kdl")]
-  #[case("example/block_5.kdl")]
+  #[case("../example/block_1.kdl")]
+  #[case("../example/block_2.kdl")]
+  #[case("../example/block_3.kdl")]
+  #[case("../example/block_4.kdl")]
+  #[case("../example/block_5.kdl")]
   fn serialization(#[case] file: &str) {
     let temp_dir = temp_dir();
     let temp_file =
@@ -80,11 +81,11 @@ mod cli {
   }
 
   #[rstest]
-  #[case("example/block_1.kdl", &["#10", "#65536"])]
-  #[case("example/block_2.kdl", &["#3"])]
-  #[case("example/block_3.kdl", &["#656161725219724531611238334681629285"])]
-  #[case("example/block_4.kdl", &["#42"])]
-  #[case("example/block_5.kdl", &["{Entry #7 #100 {Entry #2 #200 {Empty}}}"])]
+  #[case("../example/block_1.kdl", &["#10", "#65536"])]
+  #[case("../example/block_2.kdl", &["#3"])]
+  #[case("../example/block_3.kdl", &["#656161725219724531611238334681629285"])]
+  #[case("../example/block_4.kdl", &["#42"])]
+  #[case("../example/block_5.kdl", &["{Entry #7 #100 {Entry #2 #200 {Empty}}}"])]
   fn test_examples(#[case] file: &str, #[case] expected_results: &[&str]) {
     let output = kindelia!().args(["test", file]).output().unwrap();
     let err = get_stderr(&output);
@@ -96,14 +97,15 @@ mod cli {
   }
 
   #[rstest]
-  #[case("example/block_1.kdl")]
-  #[case("example/block_2.kdl")]
-  #[case("example/block_3.kdl")]
-  #[case("example/block_4.kdl")]
-  #[case("example/block_5.kdl")]
-  #[case("genesis.kdl")]
+  #[case("../example/block_1.kdl")]
+  #[case("../example/block_2.kdl")]
+  #[case("../example/block_3.kdl")]
+  #[case("../example/block_4.kdl")]
+  #[case("../example/block_5.kdl")]
+  #[case("../kindelia_core/genesis.kdl")]
   fn test_ser_deser(#[case] file: &str) {
-    use kindelia::bits::ProtoSerialize;
+    use kindelia_core::bits::ProtoSerialize;
+    eprintln!("{}", file);
     let txt = std::fs::read_to_string(file).unwrap();
     let stmts = hvm::parse_code(&txt).unwrap();
     let str_0 = hvm::view_statements(&stmts);
@@ -115,21 +117,21 @@ mod cli {
 
   #[rstest]
   #[case(
-    "example/private_key_1_namer",
+    "../example/private_key_1_namer",
     "#656161725219724531611238334681629285"
   )]
   #[case(
-    "example/private_key_2_alice",
+    "../example/private_key_2_alice",
     "#225111118185718227719509163399323998"
   )]
-  #[case("example/private_key_3_bob", "#540402903301314077240655651075245048")]
+  #[case("../example/private_key_3_bob", "#540402903301314077240655651075245048")]
   fn signing_run(#[case] private_key: &str, #[case] expected_result: &str) {
     let temp_dir = temp_dir();
     let temp_file =
       temp_dir.join(format!("crate.{:x}.txt", fastrand::u128(..)));
 
     let output = kindelia!()
-      .args(["sign", "example/block_3.unsig.kdl", "--secret-file", private_key])
+      .args(["sign", "../example/block_3.unsig.kdl", "--secret-file", private_key])
       .output()
       .unwrap();
     let output = get_stdout(&output);
@@ -142,14 +144,14 @@ mod cli {
   }
 
   #[rstest]
-  #[case("example/private_key_1_namer", "4d576ce7dc24f565a7cee2390071191da2b0de13e1fd99c7008225694cf4c21788fe7395ac05091428440fb6e64a0af6d3cdbad53421a46d3d34d49f2864301dd28e774a2a9228434e492ed9c3")]
-  #[case("example/private_key_2_alice", "4d576ce7dc24f565a7cee23980b6cc8dbc97db445ce9db50e5f7cddba5f5088227bcbb1d517aebe61f324ef5bd38c44d544ffc8ae962de6379f20fa638417184d45a6b25365411657889c7f41e")]
-  #[case("example/private_key_3_bob", "4d576ce7dc24f565a7cee239808f479434991302dd2cf82b2b4e4acfe67bbd93d81f496e1da6610498261a2bc92270c58c260d857ff98f761e6afff7f9294feccf28f1f5455cf0e80722f82c6b")]
+  #[case("../example/private_key_1_namer", "4d576ce7dc24f565a7cee2390071191da2b0de13e1fd99c7008225694cf4c21788fe7395ac05091428440fb6e64a0af6d3cdbad53421a46d3d34d49f2864301dd28e774a2a9228434e492ed9c3")]
+  #[case("../example/private_key_2_alice", "4d576ce7dc24f565a7cee23980b6cc8dbc97db445ce9db50e5f7cddba5f5088227bcbb1d517aebe61f324ef5bd38c44d544ffc8ae962de6379f20fa638417184d45a6b25365411657889c7f41e")]
+  #[case("../example/private_key_3_bob", "4d576ce7dc24f565a7cee239808f479434991302dd2cf82b2b4e4acfe67bbd93d81f496e1da6610498261a2bc92270c58c260d857ff98f761e6afff7f9294feccf28f1f5455cf0e80722f82c6b")]
   fn signing(#[case] private_key: &str, #[case] expected_result: &'static str) {
     let assertion = kindelia!()
       .args([
         "sign",
-        "example/block_3.unsig.kdl",
+        "../example/block_3.unsig.kdl",
         "--secret-file",
         private_key,
         "-E",

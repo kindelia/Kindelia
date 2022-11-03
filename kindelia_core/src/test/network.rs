@@ -15,85 +15,85 @@ use crate::node;
 
 use super::util::temp_dir;
 
-#[test]
-#[ignore = "network simulation"]
-fn network() {
-  let simulation_time = std::env::var("SIMULATION_TIME").ok();
+// #[test]
+// #[ignore = "network simulation"]
+// fn network() {
+//   let simulation_time = std::env::var("SIMULATION_TIME").ok();
 
-  let mut graph = UnGraph::new_undirected();
-  let a = graph.add_node(0_u32);
-  let b = graph.add_node(1);
-  let c = graph.add_node(2);
-  let d = graph.add_node(3);
-  let e = graph.add_node(4);
-  graph.extend_with_edges(&[(a, b, RouterMockConnection::new(20, 0.5))]);
-  graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
-  graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
-  graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
+//   let mut graph = UnGraph::new_undirected();
+//   let a = graph.add_node(0_u32);
+//   let b = graph.add_node(1);
+//   let c = graph.add_node(2);
+//   let d = graph.add_node(3);
+//   let e = graph.add_node(4);
+//   graph.extend_with_edges(&[(a, b, RouterMockConnection::new(20, 0.5))]);
+//   graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
+//   graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
+//   graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
 
-  // creates the router
-  let (router_mock, sockets) = RouterMock::from_graph(graph.clone());
-  let mut threads = vec![];
+//   // creates the router
+//   let (router_mock, sockets) = RouterMock::from_graph(graph.clone());
+//   let mut threads = vec![];
 
-  // Spawns the router thread
-  let router_thread = thread::spawn(move || loop {
-    while let Ok(router_message) = router_mock.rx.try_recv() {
-      router_mock.send(&router_message)
-    }
-  });
-  threads.push(router_thread);
-  // Spawns the nodes threads
-  for (socket, idx) in sockets {
-    let initial_peers = graph
-      .neighbors(idx)
-      .map(|node| *graph.node_weight(node).unwrap())
-      .collect();
-    let addr = socket.addr;
-    let socket_thread = thread::spawn(move || {
-      let data_path =
-        temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
+//   // Spawns the router thread
+//   let router_thread = thread::spawn(move || loop {
+//     while let Ok(router_message) = router_mock.rx.try_recv() {
+//       router_mock.send(&router_message)
+//     }
+//   });
+//   threads.push(router_thread);
+//   // Spawns the nodes threads
+//   for (socket, idx) in sockets {
+//     let initial_peers = graph
+//       .neighbors(idx)
+//       .map(|node| *graph.node_weight(node).unwrap())
+//       .collect();
+//     let addr = socket.addr;
+//     let socket_thread = thread::spawn(move || {
+//       let data_path =
+//         temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
 
-      #[cfg(feature = "events")]
-      let ws_config =
-        config::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+//       #[cfg(feature = "events")]
+//       let ws_config =
+//         config::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
 
-      let mine_cfg = config::MineConfigBuilder::default()
-        .enabled(true)
-        .slow_mining(100)
-        .build()
-        .unwrap();
+//       let mine_cfg = config::MineConfigBuilder::default()
+//         .enabled(true)
+//         .slow_mining(100)
+//         .build()
+//         .unwrap();
 
-      let node_cfg = config::NodeConfig {
-        network_id: 0,
-        data_path,
-        mining: mine_cfg,
-        ui: Some(config::UiConfig { json: true, tags: vec![] }),
-        api: None,
-        ws: Some(ws_config), // Some(ws_config),
-      };
-      node::start(node_cfg, socket, initial_peers);
-    });
-    threads.push(socket_thread);
-  }
+//       let node_cfg = config::NodeConfig {
+//         network_id: 0,
+//         data_path,
+//         mining: mine_cfg,
+//         ui: Some(config::UiConfig { json: true, tags: vec![] }),
+//         ws: Some(ws_config), // Some(ws_config),
+//       };
+//       // FIXME:
+//       start_node(node_cfg, socket, initial_peers);
+//     });
+//     threads.push(socket_thread);
+//   }
 
-  if let Some(simulation_time) = simulation_time {
-    if let Ok(simulation_time) = simulation_time.parse() {
-      let killer = thread::spawn(move || {
-        thread::sleep(std::time::Duration::from_secs(simulation_time));
-        std::process::exit(0);
-      });
-      threads.push(killer);
-    }
-  }
+//   if let Some(simulation_time) = simulation_time {
+//     if let Ok(simulation_time) = simulation_time.parse() {
+//       let killer = thread::spawn(move || {
+//         thread::sleep(std::time::Duration::from_secs(simulation_time));
+//         std::process::exit(0);
+//       });
+//       threads.push(killer);
+//     }
+//   }
 
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
-  }
-}
+//   // Joins all threads
+//   for thread in threads {
+//     thread.join().unwrap();
+//   }
+// }
 
 // Simulation implementation
-// ================================
+// =========================
 
 // Simulation address
 

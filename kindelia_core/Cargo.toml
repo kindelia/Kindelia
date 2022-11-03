@@ -1,5 +1,5 @@
 [package]
-name = "kindelia"
+name = "kindelia_core"
 version = "0.1.5"
 edition = "2021"
 description = "An efficient, secure cryptocomputer."
@@ -10,16 +10,17 @@ repository = "https://github.com/Kindelia/Kindelia"
 default = ["events"]
 events = ["dep:futures-util"]
 
-[[bin]]
-name = "kindelia"
-path = "src/main.rs"
+[lib]
 bench = false
+
+[[bench]]
+name = "bench"
+harness = false
 
 # Docs: https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
 [dependencies]
-kindelia_core = { path = "../kindelia_core" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"
@@ -38,24 +39,19 @@ secp256k1 = { version = "0.22.1", features = [
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 sha3 = "0.9.1"
 
-# CLI / configuration
-clap = { version = "3.1.3", features = ["derive"] }
-toml = "0.5.9"
-
 # Datastructures
 bit-vec = "0.6.3"
 # nohash-hasher = "0.2.0" # inlined, because we need u128
 primitive-types = { version = "0.11.1" }
 priority-queue = "1.2.1"
+# num = "0.1.36"
 
 # API
 chrono = "0.4.22"
-reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0.137", features = ["derive"] }
 serde_json = "1.0"
 serde_with = { version = "2.0.0", features = ["hex"] }
 tokio = { version = "1.19.1", features = ["full"] }
-tokio-stream = { version = "0.1.9", features = ["net"] }
 warp = "0.3"
 
 # Events API
@@ -63,6 +59,11 @@ futures-util = { version = "0.3.21", optional = true }
 
 
 [dev-dependencies]
+proptest = "1.0.0"
+rstest = "0.15.0"
+rstest_reuse = "0.4.0"
 assert_cmd = "1.0.1"
 httpmock = "0.6.6"
-rstest = "0.15.0"
+petgraph = "0.6.2"
+# Benchmarking
+criterion = "0.3"

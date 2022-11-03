@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "kindelia",
+  "kindelia_core",
 ]
 
 [profile.dev_fast]
