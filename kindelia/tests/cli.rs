@@ -1,7 +1,8 @@
 mod cli {
-  use rstest::rstest;
   use std::convert::TryInto;
   use std::env::temp_dir;
+
+  use rstest::rstest;
 
   use kindelia_core::api;
   use kindelia_core::common;
