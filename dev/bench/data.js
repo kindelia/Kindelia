@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667504451089,
+  "lastUpdate": 1667504452865,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -2381,80 +2381,75 @@ window.BENCHMARK_DATA = {
       "ca0f37c462f343719af383fc5e55f9598d460aa2": {
         "commit": {
           "author": {
-            "email": "rheidner.achiles@gmail.com",
-            "name": "rheidner",
-            "username": "racs4"
+            "name": "Kindelia",
+            "username": "Kindelia"
           },
           "committer": {
-            "email": "rheidner.achiles@gmail.com",
-            "name": "rheidner",
-            "username": "racs4"
+            "name": "Kindelia",
+            "username": "Kindelia"
           },
-          "distinct": true,
           "id": "ca0f37c462f343719af383fc5e55f9598d460aa2",
           "message": "fix network test",
-          "timestamp": "2022-11-03T16:29:35-03:00",
-          "tree_id": "fdafef3263941150a161a07e4424a05aa609ac3d",
-          "url": "https://github.com/Kindelia/Kindelia/commit/ca0f37c462f343719af383fc5e55f9598d460aa2",
-          "original_ref": "fix-network-simulation",
-          "parent": "0000000000000000000000000000000000000000"
+          "timestamp": "2022-11-03T02:36:53Z",
+          "url": "https://github.com/Kindelia/Kindelia/pull/215/commits/ca0f37c462f343719af383fc5e55f9598d460aa2",
+          "original_ref": "Kindelia:fix-network-simulation"
         },
-        "date": 1667504315614,
+        "date": 1667504452245,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
             "name": "Uncle Rate",
-            "value": 0.182748317831591,
+            "value": 0.1415492957746479,
             "unit": "Percent",
-            "range": 0.02126790632674705
+            "range": 0.0029877751317741405
           },
           {
             "name": "Failed Mining",
-            "value": 2560,
+            "value": 1857,
             "unit": "Logs",
-            "range": 29.698484809834994
+            "range": 86.2670273047588
           },
           {
             "name": "Rollback count in node 0",
-            "value": 20,
+            "value": 13.5,
             "unit": "rollbacks",
-            "range": 2.8284271247461903
+            "range": 3.5355339059327378
           },
           {
             "name": "Rollback distance mean in node 0",
-            "value": 2.0353535353535355,
+            "value": 1.5710227272727273,
             "unit": "blocks",
-            "range": 0.4999744917480638
+            "range": 0.16472373879913887
           },
           {
             "name": "Real rollback distance mean in node 0",
-            "value": 8.232323232323232,
+            "value": 7.5710227272727275,
             "unit": "blocks",
-            "range": 0.9570940270605791
+            "range": 1.2494898235739564
           },
           {
             "name": "Blocks between rollbacks in node 0",
-            "value": 5.529411764705882,
+            "value": 7.466666666666667,
             "unit": "blocks",
-            "range": 0.7487012977269325
+            "range": 1.885618083164127
           },
           {
             "name": "Computed blocks in node 0",
-            "value": 269,
+            "value": 207,
             "unit": "blocks",
-            "range": 35.35533905932738
+            "range": 14.142135623730951
           },
           {
             "name": "Height of node 0",
-            "value": 99,
+            "value": 102.5,
             "unit": "blocks",
-            "range": 9.899494936611665
+            "range": 4.949747468305833
           },
           {
             "name": "Mean height",
-            "value": 99,
+            "value": 102.5,
             "unit": "blocks",
-            "range": 9.899494936611665
+            "range": 4.949747468305833
           }
         ]
       }
