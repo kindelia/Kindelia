@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667504316168,
+  "lastUpdate": 1667504451089,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1083,49 +1083,44 @@ window.BENCHMARK_DATA = {
       "ca0f37c462f343719af383fc5e55f9598d460aa2": {
         "commit": {
           "author": {
-            "email": "rheidner.achiles@gmail.com",
-            "name": "rheidner",
-            "username": "racs4"
+            "name": "Kindelia",
+            "username": "Kindelia"
           },
           "committer": {
-            "email": "rheidner.achiles@gmail.com",
-            "name": "rheidner",
-            "username": "racs4"
+            "name": "Kindelia",
+            "username": "Kindelia"
           },
-          "distinct": true,
           "id": "ca0f37c462f343719af383fc5e55f9598d460aa2",
           "message": "fix network test",
-          "timestamp": "2022-11-03T16:29:35-03:00",
-          "tree_id": "fdafef3263941150a161a07e4424a05aa609ac3d",
-          "url": "https://github.com/Kindelia/Kindelia/commit/ca0f37c462f343719af383fc5e55f9598d460aa2",
-          "original_ref": "fix-network-simulation",
-          "parent": "0000000000000000000000000000000000000000"
+          "timestamp": "2022-11-03T02:36:53Z",
+          "url": "https://github.com/Kindelia/Kindelia/pull/215/commits/ca0f37c462f343719af383fc5e55f9598d460aa2",
+          "original_ref": "Kindelia:fix-network-simulation"
         },
-        "date": 1667504313454,
+        "date": 1667504450163,
         "tool": "cargo",
         "benches": [
           {
             "name": "kvm_tree_sum",
-            "value": 1772258,
-            "range": "± 16445",
+            "value": 2129450,
+            "range": "± 12635",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_serialize",
-            "value": 31604,
-            "range": "± 53",
+            "value": 37854,
+            "range": "± 37",
             "unit": "ns/iter"
           },
           {
             "name": "max_message_deserialize",
-            "value": 27424,
-            "range": "± 155",
+            "value": 32916,
+            "range": "± 67",
             "unit": "ns/iter"
           },
           {
             "name": "deserialize_block_with_txs",
-            "value": 111894,
-            "range": "± 115",
+            "value": 134161,
+            "range": "± 249",
             "unit": "ns/iter"
           }
         ]
@@ -2473,6 +2468,7 @@ window.BENCHMARK_DATA = {
     "thread-file": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
     "master": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
-    "fix-network-simulation": "ca0f37c462f343719af383fc5e55f9598d460aa2"
+    "fix-network-simulation": "ca0f37c462f343719af383fc5e55f9598d460aa2",
+    "Kindelia:fix-network-simulation": "ca0f37c462f343719af383fc5e55f9598d460aa2"
   }
 }
