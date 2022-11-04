@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use crate::bits;
 use crate::config;
 #[cfg(feature = "events")]
 use crate::events;
 use crate::net::{self, ProtoComm};
 use crate::node;
+use crate::{bits, persistence};
 
 use super::util::temp_dir;
 
@@ -67,10 +67,13 @@ fn network() {
         network_id: 0,
         data_path,
         mining: mine_cfg,
-        ui: Some(config::UiConfig { json: true, tags: vec![] }),
-        ws: Some(ws_config), // Some(ws_config),
+        ui: None, // not needed to configure in simulation; only prints in json
+        ws: Some(ws_config),
       };
-      start_simulation(node_cfg, socket, initial_peers);
+
+      // whit this is possible to choose what events print
+      let tags = vec![];
+      start_simulation(node_cfg, socket, initial_peers, tags);
     });
     threads.push(socket_thread);
   }
@@ -99,20 +102,20 @@ fn start_simulation<C: ProtoComm + 'static>(
   node_config: config::NodeConfig,
   comm: C,
   initial_peers: Vec<C::Address>,
+  tags: Vec<events::NodeEventDiscriminant>,
 ) {
   let addr = comm.get_addr();
 
   // Events
   #[cfg(feature = "events")]
-  let (event_tx, event_thrds) = events::spawn_event_handlers(
-    node_config.ws.unwrap_or_default(),
-    node_config.ui,
-    addr,
-  );
+  let (event_tx, event_thread) = spawn_event_handler(tags, addr);
 
   // Mining
   let (miner_comm, miner_thrds) =
-    node::spawn_miner(node_config.mining, event_tx.clone());
+    node::spawn_miner(node_config.mining, Some(event_tx.clone()));
+
+  // Storage
+  let storage = persistence::EmptyStorage;
 
   // Node
   let node_thread = {
@@ -122,8 +125,9 @@ fn start_simulation<C: ProtoComm + 'static>(
       initial_peers,
       comm,
       miner_comm,
+      storage,
       #[cfg(feature = "events")]
-      event_tx,
+      Some(event_tx),
     );
 
     // Spawns the node thread
@@ -134,13 +138,38 @@ fn start_simulation<C: ProtoComm + 'static>(
 
   // Threads
   let mut threads = vec![node_thread];
-  threads.extend(event_thrds);
+  threads.insert(0, event_thread);
   threads.extend(miner_thrds.into_iter());
 
   // Joins all threads
   for thread in threads {
     thread.join().unwrap();
   }
+}
+
+/// A version of `kindelia::spawn_event_handlers` but for simulation.
+///
+/// It does not contain the ws server and only prints the events in JSON.
+fn spawn_event_handler<A: net::ProtoAddr + 'static>(
+  tags: Vec<events::NodeEventDiscriminant>,
+  addr: A,
+) -> (
+  std::sync::mpsc::Sender<(events::NodeEventType, u128)>,
+  std::thread::JoinHandle<()>,
+) {
+  let (event_tx, event_rx) =
+    std::sync::mpsc::channel::<(events::NodeEventType, u128)>();
+
+  let thread = std::thread::spawn(move || {
+    while let Ok((event, time)) = event_rx.recv() {
+      if tags.is_empty() || tags.contains(&(event.clone()).into()) {
+        let event = events::NodeEvent { time, addr, event };
+        println!("{}", serde_json::to_string(&event).unwrap());
+      }
+    }
+  });
+
+  (event_tx, thread)
 }
 
 // Simulation address

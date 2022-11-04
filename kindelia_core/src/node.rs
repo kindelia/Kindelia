@@ -21,7 +21,7 @@ use crate::constants;
 use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
-use crate::persistence::{BlockStorage, SimpleFileStorage};
+use crate::persistence::BlockStorage;
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};

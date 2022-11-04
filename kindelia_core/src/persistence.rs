@@ -363,7 +363,7 @@ impl BlockStorage for SimpleFileStorage {
 }
 
 #[derive(Clone)]
-struct EmptyStorage;
+pub struct EmptyStorage;
 
 impl BlockStorage for EmptyStorage {
   fn enable(&mut self) {}
