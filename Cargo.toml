@@ -2,6 +2,7 @@
 members = [
   "kindelia",
   "kindelia_core",
+  "kindelia_ws_events"
 ]
 
 [profile.dev_fast]

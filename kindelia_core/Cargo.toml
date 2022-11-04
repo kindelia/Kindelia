@@ -21,6 +21,7 @@ harness = false
 
 
 [dependencies]
+kindelia_ws_events = { path = "../kindelia_ws_events" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"

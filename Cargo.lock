@@ -1412,6 +1412,7 @@ dependencies = [
  "futures-util",
  "hex",
  "httpmock",
+ "kindelia_ws_events",
  "petgraph",
  "primitive-types",
  "priority-queue",
@@ -1425,6 +1426,17 @@ dependencies = [
  "serde_with",
  "sha3",
  "tiny-keccak",
+ "tokio",
+ "warp",
+]
+
+[[package]]
+name = "kindelia_ws_events"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
  "tokio",
  "warp",
 ]
