@@ -28,6 +28,7 @@ use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node;
 use kindelia_core::node::{spawn_miner, Node};
+use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
@@ -646,8 +647,11 @@ pub fn start_node<C: ProtoComm + 'static>(
 
   // Mining
   let (miner_comm, miner_thrds) =
-    spawn_miner(node_config.mining, event_tx.clone());
+    spawn_miner(node_config.mining, Some(event_tx.clone()));
   threads.extend(miner_thrds.into_iter());
+
+  // File writter
+  let file_writter = SimpleFileStorage::new(node_config.data_path.clone());
 
   // Node state object
   let (node_query_sender, node) = Node::new(
@@ -656,8 +660,9 @@ pub fn start_node<C: ProtoComm + 'static>(
     initial_peers,
     comm,
     miner_comm,
+    file_writter,
     #[cfg(feature = "events")]
-    event_tx,
+    Some(event_tx),
   );
 
   // Spawns the API thread

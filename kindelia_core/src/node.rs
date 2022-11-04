@@ -21,6 +21,7 @@ use crate::constants;
 use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
+use crate::persistence::{BlockStorage, SimpleFileStorage};
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
@@ -29,16 +30,20 @@ use crate::heartbeat;
 macro_rules! emit_event {
   ($tx: expr, $event: expr) => {
     #[cfg(feature = "events")]
-    if let Err(_) = $tx.send(($event, get_time_micro())) {
-      println!("Could not send event");
+    if let Some(ref tx) = $tx {
+      if let Err(_) = tx.send(($event, get_time_micro())) {
+        eprintln!("Could not send event");
+      }
     }
   };
 
   ($tx: expr, $event: expr, tags = $($tag:ident),+) => {
     #[cfg(feature = "events")]
-    // #[cfg(any(all, $($tag),+))] // TODO: all
-    if let Err(_) = $tx.send(($event, get_time_micro())) {
-      println!("Could not send event");
+    // #[cfg(any(all, $($tag),+))]
+    if let Some(ref tx) = $tx {
+      if let Err(_) = tx.send(($event, get_time_micro())) {
+        eprintln!("Could not send event");
+      }
     }
   };
 }
@@ -246,12 +251,12 @@ pub enum InclusionState {
 
 // TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
 #[rustfmt::skip]
-pub struct Node<C: ProtoComm> {
-  pub data_path    : PathBuf,                           // path where files are saved
-  pub network_id   : u32,                               // Network ID / magic number
-  pub comm         : C,                                 // UDP socket
-  pub addr         : C::Address,                        // UDP port
-  pub runtime      : Runtime,                           // Kindelia's runtime
+pub struct Node<C: ProtoComm, S: BlockStorage> {
+  pub network_id : u32,                               // Network ID / magic number
+  pub comm       : C,                                 // UDP socket
+  pub addr       : C::Address,                        // UDP port
+  pub storage    : S,                                 // A `BlockStorage` implementation
+  pub runtime    : Runtime,                           // Kindelia's runtime
   pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
   pub pool         : PriorityQueue<Transaction, u64>,   // transactions to be mined
   pub peers        : PeersStore<C::Address>,            // peers store and state control
@@ -268,7 +273,7 @@ pub struct Node<C: ProtoComm> {
   pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
 
   #[cfg(feature = "events")]
-  pub event_emitter : mpsc::Sender<NodeEventEmittedInfo>,
+  pub event_emitter : Option<mpsc::Sender<NodeEventEmittedInfo>>,
   pub miner_comm    : Option<MinerCommunication>,
 }
 
@@ -303,8 +308,8 @@ impl<A: ProtoAddr> PeersStore<A> {
   pub fn see_peer(
     &mut self,
     peer: Peer<A>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) {
     let addr = peer.address;
@@ -352,8 +357,8 @@ impl<A: ProtoAddr> PeersStore<A> {
 
   fn timeout(
     &mut self,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) {
     let mut forget = Vec::new();
@@ -677,7 +682,9 @@ impl MinerCommunication {
 pub fn miner_loop(
   mut miner_comm: MinerCommunication,
   slow_mining: Option<u64>,
-  #[cfg(feature = "events")] event_emitter: mpsc::Sender<NodeEventEmittedInfo>,
+  #[cfg(feature = "events")] event_emitter: Option<
+    mpsc::Sender<NodeEventEmittedInfo>,
+  >,
 ) {
   loop {
     if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
@@ -712,15 +719,16 @@ pub fn miner_loop(
 // Node
 // ----
 
-impl<C: ProtoComm> Node<C> {
+impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   pub fn new(
     data_path: PathBuf,
     network_id: u32,
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
-    #[cfg(feature = "events")] event_emitter: mpsc::Sender<
-      NodeEventEmittedInfo,
+    storage: S,
+    #[cfg(feature = "events")] event_emitter: Option<
+      mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
@@ -735,7 +743,6 @@ impl<C: ProtoComm> Node<C> {
 
     #[rustfmt::skip]
     let mut node = Node {
-      data_path,
       network_id,
       addr: comm.get_addr(),
       comm,
@@ -757,6 +764,7 @@ impl<C: ProtoComm> Node<C> {
 
       #[cfg(feature = "events")]
       event_emitter: event_emitter.clone(),
+      storage,
       query_recv : query_receiver,
       miner_comm,
     };
@@ -928,14 +936,10 @@ impl<C: ProtoComm> Node<C> {
               // 3. Saves overwritten blocks to disk
               // TODO: on separate thread
               for bhash_comp in must_compute.iter().rev() {
-                let file_path = self.get_blocks_path().join(format!(
-                  "{:0>16x}.kindelia_block.bin",
-                  self.height[bhash_comp]
-                ));
-                let file_buff =
-                  bitvec_to_bytes(&self.block[bhash_comp].proto_serialized());
-                std::fs::write(file_path, file_buff)
-                  .expect("Couldn't save block to disk.");
+                let block_height = self.height[bhash_comp];
+                self
+                  .storage
+                  .write_block(block_height, self.block[bhash_comp].clone());
               }
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
@@ -947,7 +951,8 @@ impl<C: ProtoComm> Node<C> {
               let old = (&self.block[&cur_tip], self.height[&cur_tip]);
               let new = (&self.block[&new_tip], self.height[&new_tip]);
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
-              let ticks = (runtime_old_tick as u128, self.runtime.get_tick() as u128);
+              let ticks =
+                (runtime_old_tick as u128, self.runtime.get_tick() as u128);
               emit_event!(
                 self.event_emitter,
                 NodeEventType::reorg(old, new, common, ticks, work),
@@ -1055,7 +1060,8 @@ impl<C: ProtoComm> Node<C> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
-    while self.block.contains_key(&bhash) && bhash != zero_hash() { // TODO: zero check seems redundant
+    while self.block.contains_key(&bhash) && bhash != zero_hash() {
+      // TODO: zero check seems redundant
       let block = self.block.get(&bhash).unwrap();
       longest.push(bhash);
       bhash = block.prev;
@@ -1444,10 +1450,6 @@ impl<C: ProtoComm> Node<C> {
     self.comm.proto_send(addrs, message);
   }
 
-  pub fn get_blocks_path(&self) -> PathBuf {
-    self.data_path.join("blocks")
-  }
-
   fn broadcast_tip_block(&mut self) {
     let addrs: Vec<C::Address> =
       self.peers.get_all_active().iter().map(|x| x.address).collect();
@@ -1466,34 +1468,21 @@ impl<C: ProtoComm> Node<C> {
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
-  fn load_blocks(&mut self) {
-    let blocks_dir = self.get_blocks_path();
-    std::fs::create_dir_all(&blocks_dir).ok();
-    let mut file_paths: Vec<(u64, PathBuf)> = vec![];
-    for entry in std::fs::read_dir(&blocks_dir).unwrap() {
-      // Extract block height from block file path for fast sort
-      let path = entry.unwrap().path();
-      let name = path.file_name().unwrap().to_str().unwrap();
-      let bnum = name.split('.').nth(0).unwrap();
-      let bnum = u64::from_str_radix(bnum, 16).unwrap();
-      file_paths.push((bnum, path));
-    }
-    file_paths.sort_unstable();
-    let num_blocks = file_paths.len();
-    eprintln!("Loading {} blocks from disk...", num_blocks);
-    for (_, file_path) in file_paths {
-      let buffer = std::fs::read(&file_path).unwrap();
-      let block = Block::proto_deserialized(&bytes_to_bitvec(&buffer));
-      if let Some(block) = block {
+  pub fn load_blocks(&mut self) {
+    self.storage.disable();
+    let storage = self.storage.clone();
+    storage.read_blocks(|(block, file_path)| match block {
+      Some(block) => {
         self.add_block(&block.hashed());
-      } else {
+      }
+      None => {
         eprintln!(
           "WARN: Could not load block from file '{}'",
           file_path.display()
         );
       }
-    }
-    eprintln!("Loaded {} blocks from disk.", num_blocks);
+    });
+    self.storage.enable();
   }
 
   fn send_to_miner(&mut self, msg: MinerMessage) {
@@ -1610,9 +1599,9 @@ impl<C: ProtoComm> Node<C> {
     self.load_blocks();
 
     // A task that is executed continuously on the main loop
-    struct Task<C: ProtoComm> {
+    struct Task<C: ProtoComm, S: BlockStorage> {
       pub delay: u128,
-      pub action: fn(&mut Node<C>) -> (),
+      pub action: fn(&mut Node<C, S>) -> (),
     }
 
     // The vector of tasks
@@ -1709,7 +1698,9 @@ impl<C: ProtoComm> Node<C> {
 
 pub fn spawn_miner(
   mine_config: MineConfig,
-  #[cfg(feature = "events")] event_tx: mpsc::Sender<NodeEventEmittedInfo>,
+  #[cfg(feature = "events")] event_tx: Option<
+    mpsc::Sender<NodeEventEmittedInfo>,
+  >,
 ) -> (Option<MinerCommunication>, Vec<JoinHandle<()>>) {
   // Only spaws thread if mining is enabled
   if mine_config.enabled {
