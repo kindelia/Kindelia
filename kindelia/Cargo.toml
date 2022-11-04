@@ -8,7 +8,7 @@ repository = "https://github.com/Kindelia/Kindelia"
 
 [features]
 default = ["events"]
-events = ["dep:futures-util"]
+events = []
 
 [[bin]]
 name = "kindelia"
@@ -25,38 +25,24 @@ kindelia_server = { path = "../kindelia_server" }
 kindelia_client = { path = "../kindelia_client" }
 
 fastrand = "1.7.0"
-rand = "0.8.5"
 
 # Util
 dirs = "4.0.0"
 hex = "0.4"
 derive_builder = "0.11.2"
 
-# Crypto
-secp256k1 = { version = "0.22.1", features = [
-  "rand-std",
-  "recovery",
-  "global-context",
-] }
-tiny-keccak = { version = "2.0.2", features = ["keccak"] }
-sha3 = "0.9.1"
-
 # CLI / configuration
 clap = { version = "3.1.3", features = ["derive"] }
 toml = "0.5.9"
 
 # Datastructures
-bit-vec = "0.6.3"
 # nohash-hasher = "0.2.0" # inlined, because we need u128
-primitive-types = { version = "0.11.1" }
-priority-queue = "1.2.1"
 
 # API
 serde_json = "1.0"
 
 # Events API
 tokio = { version = "1.19.1", features = ["sync"] }
-futures-util = { version = "0.3.21", optional = true }
 
 
 [dev-dependencies]
