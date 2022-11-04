@@ -21,6 +21,8 @@ bench = false
 [dependencies]
 kindelia_core = { path = "../kindelia_core" }
 kindelia_ws = { path = "../kindelia_ws" }
+kindelia_server = { path = "../kindelia_server" }
+kindelia_client = { path = "../kindelia_client" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"
@@ -50,20 +52,15 @@ primitive-types = { version = "0.11.1" }
 priority-queue = "1.2.1"
 
 # API
-chrono = "0.4.22"
-reqwest = { version = "0.11", features = ["json"] }
-serde = { version = "1.0.137", features = ["derive"] }
 serde_json = "1.0"
-serde_with = { version = "2.0.0", features = ["hex"] }
-tokio = { version = "1.19.1", features = ["full"] }
-tokio-stream = { version = "0.1.9", features = ["net"] }
-warp = "0.3"
 
 # Events API
+tokio = { version = "1.19.1", features = ["sync"] }
 futures-util = { version = "0.3.21", optional = true }
 
 
 [dev-dependencies]
+serde = { version = "1.0.137" }
 assert_cmd = "1.0.1"
 httpmock = "0.6.6"
 rstest = "0.15.0"

@@ -2,7 +2,9 @@
 members = [
   "kindelia",
   "kindelia_core",
-  "kindelia_ws"
+  "kindelia_ws",
+  "kindelia_server",
+  "kindelia_client",
 ]
 
 [profile.dev_fast]

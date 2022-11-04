@@ -1,4 +1,3 @@
-mod api;
 mod cli;
 mod config;
 mod files;
@@ -7,7 +6,7 @@ mod util;
 use std::future::Future;
 use std::net::UdpSocket;
 
-use api::client::ApiClient;
+use kindelia_client::ApiClient;
 use clap::Parser;
 
 use cli::{
@@ -26,7 +25,6 @@ use kindelia_core::events;
 use kindelia_core::hvm::{self, view_statement, Statement};
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
-use kindelia_core::node;
 use kindelia_core::node::{spawn_miner, Node};
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
@@ -160,7 +158,7 @@ pub fn run_cli() -> Result<(), String> {
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       let code = file.read_to_string()?;
-      let f = |client: api::client::ApiClient, stmts| async move {
+      let f = |client: ApiClient, stmts| async move {
         client.run_code(stmts).await
       };
       let stmts = if encoded {
@@ -338,12 +336,12 @@ fn run_on_remote<T, P, F>(
   f: F,
 ) -> Result<T, String>
 where
-  F: FnOnce(api::client::ApiClient, Vec<HexStatement>) -> P,
+  F: FnOnce(ApiClient, Vec<HexStatement>) -> P,
   P: Future<Output = Result<T, String>>,
 {
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
   let client =
-    api::client::ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+    ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
   run_async_blocking(f(client, stmts))
 }
 
@@ -668,7 +666,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   // Spawns the API thread
   if let Some(api_config) = api_config {
     let api_thread = std::thread::spawn(move || {
-      crate::api::server::http_api_loop(node_query_sender, api_config);
+      kindelia_server::http_api_loop(node_query_sender, api_config);
     });
     threads.push(api_thread);
   }

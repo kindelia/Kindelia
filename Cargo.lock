@@ -1435,7 +1435,6 @@ version = "0.1.5"
 dependencies = [
  "assert_cmd",
  "bit-vec",
- "chrono",
  "clap 3.2.23",
  "derive_builder",
  "dirs",
@@ -1443,23 +1442,30 @@ dependencies = [
  "futures-util",
  "hex",
  "httpmock",
+ "kindelia_client",
  "kindelia_core",
+ "kindelia_server",
  "kindelia_ws",
  "primitive-types",
  "priority-queue",
  "rand 0.8.5",
- "reqwest",
  "rstest",
  "secp256k1",
  "serde",
  "serde_json",
- "serde_with",
  "sha3",
  "tiny-keccak",
  "tokio",
- "tokio-stream",
  "toml",
- "warp",
+]
+
+[[package]]
+name = "kindelia_client"
+version = "0.1.0"
+dependencies = [
+ "kindelia_core",
+ "reqwest",
+ "serde",
 ]
 
 [[package]]
@@ -1490,6 +1496,21 @@ dependencies = [
  "sha3",
  "tiny-keccak",
  "tokio",
+]
+
+[[package]]
+name = "kindelia_server"
+version = "0.1.0"
+dependencies = [
+ "bit-vec",
+ "hex",
+ "kindelia_core",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "tokio",
+ "tokio-stream",
+ "warp",
 ]
 
 [[package]]
