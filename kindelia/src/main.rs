@@ -1,4 +1,3 @@
-mod api;
 mod cli;
 mod config;
 mod files;
@@ -667,7 +666,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   // Spawns the API thread
   if let Some(api_config) = api_config {
     let api_thread = std::thread::spawn(move || {
-      crate::api::server::http_api_loop(node_query_sender, api_config);
+      kindelia_server::http_api_loop(node_query_sender, api_config);
     });
     threads.push(api_thread);
   }
