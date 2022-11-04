@@ -1,16 +1,8 @@
 // TODO: rename and organize structs and constructors
-use std::convert::Infallible;
-use std::str::FromStr;
-
-use futures_util::{SinkExt, StreamExt};
 use primitive_types::U256;
 use serde;
-use tokio::{self, sync::broadcast};
-use warp::ws::{Message, WebSocket};
-use warp::{Filter, Rejection, Reply};
 
 use crate::api::Hash;
-use crate::config::{UiConfig, WsConfig};
 use crate::net::ProtoAddr;
 use crate::node::{HashedBlock, Peer};
 
@@ -201,8 +193,8 @@ impl std::str::FromStr for NodeEventDiscriminant {
   }
 }
 
-impl From<&NodeEventType> for NodeEventDiscriminant {
-  fn from(event: &NodeEventType) -> Self {
+impl From<NodeEventType> for NodeEventDiscriminant {
+  fn from(event: NodeEventType) -> Self {
     match event {
       NodeEventType::AddBlock { .. } => NodeEventDiscriminant::AddBlock,
       NodeEventType::Mining { .. } => NodeEventDiscriminant::Mining,
@@ -688,189 +680,4 @@ macro_rules! heartbeat {
       tip_blocks: $tip_blocks.iter().map(|x: &U256| (*x).into()).collect(),
     }
   };
-}
-
-// =======================================================
-// Events tasks
-
-// type EventTask = Box<dyn FnMut(NodeEvent)>;
-
-// fn pre_process_file(file_name: &str) -> std::fs::File {
-//   let file_path = std::path::Path::new(&file_name);
-//   if file_path.exists() {
-//     std::fs::remove_file(&file_path).unwrap();
-//   }
-//   let mut file = std::fs::OpenOptions::new()
-//     .write(true)
-//     .create(true)
-//     .open(&file_path)
-//     .unwrap();
-//   file
-// }
-
-// pub fn event_tasks<A: ProtoAddr>(
-//   addr: &A,
-//   ws_tx: broadcast::Sender<NodeEvent>,
-// ) -> Vec<EventTask> {
-// pre-process
-//   let file_name = format!("log-{}.json", addr);
-//   let file = pre_process_file(&file_name);
-
-//   // tasks
-//   let print = |event: NodeEvent| {
-//     println!("{}", event);
-//   };
-//   let print = Box::new(print);
-
-//   let ws_tx = ws_tx.clone();
-//   let websocket_send = |event: NodeEvent| {
-//     if ws_tx.receiver_count() > 0 {
-//       if let Err(err) = ws_tx.send(event.clone()) {
-//         eprintln!("Could not send event to websocket: {}", err);
-//       };
-//     }
-//   };
-//   let websocket_send = Box::new(websocket_send);
-
-//   let file = |event: NodeEvent| {
-//     let txt = format!("{},\n", serde_json::to_string(&event.clone()).unwrap());
-//     // saves it in a file
-//     std::fs::
-//     file.write_all(txt.as_bytes()).unwrap();
-//   };
-//   let file = Box::new(file);
-
-//   vec![print, websocket_send, file]
-// }
-
-// =======================================================
-// Websocket server
-
-#[derive(serde::Deserialize)]
-pub struct QueryParams {
-  pub tags: Option<String>,
-}
-
-pub struct Query {
-  pub tags: Vec<String>,
-}
-
-pub fn ws_loop(port: u16, ws_tx: broadcast::Sender<NodeEventType>) {
-  let runtime = tokio::runtime::Runtime::new().unwrap();
-  runtime.block_on(async move {
-    ws_server(port, ws_tx).await;
-  });
-}
-
-async fn ws_server(port: u16, ws_tx: broadcast::Sender<NodeEventType>) {
-  let ws_route = warp::ws()
-    .and(with_rx(ws_tx.clone()))
-    .and(warp::query::<QueryParams>().map(parse_query))
-    .and_then(ws_handler);
-  warp::serve(ws_route).run(([127, 0, 0, 1], port)).await;
-}
-
-fn parse_query(query: QueryParams) -> Query {
-  let tags = match query.tags {
-    Some(tags) => tags.split(',').map(str::to_string).collect(),
-    None => vec![],
-  };
-  Query { tags }
-}
-
-fn with_rx(
-  ws_tx: broadcast::Sender<NodeEventType>,
-) -> impl Filter<Extract = (broadcast::Sender<NodeEventType>,), Error = Infallible>
-     + Clone {
-  warp::any().map(move || ws_tx.clone())
-}
-
-pub async fn ws_handler(
-  ws: warp::ws::Ws,
-  ws_tx: broadcast::Sender<NodeEventType>,
-  query: Query,
-) -> Result<impl Reply, Rejection> {
-  Ok(ws.on_upgrade(move |socket| client_connection(socket, ws_tx, query.tags)))
-}
-
-pub async fn client_connection(
-  ws: WebSocket,
-  ws_tx: broadcast::Sender<NodeEventType>,
-  tags: Vec<String>,
-) {
-  let (mut client_ws_sender, _) = ws.split();
-  let mut ws_rx = ws_tx.subscribe();
-  let mut count = 0;
-
-  while let Ok(event) = ws_rx.recv().await {
-    let tags: Result<Vec<NodeEventDiscriminant>, String> =
-      tags.iter().map(|tag| NodeEventDiscriminant::from_str(tag)).collect();
-
-    if let Ok(tags) = tags {
-      if tags.is_empty() || tags.contains(&(&event).into()) {
-        let json_stringfied = serde_json::to_string(&event).unwrap();
-        if let Err(err) =
-          client_ws_sender.send(Message::text(json_stringfied)).await
-        {
-          eprintln!("Could not send message through websocket: {}", err);
-          count += 1;
-        } else {
-          count = 0;
-        };
-        // After 10 consecutive fails we close the connection
-        if count == 10 {
-          break;
-        };
-      }
-    } else {
-      break;
-    }
-  }
-
-  eprintln!("Disconnected");
-}
-
-//
-
-// TODO
-pub fn spawn_event_handlers<A: ProtoAddr + 'static>(
-  ws_config: WsConfig,
-  ui_config: Option<UiConfig>,
-  addr: A,
-) -> (
-  std::sync::mpsc::Sender<(NodeEventType, u128)>,
-  Vec<std::thread::JoinHandle<()>>,
-) {
-  let (event_tx, event_rx) =
-    std::sync::mpsc::channel::<(NodeEventType, u128)>();
-  let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
-
-  eprintln!("Events WS on port: {}", ws_config.port);
-  let ws_tx1 = ws_tx.clone();
-  let thread_1 = std::thread::spawn(move || {
-    ws_loop(ws_config.port, ws_tx1);
-  });
-
-  let ws_tx2 = ws_tx;
-  let thread_2 = std::thread::spawn(move || {
-    while let Ok((event, time)) = event_rx.recv() {
-      if ws_tx2.receiver_count() > 0 {
-        if let Err(err) = ws_tx2.send(event.clone()) {
-          eprintln!("Could not send event to websocket: {}", err);
-        };
-      }
-      if let Some(ref ui_cfg) = &ui_config {
-        if ui_cfg.tags.is_empty() || ui_cfg.tags.contains(&(&event).into()) {
-          let event = NodeEvent { time, addr, event };
-          if ui_cfg.json {
-            println!("{}", serde_json::to_string(&event).unwrap());
-          } else {
-            println!("{}", event);
-          }
-        }
-      }
-    }
-  });
-
-  (event_tx, vec![thread_1, thread_2])
 }

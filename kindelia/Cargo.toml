@@ -20,6 +20,7 @@ bench = false
 
 [dependencies]
 kindelia_core = { path = "../kindelia_core" }
+kindelia_ws = { path = "../kindelia_ws" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"

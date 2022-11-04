@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rstest::fixture;
-use tokio::runtime;
 
 use crate::constants;
 use crate::common::{Name, U120};
