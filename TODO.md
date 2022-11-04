@@ -2,24 +2,45 @@
 
 ## 1
 
-- split to multiple crates
-- separate khvm language module
+- separate KHVM language module
 - organize `kindelia_code::config`
-- split HTTP client, server and websockets crate
-- add total work field to heartbeat event
-- sugar big numbers in hex format
-- fix 1 tick rollback request causing 256 ticks rollback
-- don't write to disk while loading blocks
-- show space (and mana?) usage on fun definition
+
+- add total work field to heartbeat event (Rhediner)
+
+- split HTTP client and server crates (Rheidner)
+
+- fix problem of 1 tick rollback request causing 256 ticks rollback (Kelvin)
+  - [ ] reimplement rollback algorithm on separate lib
+  - [ ] integrate on KHVM
+
+- sugar big numbers to hex format
+- show space and mana usage on fun definition
+
 - `kindelia subject`
 - command to publish to multiple nodes
 
+- KHVM refactors
+  - `Io` enum
+  - `CellTag` enum
+  - `Op` enum
+  - `split_names` without using strings
+  - `get_tag`, `get_ext` etc on `RawCell`
+  - `get_name_from_ext` on `RawCell`
+  - `Cell` enum
+
+- fix `Drop` of too nested terms
+
+- contract UX improvements
+  - failure opcode
+  - nonce contract
+  - node transaction heuristics
+  - node transaction sequencing
+
 ## 2
 
-- write state files to disk on separate thread
 - way to check if transaction(s) fit on a block
-- `kindelia get name`
 - command to list names defined inside of `.kdl` file
+- `kindelia get name`
 - commands to interact with txs on mempool
 - rename "slots" or other references to space to "cells"?
 
