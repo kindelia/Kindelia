@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667595384291,
+  "lastUpdate": 1667595385909,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -2506,6 +2506,86 @@ window.BENCHMARK_DATA = {
             "value": 102.5,
             "unit": "blocks",
             "range": 4.949747468305833
+          }
+        ]
+      },
+      "9b4667e8f6d9c34748827870a933d2fe43bb0a17": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "9b4667e8f6d9c34748827870a933d2fe43bb0a17",
+          "message": "fix network simulation test after Storage inclusion on kindelia::Node",
+          "timestamp": "2022-11-04T17:46:15-03:00",
+          "tree_id": "cecbbfaa73db2915a4baf24acd6695a36c9539b6",
+          "url": "https://github.com/Kindelia/Kindelia/commit/9b4667e8f6d9c34748827870a933d2fe43bb0a17",
+          "original_ref": "dev",
+          "parent": "5181bae21d49cdd2d06ac2b231ab6484f8260356"
+        },
+        "date": 1667595385242,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Uncle Rate",
+            "value": 0.17870626761938618,
+            "unit": "Percent",
+            "range": 0.052085255570078
+          },
+          {
+            "name": "Failed Mining",
+            "value": 2993.5,
+            "unit": "Logs",
+            "range": 55.86143571373726
+          },
+          {
+            "name": "Rollback count in node 0",
+            "value": 18.5,
+            "unit": "rollbacks",
+            "range": 9.192388155425117
+          },
+          {
+            "name": "Rollback distance mean in node 0",
+            "value": 1.8783333333333334,
+            "unit": "blocks",
+            "range": 0.05421151989096864
+          },
+          {
+            "name": "Real rollback distance mean in node 0",
+            "value": 8.951666666666666,
+            "unit": "blocks",
+            "range": 1.9351155578471855
+          },
+          {
+            "name": "Blocks between rollbacks in node 0",
+            "value": 6.984848484848484,
+            "unit": "blocks",
+            "range": 3.7498086881104795
+          },
+          {
+            "name": "Computed blocks in node 0",
+            "value": 283.5,
+            "unit": "blocks",
+            "range": 116.67261889578035
+          },
+          {
+            "name": "Height of node 0",
+            "value": 104,
+            "unit": "blocks",
+            "range": 2.8284271247461903
+          },
+          {
+            "name": "Mean height",
+            "value": 104,
+            "unit": "blocks",
+            "range": 2.8284271247461903
           }
         ]
       }
