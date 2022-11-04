@@ -1,5 +1,5 @@
 [package]
-name = "kindelia_ws_events"
+name = "kindelia_ws"
 version = "0.1.0"
 edition = "2021"
 

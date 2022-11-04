@@ -2,10 +2,7 @@
 use primitive_types::U256;
 use serde;
 
-use kindelia_ws_events::ws_loop;
-
 use crate::api::Hash;
-use crate::config::{UiConfig, WsConfig};
 use crate::net::ProtoAddr;
 use crate::node::{HashedBlock, Peer};
 
@@ -208,10 +205,6 @@ impl From<NodeEventType> for NodeEventDiscriminant {
       NodeEventType::Heartbeat { .. } => NodeEventDiscriminant::Heartbeat,
     }
   }
-}
-
-impl kindelia_ws_events::SerializableWithDiscriminant for NodeEventType {
-  type Discriminant = NodeEventDiscriminant;
 }
 
 // ========================================================
@@ -687,48 +680,4 @@ macro_rules! heartbeat {
       tip_blocks: $tip_blocks.iter().map(|x: &U256| (*x).into()).collect(),
     }
   };
-}
-
-pub fn spawn_event_handlers<A: ProtoAddr + 'static>(
-  ws_config: WsConfig,
-  ui_config: Option<UiConfig>,
-  addr: A,
-) -> (
-  std::sync::mpsc::Sender<(NodeEventType, u128)>,
-  Vec<std::thread::JoinHandle<()>>,
-) {
-  let (event_tx, event_rx) =
-    std::sync::mpsc::channel::<(NodeEventType, u128)>();
-  let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
-
-  eprintln!("Events WS on port: {}", ws_config.port);
-  let ws_tx1 = ws_tx.clone();
-  let thread_1 = std::thread::spawn(move || {
-    ws_loop(ws_config.port, ws_tx1);
-  });
-
-  let ws_tx2 = ws_tx;
-  let thread_2 = std::thread::spawn(move || {
-    while let Ok((event, time)) = event_rx.recv() {
-      if ws_tx2.receiver_count() > 0 {
-        if let Err(err) = ws_tx2.send(event.clone()) {
-          eprintln!("Could not send event to websocket: {}", err);
-        };
-      }
-      if let Some(ref ui_cfg) = &ui_config {
-        if ui_cfg.tags.is_empty()
-          || ui_cfg.tags.contains(&(event.clone()).into())
-        {
-          let event = NodeEvent { time, addr, event };
-          if ui_cfg.json {
-            println!("{}", serde_json::to_string(&event).unwrap());
-          } else {
-            println!("{}", event);
-          }
-        }
-      }
-    }
-  });
-
-  (event_tx, vec![thread_1, thread_2])
 }
