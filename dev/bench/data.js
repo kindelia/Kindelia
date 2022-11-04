@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1667504452865,
+  "lastUpdate": 1667595384291,
   "repoUrl": "https://github.com/Kindelia/Kindelia",
   "entries": {
     "Rust Benchmark": {
@@ -1121,6 +1121,62 @@ window.BENCHMARK_DATA = {
             "name": "deserialize_block_with_txs",
             "value": 134161,
             "range": "± 249",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      "9b4667e8f6d9c34748827870a933d2fe43bb0a17": {
+        "commit": {
+          "author": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "committer": {
+            "email": "rheidner.achiles@gmail.com",
+            "name": "rheidner",
+            "username": "racs4"
+          },
+          "distinct": true,
+          "id": "9b4667e8f6d9c34748827870a933d2fe43bb0a17",
+          "message": "fix network simulation test after Storage inclusion on kindelia::Node",
+          "timestamp": "2022-11-04T17:46:15-03:00",
+          "tree_id": "cecbbfaa73db2915a4baf24acd6695a36c9539b6",
+          "url": "https://github.com/Kindelia/Kindelia/commit/9b4667e8f6d9c34748827870a933d2fe43bb0a17",
+          "original_ref": "dev",
+          "parent": "5181bae21d49cdd2d06ac2b231ab6484f8260356"
+        },
+        "date": 1667595383372,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "kvm_tree_sum",
+            "value": 1511126,
+            "range": "± 17299",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_serialize",
+            "value": 30203,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "max_message_deserialize",
+            "value": 27197,
+            "range": "± 127",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "deserialize_block_with_txs",
+            "value": 137944,
+            "range": "± 238",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "block_loading",
+            "value": 37407685,
+            "range": "± 26517",
             "unit": "ns/iter"
           }
         ]
@@ -2458,7 +2514,7 @@ window.BENCHMARK_DATA = {
   "branches": {
     "continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
     "Kindelia:continuous-benchmark": "0c88c996a5b3abded9f483b91ff1fbe21ac69ad5",
-    "dev": "70751b889009c61c82a442e469b10d1a160cb022",
+    "dev": "9b4667e8f6d9c34748827870a933d2fe43bb0a17",
     "rollback-bench": "5106a6006970f8ddb8f8b9de7d17a2a8bac166fe",
     "thread-file": "59912c3ca22d5fcb61f17ca6cf6d56cc4ca804ab",
     "v0.1.5": "84d820a8b1cb7b36acb87489c35ce252669d5d71",
