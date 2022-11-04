@@ -6,13 +6,12 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::hvm::{self, Term};
-use crate::net::ProtoComm;
-use crate::node;
-
 use kindelia_core::api::{
   BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, RegInfo, Stats,
 };
+use kindelia_core::hvm::{self, Term};
+use kindelia_core::net::ProtoComm;
+use kindelia_core::node;
 
 pub struct ApiClient {
   client: reqwest::Client,

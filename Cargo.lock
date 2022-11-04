@@ -1443,12 +1443,12 @@ dependencies = [
  "futures-util",
  "hex",
  "httpmock",
+ "kindelia_client",
  "kindelia_core",
  "kindelia_ws",
  "primitive-types",
  "priority-queue",
  "rand 0.8.5",
- "reqwest",
  "rstest",
  "secp256k1",
  "serde",
@@ -1460,6 +1460,15 @@ dependencies = [
  "tokio-stream",
  "toml",
  "warp",
+]
+
+[[package]]
+name = "kindelia_client"
+version = "0.1.0"
+dependencies = [
+ "kindelia_core",
+ "reqwest",
+ "serde",
 ]
 
 [[package]]
