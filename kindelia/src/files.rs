@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 /// Represents input from a file or stdin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FileInput {
   Stdin,
   Path { path: PathBuf },
