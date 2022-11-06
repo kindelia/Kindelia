@@ -6,7 +6,8 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use warp::Future;
 
 use kindelia::api::{client as api_client, Hash, HexStatement};
@@ -195,7 +196,7 @@ pub enum CliCommand {
   /// Generate auto-completion for a shell.
   Completion {
     /// The shell to generate completion for.
-    shell: String,
+    shell: Shell,
   },
   Util {
     /// Which command run.
@@ -705,7 +706,7 @@ pub fn run_cli() -> Result<(), String> {
         Ok(())
       }
     },
-    CliCommand::Completion { .. } => todo!(),
+    CliCommand::Completion { shell } => print_shell_completions(shell),
   }
 }
 
@@ -898,6 +899,28 @@ fn init_socket() -> Option<UdpSocket> {
   None
 }
 
+// prints completions for a given shell, eg bash.
+fn print_shell_completions(shell: Shell) -> Result<(), String> {
+  // obtain name of present executable
+  let exec_name = std::env::current_exe()
+    .map_err(|e| format!("Error getting current executable: {}", e))?
+    .file_name()
+    .ok_or("Error getting executable file name".to_string())?
+    .to_str()
+    .ok_or("Error decoding executable name as utf8".to_string())?
+    .to_string();
+
+  // Generates completions for <shell> and prints to stdout
+  clap_complete::generator::generate(
+    shell,
+    &mut Cli::command(),
+    exec_name,
+    &mut std::io::stdout(),
+  );
+
+  Ok(())
+}
+
 // Utils
 // =====
 
@@ -1019,7 +1042,7 @@ fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
 // ---------
 
 /// Represents input from a file or stdin.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FileInput {
   Stdin,
   Path { path: PathBuf },
