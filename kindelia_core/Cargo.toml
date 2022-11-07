@@ -51,6 +51,8 @@ serde = { version = "1.0.137", features = ["derive"] }
 serde_with = { version = "2.0.0", features = ["hex"] }
 tokio = { version = "1.19.1", features = ["sync"] }
 
+# ERROR HANDLING
+thiserror = "1.0.37"
 
 [dev-dependencies]
 proptest = "1.0.0"

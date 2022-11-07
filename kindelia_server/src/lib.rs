@@ -386,7 +386,13 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
         if let Ok(code) = code {
           let res = ask(query_tx, NodeRequest::post_code(code)).await;
           match res {
-            Ok(res) => Ok(ok_json(res)),
+            Ok(res) => {
+              let res: Vec<_> = res
+                .into_iter()
+                .map(|r| r.map_err(|err| err.to_string()))
+                .collect();
+              Ok(ok_json(res))
+            }
             Err(err) => Err(reject::custom(InvalidParameter::from(err))), // TODO change this type?
           }
         } else {
@@ -427,7 +433,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results = ask(query_tx, NodeRequest::publish(code)).await;
-        let result: Vec<Result<(), String>> = results.into_iter().collect();
+        let result: Vec<_> = results
+          .into_iter()
+          .map(|res| res.map_err(|err| err.to_string()))
+          .collect();
         ok_json(result)
       }
     },

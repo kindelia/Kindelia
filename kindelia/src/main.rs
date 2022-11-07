@@ -29,7 +29,7 @@ use kindelia_core::hvm::{
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{
-  spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
+  spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
@@ -139,7 +139,10 @@ pub fn run_cli() -> Result<(), String> {
       match command {
         cli::CheckCommand::Transaction => {
           for ref stmt in stmts {
-            let transaction: Transaction = stmt.into();
+            let transaction: Transaction = stmt
+              .try_into()
+              .map_err(|err: TransactionError| err.to_string())?;
+
             // size printing
             {
               let size = transaction.len();

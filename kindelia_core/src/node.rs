@@ -11,6 +11,7 @@ use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
 use sha3::Digest;
+use thiserror::Error;
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
@@ -71,14 +72,27 @@ pub struct Transaction {
   pub hash: U256,
 }
 
+/// Transaction's error handling
+#[derive(Error, Debug)]
+pub enum TransactionError {
+  #[error(
+    "Transaction size ({len}) is greater than max transaction size ({})",
+    MAX_TRANSACTION_SIZE
+  )]
+  Oversize { len: usize },
+}
+
 impl Transaction {
-  pub fn new(mut data: Vec<u8>) -> Self {
+  pub fn new(mut data: Vec<u8>) -> Result<Self, TransactionError> {
     // Transaction length is always a non-zero multiple of 5
     while data.len() == 0 || data.len() % 5 != 0 {
       data.push(0);
     }
+    if data.len() > MAX_TRANSACTION_SIZE {
+      return Err(TransactionError::Oversize { len: data.len() });
+    }
     let hash = hash_bytes(&data);
-    return Transaction { data, hash };
+    Ok(Transaction { data, hash })
   }
 
   // Encodes a transaction length as a pair of 2 bytes
@@ -105,8 +119,9 @@ impl Deref for Transaction {
   }
 }
 
-impl From<&Statement> for Transaction {
-  fn from(stmt: &Statement) -> Self {
+impl TryFrom<&Statement> for Transaction {
+  type Error = TransactionError;
+  fn try_from(stmt: &Statement) -> Result<Self, Self::Error> {
     Transaction::new(stmt.proto_serialized().to_bytes())
   }
 }
@@ -163,13 +178,13 @@ impl Body {
   pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
   where
     I: IntoIterator<Item = T>,
-    T: Into<Transaction>,
+    T: TryInto<Transaction>,
   {
     // Reserve a byte in the beginning for the number of transactions
     let mut data = vec![0];
     let mut tx_count = 0;
     for transaction in transactions.into_iter() {
-      let transaction = transaction.into();
+      let transaction = transaction.try_into().map_err(|_| ())?;
       // Ignore transaction if it's empty
       let tx_len = transaction.data.len();
       if tx_len == 0 {
@@ -275,6 +290,13 @@ pub struct Node<C: ProtoComm, S: BlockStorage> {
   #[cfg(feature = "events")]
   pub event_emitter : Option<mpsc::Sender<NodeEventEmittedInfo>>,
   pub miner_comm    : Option<MinerCommunication>,
+}
+
+/// Pool's error handling
+#[derive(Error, Debug)]
+pub enum PoolError {
+  #[error("Transaction {hash:x} already included")]
+  AlreadyIncluded { hash: U256 },
 }
 
 // Peers
@@ -590,9 +612,9 @@ pub fn add_transaction_to_body_vec(
   body_vec: &mut Vec<u8>,
   transaction: &Transaction,
 ) -> Result<(), String> {
-  let tx_len = transaction.data.len();
+  let tx_len = transaction.data.len() + TRANSACTION_LENGTH_ENCODE_SIZE;
   let len_info = transaction.encode_length();
-  if body_vec.len() + 2 + tx_len > MAX_BODY_SIZE {
+  if body_vec.len() + tx_len > MAX_BODY_SIZE {
     return Err("No enough space in block".to_string());
   }
   body_vec.push(len_info.0);
@@ -617,7 +639,13 @@ pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
       break;
     }
     let transaction_body = body.data[index..index + tx_len].to_vec();
-    transactions.push(Transaction::new(transaction_body));
+    match Transaction::new(transaction_body) {
+      Ok(transaction) => transactions.push(transaction),
+      Err(err) => eprintln!(
+        "A transaction bigger than block was created from a block{}",
+        err
+      ), // in theory this can never happen
+    };
     index += tx_len;
   }
   transactions
@@ -800,18 +828,14 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   pub fn add_transaction(
     &mut self,
     transaction: Transaction,
-  ) -> Result<(), String> {
-    if transaction.data.len() > MAX_TRANSACTION_SIZE {
-      return Err(
-        "Transaction size is greater than max block's body size".to_string(),
-      );
-    }
-    let t_score = transaction.hash.low_u64();
+  ) -> Result<(), PoolError> {
+    let hash = transaction.hash;
+    let t_score = hash.low_u64();
     if self.pool.get(&transaction).is_none() {
       self.pool.push(transaction, t_score);
       Ok(())
     } else {
-      Err("Transaction already included".to_string())
+      Err(PoolError::AlreadyIncluded { hash })
     }
   }
 
@@ -1257,9 +1281,13 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
             let results: Vec<_> = stmts
               .into_iter()
               .map(|stmt| {
-                let bytes = bitvec_to_bytes(&stmt.proto_serialized());
-                let t = Transaction::new(bytes);
-                self.add_transaction(t)
+                let result: Result<(), api::PublishError> = {
+                  let bytes = bitvec_to_bytes(&stmt.proto_serialized());
+                  let t = Transaction::new(bytes)?; // transaction creation may fail
+                  self.add_transaction(t)?; // transaction addition may fail
+                  Ok(())
+                };
+                result
               })
               .collect();
             Ok(results)
@@ -1275,9 +1303,13 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         let result: Vec<_> = code
           .into_iter()
           .map(|stmt| {
-            let bytes = bitvec_to_bytes(&stmt.proto_serialized());
-            let t = Transaction::new(bytes);
-            self.add_transaction(t)
+            let result: Result<(), api::PublishError> = {
+              let bytes = bitvec_to_bytes(&stmt.proto_serialized());
+              let t = Transaction::new(bytes)?; // transaction creation may fail
+              self.add_transaction(t)?; // transaction addition may fail
+              Ok(())
+            };
+            result
           })
           .collect();
         handle_ans_err("Publish", tx.send(result));
@@ -1706,9 +1738,6 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 }
-
-// Main Thread
-// ===========
 
 pub fn spawn_miner(
   mine_config: MineConfig,

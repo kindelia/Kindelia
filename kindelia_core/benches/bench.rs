@@ -108,7 +108,7 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
 
     let (_, base_stmt) = hvm::read_statement(code).unwrap();
     let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
-    let transaction = node::Transaction::new(bytes);
+    let transaction = node::Transaction::new(bytes).unwrap();
 
     let body = node::Body::fill_from(std::iter::repeat(transaction));
 
