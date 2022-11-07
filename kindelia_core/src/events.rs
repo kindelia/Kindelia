@@ -141,6 +141,7 @@ pub struct HeartbeatPeers {
 pub struct HeartbeatTip {
   pub height: u64,
   pub difficulty: u64,
+  pub work: Hash,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -634,6 +635,7 @@ macro_rules! heartbeat {
     tip: {
       height: $tip_height:expr,
       difficulty: $difficulty:expr,
+      work: $work: expr,
     },
     blocks: {
       missing: $missing_count:expr,
@@ -659,6 +661,7 @@ macro_rules! heartbeat {
       tip: $crate::events::HeartbeatTip {
         height: $tip_height,
         difficulty: $difficulty,
+        work: $work.into(),
       },
       blocks: $crate::events::HeartbeatBlocks {
         missing: $missing_count,

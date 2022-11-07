@@ -1521,6 +1521,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   fn log_heartbeat(&self) {
     let tip = self.tip;
     let tip_height = *self.height.get(&tip).unwrap() as u64;
+    let tip_work = *self.work.get(&tip).unwrap();
 
     let tip_target = *self.target.get(&tip).unwrap();
     let difficulty = target_to_difficulty(tip_target);
@@ -1564,6 +1565,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       tip: {
         height: tip_height,
         difficulty: difficulty.low_u64(),
+        work: tip_work,
       },
       blocks: {
         missing: missing_count,
