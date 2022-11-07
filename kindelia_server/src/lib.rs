@@ -427,7 +427,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results = ask(query_tx, NodeRequest::publish(code)).await;
-        let result: Vec<Result<(), ()>> = results.into_iter().collect();
+        let result: Vec<Result<(), String>> = results.into_iter().collect();
         ok_json(result)
       }
     },

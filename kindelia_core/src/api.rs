@@ -289,7 +289,7 @@ pub struct RegInfo {
 pub type ReqAnsSend<T> = oneshot::Sender<T>;
 pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
 
-type PublishResults = Vec<Result<(), ()>>;
+type PublishResults = Vec<Result<(), String>>;
 
 pub enum NodeRequest<C: ProtoComm> {
   GetStats {
@@ -413,7 +413,7 @@ impl<C: ProtoComm> NodeRequest<C> {
   }
   pub fn publish(
     code: Vec<hvm::Statement>,
-  ) -> (Self, ReqAnsRecv<Vec<Result<(), ()>>>) {
+  ) -> (Self, ReqAnsRecv<Vec<Result<(), String>>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Publish { code, tx }, rx)
   }

@@ -444,6 +444,13 @@ pub const _HASH_SIZE: usize = 32;
 // Size of a block's body, in bytes
 pub const MAX_BODY_SIZE: usize = 1280;
 
+/// Size, in bytes, of needed space for transaction length store
+pub const TRANSACTION_LENGTH_ENCODE_SIZE: usize = 2;
+
+/// Size of the largest possible transaction, in bytes
+pub const MAX_TRANSACTION_SIZE: usize =
+  MAX_BODY_SIZE - TRANSACTION_LENGTH_ENCODE_SIZE - 1;
+
 // Max size of a big UDP packet, in bytes
 pub const MAX_UDP_SIZE_SLOW: usize = 8000;
 
@@ -793,13 +800,18 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   pub fn add_transaction(
     &mut self,
     transaction: Transaction,
-  ) -> Result<(), ()> {
+  ) -> Result<(), String> {
+    if transaction.data.len() > MAX_TRANSACTION_SIZE {
+      return Err(
+        "Transaction size is greater than max block's body size".to_string(),
+      );
+    }
     let t_score = transaction.hash.low_u64();
     if self.pool.get(&transaction).is_none() {
       self.pool.push(transaction, t_score);
       Ok(())
     } else {
-      Err(())
+      Err("Transaction already included".to_string())
     }
   }
 
