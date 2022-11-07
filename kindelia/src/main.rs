@@ -6,7 +6,6 @@ mod util;
 use std::future::Future;
 use std::net::UdpSocket;
 
-use kindelia_client::ApiClient;
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 
@@ -17,16 +16,21 @@ use cli::{
 use config::{arg_from_file_or_stdin, ConfigSettingsBuilder};
 
 use files::FileInput;
+use kindelia_client::ApiClient;
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::common::Name;
 use kindelia_core::config::{ApiConfig, MineConfig, NodeConfig, UiConfig};
 use kindelia_core::crypto;
 use kindelia_core::events;
-use kindelia_core::hvm::{self, view_statement, Statement};
+use kindelia_core::hvm::{
+  self, view_statement, view_statement_header, Statement,
+};
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
-use kindelia_core::node::{spawn_miner, Node};
+use kindelia_core::node::{
+  spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
+};
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
 use util::{
@@ -125,6 +129,38 @@ pub fn run_cli() -> Result<(), String> {
       test_code(&code, sudo);
       Ok(())
     }
+    CliCommand::Check { file, encoded, command } => {
+      let code = file.read_to_string()?;
+      let stmts = if encoded {
+        statements_from_hex_seq(&code)?
+      } else {
+        hvm::parse_code(&code)?
+      };
+      match command {
+        cli::CheckCommand::Transaction => {
+          for ref stmt in stmts {
+            let transaction: Transaction = stmt.into();
+            // size printing
+            {
+              let size = transaction.len();
+              let percent = size as f32 / MAX_TRANSACTION_SIZE as f32 * 100.;
+              let size_message = {
+                if size > MAX_TRANSACTION_SIZE {
+                  "❌ Doesn't fit in one block"
+                } else {
+                  "✅"
+                }
+              };
+              println!("Size: {} ({:.2}%) {}", size, percent, size_message);
+            }
+            // println!("Name: {}") // TODO
+            // header printing
+            println!("{}\n", view_statement_header(stmt));
+          }
+        }
+      };
+      Ok(())
+    }
     CliCommand::Serialize { file } => {
       let code: String = file.read_to_string()?;
       serialize_code(&code);
@@ -159,9 +195,8 @@ pub fn run_cli() -> Result<(), String> {
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       let code = file.read_to_string()?;
-      let f = |client: ApiClient, stmts| async move {
-        client.run_code(stmts).await
-      };
+      let f =
+        |client: ApiClient, stmts| async move { client.run_code(stmts).await };
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
@@ -341,8 +376,7 @@ where
   P: Future<Output = Result<T, String>>,
 {
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
-  let client =
-    ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+  let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
   run_async_blocking(f(client, stmts))
 }
 
