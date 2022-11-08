@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 use kindelia_core::common::Name;
 
@@ -163,7 +164,7 @@ pub enum CliCommand {
   /// Generate auto-completion for a shell.
   Completion {
     /// The shell to generate completion for.
-    shell: String,
+    shell: Shell,
   },
   Util {
     /// Which command run.

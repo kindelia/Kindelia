@@ -7,7 +7,8 @@ use std::future::Future;
 use std::net::UdpSocket;
 
 use kindelia_client::ApiClient;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 
 use cli::{
   Cli, CliCommand, GetCtrKind, GetFunKind, GetKind, GetRegKind, NodeCommand,
@@ -323,7 +324,7 @@ pub fn run_cli() -> Result<(), String> {
         Ok(())
       }
     },
-    CliCommand::Completion { .. } => todo!(),
+    CliCommand::Completion { shell } => print_shell_completions(shell),
   }
 }
 
@@ -681,4 +682,29 @@ pub fn start_node<C: ProtoComm + 'static>(
   for thread in threads {
     thread.join().unwrap();
   }
+}
+
+// Shell completion
+// ================
+
+// prints completions for a given shell, eg bash.
+fn print_shell_completions(shell: Shell) -> Result<(), String> {
+  // obtain name of present executable
+  let exec_name = std::env::current_exe()
+    .map_err(|e| format!("Error getting current executable: {}", e))?
+    .file_name()
+    .ok_or_else(|| "Error getting executable file name".to_string())?
+    .to_str()
+    .ok_or_else(|| "Error decoding executable name as utf8".to_string())?
+    .to_string();
+
+  // Generates completions for <shell> and prints to stdout
+  clap_complete::generator::generate(
+    shell,
+    &mut Cli::command(),
+    exec_name,
+    &mut std::io::stdout(),
+  );
+
+  Ok(())
 }
