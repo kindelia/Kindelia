@@ -47,8 +47,8 @@ kindelia get run <BLOCK_IDX> <STM_IDX>
 kindelia get stats
 
 kindelia get stats tick
-kindelia get stats mana
-kindelia get stats space
+kindelia get stats mana  [limit | used | available](TODO)
+kindelia get stats space [limit | used | available](TODO)
 kindelia get stats ctr-count
 kindelia get stats fun-count
 kindelia get stats reg-count
