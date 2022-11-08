@@ -694,23 +694,26 @@ pub const OP2: u128 = 0xA;
 pub const NUM: u128 = 0xB;
 pub const NIL: u128 = 0xF;
 
-pub const ADD : u128 = 0x0;
-pub const SUB : u128 = 0x1;
-pub const MUL : u128 = 0x2;
-pub const DIV : u128 = 0x3;
-pub const MOD : u128 = 0x4;
-pub const AND : u128 = 0x5;
-pub const OR  : u128 = 0x6;
-pub const XOR : u128 = 0x7;
-pub const SHL : u128 = 0x8;
-pub const SHR : u128 = 0x9;
-pub const LTN : u128 = 0xA;
-pub const LTE : u128 = 0xB;
-pub const EQL : u128 = 0xC;
-pub const GTE : u128 = 0xD;
-pub const GTN : u128 = 0xE;
-pub const NEQ : u128 = 0xF;
-
+#[repr(u8)]
+pub enum Op {
+ ADD = 0x00,
+ SUB = 0x01,
+ MUL = 0x02,
+ DIV = 0x03,
+ MOD = 0x04,
+ AND = 0x05,
+ OR  = 0x06,
+ XOR = 0x07,
+ SHL = 0x08,
+ SHR = 0x09,
+ LTN = 0x0A,
+ LTE = 0x0B,
+ EQL = 0x0C,
+ GTE = 0x0D,
+ GTN = 0x0E,
+ NEQ = 0x0F,
+}
+  
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const U64_NONE: u64 = u64::MAX; //TODO: rewrite as FFF's?if think it is easier to read like this.
@@ -909,22 +912,22 @@ impl TryFrom<u128> for Oper {
   type Error = String;
   fn try_from(value: u128) -> Result<Self, Self::Error> {
       match value {
-        ADD => Ok(Oper::Add),
-        SUB => Ok(Oper::Sub),
-        MUL => Ok(Oper::Mul),
-        DIV => Ok(Oper::Div),
-        MOD => Ok(Oper::Mod),
-        AND => Ok(Oper::And),
-        OR  => Ok(Oper::Or),
-        XOR => Ok(Oper::Xor),
-        SHL => Ok(Oper::Shl),
-        SHR => Ok(Oper::Shr),
-        LTN => Ok(Oper::Ltn),
-        LTE => Ok(Oper::Lte),
-        EQL => Ok(Oper::Eql),
-        GTE => Ok(Oper::Gte),
-        GTN => Ok(Oper::Gtn),
-        NEQ => Ok(Oper::Neq),
+        x if x == Op::ADD as u128 => Ok(Oper::Add),
+        x if x == Op::SUB as u128 => Ok(Oper::Sub),
+        x if x == Op::MUL as u128 => Ok(Oper::Mul),
+        x if x == Op::DIV as u128 => Ok(Oper::Div),
+        x if x == Op::MOD as u128 => Ok(Oper::Mod),
+        x if x == Op::AND as u128 => Ok(Oper::And),
+        x if x == Op::OR  as u128 => Ok(Oper::Or),
+        x if x == Op::XOR as u128 => Ok(Oper::Xor),
+        x if x == Op::SHL as u128 => Ok(Oper::Shl),
+        x if x == Op::SHR as u128 => Ok(Oper::Shr),
+        x if x == Op::LTN as u128 => Ok(Oper::Ltn),
+        x if x == Op::LTE as u128 => Ok(Oper::Lte),
+        x if x == Op::EQL as u128 => Ok(Oper::Eql),
+        x if x == Op::GTE as u128 => Ok(Oper::Gte),
+        x if x == Op::GTN as u128 => Ok(Oper::Gtn),
+        x if x == Op::NEQ as u128 => Ok(Oper::Neq),
         _ => Err(format!("Invalid value for operation: {}", value))
       }
   }
