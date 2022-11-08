@@ -1491,6 +1491,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
+ "thiserror",
  "tiny-keccak",
  "tokio",
 ]

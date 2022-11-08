@@ -5022,6 +5022,22 @@ pub fn view_oper(oper: &Oper) -> String {
   }.to_string()
 }
 
+// TODO: move these functions to impl Statement?
+pub fn view_statement_header(statement: &Statement) -> String {
+  let statement  = remove_sign(statement);
+  if let Statement::Fun { name, args, .. } = statement {
+    let args = 
+      args
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>()
+        .join(" ");
+    format!("fun ({} {})", name, args)
+  } else {
+    view_statement(&statement)
+  }
+}
+
 pub fn view_statement(statement: &Statement) -> String {
   fn view_sign(sign: &Option<crypto::Signature>) -> String {
     fn format_sign(sign: &crypto::Signature) -> String {

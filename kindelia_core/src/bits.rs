@@ -710,10 +710,8 @@ impl<A: ProtoAddr> ProtoSerialize for Message<A> {
       2 => {
         let size = deserialize_fixlen(16, bits, index)?;
         let data = deserialize_bytes(size, bits, index)?;
-        Some(Message::PleaseMineThisTransaction {
-          magic,
-          tx: Transaction::new(data),
-        })
+        let transaction = Transaction::new(data).ok()?;
+        Some(Message::PleaseMineThisTransaction { magic, tx: transaction })
       }
       _ => None,
     }

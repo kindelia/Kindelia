@@ -11,12 +11,13 @@ use std::fmt::{self, Display};
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use thiserror::Error;
 use tokio::sync::oneshot;
 
 use crate::bits::ProtoSerialize;
 use crate::hvm;
 use crate::net::ProtoComm;
-use crate::node;
+use crate::node::{self, PoolError, TransactionError};
 use crate::util;
 
 pub use crate::common::Name;
@@ -289,7 +290,14 @@ pub struct RegInfo {
 pub type ReqAnsSend<T> = oneshot::Sender<T>;
 pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
 
-type PublishResults = Vec<Result<(), ()>>;
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub enum PublishError {
+  PoolError( #[from] PoolError),
+  TransactionError(#[from] TransactionError),
+}
+
+type PublishResults = Vec<Result<(), PublishError>>;
 
 pub enum NodeRequest<C: ProtoComm> {
   GetStats {
@@ -413,7 +421,7 @@ impl<C: ProtoComm> NodeRequest<C> {
   }
   pub fn publish(
     code: Vec<hvm::Statement>,
-  ) -> (Self, ReqAnsRecv<Vec<Result<(), ()>>>) {
+  ) -> (Self, ReqAnsRecv<PublishResults>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Publish { code, tx }, rx)
   }

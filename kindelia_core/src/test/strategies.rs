@@ -330,7 +330,7 @@ pub fn peer() -> impl Strategy<Value = Peer<Address>> {
 }
 
 pub fn transaction() -> impl Strategy<Value = Transaction> {
-  vec(any::<u8>(), 1..128).prop_map(|d| Transaction::new(d))
+  vec(any::<u8>(), 1..128).prop_map(|d| Transaction::new(d).unwrap()) // unwrapped because 128 < node::MAX_TRANSACTION_SIZE
 }
 
 pub fn message() -> impl Strategy<Value = Message<Address>> {
