@@ -1158,8 +1158,18 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     match request {
       NodeRequest::GetStats { tx } => {
         let tick = self.runtime.get_tick();
-        let mana = self.runtime.get_mana();
-        let size = self.runtime.get_size();
+        let mana = {
+          let limit = self.runtime.get_mana_limit();
+          let used = self.runtime.get_mana();
+          let available = limit - used;
+          api::LimitStats { limit, used, available }
+        };
+        let size = {
+          let limit = self.runtime.get_size_limit();
+          let used = self.runtime.get_size();
+          let available = limit - used;
+          api::LimitStats { limit, used, available }
+        };
         let mut fun_count = 0;
         self.runtime.reduce_with(&mut fun_count, |acc, heap| {
           *acc += heap.get_fn_count();

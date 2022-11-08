@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-use kindelia_core::common::Name;
+use kindelia_core::{api::LimitStats, common::Name};
 
 use crate::files::FileInput;
 
@@ -66,6 +66,31 @@ kindelia node clean [-f]       // asks confirmation
 kindelia account ...
 
 */
+
+macro_rules! discriminant {
+  (
+    $struct_type:ty => $result_type:ty, // discriminant of this struct
+    pub enum $enum_name:ident { // enum name
+      $($enum_variant:ident = $struct_variant:ident),+ // enum variants
+      $(,)? // optional comma in the end
+    }
+  ) => {
+    // enum creation
+    #[derive(Subcommand)]
+    pub enum $enum_name {
+      $($enum_variant),+,
+    }
+
+    // enum implementation
+    impl $enum_name {
+      pub fn get_field(&self, structure: $struct_type) -> $result_type {
+        match &self {
+          $($enum_name::$enum_variant => structure.$struct_variant),+,
+        }
+      }
+    }
+  };
+}
 
 // Clap CLI definitions
 // ====================
@@ -278,10 +303,18 @@ pub enum GetStatsKind {
   /// Get the tick (tip block height).
   Tick,
   /// Get the used mana.
-  Mana,
+  Mana {
+    /// Optional specification of the stat
+    #[clap(subcommand)]
+    limit_stat: Option<LimitStatsDiscriminant>,
+  },
   /// Get the quantity of used space.
   // TODO: we should measure this as slots/nodes/cells, not bits
-  Space,
+  Space {
+    /// Optional specification of the stat
+    #[clap(subcommand)]
+    limit_stat: Option<LimitStatsDiscriminant>,
+  },
   /// Get the number of functions.
   FunCount,
   /// Get the number of constructors.
@@ -289,3 +322,12 @@ pub enum GetStatsKind {
   /// Get the number of namespaces.
   RegCount,
 }
+
+discriminant!(
+  LimitStats => u64,
+  pub enum LimitStatsDiscriminant {
+    Limit = limit,
+    Used = used,
+    Available = available,
+  }
+);

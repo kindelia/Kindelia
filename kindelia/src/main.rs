@@ -6,9 +6,9 @@ mod util;
 use std::future::Future;
 use std::net::UdpSocket;
 
-use kindelia_client::ApiClient;
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
+use kindelia_client::ApiClient;
 
 use cli::{
   Cli, CliCommand, GetCtrKind, GetFunKind, GetKind, GetRegKind, NodeCommand,
@@ -29,6 +29,7 @@ use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{spawn_miner, Node};
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
+use serde::Serialize;
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
 };
@@ -159,9 +160,8 @@ pub fn run_cli() -> Result<(), String> {
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       let code = file.read_to_string()?;
-      let f = |client: ApiClient, stmts| async move {
-        client.run_code(stmts).await
-      };
+      let f =
+        |client: ApiClient, stmts| async move { client.run_code(stmts).await };
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
@@ -341,9 +341,20 @@ where
   P: Future<Output = Result<T, String>>,
 {
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
-  let client =
-    ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+  let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
   run_async_blocking(f(client, stmts))
+}
+
+fn print_json<T: Serialize, F: Fn(T)>(
+  json: bool,
+  printable: T,
+  when_not_json: F,
+) {
+  if json {
+    println!("{}", serde_json::to_string_pretty(&printable).unwrap());
+  } else {
+    when_not_json(printable)
+  }
 }
 
 // Client
@@ -390,9 +401,7 @@ pub async fn get_info(
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
-        if json {
-          println!("{}", serde_json::to_string(&func_info).unwrap());
-        } else {
+        print_json(json, func_info, |func_info| {
           let func = func_info.func;
           let statement = hvm::Statement::Fun {
             name,
@@ -402,16 +411,12 @@ pub async fn get_info(
             sign: None,
           };
           println!("{}", statement);
-        }
+        });
         Ok(())
       }
       GetFunKind::State => {
         let state = client.get_function_state(name).await?;
-        if json {
-          println!("{}", serde_json::to_string_pretty(&state).unwrap());
-        } else {
-          println!("{}", state);
-        }
+        print_json(json, &state, |state| println!("{}", state));
         Ok(())
       }
       GetFunKind::Slots => todo!(),
@@ -434,22 +439,29 @@ pub async fn get_info(
       let stats = client.get_stats().await?;
       match stat_kind {
         None => {
-          if json {
-            println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-          } else {
-            println!("{:#?}", stats);
-          }
+          print_json(json, &stats, |stats| println!("{:#?}", stats));
         }
         Some(stat_kind) => {
-          let val = match stat_kind {
-            GetStatsKind::Tick => stats.tick,
-            GetStatsKind::Mana => stats.mana,
-            GetStatsKind::Space => stats.space,
-            GetStatsKind::FunCount => stats.fun_count,
-            GetStatsKind::CtrCount => stats.ctr_count,
-            GetStatsKind::RegCount => stats.reg_count,
+          match stat_kind {
+            GetStatsKind::Tick => println!("{}", stats.tick),
+            GetStatsKind::FunCount => println!("{}", stats.fun_count),
+            GetStatsKind::CtrCount => println!("{}", stats.ctr_count),
+            GetStatsKind::RegCount => println!("{}", stats.reg_count),
+            GetStatsKind::Mana { limit_stat: Some(limit_stat) } => {
+              let stat = limit_stat.get_field(stats.mana);
+              println!("{}", stat)
+            }
+            GetStatsKind::Mana { limit_stat: None } => {
+              print_json(json, &stats.mana, |stats| println!("{:#?}", stats));
+            }
+            GetStatsKind::Space { limit_stat: Some(limit_stat) } => {
+              let stat = limit_stat.get_field(stats.mana);
+              println!("{}", stat)
+            }
+            GetStatsKind::Space { limit_stat: None } => {
+              print_json(json, &stats.space, |stats| println!("{:#?}", stats));
+            }
           };
-          println!("{}", val);
         }
       };
       Ok(())

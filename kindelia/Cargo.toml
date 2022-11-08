@@ -40,6 +40,7 @@ toml = "0.5.9"
 # nohash-hasher = "0.2.0" # inlined, because we need u128
 
 # API
+serde = { version = "1.0.137" }
 serde_json = "1.0"
 
 # Events API
@@ -47,7 +48,6 @@ tokio = { version = "1.19.1", features = ["sync"] }
 
 
 [dev-dependencies]
-serde = { version = "1.0.137" }
 assert_cmd = "1.0.1"
 httpmock = "0.6.6"
 rstest = "0.15.0"
