@@ -470,6 +470,10 @@ impl RawCell {
   pub fn get_loc(&self, arg: u64) -> Loc {
     Loc(self.get_val() + arg)
   }
+
+  pub fn get_name_from_ext(&self) -> Name {
+    Name::new_unsafe(self.get_ext())
+  }
 }
 
 // Loc
@@ -1912,7 +1916,7 @@ impl Runtime {
             return done;
           }
           _ => {
-            let name = Name::new_unsafe(ext);
+            let name = term.get_name_from_ext();
             return Err(RuntimeError::EffectFailure(
               EffectFailure::InvalidIOCtr { name },
             ));
@@ -2794,7 +2798,7 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
       }
       CellTag::NUM => {}
       CellTag::CTR | CellTag::FUN => {
-        let arity = rt.get_arity(&Name::new_unsafe(term.get_ext())).unwrap();
+        let arity = rt.get_arity(&term.get_name_from_ext()).unwrap();
         // NOTE: should never be none, should panic
         // TODO: remove unwrap?
         for i in 0 .. arity {
@@ -3310,7 +3314,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
           continue;
         }
         CellTag::FUN => {
-          let name = Name::new_unsafe(term.get_ext());
+          let name = term.get_name_from_ext();
           let ari = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
           if let Some(func) = &rt.get_func(&name) {
             if ari == func.arity {
@@ -3473,8 +3477,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
           // y <- (K a1 b1 c1 ...)
           } else if arg0.get_tag() == CellTag::CTR {
             //println!("dup-ctr");
-            let func = arg0.get_ext();
-            let name = Name::new_unsafe(func);
+            let name = arg0.get_name_from_ext();
             let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
@@ -3612,8 +3615,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
               // {(F a0 b0 c0 ...) (F a1 b1 c1 ...)}
               if ask_arg(rt, term, *idx).get_tag() == CellTag::SUP {
                 //println!("fun-sup");
-                let funx = term.get_ext();
-                let name = Name::new_unsafe(funx);
+                let name = term.get_name_from_ext();
                 let arit = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
                 rt.set_mana(rt.get_mana() + FunSupMana(arit));
                 rt.set_rwts(rt.get_rwts() + 1);
@@ -3722,8 +3724,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
             return Ok(false);
           }
 
-          let fid = term.get_ext();
-          if let Some(func) = rt.get_func(&Name::new_unsafe(fid)) {
+          if let Some(func) = rt.get_func(&term.get_name_from_ext()) {
             if call_function(rt, func, host, term, mana, &mut vars_data)? {
               init = 1;
               continue;
@@ -3805,7 +3806,7 @@ pub fn compute_at(rt: &mut Runtime, loc: Loc, mana: u64) -> Result<RawCell, Runt
               compute_and_link_arg(&mut stack, norm, 2);
             }
             CellTag::CTR | CellTag::FUN => {
-              let name = Name::new_unsafe(norm.get_ext());
+              let name = norm.get_name_from_ext();
               let arity = rt.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
               for i in (0..arity).rev() {
                 compute_and_link_arg(&mut stack, norm, i);
@@ -3834,7 +3835,6 @@ pub fn show_ptr(x: RawCell) -> String {
     String::from("~")
   } else {
     let tag = x.get_tag();
-    let ext = x.get_ext();
     let val = x.get_val();
     let tgs = match tag {
       CellTag::DP0 => "DP0",
@@ -3851,7 +3851,7 @@ pub fn show_ptr(x: RawCell) -> String {
       CellTag::NUM => "NUM",
       _   => "?",
     };
-    let name = Name::new_unsafe(ext);
+    let name = x.get_name_from_ext();
     format!("{}:{}:{:x}", tgs, name, val)
   }
 }
@@ -3931,7 +3931,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
           stack.push(ask_arg(rt, term, 0));
         }
         CellTag::CTR | CellTag::FUN => {
-          let name = Name::new_unsafe(term.get_ext());
+          let name = term.get_name_from_ext();
           let arity = rt.get_arity(&name).unwrap();
           // NOTE: arity should never be None (read from memory), should panic
           // TODO: remove unwrap?
@@ -4031,7 +4031,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               output.push(format!("#{}", numb));
             }
             CellTag::CTR => {
-              let name = Name::new_unsafe(term.get_ext());
+              let name = term.get_name_from_ext();
               let mut arit = rt.get_arity(&name).unwrap();
               // NOTE: arity should never be zero (read from memory)
               // TODO: remove unwrap
@@ -4055,7 +4055,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               }
             }
             CellTag::FUN => {
-              let name = Name::new_unsafe(term.get_ext());
+              let name = term.get_name_from_ext();
               output.push(format!("({}", name));
               stack.push(StackItem::Str(")".to_string()));
               let arit = rt.get_arity(&name).unwrap();
@@ -4165,7 +4165,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
         }
         CellTag::NUM => {}
         CellTag::CTR | CellTag::FUN => {
-          let name = Name::new_unsafe(term.get_ext());
+          let name = term.get_name_from_ext();
           let arity = rt.get_arity(&name).unwrap();
           // NOTE: should never be None, should panic.
           // TODO: remove unwrap?
@@ -4306,7 +4306,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
               stack.push(StackItem::Term(ask_arg(rt, term, 0)));
             }
             CellTag::CTR | CellTag::FUN => {
-              let name = Name::new_unsafe(term.get_ext());
+              let name = term.get_name_from_ext();
               let arit = rt.get_arity(&name).unwrap();
               // NOTE: arity cant be None, should panic
               // TODO: remove unwrap?
@@ -4347,7 +4347,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
               dup_store.pop(col);
             }
             CellTag::CTR | CellTag::FUN => {
-              let name = Name::new_unsafe(term.get_ext());
+              let name = term.get_name_from_ext();
               let arit = rt.get_arity(&name).unwrap();
               let mut args = Vec::new();
               for i in 0..arit {
