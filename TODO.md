@@ -21,8 +21,6 @@
 
 - KHVM refactors
   - `Io` enum
-  - `CellTag` enum
-  - `Op` enum
   - `split_names` without using strings
   - `get_tag`, `get_ext` etc on `RawCell`
   - `get_name_from_ext` on `RawCell`
