@@ -8,6 +8,7 @@ use std::net::UdpSocket;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
+use serde::Serialize;
 
 use cli::{
   Cli, CliCommand, GetCtrKind, GetFunKind, GetKind, GetRegKind, NodeCommand,
@@ -384,6 +385,18 @@ where
   run_async_blocking(f(client, stmts))
 }
 
+fn print_json_else<T: Serialize, F: Fn(T)>(
+  json: bool,
+  printable: T,
+  when_not_json: F,
+) {
+  if json {
+    println!("{}", serde_json::to_string_pretty(&printable).unwrap());
+  } else {
+    when_not_json(printable)
+  }
+}
+
 // Client
 // ======
 
@@ -428,9 +441,7 @@ pub async fn get_info(
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
-        if json {
-          println!("{}", serde_json::to_string(&func_info).unwrap());
-        } else {
+        print_json_else(json, func_info, |func_info| {
           let func = func_info.func;
           let statement = hvm::Statement::Fun {
             name,
@@ -440,16 +451,12 @@ pub async fn get_info(
             sign: None,
           };
           println!("{}", statement);
-        }
+        });
         Ok(())
       }
       GetFunKind::State => {
         let state = client.get_function_state(name).await?;
-        if json {
-          println!("{}", serde_json::to_string_pretty(&state).unwrap());
-        } else {
-          println!("{}", state);
-        }
+        print_json_else(json, &state, |state| println!("{}", state));
         Ok(())
       }
       GetFunKind::Slots => todo!(),
@@ -472,22 +479,33 @@ pub async fn get_info(
       let stats = client.get_stats().await?;
       match stat_kind {
         None => {
-          if json {
-            println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-          } else {
-            println!("{:#?}", stats);
-          }
+          print_json_else(json, &stats, |stats| println!("{:#?}", stats));
         }
         Some(stat_kind) => {
-          let val = match stat_kind {
-            GetStatsKind::Tick => stats.tick,
-            GetStatsKind::Mana => stats.mana,
-            GetStatsKind::Space => stats.space,
-            GetStatsKind::FunCount => stats.fun_count,
-            GetStatsKind::CtrCount => stats.ctr_count,
-            GetStatsKind::RegCount => stats.reg_count,
+          match stat_kind {
+            GetStatsKind::Tick => println!("{}", stats.tick),
+            GetStatsKind::FunCount => println!("{}", stats.fun_count),
+            GetStatsKind::CtrCount => println!("{}", stats.ctr_count),
+            GetStatsKind::RegCount => println!("{}", stats.reg_count),
+            GetStatsKind::Mana { limit_stat: Some(limit_stat) } => {
+              let stat = limit_stat.get_field(stats.mana);
+              println!("{}", stat)
+            }
+            GetStatsKind::Mana { limit_stat: None } => {
+              print_json_else(json, &stats.mana, |stats| {
+                println!("{:#?}", stats)
+              });
+            }
+            GetStatsKind::Space { limit_stat: Some(limit_stat) } => {
+              let stat = limit_stat.get_field(stats.space);
+              println!("{}", stat)
+            }
+            GetStatsKind::Space { limit_stat: None } => {
+              print_json_else(json, &stats.space, |stats| {
+                println!("{:#?}", stats)
+              });
+            }
           };
-          println!("{}", val);
         }
       };
       Ok(())

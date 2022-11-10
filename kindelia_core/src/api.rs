@@ -166,10 +166,17 @@ impl TryFrom<&str> for HexStatement {
 // ===
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct LimitStats {
+  pub limit: u64,
+  pub used: u64,
+  pub available: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Stats {
   pub tick: u64,
-  pub mana: u64,
-  pub space: u64,
+  pub mana: LimitStats,
+  pub space: LimitStats,
   pub fun_count: u64,
   pub ctr_count: u64,
   pub reg_count: u64,

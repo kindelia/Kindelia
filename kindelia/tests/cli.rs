@@ -125,14 +125,22 @@ mod cli {
     "../example/private_key_2_alice",
     "#225111118185718227719509163399323998"
   )]
-  #[case("../example/private_key_3_bob", "#540402903301314077240655651075245048")]
+  #[case(
+    "../example/private_key_3_bob",
+    "#540402903301314077240655651075245048"
+  )]
   fn signing_run(#[case] private_key: &str, #[case] expected_result: &str) {
     let temp_dir = temp_dir();
     let temp_file =
       temp_dir.join(format!("crate.{:x}.txt", fastrand::u128(..)));
 
     let output = kindelia!()
-      .args(["sign", "../example/block_3.unsig.kdl", "--secret-file", private_key])
+      .args([
+        "sign",
+        "../example/block_3.unsig.kdl",
+        "--secret-file",
+        private_key,
+      ])
       .output()
       .unwrap();
     let output = get_stdout(&output);
@@ -182,8 +190,12 @@ mod cli {
   #[case("/stats", None, stats_response_1(), "stats ctr-count", "3")]
   #[case("/stats", None, stats_response_1(), "stats fun-count", "4")]
   #[case("/stats", None, stats_response_1(), "stats reg-count", "5")]
-  #[case("/stats", None, stats_response_1(), "stats mana", "400")]
-  #[case("/stats", None, stats_response_1(), "stats space", "500")]
+  #[case("/stats", None, stats_response_1(), "stats mana limit", "700")]
+  #[case("/stats", None, stats_response_1(), "stats mana used", "300")]
+  #[case("/stats", None, stats_response_1(), "stats mana available", "400")]
+  #[case("/stats", None, stats_response_1(), "stats space limit", "700")]
+  #[case("/stats", None, stats_response_1(), "stats space used", "300")]
+  #[case("/stats", None, stats_response_1(), "stats space available", "400")]
   #[case("/stats", None, stats_response_1(), "stats tick", "700")]
   // not working because the lack of u128 deserialzation support
   // #[case("/peers/",None,peers_response_1(),"peers","0.0.0.1:42000\n0.0.0.1:42001")]
@@ -198,8 +210,8 @@ mod cli {
     #[case] expected_result: &'static str,
   ) {
     // separate command and subcommand
-    let command: Vec<_> = command.split(' ').collect();
-    let subcommand = command.last();
+    let command: Vec<&str> = command.split(' ').collect();
+    let subcommands: Vec<_> = command.iter().skip(1).collect();
     let command = command.first().unwrap();
 
     let mut path: String = path.into();
@@ -221,9 +233,7 @@ mod cli {
     if let Some(name) = name {
       args.push(name);
     }
-    if let Some(subcommand) = subcommand {
-      args.push(subcommand);
-    }
+    args.extend(subcommands);
     let assertion = kindelia!().args(&args).assert();
     assertion.success().stdout(format!("{}\n", expected_result));
   }
@@ -268,8 +278,8 @@ mod cli {
       ctr_count: 3,
       fun_count: 4,
       reg_count: 5,
-      mana: 400,
-      space: 500,
+      mana: api::LimitStats { limit: 700, available: 400, used: 300 },
+      space: api::LimitStats { limit: 700, available: 400, used: 300 },
       tick: 700,
     }
   }
