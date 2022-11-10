@@ -211,7 +211,10 @@ pub enum CliCommand {
 #[derive(Subcommand)]
 pub enum NodeCommand {
   /// Clean the node's data.
-  Clean,
+  Clean {
+    #[clap(subcommand)]
+    command: NodeCleanCommand,
+  },
   /// Starts a Kindelia node.
   Start {
     /// Network id / magic number.
@@ -227,6 +230,27 @@ pub enum NodeCommand {
     #[clap(long, short)]
     json: bool,
   },
+}
+
+#[derive(Subcommand)]
+pub enum NodeCleanCommand {
+  /// Cleans all kindelia content.
+  All,
+  /// Cleans kindelia blocks
+  Blocks {
+    #[clap(subcommand)]
+    command: NodeCleanBlocksCommand,
+  },
+}
+
+#[derive(Subcommand)]
+pub enum NodeCleanBlocksCommand {
+  /// Cleans all kindelia blocks.
+  All,
+  /// Cleans half of kindelia blocks (the most recent ones).
+  Half,
+  /// Cleans <NUMBER_OF_BLOCKS> kindelia blocks (the most recent ones).
+  N { number_of_blocks: usize },
 }
 
 #[derive(Subcommand)]
