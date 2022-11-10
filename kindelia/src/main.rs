@@ -8,7 +8,7 @@ use std::net::UdpSocket;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
-use kindelia_client::ApiClient;
+use serde::Serialize;
 
 use cli::{
   Cli, CliCommand, GetCtrKind, GetFunKind, GetKind, GetRegKind, NodeCommand,
@@ -17,6 +17,7 @@ use cli::{
 use config::{arg_from_file_or_stdin, ConfigSettingsBuilder};
 
 use files::FileInput;
+use kindelia_client::ApiClient;
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::common::Name;
@@ -29,7 +30,6 @@ use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{spawn_miner, Node};
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
-use serde::Serialize;
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
 };
@@ -345,7 +345,7 @@ where
   run_async_blocking(f(client, stmts))
 }
 
-fn print_json<T: Serialize, F: Fn(T)>(
+fn print_json_else<T: Serialize, F: Fn(T)>(
   json: bool,
   printable: T,
   when_not_json: F,
@@ -401,7 +401,7 @@ pub async fn get_info(
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
         let func_info = client.get_function(name).await?;
-        print_json(json, func_info, |func_info| {
+        print_json_else(json, func_info, |func_info| {
           let func = func_info.func;
           let statement = hvm::Statement::Fun {
             name,
@@ -416,7 +416,7 @@ pub async fn get_info(
       }
       GetFunKind::State => {
         let state = client.get_function_state(name).await?;
-        print_json(json, &state, |state| println!("{}", state));
+        print_json_else(json, &state, |state| println!("{}", state));
         Ok(())
       }
       GetFunKind::Slots => todo!(),
@@ -439,7 +439,7 @@ pub async fn get_info(
       let stats = client.get_stats().await?;
       match stat_kind {
         None => {
-          print_json(json, &stats, |stats| println!("{:#?}", stats));
+          print_json_else(json, &stats, |stats| println!("{:#?}", stats));
         }
         Some(stat_kind) => {
           match stat_kind {
@@ -452,14 +452,18 @@ pub async fn get_info(
               println!("{}", stat)
             }
             GetStatsKind::Mana { limit_stat: None } => {
-              print_json(json, &stats.mana, |stats| println!("{:#?}", stats));
+              print_json_else(json, &stats.mana, |stats| {
+                println!("{:#?}", stats)
+              });
             }
             GetStatsKind::Space { limit_stat: Some(limit_stat) } => {
-              let stat = limit_stat.get_field(stats.mana);
+              let stat = limit_stat.get_field(stats.space);
               println!("{}", stat)
             }
             GetStatsKind::Space { limit_stat: None } => {
-              print_json(json, &stats.space, |stats| println!("{:#?}", stats));
+              print_json_else(json, &stats.space, |stats| {
+                println!("{:#?}", stats)
+              });
             }
           };
         }
