@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::io::{Error, ErrorKind, Read, Result as IoResult, Write};
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use crate::bits::ProtoSerialize;
@@ -220,7 +220,7 @@ impl DiskSer for crate::crypto::Hash {
 }
 
 impl DiskSer for crate::hvm::RawCell {
-  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     (**self).disk_serialize(sink)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
@@ -231,7 +231,7 @@ impl DiskSer for crate::hvm::RawCell {
         let rawcell = crate::hvm::RawCell::new(num);
         match rawcell {
           Some(rawcell) => Ok(Some(rawcell)),
-          None => Err(Error::from(ErrorKind::InvalidData))
+          None => Err(Error::from(ErrorKind::InvalidData)),
         }
       }
     }
@@ -239,7 +239,7 @@ impl DiskSer for crate::hvm::RawCell {
 }
 
 impl DiskSer for crate::hvm::Loc {
-  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize>{ 
+  fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     (**self).disk_serialize(sink)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
@@ -250,7 +250,7 @@ impl DiskSer for crate::hvm::Loc {
         let loc = crate::hvm::Loc::new(num);
         match loc {
           Some(loc) => Ok(Some(loc)),
-          None => Err(Error::from(ErrorKind::InvalidData))
+          None => Err(Error::from(ErrorKind::InvalidData)),
         }
       }
     }
@@ -259,6 +259,8 @@ impl DiskSer for crate::hvm::Loc {
 
 // Node persistence
 // ================
+
+pub const BLOCKS_DIR: &str = "blocks";
 
 /// A block writter interface, used to tell the node
 /// how it should write a block (in file system, in a mocked container, etc).
@@ -295,7 +297,7 @@ impl SimpleFileStorage {
     // create channel
     let (tx, rx) = mpsc::channel::<FileWritterChannelInfo>();
     // blocks are stored in `blocks` dir
-    let blocks_path = path.join("blocks");
+    let blocks_path = path.join(BLOCKS_DIR);
     std::fs::create_dir_all(&blocks_path)
       .expect("Could not create block storage folder");
 
@@ -331,19 +333,7 @@ impl BlockStorage for SimpleFileStorage {
     }
   }
   fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, then: F) {
-    let mut file_paths = std::fs::read_dir(&self.path)
-      .unwrap()
-      .map(|entry| {
-        // Extract block height from block file path for fast sort
-        let path = entry.unwrap().path();
-        let name = path.file_name().unwrap().to_str().unwrap();
-        let bnum = name.split('.').next().unwrap();
-        let bnum = u64::from_str_radix(bnum, 16).unwrap();
-        (bnum, path)
-      })
-      .collect::<Vec<_>>();
-    file_paths.sort_unstable();
-
+    let file_paths = get_ordered_blocks_path(&self.path);
     file_paths
       .into_iter()
       .map(|(_, file_path)| {
@@ -360,6 +350,29 @@ impl BlockStorage for SimpleFileStorage {
   fn enable(&mut self) {
     self.enabled = true
   }
+}
+
+// TODO: remove unwraps, return Result instead
+/// Get all block entries in the `path`, sort it by the name/height and
+/// returns a vector containing ordered (height, paths).
+///
+/// Expects all the dir entries to be a kindelia block, named as
+/// <block_height>.kindelia_block.bin.
+pub fn get_ordered_blocks_path(path: &Path) -> Vec<(u64, PathBuf)> {
+  let mut file_paths = std::fs::read_dir(path)
+    .unwrap()
+    .map(|entry| {
+      // Extract block height from block file path for fast sort
+      let path = entry.unwrap().path();
+      let name = path.file_name().unwrap().to_str().unwrap();
+      let bnum = name.split('.').next().unwrap();
+      let bnum = u64::from_str_radix(bnum, 16).unwrap();
+      (bnum, path)
+    })
+    .collect::<Vec<_>>();
+  file_paths.sort_unstable();
+
+  file_paths
 }
 
 #[derive(Clone)]

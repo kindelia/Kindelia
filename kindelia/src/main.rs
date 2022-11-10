@@ -5,6 +5,7 @@ mod util;
 
 use std::future::Future;
 use std::net::UdpSocket;
+use std::path::Path;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
@@ -31,13 +32,15 @@ use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
-use kindelia_core::persistence::SimpleFileStorage;
+use kindelia_core::persistence::{
+  get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
+};
 use kindelia_core::util::bytes_to_bitvec;
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
 };
 
-use crate::cli::GetStatsKind;
+use crate::cli::{GetStatsKind, NodeCleanBlocksCommand, NodeCleanCommand};
 use crate::util::init_config_file;
 
 fn main() -> Result<(), String> {
@@ -98,6 +101,8 @@ macro_rules! resolve_cfg {
   };
 }
 
+// TODO: create own error with `thiserror`
+// TODO: separate file in `mod`'s?
 /// Parse CLI arguments and run
 pub fn run_cli() -> Result<(), String> {
   let parsed = Cli::parse();
@@ -247,29 +252,8 @@ pub fn run_cli() -> Result<(), String> {
       );
 
       match command {
-        NodeCommand::Clean => {
-          // warning
-          println!(
-            "WARNING! This will delete all the files present in '{}'...",
-            data_path.display()
-          );
-          // confirmation
-          println!("Do you want to continue? ['y' for YES / or else NO]");
-          let mut answer = String::new();
-          std::io::stdin()
-            .read_line(&mut answer)
-            .map_err(|err| format!("Could not read your answer: '{}'", err))?;
-          // only accept 'y' as positive answer, anything else will be ignored
-          if answer.trim().to_lowercase() == "y" {
-            std::fs::remove_dir_all(data_path).map_err(|err| {
-              format!("Could not remove the files: '{}'", err)
-            })?;
-            println!("All items were removed.");
-          } else {
-            println!("Canceling operation.");
-          }
-          Ok(())
-        }
+        NodeCommand::Clean { command } => clean(&data_path, command)
+          .map_err(|err| format!("Could not clean kindelia's data: {}", err)),
         NodeCommand::Start { initial_peers, network_id, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
@@ -601,6 +585,78 @@ fn init_socket() -> Option<UdpSocket> {
     }
   }
   None
+}
+
+// Clean
+fn clean(
+  data_path: &Path,
+  command: NodeCleanCommand,
+) -> Result<(), std::io::Error> {
+  fn user_confirm(data_path: &Path) -> Result<bool, std::io::Error> {
+    // warning
+    println!(
+      "WARNING! This will delete permanently the selected files present in '{}'...",
+      data_path.display()
+    );
+    // confirmation
+    println!("Do you want to continue? ['y' for YES / or else NO]");
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    // only accept 'y' as positive answer, anything else will be ignored
+    if answer.trim().to_lowercase() != "y" {
+      println!("Canceling operation.");
+      return Ok(false);
+    }
+    Ok(true)
+  }
+
+  fn exclude_n_files(
+    data_path: &std::path::Path,
+    n: usize,
+  ) -> Result<(), std::io::Error> {
+    let entries = get_ordered_blocks_path(data_path);
+    let mut count = 0;
+    for entry in entries.iter().rev() {
+      if entry.1.is_file() {
+        std::fs::remove_file(&entry.1)?
+      }
+      count += 1;
+      if count >= n {
+        break;
+      }
+    }
+    Ok(())
+  }
+
+  fn clean_node(
+    data_path: &Path,
+    command: NodeCleanCommand,
+  ) -> Result<(), std::io::Error> {
+    match command {
+      NodeCleanCommand::All => std::fs::remove_dir_all(data_path)?,
+      NodeCleanCommand::Blocks { command } => {
+        let data_path = data_path.join(BLOCKS_DIR);
+        match command {
+          NodeCleanBlocksCommand::All => std::fs::remove_dir_all(data_path)?,
+          NodeCleanBlocksCommand::Half => {
+            let dir = std::fs::read_dir(&data_path)?;
+            let half = dir.count() / 2;
+            exclude_n_files(&data_path, half)?
+          }
+          NodeCleanBlocksCommand::N { number_of_blocks } => {
+            exclude_n_files(&data_path, number_of_blocks)?
+          }
+        }
+      }
+    }
+    Ok(())
+  }
+
+  if user_confirm(data_path)? {
+    clean_node(data_path, command)?
+  }
+
+  Ok(())
 }
 
 // Node main thread
