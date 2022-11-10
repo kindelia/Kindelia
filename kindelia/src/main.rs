@@ -507,7 +507,7 @@ pub async fn get_info(
 
 pub fn serialize_code(code: &str) {
   let statements =
-    parser::read_statements(code).map_err(|err| err.erro).unwrap().1;
+    parser::parse_statements(code).map_err(|err| err.erro).unwrap().1;
   for statement in statements {
     println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
   }

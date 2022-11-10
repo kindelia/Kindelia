@@ -107,7 +107,7 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
   c.bench_function("deserialize_block_with_txs", |b| {
     let code = include_str!("kdl/inc.kdl");
 
-    let (_, base_stmt) = parser::read_statement(code).unwrap();
+    let (_, base_stmt) = parser::parse_statement(code).unwrap();
     let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
     let transaction = node::Transaction::new(bytes).unwrap();
 

@@ -261,7 +261,7 @@ use crate::NoHashHasher::NoHashHasher;
 
 use crate::common::{Name, U120};
 use crate::persistence::DiskSer;
-use crate::parser::{read_statements, parse_code, ParseErr};
+use crate::parser::{parse_statements, parse_code, ParseErr};
 
 /// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 /// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
@@ -1632,7 +1632,7 @@ impl Runtime {
   }
 
   pub fn run_statements_from_code(&mut self, code: &str, silent: bool, debug: bool) -> Vec<StatementResult> {
-    let stataments = read_statements(code);
+    let stataments = parse_statements(code);
     match stataments {
       Ok((.., statements)) => self.run_statements(&statements, silent, debug),
       Err(ParseErr { erro , .. }) => {
@@ -1660,7 +1660,7 @@ impl Runtime {
   }
 
   pub fn test_statements_from_code(&mut self, code: &str) -> Vec<StatementResult> {
-    let stataments = read_statements(code);
+    let stataments = parse_statements(code);
     match stataments {
       Ok((.., statements)) => self.test_statements(&statements),
       Err(ParseErr { erro , .. }) => {
@@ -4654,7 +4654,7 @@ pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
 }
 
 pub fn test_statements_from_code(code: &str, debug: bool) {
-  let statments = read_statements(code);
+  let statments = parse_statements(code);
   match statments {
     Ok((.., statements)) => test_statements(&statements, debug),
     Err(ParseErr { code, erro }) => println!("{}", erro),

@@ -268,7 +268,7 @@ pub fn run_term_from_code_and<A>(code: &str, action: A)
 where
   A: Fn(&Term),
 {
-  let (_, term) = parser::read_term(code).unwrap();
+  let (_, term) = parser::parse_term(code).unwrap();
   run_term_and(&term, action)
 }
 

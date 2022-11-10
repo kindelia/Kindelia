@@ -54,7 +54,7 @@ mod cli {
 
     // read file and get statments
     let file_content = std::fs::read_to_string(file).unwrap();
-    let (_, s1) = parser::read_statements(&file_content).unwrap();
+    let (_, s1) = parser::parse_statements(&file_content).unwrap();
 
     // serializes file and saves it in a temp file
     let output = kindelia!().args(["serialize", file]).output().unwrap();
@@ -73,7 +73,7 @@ mod cli {
       .output()
       .unwrap();
     let output = get_stdout(&output);
-    let (_, s2) = parser::read_statements(&output).unwrap();
+    let (_, s2) = parser::parse_statements(&output).unwrap();
 
     eprintln!("OUT:\n{}", output);
 
@@ -255,7 +255,7 @@ mod cli {
 
   fn fun_response_1() -> (api::FuncInfo, Option<hvm::Term>) {
     let code = FUN_CODE;
-    let func = parser::read_statement(code).unwrap().1;
+    let func = parser::parse_statement(code).unwrap().1;
     if let hvm::Statement::Fun { func, init, .. } = func {
       (api::FuncInfo { func }, init)
     } else {

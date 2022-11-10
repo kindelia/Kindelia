@@ -1275,7 +1275,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       }
       NodeRequest::PublishCode { code, tx } => {
         let statements =
-          parser::read_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
+          parser::parse_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
         let res = match statements {
           Err(err) => Err(err),
           Ok(stmts) => {

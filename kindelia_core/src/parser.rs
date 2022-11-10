@@ -85,7 +85,7 @@ fn is_name_char(chr: char) -> bool {
       || chr >= '0' && chr <= '9';
 }
 
-pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
+pub fn parse_char(code: &str, chr: char) -> ParseResult<()> {
   let code = skip(code);
   if head(code) == chr {
     Ok((tail(code), ()))
@@ -97,7 +97,7 @@ pub fn read_char(code: &str, chr: char) -> ParseResult<()> {
   }
 }
 
-pub fn read_numb<T>(code: &str) -> ParseResult<T>
+pub fn parse_numb<T>(code: &str) -> ParseResult<T>
 where
   T: TryFrom<u128, Error = String>,
 {
@@ -140,7 +140,7 @@ where
   Ok((code, numb))
 }
 
-pub fn read_name(code: &str) -> ParseResult<Name> {
+pub fn parse_name(code: &str) -> ParseResult<Name> {
   let code = skip(code);
   let mut name = String::new();
   if head(code) == '~' {
@@ -187,8 +187,8 @@ pub fn read_name(code: &str) -> ParseResult<Name> {
   }
 }
 
-// Like read_name, but we're sure it's an actual name and not something else
-pub fn read_strict_name(code: &str) -> ParseResult<Name> {
+// Like parse_name, but we're sure it's an actual name and not something else
+pub fn parse_strict_name(code: &str) -> ParseResult<Name> {
   let code = skip(code);
   let mut name = String::new();
   let mut code = code;
@@ -216,7 +216,7 @@ pub fn read_strict_name(code: &str) -> ParseResult<Name> {
   return Ok((code, name));
 }
 
-pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
+pub fn parse_hex(code: &str) -> ParseResult<Vec<u8>> {
   let mut data : Vec<u8> = Vec::new();
   let mut code = skip(code);
   while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
@@ -227,7 +227,7 @@ pub fn read_hex(code: &str) -> ParseResult<Vec<u8>> {
   return Ok((code, data));
 }
 
-pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -> ParseResult<Vec<A>> {
+pub fn parse_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -> ParseResult<Vec<A>> {
   let mut elems = Vec::new();
   let mut code = code;
   while code.len() > 0 && head(skip(code)) != stop {
@@ -239,42 +239,42 @@ pub fn read_until<A>(code: &str, stop: char, read: fn(&str) -> ParseResult<A>) -
   return Ok((code, elems));
 }
 
-pub fn read_term(code: &str) -> ParseResult<Term> {
+pub fn parse_term(code: &str) -> ParseResult<Term> {
   let code = skip(code);
   match head(code) {
     // Lambda definition
     '@' => {
       let code         = tail(code);
-      let (code, name) = read_name(code)?;
-      let (code, body) = read_term(code)?;
+      let (code, name) = parse_name(code)?;
+      let (code, body) = parse_term(code)?;
       let term = Term::lam(name, Box::new(body));
       return Ok((code, term));
     },
     // Redex
     '(' => {
       let code = skip(tail(code));
-      let (code, oper) = read_oper(code);
+      let (code, oper) = parse_oper(code);
       // Native number operation
       if let Some(oper) = oper {
-        let (code, val0) = read_term(code)?;
-        let (code, val1) = read_term(code)?;
-        let (code, _unit) = read_char(code, ')')?;
+        let (code, val0) = parse_term(code)?;
+        let (code, val1) = parse_term(code)?;
+        let (code, _unit) = parse_char(code, ')')?;
         let term = Term::op2(oper, Box::new(val0), Box::new(val1));
         return Ok((code, term));
       }
       // Lambda application
       else if head(code) == '!' {
         let code = tail(code);
-        let (code, func) = read_term(code)?;
-        let (code, argm) = read_term(code)?;
-        let (code, _unit) = read_char(code, ')')?;
+        let (code, func) = parse_term(code)?;
+        let (code, argm) = parse_term(code)?;
+        let (code, _unit) = parse_char(code, ')')?;
         let term = Term::app(Box::new(func), Box::new(argm));
         return Ok((code, term));
       }
       // Function application
       else {
-        let (code, name) = read_strict_name(code)?;
-        let (code, args) = read_until(code, ')', read_term)?;
+        let (code, name) = parse_strict_name(code)?;
+        let (code, args) = parse_until(code, ')', parse_term)?;
         let term = Term::fun(name, args);
         return Ok((code, term));
       }
@@ -282,15 +282,15 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     // Constructor
     '{' => {
       let code = tail(code);
-      let (code, name) = read_strict_name(code)?;
-      let (code, args) = read_until(code, '}', read_term)?;
+      let (code, name) = parse_strict_name(code)?;
+      let (code, args) = parse_until(code, '}', parse_term)?;
       let term = Term::ctr(name, args);
       return Ok((code, term));
     },
     // Tuple sugar
     '[' => {
       let code = tail(code);
-      let (code, vals) = read_until(code, ']', read_term)?;
+      let (code, vals) = parse_until(code, ']', parse_term)?;
       let num_vals = vals.len();
       if num_vals <= 12 {
         let name = Name::from_str(&format!("T{}", num_vals)).unwrap();
@@ -303,15 +303,15 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     // Number
     '#' => {
       let code = tail(code);
-      let (code, numb) = read_numb(code)?;
+      let (code, numb) = parse_numb(code)?;
       let term = Term::num(numb);
       return Ok((code, term));
     },
     // Name to number sugar
     '\'' => {
       let code = tail(code);
-      let (code, name) = read_strict_name(code)?;
-      let (code, _unit) = read_char(code, '\'')?;
+      let (code, name) = parse_strict_name(code)?;
+      let (code, _unit) = parse_char(code, '\'')?;
       let numb = *name;
       let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
       let term = Term::num(numb);
@@ -320,12 +320,12 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
     _ => {
       if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,3);
-        let (code, nam0) = read_name(code)?;
-        let (code, nam1) = read_name(code)?;
-        let (code, _unit) = read_char(code, '=')?;
-        let (code, expr) = read_term(code)?;
-        let (code, _unit) = read_char(code, ';')?;
-        let (code, body) = read_term(code)?;
+        let (code, nam0) = parse_name(code)?;
+        let (code, nam1) = parse_name(code)?;
+        let (code, _unit) = parse_char(code, '=')?;
+        let (code, expr) = parse_term(code)?;
+        let (code, _unit) = parse_char(code, ';')?;
+        let (code, body) = parse_term(code)?;
         let term = Term::dup(nam0, nam1, Box::new(expr), Box::new(body));
         return Ok((code, term));
       // let x = y; z
@@ -333,11 +333,11 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       // (@x z y)
       } else if let ('l','e','t',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,3);
-        let (code, name) = read_name(code)?;
-        let (code, _unit) = read_char(code, '=')?;
-        let (code, expr) = read_term(code)?;
-        let (code, _unit) = read_char(code, ';')?;
-        let (code, body) = read_term(code)?;
+        let (code, name) = parse_name(code)?;
+        let (code, _unit) = parse_char(code, '=')?;
+        let (code, expr) = parse_term(code)?;
+        let (code, _unit) = parse_char(code, ';')?;
+        let (code, body) = parse_term(code)?;
         let lam = Term::lam(name, Box::new(body));
         let app = Term::app(Box::new(lam), Box::new(expr));
         return Ok((code, app));
@@ -347,24 +347,24 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
       } else if let ('a','s','k',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = skip(drop(code,3));
         if nth(code,0) == '(' {
-          let (code, expr) = read_term(code)?;
-          let (code, _unit) = read_char(code, ';')?;
-          let (code, body) = read_term(code)?;
+          let (code, expr) = parse_term(code)?;
+          let (code, _unit) = parse_char(code, ';')?;
+          let (code, body) = parse_term(code)?;
           let argm = Term::lam(Name::NONE, Box::new(body));
           let term = Term::app(Box::new(expr), Box::new(argm));
           return Ok((code, term));
         } else {
-          let (code, name) = read_name(code)?;
-          let (code, _unit) = read_char(code, '=')?;
-          let (code, expr) = read_term(code)?;
-          let (code, _unit) = read_char(code, ';')?;
-          let (code, body) = read_term(code)?;
+          let (code, name) = parse_name(code)?;
+          let (code, _unit) = parse_char(code, '=')?;
+          let (code, expr) = parse_term(code)?;
+          let (code, _unit) = parse_char(code, ';')?;
+          let (code, body) = parse_term(code)?;
           let argm = Term::lam(name, Box::new(body));
           let term = Term::app(Box::new(expr), Box::new(argm));
           return Ok((code, term));
         }
       } else {
-        let (code, name) = read_name(code)?;
+        let (code, name) = parse_name(code)?;
         let term = Term::var(name);
         return Ok((code, term));
       }
@@ -372,7 +372,7 @@ pub fn read_term(code: &str) -> ParseResult<Term> {
   }
 }
 
-pub fn read_oper(in_code: &str) -> (&str, Option<Oper>) {
+pub fn parse_oper(in_code: &str) -> (&str, Option<Oper>) {
   let code = skip(in_code);
   match head(code) {
     // Should not match with `~`
@@ -406,21 +406,21 @@ pub fn read_oper(in_code: &str) -> (&str, Option<Oper>) {
   }
 }
 
-pub fn read_rule(code: &str) -> ParseResult<Rule> {
+pub fn parse_rule(code: &str) -> ParseResult<Rule> {
   // TODO: custom parser for lhs
-  let (code, lhs) = read_term(code)?;
-  let (code, ())  = read_char(code, '=')?;
-  let (code, rhs) = read_term(code)?;
+  let (code, lhs) = parse_term(code)?;
+  let (code, ())  = parse_char(code, '=')?;
+  let (code, rhs) = parse_term(code)?;
   return Ok((code, Rule{lhs, rhs}));
 }
 
-pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
-  let (code, rules) = read_until(code, '\0', read_rule)?;
+pub fn parse_rules(code: &str) -> ParseResult<Vec<Rule>> {
+  let (code, rules) = parse_until(code, '\0', parse_rule)?;
   return Ok((code, rules));
 }
 
-pub fn read_func(code: &str) -> ParseResult<CompFunc> {
-  let (code, rules) = read_until(code, '\0', read_rule)?;
+pub fn parse_func(code: &str) -> ParseResult<CompFunc> {
+  let (code, rules) = parse_until(code, '\0', parse_rule)?;
   let func = Func { rules };
   let comp_func = compile_func(&func, false);
   match comp_func {
@@ -432,13 +432,13 @@ pub fn read_func(code: &str) -> ParseResult<CompFunc> {
   }
 }
 
-pub fn read_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
+pub fn parse_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
   let code = skip(code);
   if let ('s','i','g','n') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
     let code = drop(code,4);
-    let (code, _unit) = read_char(code, '{')?;
-    let (code, sign) = read_hex(code)?;
-    let (code, _unit) = read_char(code, '}')?;
+    let (code, _unit) = parse_char(code, '{')?;
+    let (code, sign) = parse_hex(code)?;
+    let (code, _unit) = parse_char(code, '}')?;
     if sign.len() == 65 {
       return Ok((code, Some(crypto::Signature(sign.as_slice().try_into().unwrap())))); // TODO: remove unwrap
     } else {
@@ -451,44 +451,44 @@ pub fn read_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
   return Ok((code, None));
 }
 
-pub fn read_statement(code: &str) -> ParseResult<Statement> {
+pub fn parse_statement(code: &str) -> ParseResult<Statement> {
   let code = skip(code);
   match (nth(code,0), nth(code,1), nth(code,2)) {
     ('f','u','n') => {
       let code = drop(code,3);
-      let (code, _unit) = read_char(code, '(')?;
-      let (code, name) = read_strict_name(code)?;
-      let (code, args) = read_until(code, ')', read_name)?;
-      let (code, _unit) = read_char(code, '{')?;
-      let (code, ruls) = read_until(code, '}', read_rule)?;
+      let (code, _unit) = parse_char(code, '(')?;
+      let (code, name) = parse_strict_name(code)?;
+      let (code, args) = parse_until(code, ')', parse_name)?;
+      let (code, _unit) = parse_char(code, '{')?;
+      let (code, ruls) = parse_until(code, '}', parse_rule)?;
       let code = skip(code);
       let (code, init) = if let ('w','i','t','h') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,4);
-        let (code, _unit) = read_char(code, '{')?;
-        let (code, init) = read_term(code)?;
-        let (code, _unit) = read_char(code, '}')?;
+        let (code, _unit) = parse_char(code, '{')?;
+        let (code, init) = parse_term(code)?;
+        let (code, _unit) = parse_char(code, '}')?;
         (code, Some(init))
       } else {
         (code, None)
       };
-      let (code, sign) = read_sign(code)?;
+      let (code, sign) = parse_sign(code)?;
       let func = Func { rules: ruls };
       return Ok((code, Statement::Fun { name, args, func, init, sign }));
     }
     ('c','t','r') => {
       let code = drop(code,3);
-      let (code, _unit) = read_char(code, '{')?;
-      let (code, name) = read_strict_name(code)?;
-      let (code, args) = read_until(code, '}', read_name)?;
-      let (code, sign) = read_sign(code)?;
+      let (code, _unit) = parse_char(code, '{')?;
+      let (code, name) = parse_strict_name(code)?;
+      let (code, args) = parse_until(code, '}', parse_name)?;
+      let (code, sign) = parse_sign(code)?;
       return Ok((code, Statement::Ctr { name, args, sign }));
     }
     ('r','u','n') => {
       let code = drop(code,3);
-      let (code, _unit) = read_char(code, '{')?;
-      let (code, expr) = read_term(code)?;
-      let (code, _unit) = read_char(code, '}')?;
-      let (code, sign) = read_sign(code)?;
+      let (code, _unit) = parse_char(code, '{')?;
+      let (code, expr) = parse_term(code)?;
+      let (code, _unit) = parse_char(code, '}')?;
+      let (code, sign) = parse_sign(code)?;
       return Ok((code, Statement::Run { expr, sign  }));
     }
     // reg Foo.Bar { #x123456 } sign { signature }
@@ -498,26 +498,26 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         if nth(code, 0) == '{' {
           (code, Name::EMPTY)
         } else {
-          read_strict_name(code)?
+          parse_strict_name(code)?
         };
-      let (code, _unit) = read_char(code, '{')?;
+      let (code, _unit) = parse_char(code, '{')?;
       let code = skip(code);
       let (code, ownr) = match head(code) {
         '#' => {
           let code = tail(code);
-          read_numb(code)?
+          parse_numb(code)?
         },
         '\'' => {
           let code = tail(code);
-          let (code, name) = read_strict_name(code)?;
-          let (code, _unit) = read_char(code, '\'')?;
+          let (code, name) = parse_strict_name(code)?;
+          let (code, _unit) = parse_char(code, '\'')?;
           let numb: U120 = name.into();
           (code, numb)
         },
         _ => return Err(ParseErr::new(code, "Expected a number representation"))
       };
-      let (code, _unit) = read_char(code, '}')?;
-      let (code, sign) = read_sign(code)?;
+      let (code, _unit) = parse_char(code, '}')?;
+      let (code, sign) = parse_sign(code)?;
       return Ok((code, Statement::Reg { name, ownr, sign }));
     }
     _ => {
@@ -526,12 +526,12 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
   }
 }
 
-pub fn read_statements(code: &str) -> ParseResult<Vec<Statement>> {
-  read_until(code, '\0', read_statement)
+pub fn parse_statements(code: &str) -> ParseResult<Vec<Statement>> {
+  parse_until(code, '\0', parse_statement)
 }
 
 pub fn parse_code(code: &str) -> Result<Vec<Statement>, String> {
-  let statements = read_statements(code);
+  let statements = parse_statements(code);
   match statements {
     Ok((code, statements)) => {
       if code.is_empty() {

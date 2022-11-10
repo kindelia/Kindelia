@@ -8,7 +8,7 @@ use rstest::rstest;
 use rstest_reuse::{apply, template};
 
 use crate::common::{Name, U120};
-use crate::parser::read_statements;
+use crate::parser::parse_statements;
 use crate::hvm::{
   self, init_u128_map, readback_term, show_term, view_statements,
   view_term, Rollback, Runtime, StatementInfo, Term, Heap
@@ -421,7 +421,7 @@ fn parse_ask_fail1(
   #[values("ask", "dup", "let")] keyword: &str,
 ) {
   let code = template_fn(keyword);
-  read_statements(&code).unwrap();
+  parse_statements(&code).unwrap();
 }
 
 #[rstest]
@@ -582,7 +582,7 @@ proptest! {
   #[test]
   fn parser(statements in vec(statement(), 0..10)) {
     let str = view_statements(&statements);
-    let (.., s1) = read_statements(&str).unwrap();
+    let (.., s1) = parse_statements(&str).unwrap();
     assert_eq!(statements, s1);
   }
 
