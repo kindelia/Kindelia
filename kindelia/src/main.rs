@@ -29,7 +29,8 @@ use kindelia_core::hvm::{
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{
-  spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
+  spawn_miner, Node, Transaction, TransactionError, MAX_BODY_SIZE,
+  TRANSACTION_LENGTH_ENCODE_SIZE,
 };
 use kindelia_core::persistence::SimpleFileStorage;
 use kindelia_core::util::bytes_to_bitvec;
@@ -138,28 +139,37 @@ pub fn run_cli() -> Result<(), String> {
       };
       match command {
         cli::CheckCommand::Transaction => {
-          for ref stmt in stmts {
+          let mut acc_size = 0;
+          for stmt in &stmts {
             let transaction: Transaction = stmt
               .try_into()
               .map_err(|err: TransactionError| err.to_string())?;
 
             // size printing
             {
-              let size = transaction.len();
-              let percent = size as f32 / MAX_TRANSACTION_SIZE as f32 * 100.;
-              let size_message = {
-                if size > MAX_TRANSACTION_SIZE {
-                  "❌ Doesn't fit in one block"
-                } else {
-                  "✅"
-                }
-              };
-              println!("Size: {} ({:.2}%) {}", size, percent, size_message);
+              let size = transaction.len() + TRANSACTION_LENGTH_ENCODE_SIZE;
+              let percent = size as f32 / MAX_BODY_SIZE as f32 * 100.;
+              if size > MAX_BODY_SIZE {
+                let size_message = "❌ Doesn't fit in one block";
+                println!("Size: {} ({:.2}%), {}", size, percent, size_message);
+              } else {
+                acc_size += size;
+                let size_message = "✅";
+                println!("Size: {} ({:.2}%) {}", size, percent, size_message);
+              }
             }
             // println!("Name: {}") // TODO
             // header printing
             println!("{}\n", view_statement_header(stmt));
           }
+
+          let blocks = acc_size as f32 / MAX_BODY_SIZE as f32;
+          println!(
+            "Accumulated Size: {} bytes ({} blocks) in {} statements.",
+            acc_size,
+            blocks,
+            stmts.len()
+          );
         }
       };
       Ok(())
