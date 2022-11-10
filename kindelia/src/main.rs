@@ -26,6 +26,7 @@ use kindelia_core::events;
 use kindelia_core::hvm::{
   self, view_statement, view_statement_header, Statement,
 };
+use kindelia_core::parser;
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{
@@ -134,7 +135,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        hvm::parse_code(&code)?
+        parser::parse_code(&code)?
       };
       match command {
         cli::CheckCommand::Transaction => {
@@ -203,7 +204,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        hvm::parse_code(&code)?
+        parser::parse_code(&code)?
       };
       let results = run_on_remote(&api_url, stmts, f)?;
       for result in results {
@@ -216,7 +217,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        hvm::parse_code(&code)?
+        parser::parse_code(&code)?
       };
       publish_code(&api_url, stmts)
     }
@@ -506,7 +507,7 @@ pub async fn get_info(
 
 pub fn serialize_code(code: &str) {
   let statements =
-    hvm::read_statements(code).map_err(|err| err.erro).unwrap().1;
+    parser::read_statements(code).map_err(|err| err.erro).unwrap().1;
   for statement in statements {
     println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
   }
@@ -550,7 +551,7 @@ fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
   if encoded {
     statements_from_hex_seq(code)
   } else {
-    hvm::parse_code(code)
+    parser::parse_code(code)
   }
 }
 

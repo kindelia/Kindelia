@@ -136,7 +136,7 @@ impl TryFrom<&str> for U120 {
     fn err_msg<E: fmt::Debug>(e: E) -> String {
       format!("Invalid number string '{:?}'", e)
     }
-    let (rest, result) = crate::hvm::read_numb(numb).map_err(err_msg)?;
+    let (rest, result) = crate::parser::read_numb(numb).map_err(err_msg)?;
     if !rest.is_empty() {
       Err(err_msg(numb))
     } else {

@@ -9,6 +9,7 @@ use primitive_types::U256;
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::constants;
 use kindelia_core::hvm;
+use kindelia_core::parser;
 use kindelia_core::net;
 use kindelia_core::node;
 use kindelia_core::util;
@@ -28,7 +29,7 @@ pub fn temp_dir() -> PathBuf {
 
 pub fn init_runtime(path: PathBuf) -> hvm::Runtime {
   let genesis_stmts =
-    hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+    parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
   hvm::init_runtime(path, &genesis_stmts)
 }
 
@@ -106,7 +107,7 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
   c.bench_function("deserialize_block_with_txs", |b| {
     let code = include_str!("kdl/inc.kdl");
 
-    let (_, base_stmt) = hvm::read_statement(code).unwrap();
+    let (_, base_stmt) = parser::read_statement(code).unwrap();
     let bytes = util::bitvec_to_bytes(&base_stmt.proto_serialized());
     let transaction = node::Transaction::new(bytes).unwrap();
 

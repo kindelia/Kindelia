@@ -8,8 +8,9 @@ use rstest::rstest;
 use rstest_reuse::{apply, template};
 
 use crate::common::{Name, U120};
+use crate::parser::read_statements;
 use crate::hvm::{
-  self, init_u128_map, read_statements, readback_term, show_term, view_statements,
+  self, init_u128_map, readback_term, show_term, view_statements,
   view_term, Rollback, Runtime, StatementInfo, Term, Heap
 };
 use crate::node;

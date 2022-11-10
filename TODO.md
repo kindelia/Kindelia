@@ -2,7 +2,6 @@
 
 ## 1
 
-- separate KHVM language module
 - organize `kindelia_code::config`
 
 - add total work field to heartbeat event (Rhediner)
@@ -23,6 +22,8 @@
   - `Io` enum
   - `split_names` without using strings
   - `Cell` enum
+  - U72 type? (maybe called label?)
+    - would be mainly used by `Name`'s and `get_ext`'s
 
 - fix `Drop` of too nested terms
 

@@ -13,6 +13,7 @@ pub mod node;
 pub mod util;
 pub mod config;
 pub mod persistence;
+pub mod parser;
 
 #[cfg(feature = "events")]
 pub mod events;

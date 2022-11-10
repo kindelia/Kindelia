@@ -7,15 +7,16 @@ use rstest::fixture;
 
 use crate::constants;
 use crate::common::{Name, U120};
+use crate::parser;
 use crate::hvm::{
-  self, read_term, show_term, Rollback, Runtime, Statement, StatementInfo,
+  self, show_term, Rollback, Runtime, Statement, StatementInfo,
   Term, U128_NONE, U64_NONE,
 };
 use crate::node;
 
 pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
   let genesis_stmts =
-    hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+    parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
   hvm::init_runtime(path.clone(), &genesis_stmts)
 }
 
@@ -267,7 +268,7 @@ pub fn run_term_from_code_and<A>(code: &str, action: A)
 where
   A: Fn(&Term),
 {
-  let (_, term) = read_term(code).unwrap();
+  let (_, term) = parser::read_term(code).unwrap();
   run_term_and(&term, action)
 }
 

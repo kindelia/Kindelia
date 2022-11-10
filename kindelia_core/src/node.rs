@@ -24,6 +24,7 @@ use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::persistence::BlockStorage;
 use crate::util::*;
+use crate::parser;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
 use crate::heartbeat;
@@ -769,7 +770,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
 
     let genesis_stmts =
-      hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
+      parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
     let genesis_block = build_genesis_block(&genesis_stmts);
     let genesis_block = genesis_block.hashed();
     let genesis_hash = genesis_block.get_hash().into();
@@ -1274,7 +1275,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       }
       NodeRequest::PublishCode { code, tx } => {
         let statements =
-          hvm::read_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
+          parser::read_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
         let res = match statements {
           Err(err) => Err(err),
           Ok(stmts) => {
