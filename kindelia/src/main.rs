@@ -28,12 +28,12 @@ use kindelia_core::events;
 use kindelia_core::hvm::{
   self, view_statement, view_statement_header, Statement,
 };
-use kindelia_core::parser;
 use kindelia_core::net;
-use kindelia_core::net::ProtoComm;
+use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
+use kindelia_core::parser;
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
@@ -575,18 +575,74 @@ pub fn publish_code(
   api_url: &str,
   stmts: Vec<Statement>,
 ) -> Result<(), String> {
-  let f =
-    |client: ApiClient, stmts| async move { client.publish_code(stmts).await };
-  let results = run_on_remote(api_url, stmts, f)?;
-  for (i, result) in results.iter().enumerate() {
-    print!("Transaction #{}: ", i);
-    match result {
-      Ok(_) => println!("PUBLISHED (tx added to mempool)"),
-      Err(_) => {
-        println!("NOT PUBLISHED (tx is probably already on mempool)")
-      }
-    }
+  // setup tokio runtime and unordered joinset (tasks).
+  let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+  let mut tasks = tokio::task::JoinSet::new();
+
+  let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+
+  // obtain list of active peers known to "our" node.
+  let prom = async move { client.get_peers::<NC>(false).await };
+  let peers = runtime.block_on(prom)?;
+
+  let stmts_hex: Vec<HexStatement> =
+    stmts.into_iter().map(|s| s.into()).collect();
+
+  for peer in peers.into_iter() {
+    // these are move'd into the spawned task, so they must be
+    // created for each iteration.
+    let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+    let stmts_hex = stmts_hex.clone();
+
+    // spawn a new task for contacting each peer.  Because it is
+    // spawn'd, the task should begin executing immediately.
+    tasks.spawn_on(
+      async move {
+        let peer_url = match peer.address {
+          Address::IPv4 { val0, val1, val2, val3, port: _ } => {
+            // strips the port, so port 80 is assumed/default.
+            // note:  we just assume/guess that this host has
+            //        a webservice running on port 80. (gross)
+            //        this is a fragile and temporary hack until
+            //        code is relayed properly by p2p nodes.
+            format!("http://{}.{}.{}.{}", val0, val1, val2, val3)
+          }
+        };
+
+        let results = match client.publish_code(stmts_hex.clone()).await {
+          Ok(r) => r,
+          Err(e) => {
+            println!("NOT PUBLISHED to {}. ({})", peer_url, e);
+            return Err(e);
+          }
+        };
+        for (i, result) in results.iter().enumerate() {
+          print!("Transaction #{}: ", i);
+          match result {
+            Ok(_) => {
+              println!("PUBLISHED to {} (tx added to mempool)", peer_url)
+            }
+            Err(_) => {
+              println!(
+                "NOT PUBLISHED to {} (tx is probably already on mempool)",
+                peer_url,
+              )
+            }
+          }
+        }
+        Ok(())
+      },
+      runtime.handle(),
+    );
   }
+  // wait for all tasks to complete.
+  runtime.block_on(join_all(tasks))
+}
+
+async fn join_all(
+  mut tasks: tokio::task::JoinSet<Result<(), String>>,
+) -> Result<(), String> {
+  while let Some(_res) = tasks.join_next().await {}
   Ok(())
 }
 
