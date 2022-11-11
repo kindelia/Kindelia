@@ -30,7 +30,7 @@ Installation
 Clone this repository, navigate to its root directory, and enter:
 
 ```sh
-cargo install --path .
+cargo install --path kindelia
 ```
 
 Usage
