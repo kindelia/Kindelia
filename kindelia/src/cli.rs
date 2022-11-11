@@ -60,6 +60,7 @@ kindelia [--api ""] publish     code.hex.txt
 
 kindelia node start --mine --local --log-events --nice-ui?
 kindelia node clean [-f]       // asks confirmation
+kindelia node clean blocks [all|half|n <NUMBER_OF_BLOCKS>]
 
 == Accounts ==
 
