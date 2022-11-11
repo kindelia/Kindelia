@@ -4187,7 +4187,6 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
     rt: &Runtime,
     term: RawCell,
     names: &mut LocMap<String>,
-    seen: &mut HashSet<RawCell>,
     dup_store: &mut DupStore,
     limit: Option<usize>
   ) -> Option<Term> {
@@ -4240,18 +4239,15 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
           debug_assert!(term != RawCell(0));
           match term.get_tag() {
             CellTag::DP0 | CellTag::DP1 => {
-              if !seen.contains(&term) { // this avoids looping when term doesnt exist
-                seen.insert(term);
-                let col = term.get_ext();
-                let val = ask_arg(rt, term, 2);
-                if term.get_tag() == CellTag::DP0 {
-                  dup_store.push(col, false);
-                } else {
-                  dup_store.push(col, true);
-                }
-                stack.push(StackItem::Resolver(term));
-                stack.push(StackItem::Term(val));
+              let col = term.get_ext();
+              let val = ask_arg(rt, term, 2);
+              if term.get_tag() == CellTag::DP0 {
+                dup_store.push(col, false);
+              } else {
+                dup_store.push(col, true);
               }
+              stack.push(StackItem::Resolver(term));
+              stack.push(StackItem::Term(val));
             }
             CellTag::SUP => {
               let col = term.get_ext();
@@ -4291,8 +4287,6 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
             CellTag::CTR | CellTag::FUN => {
               let name = term.get_name_from_ext();
               let arit = rt.get_arity(&name).unwrap();
-              // NOTE: arity cant be None, should panic
-              // TODO: remove unwrap?
               stack.push(StackItem::Resolver(term));
               for i in 0..arit {
                 stack.push(StackItem::Term(ask_arg(rt, term, i)));
@@ -4374,10 +4368,9 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
   }
 
   let mut names: LocMap<String> = init_loc_map();
-  let mut seen: HashSet<RawCell> = HashSet::new();
   let mut dup_store = DupStore::new();
   find_names(rt, term, &mut names);
-  readback(rt, term, &mut names, &mut seen, &mut dup_store, limit)
+  readback(rt, term, &mut names, &mut dup_store, limit)
 }
 
 
