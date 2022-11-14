@@ -110,6 +110,12 @@ fun (Hax1) {
   (Hax1) = @cont {HAX1 cont}
 }
 
+// FAIL fails a run statement
+ctr {FAIL err}
+fun (Fail err) {
+  (Fail err) = {FAIL err}
+}
+
 // LOAD works like TAKE, but clones the state
 fun (Load) {
   (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (!cont x1)}}

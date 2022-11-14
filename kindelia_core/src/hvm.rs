@@ -619,6 +619,7 @@ pub enum EffectFailure {
   InvalidCallArg {caller: U120, callee: U120, arg: RawCell},
   InvalidIOCtr { name: Name },
   InvalidIONonCtr { ptr: RawCell },
+  IoFail { err: RawCell },
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -780,7 +781,7 @@ const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
 const IO_GIDX : u128 = 0x4533a2; // name_to_u128("GIDX")
 const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
 const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
-// TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
+const IO_FAIL : u128 = 0x40b4d6; // name_to_u128("FAIL")
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
@@ -1897,6 +1898,13 @@ impl Runtime {
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
+          }
+          IO_FAIL => {
+            let err = ask_arg(self, term, 0);
+            clear(self, host, 1);
+            clear(self, term.get_loc(0), 1);
+            // TODO: readback error?
+            return Err(RuntimeError::EffectFailure(EffectFailure::IoFail { err }));
           }
           _ => {
             let name = term.get_name_from_ext();
@@ -4093,6 +4101,7 @@ pub fn show_runtime_error(err: RuntimeError) -> String {
         },
         EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
         EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term.", show_ptr(ptr)),
+        EffectFailure::IoFail { err } => format!("Failed: '{}'", show_ptr(err)),
     }
   RuntimeError::DefinitionError(def_error) =>
       match def_error {

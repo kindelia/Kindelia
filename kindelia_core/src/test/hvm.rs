@@ -11,7 +11,7 @@ use crate::common::{Name, U120};
 use crate::parser::parse_statements;
 use crate::hvm::{
   self, init_u128_map, readback_term, show_term, view_statements,
-  view_term, Rollback, Runtime, StatementInfo, Term, Heap
+  view_term, Rollback, Runtime, StatementInfo, Term, Heap, StatementErr
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
@@ -184,6 +184,30 @@ pub fn persistence1(
   assert_eq!(s1, s3);
   assert_eq!(s2, s4);
   assert_eq!(s3, s5);
+}
+
+#[rstest]
+fn fail_opcode(temp_dir: TempPath) {
+  let mut rt = init_runtime(&temp_dir.path);
+  let code = "
+     fun (Test a b) {
+       (Test #0 #1) = (Fail #0)
+       (Test #1 #0) = (Done #0)
+     }
+
+     run {
+       (Test #0 #1)
+     }
+  ";
+  let results = rt.run_statements_from_code(code, false, true);
+  let result_term = results.last().unwrap().clone();
+  if let Err(StatementErr { err }) = result_term {
+    assert_eq!("Failed: 'NUM::0'", err);
+  }
+  else {
+    panic!("Wrong result");
+  }
+    
 }
 
 #[rstest]

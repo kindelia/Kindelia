@@ -24,11 +24,12 @@
   - `Cell` enum
   - U72 type? (maybe called label?)
     - would be mainly used by `Name`'s and `get_ext`'s
-
+  - decouple `temp_path` from `Runtime` (`init_runtime`)
+  - absorb trait
+ 
 - fix `Drop` of too nested terms
 
 - contract UX improvements
-  - failure opcode
   - nonce contract
   - node transaction heuristics
   - node transaction sequencing
