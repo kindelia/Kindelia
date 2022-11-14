@@ -256,7 +256,7 @@ pub enum NodeCleanBlocksCommand {
 
 #[derive(Subcommand)]
 pub enum UtilCommand {
-  /// Generate a new keypair.
+  /// Decodes a Kindelia 72-bit name (hex) to it's string.
   DecodeName { file: FileInput },
 }
 

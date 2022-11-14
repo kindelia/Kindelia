@@ -328,9 +328,10 @@ pub fn run_cli() -> Result<(), String> {
     CliCommand::Util { command } => match command {
       UtilCommand::DecodeName { file } => {
         let txt = file.read_to_string()?;
-        let data: Result<Vec<Vec<u8>>, _> = txt
-          .trim()
+        let input = txt.trim();
+        let data: Result<Vec<Vec<u8>>, _> = input
           .split(|c: char| c.is_whitespace())
+          .map(|s| s.strip_prefix("0x").unwrap_or(s))
           .map(hex::decode)
           .collect();
         let data =
