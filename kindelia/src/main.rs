@@ -622,11 +622,8 @@ pub fn publish_code(
             Ok(_) => {
               println!("PUBLISHED to {} (tx added to mempool)", peer_url)
             }
-            Err(_) => {
-              println!(
-                "NOT PUBLISHED to {} (tx is probably already on mempool)",
-                peer_url,
-              )
+            Err(err) => {
+              println!("NOT PUBLISHED to {}: {}", peer_url, err)
             }
           }
         }

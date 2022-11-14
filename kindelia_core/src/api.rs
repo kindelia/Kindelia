@@ -297,7 +297,7 @@ pub struct RegInfo {
 pub type ReqAnsSend<T> = oneshot::Sender<T>;
 pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error, Serialize, Deserialize)]
 #[error(transparent)]
 pub enum PublishError {
   PoolError( #[from] PoolError),
