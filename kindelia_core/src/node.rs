@@ -1655,6 +1655,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       eprintln!("  - {}", peer.address);
     }
 
+    eprintln!("Loading block from disk...");
     self.load_blocks();
 
     // A task that is executed continuously on the main loop
