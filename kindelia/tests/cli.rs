@@ -1,7 +1,7 @@
 mod cli {
-  use std::convert::TryInto;
   use std::env::temp_dir;
 
+  use kindelia_core::common::Name;
   use rstest::rstest;
 
   use kindelia_core::api;
@@ -226,7 +226,7 @@ mod cli {
       when.method(httpmock::Method::GET).path(path);
       then.status(200).json_body_obj(&response);
     });
-    let mock_url = format!("http://127.0.0.1:{}/", server.port());
+    let mock_url = format!("http://127.0.0.1:{}", server.port());
 
     // execute a get
     let mut args = vec!["--api", &mock_url, "get", command];
@@ -245,7 +245,7 @@ mod cli {
   fn reg_response_1() -> api::RegInfo {
     let names: Vec<common::Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
       .iter()
-      .map(|s| (*s).try_into().unwrap())
+      .map(|s| Name::from_str(s).unwrap())
       .collect();
     api::RegInfo { ownr: common::Name::from_u128_unchecked(1024), stmt: names }
   }

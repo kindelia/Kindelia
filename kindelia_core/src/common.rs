@@ -13,7 +13,7 @@ use crate::hvm::EXT_SIZE;
 /// of the Kindelia's HVM.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(into = "String", try_from = "&str")]
+#[serde(into = "String", try_from = "String")]
 #[repr(transparent)]
 pub struct U120(u128);
 
@@ -130,13 +130,13 @@ impl From<U120> for String {
 }
 
 
-impl TryFrom<&str> for U120 {
+impl TryFrom<String> for U120 {
   type Error = String;
-  fn try_from(numb: &str) -> Result<Self, Self::Error> {
+  fn try_from(numb: String) -> Result<Self, Self::Error> {
     fn err_msg<E: fmt::Debug>(e: E) -> String {
       format!("Invalid number string '{:?}'", e)
     }
-    let (rest, result) = crate::parser::parse_numb(numb).map_err(err_msg)?;
+    let (rest, result) = crate::parser::parse_numb(&numb).map_err(err_msg)?;
     if !rest.is_empty() {
       Err(err_msg(numb))
     } else {
@@ -162,7 +162,7 @@ impl crate::NoHashHasher::IsEnabled for U120 {}
 /// '_'       => 63
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(into = "String", try_from = "&str")]
+#[serde(into = "String", try_from = "String")]
 #[repr(transparent)]
 pub struct Name(u128);
 
@@ -299,10 +299,10 @@ impl From<U120> for Name {
 }
 
 // Necessary for serde `try_from` attr
-impl TryFrom<&str> for Name {
+impl TryFrom<String> for Name {
   type Error = String;
-  fn try_from(name: &str) -> Result<Self, Self::Error> {
-    Name::from_str(name)
+  fn try_from(name: String) -> Result<Self, Self::Error> {
+    Name::from_str(&name)
   }
 }
 
@@ -314,10 +314,11 @@ impl From<Name> for String {
 }
 
 // Necessary for `clap` parsing
+
 impl FromStr for Name {
   type Err = String;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    s.try_into()
+    Name::from_str(s)
   }
 }
 

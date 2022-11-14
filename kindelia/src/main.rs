@@ -365,7 +365,7 @@ where
   P: Future<Output = Result<T, String>>,
 {
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
-  let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+  let client = ApiClient::new(api_url, None);
   run_async_blocking(f(client, stmts))
 }
 
@@ -393,7 +393,7 @@ pub async fn get_info(
   json: bool,
   host_url: &str,
 ) -> Result<(), String> {
-  let client = ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
+  let client = ApiClient::new(host_url, None);
   match kind {
     GetKind::BlockHash { index } => {
       let block_hash = client.get_block_hash(index).await?;

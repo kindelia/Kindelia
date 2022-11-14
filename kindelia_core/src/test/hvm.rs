@@ -454,9 +454,9 @@ fn dupped_state_test(temp_dir: TempPath) {
     expected_other_readback: &str,
   ) {
     let original_state =
-      rt.read_disk(Name::try_from("Original").unwrap().into()).unwrap();
+      rt.read_disk(Name::from_str("Original").unwrap().into()).unwrap();
     let other_state =
-      rt.read_disk(Name::try_from("Other").unwrap().into()).unwrap();
+      rt.read_disk(Name::from_str("Other").unwrap().into()).unwrap();
     println!();
     println!("original ptr: {}", *original_state);
     println!("original: {}", show_term(&rt, original_state, None));

@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use std::fmt::Debug;
 use std::ops::Deref;
 
-use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
 use kindelia_core::api::{
@@ -14,48 +12,52 @@ use kindelia_core::net::ProtoComm;
 use kindelia_core::node;
 
 pub struct ApiClient {
-  client: reqwest::Client,
-  base_url: Url,
+  client: ureq::Agent,
+  base_url: String,
 }
 
 impl Deref for ApiClient {
-  type Target = Url;
-  fn deref(&self) -> &Url {
+  type Target = String;
+  fn deref(&self) -> &String {
     &self.base_url
+  }
+}
+
+pub enum Method {
+  GET,
+  POST,
+}
+
+impl ToString for Method {
+  fn to_string(&self) -> String {
+    let res = match self {
+      Method::GET => "GET",
+      Method::POST => "POST",
+    };
+    res.to_string()
   }
 }
 
 type ApiResult<T> = Result<T, String>;
 
 impl ApiClient {
-  pub fn new<U>(
-    base_url: U,
-    client: Option<Client>,
-  ) -> Result<Self, reqwest::Error>
-  where
-    U: IntoUrl + Debug,
-  {
-    let url_txt = format!("{:?}", base_url);
-    let base_url = base_url
-      .into_url()
-      .unwrap_or_else(|_| panic!("Invalid base URL: '{}'.", url_txt));
-    let client = client.unwrap_or_else(Client::new);
-    Ok(ApiClient { client, base_url })
+  /// Receives an `urq::Agent` or build it with default values and
+  /// wraps it with the default `base_url` into an `ApiClient` structure.
+  pub fn new(base_url: &str, client: Option<ureq::Agent>) -> Self {
+    let client = client.unwrap_or_else(|| ureq::AgentBuilder::new().build());
+    ApiClient { client, base_url: base_url.to_string() }
   }
 
-  pub fn base_request(&self, method: Method, path: &str) -> RequestBuilder {
-    let url = self
-      .base_url
-      .join(path)
-      .unwrap_or_else(|err| panic!("Invalid URL sub-path '{}'; {}", path, err));
-    self.client.request(method, url)
+  pub fn base_request(&self, method: Method, path: &str) -> ureq::Request {
+    let url = format!("{}{}", self.base_url, path);
+    self.client.request(&method.to_string(), &url)
   }
 
-  pub fn base_get(&self, path: &str) -> RequestBuilder {
+  pub fn base_get(&self, path: &str) -> ureq::Request {
     self.base_request(Method::GET, path)
   }
 
-  pub async fn req<T, B>(
+  pub fn req<T, B>(
     &self,
     method: Method,
     path: &str,
@@ -66,14 +68,22 @@ impl ApiClient {
     B: Serialize,
   {
     let req = self.base_request(method, path);
-    let req = if let Some(body) = body { req.json(&body) } else { req };
-    let res = req.send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() {
-      let value = res.json().await.map_err(|e| e.to_string())?;
+    // {
+    //   let req = req.clone();
+    //   let res =
+    //     if let Some(ref body) = body { req.send_json(body) } else { req.call() };
+    //   let res = res.map_err(|e| e.to_string())?;
+    //   println!("{}", res.into_string().unwrap());
+    // }
+    let res =
+      if let Some(body) = body { req.send_json(&body) } else { req.call() };
+    let res = res.map_err(|e| e.to_string())?;
+    if res.status() == 200 {
+      let value = res.into_json().map_err(|e| e.to_string())?;
       Ok(value)
     } else {
       let status = res.status();
-      let text = res.text().await.map_err(|e| e.to_string())?;
+      let text = res.into_string().map_err(|e| e.to_string())?;
       Err(format!("Error {}: {}", status, text)) // TODO: better messages
     }
   }
@@ -82,7 +92,7 @@ impl ApiClient {
   where
     T: DeserializeOwned,
   {
-    self.req::<T, String>(Method::GET, path, None).await
+    self.req::<T, String>(Method::GET, path, None)
   }
 
   pub async fn get_stats(&self) -> ApiResult<Stats> {
@@ -121,7 +131,7 @@ impl ApiClient {
     &self,
     code: Vec<HexStatement>,
   ) -> ApiResult<Vec<hvm::StatementInfo>> {
-    self.req(Method::POST, "/run", Some(code)).await
+    self.req(Method::POST, "/run", Some(code))
   }
 
   // I'm not sure what the return type should be.
@@ -129,7 +139,7 @@ impl ApiClient {
     &self,
     code: Vec<HexStatement>,
   ) -> ApiResult<Vec<Result<(), ()>>> {
-    self.req(Method::POST, "/publish", Some(code)).await
+    self.req(Method::POST, "/publish", Some(code))
   }
 
   pub async fn get_peers<C: ProtoComm>(

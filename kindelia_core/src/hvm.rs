@@ -4272,7 +4272,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
             }
             CellTag::VAR => {
               let name = &format!("x{}", names.get(&term.get_loc(0)).unwrap_or(&String::from("_")));
-              let name: Name = (name as &str).try_into().unwrap(); 
+              let name = Name::from_str(name).unwrap();
               output.push(Term::var(name));
             }
             CellTag::NUM => {
@@ -4311,7 +4311,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
         StackItem::SUPResolverNone(term) => {
                     // TODO: check if this should really be here. is it necessary?
           let name = "HVM.sup"; // lang::Term doesn't have a Sup variant
-          let name = name.try_into().unwrap();
+          let name = Name::from_str(name).unwrap();
           let val0 = output.pop().unwrap();
           let val1 = output.pop().unwrap();
           let args = vec![val0, val1];

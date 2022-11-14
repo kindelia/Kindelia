@@ -253,7 +253,7 @@ where
   let mut rt = init_runtime(&temp_dir.path);
 
   let term = Term::Fun {
-    name: "Done".try_into().unwrap(),
+    name: Name::from_str("Done").unwrap(),
     args: [term.clone()].to_vec(),
   };
   let stmt = Statement::Run { expr: term, sign: None };
