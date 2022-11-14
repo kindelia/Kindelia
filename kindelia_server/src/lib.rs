@@ -15,9 +15,9 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
-use kindelia_core::api::u256_to_hex;
-use kindelia_core::api::NodeRequest;
-use kindelia_core::api::{HexStatement, ReqAnsRecv};
+use kindelia_core::api::{
+  u256_to_hex, HexStatement, NodeRequest, PublishError, ReqAnsRecv,
+};
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::common::Name;
 use kindelia_core::config::ApiConfig;
@@ -433,10 +433,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
         let code: Vec<hvm::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results = ask(query_tx, NodeRequest::publish(code)).await;
-        let result: Vec<_> = results
-          .into_iter()
-          .map(|res| res.map_err(|err| err.to_string()))
-          .collect();
+        let result: Vec<Result<(), PublishError>> =
+          results.into_iter().collect();
         ok_json(result)
       }
     },

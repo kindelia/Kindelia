@@ -582,9 +582,9 @@ pub fn publish_code(
   for (i, result) in results.iter().enumerate() {
     print!("Transaction #{}: ", i);
     match result {
-      Ok(_) => println!("PUBLISHED (tx added to mempool)"),
-      Err(_) => {
-        println!("NOT PUBLISHED (tx is probably already on mempool)")
+      Ok(()) => println!("PUBLISHED (tx added to mempool)"),
+      Err(err) => {
+        println!("NOT PUBLISHED: {}", err)
       }
     }
   }

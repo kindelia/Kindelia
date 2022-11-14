@@ -7,7 +7,8 @@ use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
 use kindelia_core::api::{
-  BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, RegInfo, Stats,
+  BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, PublishError,
+  RegInfo, Stats,
 };
 use kindelia_core::hvm::{self, Term};
 use kindelia_core::net::ProtoComm;
@@ -128,7 +129,7 @@ impl ApiClient {
   pub async fn publish_code(
     &self,
     code: Vec<HexStatement>,
-  ) -> ApiResult<Vec<Result<(), ()>>> {
+  ) -> ApiResult<Vec<Result<(), PublishError>>> {
     self.req(Method::POST, "/publish", Some(code)).await
   }
 

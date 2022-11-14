@@ -10,6 +10,7 @@ use bit_vec::BitVec;
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
 use rand::seq::IteratorRandom;
+use serde::{Deserialize, Serialize};
 use sha3::Digest;
 use thiserror::Error;
 
@@ -22,9 +23,9 @@ use crate::constants;
 use crate::crypto::{self, Hashed, Keccakable};
 use crate::hvm::{self, *};
 use crate::net::{ProtoAddr, ProtoComm};
+use crate::parser;
 use crate::persistence::BlockStorage;
 use crate::util::*;
-use crate::parser;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
 use crate::heartbeat;
@@ -74,7 +75,7 @@ pub struct Transaction {
 }
 
 /// Transaction's error handling
-#[derive(Error, Debug)]
+#[derive(Debug, Error, Serialize, Deserialize)]
 pub enum TransactionError {
   #[error(
     "Transaction size ({len}) is greater than max transaction size ({})",
@@ -294,10 +295,10 @@ pub struct Node<C: ProtoComm, S: BlockStorage> {
 }
 
 /// Pool's error handling
-#[derive(Error, Debug)]
+#[derive(Debug, Error, Serialize, Deserialize)]
 pub enum PoolError {
-  #[error("Transaction {hash:x} already included")]
-  AlreadyIncluded { hash: U256 },
+  #[error("Transaction {hash} already included on pool")]
+  AlreadyIncluded { hash: api::Hash },
 }
 
 // Peers
@@ -836,7 +837,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       self.pool.push(transaction, t_score);
       Ok(())
     } else {
-      Err(PoolError::AlreadyIncluded { hash })
+      Err(PoolError::AlreadyIncluded { hash: hash.into() })
     }
   }
 
@@ -1284,8 +1285,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         handle_ans_err("RunCode", tx.send(result));
       }
       NodeRequest::PublishCode { code, tx } => {
-        let statements =
-          parser::parse_statements(&code).map_err(|err| err.erro).map(|(_, s)| s);
+        let statements = parser::parse_statements(&code)
+          .map_err(|err| err.erro)
+          .map(|(_, s)| s);
         let res = match statements {
           Err(err) => Err(err),
           Ok(stmts) => {
