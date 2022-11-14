@@ -240,9 +240,9 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   let get_block_go = get_block().and(path!()).map(ok_json);
 
-  let blocks_router = get_blocks //
-    .or(get_block_go)
-    .or(get_block_hash);
+  let blocks_router = get_blocks.boxed() //
+    .or(get_block_go.boxed())
+    .or(get_block_hash.boxed());
 
   // == Functions ==
 
@@ -315,9 +315,9 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
       }
     });
 
-  let functions_router = get_functions //
-    .or(get_function) //
-    .or(get_function_state);
+  let functions_router = get_functions.boxed() //
+    .or(get_function.boxed()) //
+    .or(get_function_state.boxed());
 
   // == Constructors ==
 
@@ -442,10 +442,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     },
   );
 
-  let interact_router = interact_code_run
-    .or(interact_code_publish)
-    .or(interact_run)
-    .or(interact_publish);
+  let interact_router = interact_code_run.boxed()
+    .or(interact_code_publish.boxed())
+    .or(interact_run.boxed())
+    .or(interact_publish.boxed());
 
   // == Reg ==
 
@@ -498,7 +498,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     }
   });
 
-  let peers_router = get_peers.or(get_all_peers);
+  let peers_router = get_peers.boxed().or(get_all_peers.boxed());
 
   // ==
 
