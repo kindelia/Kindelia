@@ -502,14 +502,14 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   // ==
 
-  let app = root
-    .or(get_stats)
-    .or(blocks_router)
-    .or(functions_router)
-    .or(interact_router)
-    .or(peers_router)
-    .or(constructor_router)
-    .or(reg_router);
+  let app = root.boxed()
+    .or(get_stats.boxed())
+    .or(blocks_router.boxed())
+    .or(functions_router.boxed())
+    .or(interact_router.boxed())
+    .or(peers_router.boxed())
+    .or(constructor_router.boxed())
+    .or(reg_router.boxed());
 
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
