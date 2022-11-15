@@ -587,7 +587,7 @@ pub fn publish_code(
     // obtain list of active peers known to "our" node.
     let prom = async move { client.get_peers::<NC>(false).await };
     let peers = runtime.block_on(prom)?;
-    peers
+    let mut urls: Vec<String> = peers
       .iter()
       .map(|p| match p.address {
         Address::IPv4 { val0, val1, val2, val3, port: _ } => {
@@ -599,7 +599,12 @@ pub fn publish_code(
           format!("http://{}.{}.{}.{}", val0, val1, val2, val3)
         }
       })
-      .collect()
+      .collect();
+    // add api_url if not present in peers list.
+    if !urls.iter().any(|x| x == api_url) {
+      urls.push(api_url.to_string());
+    }
+    urls
   } else {
     hosts.iter().map(|h| format!("http://{}", h)).collect()
   };
