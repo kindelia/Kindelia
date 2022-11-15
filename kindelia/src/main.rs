@@ -4,7 +4,7 @@ mod files;
 mod util;
 
 use std::future::Future;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::path::Path;
 
 use clap::{CommandFactory, Parser};
@@ -218,18 +218,18 @@ pub fn run_cli() -> Result<(), String> {
       }
       Ok(())
     }
-    CliCommand::Publish { file, encoded } => {
+    CliCommand::Publish { file, encoded, hosts } => {
       let code = file.read_to_string()?;
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
         parser::parse_code(&code)?
       };
-      publish_code(&api_url, stmts)
+      publish_code(&api_url, stmts, hosts)
     }
-    CliCommand::Post { stmt } => {
+    CliCommand::Post { stmt, hosts } => {
       let stmts = statements_from_hex_seq(&stmt)?;
-      publish_code(&api_url, stmts)
+      publish_code(&api_url, stmts, hosts)
     }
     CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &api_url);
@@ -575,6 +575,7 @@ fn statement_from_hex(hex: &str) -> Result<Statement, String> {
 pub fn publish_code(
   api_url: &str,
   stmts: Vec<Statement>,
+  hosts: Vec<SocketAddr>,
 ) -> Result<(), String> {
   // setup tokio runtime and unordered joinset (tasks).
   let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
@@ -582,38 +583,44 @@ pub fn publish_code(
 
   let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
 
-  // obtain list of active peers known to "our" node.
-  let prom = async move { client.get_peers::<NC>(false).await };
-  let peers = runtime.block_on(prom)?;
+  let peer_urls: Vec<String> = if hosts.is_empty() {
+    // obtain list of active peers known to "our" node.
+    let prom = async move { client.get_peers::<NC>(false).await };
+    let peers = runtime.block_on(prom)?;
+    peers
+      .iter()
+      .map(|p| match p.address {
+        Address::IPv4 { val0, val1, val2, val3, port: _ } => {
+          // strips the port, so port 80 is assumed/default.
+          // note:  we just assume/guess that this host has
+          //        a webservice running on port 80. (gross)
+          //        this is a fragile and temporary hack until
+          //        code is relayed properly by p2p nodes.
+          format!("http://{}.{}.{}.{}", val0, val1, val2, val3)
+        }
+      })
+      .collect()
+  } else {
+    hosts.iter().map(|h| format!("http://{}", h)).collect()
+  };
 
   let stmts_hex: Vec<HexStatement> =
     stmts.into_iter().map(|s| s.into()).collect();
 
-  for peer in peers.into_iter() {
+  for peer_url in peer_urls.into_iter() {
     // these are move'd into the spawned task, so they must be
     // created for each iteration.
-    let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+    let client = ApiClient::new(peer_url, None).map_err(|e| e.to_string())?;
     let stmts_hex = stmts_hex.clone();
 
     // spawn a new task for contacting each peer.  Because it is
     // spawn'd, the task should begin executing immediately.
     tasks.spawn_on(
       async move {
-        let peer_url = match peer.address {
-          Address::IPv4 { val0, val1, val2, val3, port: _ } => {
-            // strips the port, so port 80 is assumed/default.
-            // note:  we just assume/guess that this host has
-            //        a webservice running on port 80. (gross)
-            //        this is a fragile and temporary hack until
-            //        code is relayed properly by p2p nodes.
-            format!("http://{}.{}.{}.{}", val0, val1, val2, val3)
-          }
-        };
-
         let results = match client.publish_code(stmts_hex.clone()).await {
           Ok(r) => r,
           Err(e) => {
-            println!("NOT PUBLISHED to {}. ({})", peer_url, e);
+            println!("NOT PUBLISHED to {}. ({})", *client, e);
             return Err(e);
           }
         };
@@ -621,10 +628,10 @@ pub fn publish_code(
           print!("Transaction #{}: ", i);
           match result {
             Ok(_) => {
-              println!("PUBLISHED to {} (tx added to mempool)", peer_url)
+              println!("PUBLISHED to {} (tx added to mempool)", *client)
             }
             Err(err) => {
-              println!("NOT PUBLISHED to {}: {}", peer_url, err)
+              println!("NOT PUBLISHED to {}: {}", *client, err)
             }
           }
         }
