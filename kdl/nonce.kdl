@@ -1,0 +1,29 @@
+// Example of a contract using a nonce to validate a transaction
+// It must change the contract state after validating, in order to invalidate
+// subsequent similar calls.
+
+ctr {Nonce n}
+
+fun (OnlyOnce nonce) {
+  (OnlyOnce {Nonce nonce}) =
+    ask secret = (Load);
+    (If (== nonce secret)
+      ask new_nonce = (Time);
+      // pseudo-random number
+      // may also just do nonce++
+      ask (Save new_nonce);
+      (Done #0)  // here you may do your transaction
+      (Fail #0)) // else, just fail the whole run
+} with {
+  #5
+}
+
+run {
+  ask (Call 'OnlyOnce' {Nonce #5});
+  (Done #0)
+}
+
+run {
+  ask (Call 'OnlyOnce' {Nonce #5});
+  (Done #0)
+}
