@@ -238,7 +238,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
       let network_id = resolve_cfg!(
         env = "KINDELIA_NETWORK_ID",
-        prop = "node.network.network_id".to_string(),
+        prop = "node.network.network_id",
         no_default = anyhow!("Missing `network_id` parameter."),
         cli_val = network_id,
         cfg = config,
