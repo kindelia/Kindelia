@@ -28,12 +28,12 @@ use kindelia_core::events;
 use kindelia_core::hvm::{
   self, view_statement, view_statement_header, Statement,
 };
-use kindelia_core::parser;
 use kindelia_core::net;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
+use kindelia_core::parser;
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
@@ -241,9 +241,17 @@ pub fn run_cli() -> Result<(), String> {
       init_config_file(&path)?;
       Ok(())
     }
-    CliCommand::Node { command, data_dir } => {
+    CliCommand::Node { command, data_dir, network_id } => {
       let config = handle_config_file(&config_path)?;
       let config = Some(&config);
+
+      let network_id = resolve_cfg!(
+        env = "KINDELIA_NETWORK_ID",
+        prop = "node.network.network_id",
+        no_default = "Missing `network_id` parameter.".to_string(),
+        cli_val = network_id,
+        cfg = config,
+      );
 
       let data_path = resolve_cfg!(
         env = "KINDELIA_NODE_DATA_DIR",
@@ -251,23 +259,16 @@ pub fn run_cli() -> Result<(), String> {
         default = default_node_data_path()?,
         cli_val = data_dir,
         cfg = config,
-      );
+      )
+      .join(format!("{:#02X}", network_id));
 
       match command {
         NodeCommand::Clean { command } => clean(&data_path, command)
           .map_err(|err| format!("Could not clean kindelia's data: {}", err)),
-        NodeCommand::Start { initial_peers, network_id, mine, json } => {
+        NodeCommand::Start { initial_peers, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
-
-          let network_id = resolve_cfg!(
-            env = "KINDELIA_NETWORK_ID",
-            prop = "node.network.network_id",
-            no_default = "Missing `network_id` paramenter.".to_string(),
-            cli_val = network_id,
-            cfg = config,
-          );
 
           let initial_peers = resolve_cfg!(
             env = "KINDELIA_NODE_INITIAL_PEERS",
