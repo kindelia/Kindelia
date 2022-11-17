@@ -238,7 +238,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
       let network_id = resolve_cfg!(
         env = "KINDELIA_NETWORK_ID",
-        prop = "node.network.network_id",
+        prop = "node.network.network_id".to_string(),
         no_default = anyhow!("Missing `network_id` parameter."),
         cli_val = network_id,
         cfg = config,
@@ -264,7 +264,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
           let initial_peers = resolve_cfg!(
             env = "KINDELIA_NODE_INITIAL_PEERS",
-            prop = format!("node.networks.{:#02X}.initial_peers", network_id),
+            prop = format!("node.network.{:#02X}.initial_peers", network_id),
             default = vec![],
             cli_val = initial_peers,
             cfg = config,
