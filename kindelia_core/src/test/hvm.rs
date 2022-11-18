@@ -136,8 +136,6 @@ pub fn stack_overflow(
 }
 
 #[rstest]
-#[ignore = "fix not done"]
-// TODO: fix drop stack overflow
 pub fn stack_overflow2(temp_dir: TempPath) {
   // caused by drop of term
   let mut rt = init_runtime(&temp_dir.path);
@@ -774,7 +772,7 @@ pub const SIMPLE_COUNT: &'static str = "
 
 pub const COUNTER_STACKOVERFLOW: &'static str = "
   run {
-    (Done (ToSucc #8000))
+    (Done (ToSucc #32767)) // max allowed by readback limit
   }
 ";
 
