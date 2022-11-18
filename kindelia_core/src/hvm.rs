@@ -1705,11 +1705,11 @@ impl Runtime {
         },
         CellTag::APP => {
           recursive_locs.push(term.get_loc(0));
-          recursive_locs.push(term.get_loc(0));
+          recursive_locs.push(term.get_loc(1));
         },
         CellTag::SUP => {
           recursive_locs.push(term.get_loc(0));
-          recursive_locs.push(term.get_loc(0));
+          recursive_locs.push(term.get_loc(1));
         },
         CellTag::CTR | CellTag::FUN => {
           let name = term.get_name_from_ext();
