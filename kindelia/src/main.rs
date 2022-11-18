@@ -247,7 +247,7 @@ pub fn run_cli() -> Result<(), String> {
 
       let network_id = resolve_cfg!(
         env = "KINDELIA_NETWORK_ID",
-        prop = "node.network.network_id",
+        prop = "node.network.network_id".to_string(),
         no_default = "Missing `network_id` parameter.".to_string(),
         cli_val = network_id,
         cfg = config,
@@ -255,7 +255,7 @@ pub fn run_cli() -> Result<(), String> {
 
       let data_path = resolve_cfg!(
         env = "KINDELIA_NODE_DATA_DIR",
-        prop = "node.data.dir",
+        prop = "node.data.dir".to_string(),
         default = default_node_data_path()?,
         cli_val = data_dir,
         cfg = config,
@@ -272,7 +272,7 @@ pub fn run_cli() -> Result<(), String> {
 
           let initial_peers = resolve_cfg!(
             env = "KINDELIA_NODE_INITIAL_PEERS",
-            prop = "node.network.initial_peers",
+            prop = format!("node.network.{:#02X}.initial_peers", network_id),
             default = vec![],
             cli_val = initial_peers,
             cfg = config,
@@ -280,7 +280,7 @@ pub fn run_cli() -> Result<(), String> {
 
           let mine = resolve_cfg!(
             env = "KINDELIA_MINE",
-            prop = "node.mining.enable",
+            prop = "node.mining.enable".to_string(),
             default = false,
             cli_val = flag_to_option(mine),
             cfg = config,
@@ -288,14 +288,14 @@ pub fn run_cli() -> Result<(), String> {
 
           let slow_mining = ConfigSettingsBuilder::default()
             .env("KINDELIA_SLOW_MINING")
-            .prop("node.debug.slow_mining")
+            .prop("node.debug.slow_mining".to_string())
             .default_value(|| Ok(0))
             .build()
             .unwrap()
             .resolve_from_file_opt(config)?;
 
           let api_config = ConfigSettingsBuilder::default()
-            .prop("node.api")
+            .prop("node.api".to_string())
             .default_value(|| Ok(ApiConfig::default()))
             .build()
             .unwrap()

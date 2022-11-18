@@ -15,7 +15,7 @@ where
   #[builder(default)]
   env: Option<&'static str>,
   #[builder(default)]
-  prop: Option<&'static str>,
+  prop: Option<String>,
   default_value: F,
 }
 
@@ -49,7 +49,7 @@ where
     }
     if let (Some(prop_path), Some(config_values)) = (self.prop, config_values) {
       // If config file and argument prop path are set, read from config file
-      return Self::resolve_from_config_aux(config_values, prop_path);
+      return Self::resolve_from_config_aux(config_values, &prop_path);
     }
     (self.default_value)()
   }
@@ -65,7 +65,7 @@ where
   {
     if let Some(prop_path) = self.prop {
       if let Some(config_values) = config_values {
-        Self::resolve_from_config_aux(config_values, prop_path)
+        Self::resolve_from_config_aux(config_values, &prop_path)
       } else {
         (self.default_value)()
       }
@@ -83,7 +83,7 @@ where
   {
     if let Some(prop_path) = self.prop {
       if let Some(config_values) = config_values {
-        let value = Self::get_prop(config_values, prop_path);
+        let value = Self::get_prop(config_values, &prop_path);
         if let Some(value) = value {
           return T::arg_from(value).map(|v| Some(v)).map_err(|e| {
             format!(
@@ -107,7 +107,7 @@ where
     T: ArgumentFrom<toml::Value>,
   {
     let value = Self::get_prop(config_values, prop_path)
-      .ok_or(format!("Could not found prop '{}' in config file.", prop_path))?;
+      .ok_or(format!("Could not find prop '{}' in config file.", prop_path))?;
     T::arg_from(value).map_err(|e| {
       format!(
         "Could not convert value of '{}' into desired type: {}",
