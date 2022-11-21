@@ -1683,49 +1683,68 @@ impl Runtime {
   }
 
   // Full-reduce a term.
-  // TODO: rewrite as stack based? not needed?
   pub fn normalize(&mut self, host: Loc, mana:u64, seen: &mut HashSet<RawCell>) -> Result<RawCell, RuntimeError> {
-    let term  = ask_lnk(self, host);
-    if seen.contains(&term) {
-      Ok(term)
+    enum StackItem {
+      Host(Loc),
+      Linker(Loc)
     }
-    else {
-      let term = reduce(self, host, mana)?;
-      seen.insert(term);
-      let mut recursive_locs = vec![];
-      match term.get_tag() {
-        CellTag::DP0 => {
-          recursive_locs.push(term.get_loc(2));
-        },
-        CellTag::DP1 => {
-          recursive_locs.push(term.get_loc(2));
-        },
-        CellTag::LAM => {
-          recursive_locs.push(term.get_loc(1));
-        },
-        CellTag::APP => {
-          recursive_locs.push(term.get_loc(0));
-          recursive_locs.push(term.get_loc(1));
-        },
-        CellTag::SUP => {
-          recursive_locs.push(term.get_loc(0));
-          recursive_locs.push(term.get_loc(1));
-        },
-        CellTag::CTR | CellTag::FUN => {
-          let name = term.get_name_from_ext();
-          let arity = self.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
-          for i in 0..arity {
-            recursive_locs.push(term.get_loc(i));
+    let mut stack = vec![StackItem::Host(host)];
+    let mut output = vec![];
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Host(host) => {
+          let term = ask_lnk(self, host);
+          if seen.contains(&term) {
+            output.push(term);
+          }
+          else {
+            let term = reduce(self, host, mana)?;
+            seen.insert(term);
+            let mut recursive_locs = vec![];
+            match term.get_tag() {
+              CellTag::DP0 => {
+                recursive_locs.push(term.get_loc(2));
+              },
+              CellTag::DP1 => {
+                recursive_locs.push(term.get_loc(2));
+              },
+              CellTag::LAM => {
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::APP => {
+                recursive_locs.push(term.get_loc(0));
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::SUP => {
+                recursive_locs.push(term.get_loc(0));
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::CTR | CellTag::FUN => {
+                let name = term.get_name_from_ext();
+                let arity = self.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+                for i in 0..arity {
+                  recursive_locs.push(term.get_loc(i));
+                }
+              },
+              _ => {}
+            };
+            for loc in recursive_locs {
+              stack.push(StackItem::Linker(loc));
+              stack.push(StackItem::Host(loc));
+              // let lnk = self.normalize(loc, mana, seen)?;
+              // link(self, loc, lnk);
+            }
+            output.push(term);
           }
         },
-        _ => {}
-      };
-      for loc in recursive_locs {
-        let lnk = self.normalize(loc, mana, seen)?;
-        link(self, loc, lnk);
-      }
-      Ok(term)
+        StackItem::Linker(loc) => {
+          let lnk = output.pop().unwrap();
+          link(self, loc, lnk);
+        },
+      }  
     }
+    Ok(output.pop().unwrap())
   }
   
   pub fn show_term(&self, lnk: RawCell) -> String {
