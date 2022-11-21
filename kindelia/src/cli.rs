@@ -173,7 +173,7 @@ pub enum CliCommand {
     #[clap(long, short = 'e')]
     encoded: bool,
     /// specify host(s) to connect to. x.x.x.x:port (comma separated)
-    #[clap(name = "node", long, short = 'n', value_delimiter = ',')]
+    #[clap(name = "nodes", long, short = 'n', value_delimiter = ',')]
     hosts: Vec<SocketAddr>,
   },
   // Post a (serialized) statement
@@ -181,7 +181,7 @@ pub enum CliCommand {
     /// Hex string of the serialized statement.
     stmt: String,
     /// specify host(s) to connect to. x.x.x.x:port (comma separated)
-    #[clap(name = "node", long, short = 'n', value_delimiter = ',')]
+    #[clap(name = "nodes", long, short = 'n', value_delimiter = ',')]
     hosts: Vec<SocketAddr>,
   },
   /// Get remote information.
