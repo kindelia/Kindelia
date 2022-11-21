@@ -294,8 +294,10 @@ impl Drop for Term {
     /// `Term`'s properties is not a var or a num)
     fn term_is_recursive(term: &Term) -> bool {
       fn term_is_num_or_var(term: &Term) -> bool {
-        matches!(term, &Term::Num { .. }) ||
-        matches!(term, &Term::Var { .. }) 
+        match term {
+          Term::Num { .. } | Term::Var { .. } => true,
+          _ => false
+        } 
       }
       match term {
         Term::Var { name } => false,
