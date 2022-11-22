@@ -2,11 +2,7 @@
 
 ## 1
 
-- organize `kindelia_code::config`
-
-- add total work field to heartbeat event (Rhediner)
-
-- split HTTP client and server crates (Rheidner)
+- dirty constructor system
 
 - fix problem of 1 tick rollback request causing 256 ticks rollback (Kelvin)
   - [ ] reimplement rollback algorithm on separate lib
@@ -16,23 +12,21 @@
 - show space and mana usage on fun definition
 
 - `kindelia subject`
-- command to publish to multiple nodes
 
 - KHVM refactors
+  - decouple heap storage path from `Runtime` (move logic into `SimpleFileStorage`)
   - `Io` enum
   - `split_names` without using strings
   - `Cell` enum
-  - U72 type? (maybe called label?)
-    - would be mainly used by `Name`'s and `get_ext`'s
-  - decouple `temp_path` from `Runtime` (`init_runtime`)
-  - absorb trait
- 
-- fix `Drop` of too nested terms
+  - U72 type? ()
+    - would be mainly used on `get_ext` (maybe inside `Name`)
+    - call it Label?
+  - `Absorb` trait
 
 - contract UX improvements
-  - nonce contract
-  - node transaction heuristics
-  - node transaction sequencing
+  - [x] nonce contract
+  - [ ] transaction sequencing
+    - [ ] transactions pool inspection/heuristics system
 
 ## 2
 
