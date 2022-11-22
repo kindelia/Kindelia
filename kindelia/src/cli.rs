@@ -196,6 +196,9 @@ pub enum CliCommand {
     /// Base path to store the node's data in.
     #[clap(long)]
     data_dir: Option<PathBuf>,
+    /// Network id / magic number.
+    #[clap(long)]
+    network_id: Option<u32>,
   },
   /// Generate auto-completion for a shell.
   Completion {
@@ -218,9 +221,6 @@ pub enum NodeCommand {
   },
   /// Starts a Kindelia node.
   Start {
-    /// Network id / magic number.
-    #[clap(long)]
-    network_id: Option<u32>,
     /// Initial peer nodes.
     #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
