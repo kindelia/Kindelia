@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc, str::FromStr};
+use std::{
+  collections::HashMap, fmt::Debug, ops::Range, str::FromStr, sync::Arc,
+};
 
 use primitive_types::U256;
 

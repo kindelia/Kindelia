@@ -257,7 +257,7 @@ mod u128_time_ser {
 
 impl From<&node::Block> for BlockRepr {
   fn from(block: &node::Block) -> Self {
-    let transactions = node::extract_transactions(&block.body);
+    let transactions = block.body.extract_transactions();
     let hexes = transactions.iter().map(|t| t.into());
     BlockRepr {
       time: block.time,
