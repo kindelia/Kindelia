@@ -287,6 +287,94 @@ pub enum Term {
   Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
 }
 
+
+impl Drop for Term {
+  fn drop(&mut self) {
+    /// Verify if `term` has recursive childs (any of its
+    /// `Term`'s properties is not a var or a num)
+    fn term_is_recursive(term: &Term) -> bool {
+      fn term_is_num_or_var(term: &Term) -> bool {
+        match term {
+          Term::Num { .. } | Term::Var { .. } => true,
+          _ => false
+        } 
+      }
+      match term {
+        Term::Var { name } => false,
+        Term::Dup { nam0, nam1, expr, body } => !(term_is_num_or_var(expr) && term_is_num_or_var(body)),
+        Term::Lam { name, body } => !term_is_num_or_var(body),
+        Term::App { func, argm } => !(term_is_num_or_var(func) && term_is_num_or_var(argm)),
+        Term::Ctr { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
+        Term::Fun { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
+        Term::Num { numb } => false,
+        Term::Op2 { oper, val0, val1 } => !(term_is_num_or_var(val0) && term_is_num_or_var(val1)),
+      }
+    }
+
+    // if term is not recursive it will not enter this if
+    // and will be dropped normally
+    if term_is_recursive(&self) {
+      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`. 
+      // It is being repeated to avoid create a Term variable that would be dropped
+      // and would call this implementation (could generate a stack overflow, 
+      // or unecessary calls, depending where putted)
+      let term = std::mem::replace(self, Self::Num { numb: U120::ZERO });
+      let mut stack = vec![term]; // this will store the recursive terms
+      while let Some(mut in_term) = stack.pop() {
+        // if `in_term` is not recursive nothing will be done and, therefore, 
+        // it will be dropped. This will call this drop function from the start
+        // with `in_term` as `self` and it will not pass the first
+        // `if term_is_recursive`, dropping the term normally.
+        if term_is_recursive(&in_term) {
+          // if the `in_term` is recursive, its children will be erased, and added to stack.
+          // The `in_term` will be dropped after this, but it will not be recursive anymore,
+          // so the drop will occur normally. The while will repeat this for all `in_term` children
+          match &mut in_term {
+            Term::Var { name } => {},
+            Term::Num { numb } => {},
+            Term::Dup { nam0, nam1, expr, body } => {
+              let expr = std::mem::replace(expr.as_mut(), Self::Num { numb: U120::ZERO });
+              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
+              stack.push(expr);
+              stack.push(body);
+              
+            },
+            Term::Lam { name, body } => {
+              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
+              stack.push(body);
+            },
+            Term::App { func, argm } => {
+              let func = std::mem::replace(func.as_mut(), Self::Num { numb: U120::ZERO });
+              let argm = std::mem::replace(argm.as_mut(), Self::Num { numb: U120::ZERO });
+              stack.push(func);
+              stack.push(argm);
+            },
+            Term::Ctr { name, args } => {
+              for arg in args {
+                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
+                stack.push(arg);
+              }
+            },
+            Term::Fun { name, args } => {
+              for arg in args {
+                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
+                stack.push(arg);
+              }
+            },
+            Term::Op2 { oper, val0, val1 } => {
+              let val0 = std::mem::replace(val0.as_mut(), Self::Num { numb: U120::ZERO });
+              let val1 = std::mem::replace(val1.as_mut(), Self::Num { numb: U120::ZERO });
+              stack.push(val0);
+              stack.push(val1);
+            },
+          }
+        }
+      }
+    }
+
+  }
+}
+
 /// A native HVM 120-bit machine integer operation.
 /// - Add: addition
 /// - Sub: subtraction
