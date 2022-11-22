@@ -272,7 +272,7 @@ pub fn run_cli() -> Result<(), String> {
 
           let initial_peers = resolve_cfg!(
             env = "KINDELIA_NODE_INITIAL_PEERS",
-            prop = format!("node.network.{:#02X}.initial_peers", network_id),
+            prop = format!("node.networks.{:#02X}.initial_peers", network_id),
             default = vec![],
             cli_val = initial_peers,
             cfg = config,
