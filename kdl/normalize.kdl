@@ -1,0 +1,14 @@
+ctr {Pair a b}
+
+run {
+  let p = {Pair (!@x (* #2 x) #3) (!@x x @y y)};
+  (Done p)
+}
+
+run {
+  let p = {Pair (!@x (* #2 x) #3) (!@x x @y y)};
+  ask norm = (Norm p);
+  (Done norm)
+}
+
+

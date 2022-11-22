@@ -870,6 +870,7 @@ const IO_GIDX : u128 = 0x4533a2; // name_to_u128("GIDX")
 const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
 const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
 const IO_FAIL : u128 = 0x40b4d6; // name_to_u128("FAIL")
+const IO_NORM : u128 = 0x619717; // name_to_u128("NORM")
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
@@ -1769,6 +1770,71 @@ impl Runtime {
     return Ok(done);
   }
 
+  // Full-reduce a term.
+  pub fn normalize(&mut self, host: Loc, mana:u64, seen: &mut HashSet<RawCell>) -> Result<RawCell, RuntimeError> {
+    enum StackItem {
+      Host(Loc),
+      Linker(Loc)
+    }
+    let mut stack = vec![StackItem::Host(host)];
+    let mut output = vec![];
+    while !stack.is_empty() {
+      let item = stack.pop().unwrap();
+      match item {
+        StackItem::Host(host) => {
+          let term = ask_lnk(self, host);
+          if seen.contains(&term) {
+            output.push(term);
+          }
+          else {
+            let term = reduce(self, host, mana)?;
+            seen.insert(term);
+            let mut recursive_locs = vec![];
+            match term.get_tag() {
+              CellTag::DP0 => {
+                recursive_locs.push(term.get_loc(2));
+              },
+              CellTag::DP1 => {
+                recursive_locs.push(term.get_loc(2));
+              },
+              CellTag::LAM => {
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::APP => {
+                recursive_locs.push(term.get_loc(0));
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::SUP => {
+                recursive_locs.push(term.get_loc(0));
+                recursive_locs.push(term.get_loc(1));
+              },
+              CellTag::CTR | CellTag::FUN => {
+                let name = term.get_name_from_ext();
+                let arity = self.get_arity(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+                for i in 0..arity {
+                  recursive_locs.push(term.get_loc(i));
+                }
+              },
+              _ => {}
+            };
+            for loc in recursive_locs {
+              stack.push(StackItem::Linker(loc));
+              stack.push(StackItem::Host(loc));
+              // let lnk = self.normalize(loc, mana, seen)?;
+              // link(self, loc, lnk);
+            }
+            output.push(term);
+          }
+        },
+        StackItem::Linker(loc) => {
+          let lnk = output.pop().unwrap();
+          link(self, loc, lnk);
+        },
+      }  
+    }
+    Ok(output.pop().unwrap())
+  }
+  
   pub fn show_term(&self, lnk: RawCell) -> String {
     return show_term(self, lnk, None);
   }
@@ -1898,6 +1964,16 @@ impl Runtime {
             clear(self, term.get_loc(0), 3);
             return done;
           }
+          IO_NORM => {
+            let unnormalized = term.get_loc(0);
+            let cont = ask_arg(self, term, 1);
+            let normalized = self.normalize(unnormalized, mana, &mut HashSet::new())?;
+            let cont = alloc_app(self, cont, normalized);
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, term.get_loc(0), 2);
+            return done;
+          }
           IO_GIDX => {
             let fnid = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);
@@ -1908,7 +1984,7 @@ impl Runtime {
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
-          }
+          }          
           IO_STH0 => {
             let indx = ask_arg(self, term, 0);
             let cont = ask_arg(self, term, 1);

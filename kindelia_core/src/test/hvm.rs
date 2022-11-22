@@ -696,6 +696,39 @@ fn operators_cases(#[case] code: &str, #[case] expected: u128) {
   })
 }
 
+#[rstest]
+#[case("{Pair (!@x x #3) (!@x x @y y)}", "{Pair #3 @y y}")]
+#[case("{Pair (!(!@x @~ x #3) #4) (!@x x @y y)}", "{Pair #3 @y y}")]
+#[case("{Pair (!@x (+ x #2) #1) @y y}", "{Pair #3 @y y}")]
+fn normalize_cases(#[case] term: &str, #[case] expected: &str, temp_dir: TempPath) {
+  let code = format!("
+    ctr {{Pair a b}}
+ 
+    run {{
+      let term = {};
+      ask norm = (Norm term);
+      (Done norm)
+    }}
+  ", term);
+  let mut rt = init_runtime(&temp_dir.path);
+  let result = rt.run_statements_from_code(&code, true, true);
+  match result.last().unwrap() {
+    Ok(StatementInfo::Run { done_term, used_mana , size_diff, end_size }) => {
+      if let Term::Ctr { name, args } = done_term {
+        if let [normal] = args.as_slice() {
+          assert_eq!(*name, Name::from_str("DONE").unwrap());
+          assert_eq!(format!("{}",normal), expected);
+          assert_eq!(*size_diff, 0);
+        }
+      }
+      else {
+        panic!("Not constructor.")
+      }
+    }
+    _ => panic!("Unexpected result.")
+  };
+}
+
 // ===========================================================
 // Codes
 pub const PRE_COUNTER: &'static str = "

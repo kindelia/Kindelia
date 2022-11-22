@@ -71,16 +71,23 @@ fun (Tick) {
   (Tick) = @cont {TICK cont}
 }
 
+// GIDX returns the block number and statement index inside the block
+// of a function, register or constructor.
+// Returns in the form of a U120:
+// - most significant 60 bits are the block index
+// - less signficiant 60 bits are the statement index
 ctr {GIDX name cont}
 fun (GetIdx name) {
   (GetIdx name) = @cont {GIDX name cont}
 }
 
+// STH0 returns the less significant 120 bits hash of the statement at index idx
 ctr {STH0 idx cont}
 fun (GetStmHash0 idx) {
   (GetStmHash0 idx) = @cont {STH0 idx cont}
 }
 
+// STH0 returns the less significant 120 bits hash of the statement at index idx
 ctr {STH1 idx cont}
 fun (GetStmHash1 idx) {
   (GetStmHash1 idx) = @cont {STH1 idx cont}
@@ -114,6 +121,12 @@ fun (Hax1) {
 ctr {FAIL err}
 fun (Fail err) {
   (Fail err) = {FAIL err}
+}
+
+// NORM fully normalizes a term
+ctr {NORM term cont}
+fun (Norm term) {
+  (Norm term) = @cont {NORM term cont}
 }
 
 // LOAD works like TAKE, but clones the state
