@@ -108,7 +108,7 @@ impl From<Hash> for String {
 
 /// Decorator for Statement that serializes it as hexadecimal string of the
 /// protocol's serialization format.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HexStatement(hvm::Statement);
 
 impl std::ops::Deref for HexStatement {

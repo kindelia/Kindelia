@@ -4,7 +4,7 @@ mod files;
 mod util;
 
 use std::future::Future;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::path::Path;
 
 use clap::{CommandFactory, Parser};
@@ -29,7 +29,7 @@ use kindelia_core::hvm::{
   self, view_statement, view_statement_header, Statement,
 };
 use kindelia_core::net;
-use kindelia_core::net::ProtoComm;
+use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
@@ -218,18 +218,18 @@ pub fn run_cli() -> Result<(), String> {
       }
       Ok(())
     }
-    CliCommand::Publish { file, encoded } => {
+    CliCommand::Publish { file, encoded, hosts } => {
       let code = file.read_to_string()?;
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
         parser::parse_code(&code)?
       };
-      publish_code(&api_url, stmts)
+      publish_code(&api_url, stmts, hosts)
     }
-    CliCommand::Post { stmt } => {
+    CliCommand::Post { stmt, hosts } => {
       let stmts = statements_from_hex_seq(&stmt)?;
-      publish_code(&api_url, stmts)
+      publish_code(&api_url, stmts, hosts)
     }
     CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &api_url);
@@ -576,19 +576,84 @@ fn statement_from_hex(hex: &str) -> Result<Statement, String> {
 pub fn publish_code(
   api_url: &str,
   stmts: Vec<Statement>,
+  hosts: Vec<SocketAddr>,
 ) -> Result<(), String> {
-  let f =
-    |client: ApiClient, stmts| async move { client.publish_code(stmts).await };
-  let results = run_on_remote(api_url, stmts, f)?;
-  for (i, result) in results.iter().enumerate() {
-    print!("Transaction #{}: ", i);
-    match result {
-      Ok(()) => println!("PUBLISHED (tx added to mempool)"),
-      Err(err) => {
-        println!("NOT PUBLISHED: {}", err)
-      }
+  // setup tokio runtime and unordered joinset (tasks).
+  let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+  let mut tasks = tokio::task::JoinSet::new();
+
+  let client = ApiClient::new(api_url, None).map_err(|e| e.to_string())?;
+
+  let peer_urls: Vec<String> = if hosts.is_empty() {
+    // obtain list of active peers known to "our" node.
+    let prom = async move { client.get_peers::<NC>(false).await };
+    let peers = runtime.block_on(prom)?;
+    let mut urls: Vec<String> = peers
+      .iter()
+      .map(|p| match p.address {
+        Address::IPv4 { val0, val1, val2, val3, port: _ } => {
+          // strips the port, so port 80 is assumed/default.
+          // note:  we just assume/guess that this host has
+          //        a webservice running on port 80. (gross)
+          //        this is a fragile and temporary hack until
+          //        code is relayed properly by p2p nodes.
+          format!("http://{}.{}.{}.{}", val0, val1, val2, val3)
+        }
+      })
+      .collect();
+    // add api_url if not present in peers list.
+    if !urls.iter().any(|x| x == api_url) {
+      urls.push(api_url.to_string());
     }
+    urls
+  } else {
+    hosts.iter().map(|h| format!("http://{}", h)).collect()
+  };
+
+  let stmts_hex: Vec<HexStatement> =
+    stmts.into_iter().map(|s| s.into()).collect();
+
+  for peer_url in peer_urls.into_iter() {
+    // these are move'd into the spawned task, so they must be
+    // created for each iteration.
+    let client = ApiClient::new(peer_url, None).map_err(|e| e.to_string())?;
+    let stmts_hex = stmts_hex.clone();
+
+    // spawn a new task for contacting each peer.  Because it is
+    // spawn'd, the task should begin executing immediately.
+    tasks.spawn_on(
+      async move {
+        let results = match client.publish_code(stmts_hex.clone()).await {
+          Ok(r) => r,
+          Err(e) => {
+            println!("NOT PUBLISHED to {}. ({})", *client, e);
+            return Err(e);
+          }
+        };
+        for (i, result) in results.iter().enumerate() {
+          print!("Transaction #{}: ", i);
+          match result {
+            Ok(_) => {
+              println!("PUBLISHED to {} (tx added to mempool)", *client)
+            }
+            Err(err) => {
+              println!("NOT PUBLISHED to {}: {}", *client, err)
+            }
+          }
+        }
+        Ok(())
+      },
+      runtime.handle(),
+    );
   }
+  // wait for all tasks to complete.
+  runtime.block_on(join_all(tasks))
+}
+
+async fn join_all(
+  mut tasks: tokio::task::JoinSet<Result<(), String>>,
+) -> Result<(), String> {
+  while let Some(_res) = tasks.join_next().await {}
   Ok(())
 }
 
