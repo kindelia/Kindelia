@@ -47,7 +47,7 @@ pub enum Term {
 /// - Gtn: greater than
 /// - Neq: not equal
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Oper {
   Add, Sub, Mul, Div,
   Mod, And, Or,  Xor,
@@ -72,7 +72,7 @@ pub struct Func {
 // the type aboves, except in a semi-compiled, digested form, allowing faster computation.
 
 // Compiled information about a left-hand side variable.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Var {
   pub name: Name,         // this variable's name
   pub param: u64,         // in what parameter is this variable located?
@@ -162,7 +162,7 @@ impl fmt::Display for Term {
                 stack.push(StackItem::Term(expr));
               }
               Term::Lam { name, body } => {
-                output.push(format!("@{} ", name.to_string()));
+                output.push(format!("@{} ", name));
                 stack.push(StackItem::Term(body));
               }
               Term::App { func, argm } => {
@@ -178,7 +178,7 @@ impl fmt::Display for Term {
                 if name == "Name" && args.len() == 1 {
                   if let Term::Num { numb } = args[0] {
                     let name: Name = numb.into();
-                    output.push(format!("{{Name '{}'}}", name.to_string()));
+                    output.push(format!("{{Name '{}'}}", name));
                   }
                 } else {
                   output.push("{".to_string());
@@ -221,8 +221,7 @@ impl fmt::Display for Term {
           }
         }
       }
-      let res = output.join("");
-      res
+      output.join("")
     }
 
     f.write_str(&view_term(self))
@@ -235,18 +234,15 @@ impl Drop for Term {
     /// `Term`'s properties is not a var or a num)
     fn term_is_recursive(term: &Term) -> bool {
       fn term_is_num_or_var(term: &Term) -> bool {
-        match term {
-          Term::Num { .. } | Term::Var { .. } => true,
-          _ => false,
-        }
+        matches!(term, Term::Num { .. } | Term::Var { .. })
       }
       match term {
         Term::Var { .. } => false,
         Term::Dup { expr, body, .. } => !(term_is_num_or_var(expr) && term_is_num_or_var(body)),
         Term::Lam { body, .. } => !term_is_num_or_var(body),
         Term::App { func, argm } => !(term_is_num_or_var(func) && term_is_num_or_var(argm)),
-        Term::Ctr { args, .. } => args.iter().any(|term| !term_is_num_or_var(&term)),
-        Term::Fun { args, .. } => args.iter().any(|term| !term_is_num_or_var(&term)),
+        Term::Ctr { args, .. } => args.iter().any(|term| !term_is_num_or_var(term)),
+        Term::Fun { args, .. } => args.iter().any(|term| !term_is_num_or_var(term)),
         Term::Num { .. } => false,
         Term::Op2 { val0, val1, .. } => !(term_is_num_or_var(val0) && term_is_num_or_var(val1)),
       }
@@ -254,7 +250,7 @@ impl Drop for Term {
 
     // if term is not recursive it will not enter this if
     // and will be dropped normally
-    if term_is_recursive(&self) {
+    if term_is_recursive(self) {
       // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`.
       // It is being repeated to avoid create a Term variable that would be dropped
       // and would call this implementation (could generate a stack overflow,
@@ -421,9 +417,9 @@ pub fn view_statement(statement: &Statement) -> String {
       for i in 0..5 {
         text.push_str("  ");
         text.push_str(&hex[i * 26..(i + 1) * 26]);
-        text.push_str("\n");
+        text.push('\n');
       }
-      return text;
+      text
     }
     match sign {
       None       => String::new(),
@@ -441,7 +437,7 @@ pub fn view_statement(statement: &Statement) -> String {
         "\n".to_string()
       };
       let sign = view_sign(sign);
-      return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
+      format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign)
     }
     Statement::Ctr { name, args, sign } => {
       // correct:
@@ -452,17 +448,17 @@ pub fn view_statement(statement: &Statement) -> String {
         .collect::<Vec<String>>()
         .join("");
       let sign = view_sign(sign);
-      return format!("ctr {{{}{}}}{}", name, args, sign);
+      format!("ctr {{{}{}}}{}", name, args, sign)
     }
     Statement::Run { expr, sign } => {
       let sign = view_sign(sign);
-      return format!("run {{\n  {}\n}}{}", expr, sign);
+      format!("run {{\n  {}\n}}{}", expr, sign)
     }
     Statement::Reg { name, ownr, sign } => {
       let name = name;
       let ownr = format!("#x{:0>30x}", **ownr);
       let sign = view_sign(sign);
-      return format!("reg {} {{ {} }}{}", name, ownr, sign);
+      format!("reg {} {{ {} }}{}", name, ownr, sign)
     }
   }
 }
@@ -471,9 +467,9 @@ pub fn view_statements(statements: &[Statement]) -> String {
   let mut result = String::new();
   for statement in statements {
     result.push_str(&statement.to_string());
-    result.push_str("\n");
+    result.push('\n');
   }
-  return result;
+  result
 }
 
 impl fmt::Display for Statement {
