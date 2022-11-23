@@ -243,204 +243,42 @@
 
 use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
+use std::fs::File;
 use std::hash::{BuildHasherDefault, Hash};
 use std::path::PathBuf;
-use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+
+use kindelia_common::nohash_hasher::NoHashHasher;
+use kindelia_common::{crypto, nohash_hasher, Name, U120};
+use kindelia_lang::ast;
+use kindelia_lang::ast::{Func, Oper, Statement, Term, Var};
+use kindelia_lang::parser::{parse_code, parse_statements, ParseErr};
 
 use crate::bits::ProtoSerialize;
 use crate::constants;
-use crate::crypto;
-use crate::util::{self, U128_SIZE, mask};
-use crate::util::{LocMap, NameMap, U128Map, U120Map};
-use crate::NoHashHasher::NoHashHasher;
-
-use crate::common::{Name, U120};
 use crate::persistence::DiskSer;
-use crate::parser::{parse_statements, parse_code, ParseErr};
-
-/// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
-/// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
-/// later on. Below is a description of each variant:
-/// - Var: variable. It stores up to 12 6-bit letters.
-/// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
-/// - Lam: an affine lambda. Written as: `@var body`.
-/// - App: a lambda application. Written as: `(!f x)`.
-/// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
-/// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
-/// - Num: an unsigned integer.
-/// - Op2: a numeric operation.
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Term {
-  Var { name: Name },
-  Dup { nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term> },
-  Lam { name: Name, body: Box<Term> },
-  App { func: Box<Term>, argm: Box<Term> },
-  Ctr { name: Name, args: Vec<Term> },
-  Fun { name: Name, args: Vec<Term> },
-  Num { numb: U120 },
-  Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
-}
-
-
-impl Drop for Term {
-  fn drop(&mut self) {
-    /// Verify if `term` has recursive childs (any of its
-    /// `Term`'s properties is not a var or a num)
-    fn term_is_recursive(term: &Term) -> bool {
-      fn term_is_num_or_var(term: &Term) -> bool {
-        match term {
-          Term::Num { .. } | Term::Var { .. } => true,
-          _ => false
-        } 
-      }
-      match term {
-        Term::Var { name } => false,
-        Term::Dup { nam0, nam1, expr, body } => !(term_is_num_or_var(expr) && term_is_num_or_var(body)),
-        Term::Lam { name, body } => !term_is_num_or_var(body),
-        Term::App { func, argm } => !(term_is_num_or_var(func) && term_is_num_or_var(argm)),
-        Term::Ctr { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
-        Term::Fun { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
-        Term::Num { numb } => false,
-        Term::Op2 { oper, val0, val1 } => !(term_is_num_or_var(val0) && term_is_num_or_var(val1)),
-      }
-    }
-
-    // if term is not recursive it will not enter this if
-    // and will be dropped normally
-    if term_is_recursive(&self) {
-      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`. 
-      // It is being repeated to avoid create a Term variable that would be dropped
-      // and would call this implementation (could generate a stack overflow, 
-      // or unecessary calls, depending where putted)
-      let term = std::mem::replace(self, Self::Num { numb: U120::ZERO });
-      let mut stack = vec![term]; // this will store the recursive terms
-      while let Some(mut in_term) = stack.pop() {
-        // if `in_term` is not recursive nothing will be done and, therefore, 
-        // it will be dropped. This will call this drop function from the start
-        // with `in_term` as `self` and it will not pass the first
-        // `if term_is_recursive`, dropping the term normally.
-        if term_is_recursive(&in_term) {
-          // if the `in_term` is recursive, its children will be erased, and added to stack.
-          // The `in_term` will be dropped after this, but it will not be recursive anymore,
-          // so the drop will occur normally. The while will repeat this for all `in_term` children
-          match &mut in_term {
-            Term::Var { name } => {},
-            Term::Num { numb } => {},
-            Term::Dup { nam0, nam1, expr, body } => {
-              let expr = std::mem::replace(expr.as_mut(), Self::Num { numb: U120::ZERO });
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(expr);
-              stack.push(body);
-              
-            },
-            Term::Lam { name, body } => {
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(body);
-            },
-            Term::App { func, argm } => {
-              let func = std::mem::replace(func.as_mut(), Self::Num { numb: U120::ZERO });
-              let argm = std::mem::replace(argm.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(func);
-              stack.push(argm);
-            },
-            Term::Ctr { name, args } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Fun { name, args } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Op2 { oper, val0, val1 } => {
-              let val0 = std::mem::replace(val0.as_mut(), Self::Num { numb: U120::ZERO });
-              let val1 = std::mem::replace(val1.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(val0);
-              stack.push(val1);
-            },
-          }
-        }
-      }
-    }
-
-  }
-}
-
-/// A native HVM 120-bit machine integer operation.
-/// - Add: addition
-/// - Sub: subtraction
-/// - Mul: multiplication
-/// - Div: division
-/// - Mod: modulo
-/// - And: bitwise and
-/// - Or : bitwise or
-/// - Xor: bitwise xor
-/// - Shl: shift left
-/// - Shr: shift right
-/// - Ltn: less than
-/// - Lte: less than or equal
-/// - Eql: equal
-/// - Gte: greater than or equal
-/// - Gtn: greater than
-/// - Neq: not equal
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Oper {
-  Add, Sub, Mul, Div,
-  Mod, And, Or,  Xor,
-  Shl, Shr, Ltn, Lte,
-  Eql, Gte, Gtn, Neq,
-}
-
-/// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Rule {
-  pub lhs: Term,
-  pub rhs: Term,
-}
-
-/// A function, which is just a vector of rewrite rules.
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
-pub struct Func {
-  pub rules: Vec<Rule>,
-}
-
-// The types below are used by the runtime to evaluate rewrite rules. They store the same data as
-// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
-
-// Compiled information about a left-hand side variable.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Var {
-  pub name : Name,         // this variable's name
-  pub param: u64,         // in what parameter is this variable located?
-  pub field: Option<u64>, // in what field is this variable located? (if any)
-  pub erase: bool,         // should this variable be collected (because it is unused)?
-}
+use crate::util::{self, mask, U128_SIZE};
+use crate::util::{LocMap, NameMap, U120Map, U128Map};
 
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<RawCell>,          // left-hand side matching conditions
-  pub vars: Vec<Var>,          // left-hand side variable locations
+  pub cond: Vec<RawCell>,    // left-hand side matching conditions
+  pub vars: Vec<Var>,        // left-hand side variable locations
   pub eras: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
-  pub body: Term,              // right-hand side body of rule
+  pub body: Term,            // right-hand side body of rule
 }
 
 // Compiled information about a function.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   pub func: Func,           // the original function
-  pub arity: u64,          // number of arguments
-  pub redux: Vec<u64>,     // index of strict arguments
+  pub arity: u64,           // number of arguments
+  pub redux: Vec<u64>,      // index of strict arguments
   pub rules: Vec<CompRule>, // vector of rules
 }
 
@@ -482,14 +320,6 @@ pub struct Store {
   pub links: U120Map<RawCell>,
 }
 
-/// A global statement that alters the state of the blockchain
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Statement {
-  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<crypto::Signature> },
-  Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
-  Run { expr: Term, sign: Option<crypto::Signature> },
-  Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
-}
 
 /// RawCell
 /// =======
@@ -523,20 +353,20 @@ impl RawCell {
   pub fn get_tag(&self) -> CellTag {
     let tag = (**self / TAG_SHL) as u8;
     match tag {
-      tag if tag == CellTag::DP0 as u8 => CellTag::DP0 ,
-      tag if tag == CellTag::DP1 as u8 => CellTag::DP1 ,
-      tag if tag == CellTag::VAR as u8 => CellTag::VAR ,
-      tag if tag == CellTag::ARG as u8 => CellTag::ARG ,
-      tag if tag == CellTag::ERA as u8 => CellTag::ERA ,
-      tag if tag == CellTag::LAM as u8 => CellTag::LAM ,
-      tag if tag == CellTag::APP as u8 => CellTag::APP ,
-      tag if tag == CellTag::SUP as u8 => CellTag::SUP ,
-      tag if tag == CellTag::CTR as u8 => CellTag::CTR ,
-      tag if tag == CellTag::FUN as u8 => CellTag::FUN ,
-      tag if tag == CellTag::OP2 as u8 => CellTag::OP2 ,
-      tag if tag == CellTag::NUM as u8 => CellTag::NUM ,
-      tag if tag == CellTag::NIL as u8 => CellTag::NIL ,
-      _ => panic!("Unkown rawcell tag")
+      tag if tag == CellTag::DP0 as u8 => CellTag::DP0,
+      tag if tag == CellTag::DP1 as u8 => CellTag::DP1,
+      tag if tag == CellTag::VAR as u8 => CellTag::VAR,
+      tag if tag == CellTag::ARG as u8 => CellTag::ARG,
+      tag if tag == CellTag::ERA as u8 => CellTag::ERA,
+      tag if tag == CellTag::LAM as u8 => CellTag::LAM,
+      tag if tag == CellTag::APP as u8 => CellTag::APP,
+      tag if tag == CellTag::SUP as u8 => CellTag::SUP,
+      tag if tag == CellTag::CTR as u8 => CellTag::CTR,
+      tag if tag == CellTag::FUN as u8 => CellTag::FUN,
+      tag if tag == CellTag::OP2 as u8 => CellTag::OP2,
+      tag if tag == CellTag::NUM as u8 => CellTag::NUM,
+      tag if tag == CellTag::NIL as u8 => CellTag::NIL,
+      _ => panic!("Unkown rawcell tag"),
     }
   }
 
@@ -574,7 +404,7 @@ impl RawCell {
 #[repr(transparent)]
 pub struct Loc(u64);
 
-impl crate::NoHashHasher::IsEnabled for crate::hvm::Loc {}
+impl nohash_hasher::IsEnabled for crate::hvm::Loc {}
 
 impl Loc {
   pub const _MAX: u64 = (1 << VAL_SIZE) - 1;
@@ -617,7 +447,7 @@ pub struct Nodes {
   pub nodes: LocMap<RawCell>,
 }
 
-#[derive(Debug, Clone, PartialEq)] 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Hashs {
   pub stmt_hashes: U128Map<crypto::Hash>,
 }
@@ -633,19 +463,19 @@ pub struct Heap {
   pub indx: Indxs, // function name to position in heap
   pub hash: Hashs,
   pub ownr: Ownrs, // namespace owners
-  pub tick: u64,  // tick counter
+  pub tick: u64,   // tick counter
   pub time: u128,  // block timestamp
   pub meta: u128,  // block metadata
   pub hax0: u128,  // block hash, part 0
   pub hax1: u128,  // block hash, part 1
-  pub funs: u64,  // total function count
-  pub dups: u64,  // total dups count
-  pub rwts: u64,  // total graph rewrites
-  pub mana: u64,  // total mana cost
-  pub size: u64,  // total used memory (in 64-bit words)
-  pub mcap: u64,  // memory capacity (in 64-bit words)
-  pub next: u64,  // memory index that *may* be empty
-  // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
+  pub funs: u64,   // total function count
+  pub dups: u64,   // total dups count
+  pub rwts: u64,   // total graph rewrites
+  pub mana: u64,   // total mana cost
+  pub size: u64,   // total used memory (in 64-bit words)
+  pub mcap: u64,   // memory capacity (in 64-bit words)
+  pub next: u64,   // memory index that *may* be empty
+                   // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -663,12 +493,12 @@ pub enum Rollback {
 
 // The current and past states
 pub struct Runtime {
-  heap: Vec<Heap>,      // heap objects
-  draw: u64,            // drawing heap index
-  curr: u64,            // current heap index
-  nuls: Vec<u64>,       // reuse heap indices
-  back: Arc<Rollback>,  // past states
-  path: PathBuf,        // where to save runtime state
+  heap: Vec<Heap>,     // heap objects
+  draw: u64,           // drawing heap index
+  curr: u64,           // current heap index
+  nuls: Vec<u64>,      // reuse heap indices
+  back: Arc<Rollback>, // past states
+  path: PathBuf,       // where to save runtime state
 }
 
 #[derive(Debug, Clone)]
@@ -676,16 +506,16 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   DivisionByZero,
-  TermIsInvalidNumber { term: RawCell},
+  TermIsInvalidNumber { term: RawCell },
   CtrOrFunNotDefined { name: Name },
-  StmtDoesntExist { stmt_index: u128},
+  StmtDoesntExist { stmt_index: u128 },
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
   NameTooBig { numb: u128 },
   TermIsNotLinear { term: Term, var: Name },
   TermExceedsMaxDepth,
   EffectFailure(EffectFailure),
-  DefinitionError(DefinitionError)
+  DefinitionError(DefinitionError),
 }
 #[derive(Debug, Clone)]
 pub enum DefinitionError {
@@ -693,18 +523,17 @@ pub enum DefinitionError {
   LHSIsNotAFunction, // TODO: check at compile time
   LHSArityMismatch { rule_index: usize, expected: usize, got: usize }, // TODO: check at compile time
   LHSNotConstructor { rule_index: usize }, // TODO: check at compile time
-  VarIsUsedTwiceInDefinition { name : Name, rule_index: usize },
-  VarIsNotLinearInBody { name : Name, rule_index: usize },
-  VarIsNotUsed { name : Name, rule_index: usize },
+  VarIsUsedTwiceInDefinition { name: Name, rule_index: usize },
+  VarIsNotLinearInBody { name: Name, rule_index: usize },
+  VarIsNotUsed { name: Name, rule_index: usize },
   NestedMatch { rule_index: usize },
   UnsupportedMatch { rule_index: usize },
-  
 }
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
-  InvalidCallArg {caller: U120, callee: U120, arg: RawCell},
+  InvalidCallArg { caller: U120, callee: U120, arg: RawCell },
   InvalidIOCtr { name: Name },
   InvalidIONonCtr { ptr: RawCell },
   IoFail { err: RawCell },
@@ -759,6 +588,14 @@ pub struct StatementErr {
   pub err: String,
 }
 
+pub fn hash_statement(statement: &Statement) -> crypto::Hash {
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&ast::remove_sign(&statement).proto_serialized()))
+}
+
+pub fn hash_term(term: &Term) -> crypto::Hash {
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
+}
+
 // Constants
 // ---------
 
@@ -779,7 +616,7 @@ pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
 // Size of each RawCell field in bits
 pub const VAL_SIZE: usize = 48;
-pub const EXT_SIZE: usize = 72;
+pub const EXT_SIZE: usize = Name::MAX_BITS;
 pub const TAG_SIZE: usize = 8;
 pub const NUM_SIZE: usize = EXT_SIZE + VAL_SIZE;
 
@@ -805,43 +642,23 @@ pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 #[derive(PartialEq)]
 #[repr(u8)]
 pub enum CellTag {
- DP0 = 0x0,
- DP1 = 0x1,
- VAR = 0x2,
- ARG = 0x3,
- ERA = 0x4,
- LAM = 0x5,
- APP = 0x6,
- SUP = 0x7,
- CTR = 0x8,
- FUN = 0x9,
- OP2 = 0xA,
- NUM = 0xB,
- NIL = 0xF,
+  DP0 = 0x0,
+  DP1 = 0x1,
+  VAR = 0x2,
+  ARG = 0x3,
+  ERA = 0x4,
+  LAM = 0x5,
+  APP = 0x6,
+  SUP = 0x7,
+  CTR = 0x8,
+  FUN = 0x9,
+  OP2 = 0xA,
+  NUM = 0xB,
+  NIL = 0xF,
 }
 
-#[repr(u8)]
-pub enum Op {
- ADD = 0x00,
- SUB = 0x01,
- MUL = 0x02,
- DIV = 0x03,
- MOD = 0x04,
- AND = 0x05,
- OR  = 0x06,
- XOR = 0x07,
- SHL = 0x08,
- SHR = 0x09,
- LTN = 0x0A,
- LTE = 0x0B,
- EQL = 0x0C,
- GTE = 0x0D,
- GTN = 0x0E,
- NEQ = 0x0F,
-}
-  
-pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
-pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+pub const U128_NONE: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+pub const I128_NONE: i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const U64_NONE: u64 = u64::MAX; //TODO: rewrite as FFF's?if think it is easier to read like this.
 
 // TODO: r -> U120
@@ -874,10 +691,10 @@ const IO_NORM : u128 = 0x619717; // name_to_u128("NORM")
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u64 = 4_000_000;
+pub const BLOCK_MANA_LIMIT: u64 = 4_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : u64 = 2048; // 1024 bits per sec = about 8 GB per year
+pub const BLOCK_BITS_LIMIT: u64 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
@@ -1032,71 +849,6 @@ fn show_addr(addr: U120) -> String {
 }
 
 
-// Oper
-// ====
-
-impl TryFrom<u128> for Oper {
-  type Error = String;
-  fn try_from(value: u128) -> Result<Self, Self::Error> {
-      match value {
-        x if x == Op::ADD as u128 => Ok(Oper::Add),
-        x if x == Op::SUB as u128 => Ok(Oper::Sub),
-        x if x == Op::MUL as u128 => Ok(Oper::Mul),
-        x if x == Op::DIV as u128 => Ok(Oper::Div),
-        x if x == Op::MOD as u128 => Ok(Oper::Mod),
-        x if x == Op::AND as u128 => Ok(Oper::And),
-        x if x == Op::OR  as u128 => Ok(Oper::Or),
-        x if x == Op::XOR as u128 => Ok(Oper::Xor),
-        x if x == Op::SHL as u128 => Ok(Oper::Shl),
-        x if x == Op::SHR as u128 => Ok(Oper::Shr),
-        x if x == Op::LTN as u128 => Ok(Oper::Ltn),
-        x if x == Op::LTE as u128 => Ok(Oper::Lte),
-        x if x == Op::EQL as u128 => Ok(Oper::Eql),
-        x if x == Op::GTE as u128 => Ok(Oper::Gte),
-        x if x == Op::GTN as u128 => Ok(Oper::Gtn),
-        x if x == Op::NEQ as u128 => Ok(Oper::Neq),
-        _ => Err(format!("Invalid value for operation: {}", value))
-      }
-  }
-}
-
-// Term
-// ====
-
-impl Term {
-  pub fn num(numb: U120) -> Self {
-    Term::Num { numb }
-  }
-
-  pub fn var(name: Name) -> Self {
-    Term::Var { name }
-  }
-
-  pub fn lam(name: Name, body: Box<Term>) -> Self {
-    Term::Lam { name, body }
-  }
-
-  pub fn dup(nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term>) -> Self {
-    Term::Dup { nam0, nam1, expr, body }
-  }
-
-  pub fn op2(oper: Oper, val0: Box<Term>, val1: Box<Term>) -> Self {
-    Term::Op2 { oper, val0, val1 }
-  }
-
-  pub fn app(func: Box<Term>, argm: Box<Term>) -> Self {
-    Term::App { func, argm }
-  }
-
-  pub fn fun(name: Name, args: Vec<Term>) -> Self {
-    Term::Fun { name, args }
-  }
-
-  pub fn ctr(name: Name, args: Vec<Term>) -> Self {
-    Term::Ctr { name, args }
-  }
-}
-
 // Parser
 // ======
 
@@ -1117,78 +869,6 @@ pub fn get_namespace(name: Name) -> Option<Name> {
   }
 }
 
-// Statements
-// ----------
-
-// Removes the signature from a statement
-pub fn remove_sign(statement: &Statement) -> Statement {
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      Statement::Fun {
-        name: *name,
-        args: args.clone(),
-        func: func.clone(),
-        init: init.clone(),
-        sign: None,
-      }
-    }
-    Statement::Ctr { name, args, sign } => {
-      Statement::Ctr {
-        name: *name,
-        args: args.clone(),
-        sign: None,
-      }
-    }
-    Statement::Run { expr, sign } => {
-      Statement::Run {
-        expr: expr.clone(),
-        sign: None,
-      }
-    }
-    Statement::Reg { name, ownr, sign } => {
-      Statement::Reg {
-        name: *name,
-        ownr: *ownr,
-        sign: None,
-      }
-    }
-  }
-}
-
-pub fn set_sign(statement: &Statement, new_sign: crypto::Signature) -> Statement {
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      Statement::Fun {
-        name: *name,
-        args: args.clone(),
-        func: func.clone(),
-        init: init.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Ctr { name, args, sign } => {
-      Statement::Ctr {
-        name: *name,
-        args: args.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Run { expr, sign } => {
-      Statement::Run {
-        expr: expr.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Reg { name, ownr, sign } => {
-      Statement::Reg {
-        name: *name,
-        ownr: *ownr,
-        sign: Some(new_sign),
-      }
-    }
-  }
-}
-
 // StatementInfo
 // =============
 
@@ -1199,7 +879,7 @@ impl fmt::Display for StatementInfo {
       StatementInfo::Fun { name, args } => write!(f, "[fun] {}", name),
       StatementInfo::Reg { name, .. } => write!(f, "[reg] {}", name),
       StatementInfo::Run { done_term, used_mana, size_diff, .. } =>
-        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&done_term), used_mana, size_diff)
+        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", done_term, used_mana, size_diff)
     }
   }
 }
@@ -1307,7 +987,7 @@ impl Heap {
     return self.rwts;
   }
   // NOTE: u64 for mana suffices
-  fn set_mana(&mut self, mana: u64) { 
+  fn set_mana(&mut self, mana: u64) {
     self.mana = mana;
   }
   fn get_mana(&self) -> u64 {
@@ -1406,7 +1086,7 @@ impl Heap {
         .read(true)
         .open(file_path)
     }
-    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + crate::NoHashHasher::IsEnabled, V: DiskSer>
+    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + nohash_hasher::IsEnabled, V: DiskSer>
       (uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<K, V, std::hash::BuildHasherDefault<NoHashHasher<K>>>> {
       HashMap::disk_deserialize(&mut open_reader(uuid, path, buffer_name)?)?
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
@@ -1628,14 +1308,14 @@ pub fn init_runtime(heaps_path: PathBuf, init_stmts: &[Statement]) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
   let mut heap = Vec::new();
-  for i in 0 .. MAX_HEAPS {
+  for i in 0..MAX_HEAPS {
     heap.push(init_heap());
   }
   let mut rt = Runtime {
     heap,
     draw: 0,
     curr: 1,
-    nuls: (2 .. MAX_HEAPS).collect(),
+    nuls: (2..MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
     path: heaps_path,
   };
@@ -1741,7 +1421,7 @@ impl Runtime {
         }
         Err(..) => {
           results.push(res);
-          break
+          break;
         }
       }
     }
@@ -1774,7 +1454,7 @@ impl Runtime {
   pub fn normalize(&mut self, host: Loc, mana:u64, seen: &mut HashSet<RawCell>) -> Result<RawCell, RuntimeError> {
     enum StackItem {
       Host(Loc),
-      Linker(Loc)
+      Linker(Loc),
     }
     let mut stack = vec![StackItem::Host(host)];
     let mut output = vec![];
@@ -1834,7 +1514,7 @@ impl Runtime {
     }
     Ok(output.pop().unwrap())
   }
-  
+
   pub fn show_term(&self, lnk: RawCell) -> String {
     return show_term(self, lnk, None);
   }
@@ -2866,7 +2546,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
       if index <= mcap - arity {
         let index = Loc(index);
         let mut has_space = true;
-        for i in 0 .. arity {
+        for i in 0..arity {
           if *rt.read(index + i) != 0 {
             has_space = false;
             break;
@@ -2877,7 +2557,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
           rt.set_next(rt.get_next() + arity);
           rt.set_size(rt.get_size() + arity);
           //println!("{}", show_memo(rt));
-          for i in 0 .. arity {
+          for i in 0..arity {
             rt.write(index + i, RawCell(CellTag::NIL as u128 * TAG_SHL)); // millions perished for forgetting this line
           }
           return index;
@@ -2896,7 +2576,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
 }
 
 pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
-  for i in 0 .. size {
+  for i in 0..size {
     if rt.read(loc + i) == RawCell(0) {
       panic!("Cleared twice: {}", *loc);
     }
@@ -2907,9 +2587,9 @@ pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
 }
 
 pub fn collect(rt: &mut Runtime, term: RawCell) {
-  let mut stack : Vec<RawCell> = Vec::new();
+  let mut stack: Vec<RawCell> = Vec::new();
   let mut next = term;
-  let mut dups : Vec<RawCell> = Vec::new();
+  let mut dups: Vec<RawCell> = Vec::new();
   loop {
     let term = next;
     match term.get_tag() {
@@ -2956,7 +2636,7 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
         let arity = rt.get_arity(&term.get_name_from_ext()).unwrap();
         // NOTE: should never be none, should panic
         // TODO: remove unwrap?
-        for i in 0 .. arity {
+        for i in 0..arity {
           if i < arity - 1 {
             stack.push(ask_arg(rt, term, i));
           } else {
@@ -3053,7 +2733,7 @@ fn count_uses(term: &Term, name: Name) -> u128 {
 // - Every non-erased variable is used exactly once
 // - Every erased variable is never used
 pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
-  // println!("{}", view_term(term));
+  // println!("{}", term);
   let res = match term {
     Term::Var { name: var_name } => {
       // TODO: check unbound variables
@@ -3104,7 +2784,7 @@ pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
     }
   };
 
-  // println!("{}: {}", view_term(term), res);
+  // println!("{}: {}", term, res);
   res
 }
 
@@ -3117,7 +2797,7 @@ pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
     match term {
       Term::Var { name } => {
         return Ok(());
-      },
+      }
       Term::Dup { nam0, nam1, expr, body } => {
         check_term_depth(expr, depth + 1)?;
         check_term_depth(body, depth + 1)?;
@@ -3280,7 +2960,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for rule_index in 0 .. rules.len() {
+  for rule_index in 0..rules.len() {
     let rule = &func.rules[rule_index];
 
     // Validates that:
@@ -3368,7 +3048,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
 
   // Builds the redux object, with the index of strict arguments
   let mut redux = Vec::new();
-  for i in 0 .. strict.len() {
+  for i in 0..strict.len() {
     if strict[i] {
       redux.push(i as u64);
     }
@@ -3391,7 +3071,7 @@ pub fn create_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> RawCell {
 
 pub fn create_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> RawCell {
   let node = alloc(rt, args.len() as u64);
-  for i in 0 .. args.len() {
+  for i in 0..args.len() {
     link(rt, node + (i as u64), args[i]);
   }
   Fun(fun, node)
@@ -3434,8 +3114,8 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
   let mut init = 1;
   let mut host = root;
 
-  let mut func_val : Option<CompFunc>;
-  let mut func_ref : Option<&mut CompFunc>;
+  let mut func_val: Option<CompFunc>;
+  let mut func_ref: Option<&mut CompFunc>;
 
   loop {
     let term = ask_lnk(rt, host);
@@ -3491,7 +3171,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
           }
         }
         // We don't need to reduce further
-        _ => {},
+        _ => {}
       }
     } else {
       match term.get_tag() {
@@ -3803,7 +3483,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
               let mut matched = true;
               //println!("- matching rule");
               // Tests each rule condition (ex: `args[0].get_tag() == SUCC`)
-              for i in 0 .. rule.cond.len() as u64 {
+              for i in 0..rule.cond.len() as u64 {
                 let argi = ask_arg(rt, term, i);
                 let cond = rule.cond[i as usize];
                 match cond.get_tag() {
@@ -3970,7 +3650,7 @@ pub fn compute_at(rt: &mut Runtime, loc: Loc, mana: u64) -> Result<RawCell, Runt
             _ => {}
           };
         }
-      },
+      }
       StackItem::LinkResolver { loc } => {
         let cell = output.pop().expect("No term to resolve link");
         link(rt, loc, cell);
@@ -4004,7 +3684,7 @@ pub fn show_ptr(x: RawCell) -> String {
       CellTag::FUN => "FUN",
       CellTag::OP2 => "OP2",
       CellTag::NUM => "NUM",
-      _   => "?",
+      _ => "?",
     };
     let name = x.get_name_from_ext();
     format!("{}:{}:{:x}", tgs, name, val)
@@ -4024,7 +3704,7 @@ pub fn show_rt(rt: &Runtime) -> String {
 
 fn show_memo(rt: &Runtime) -> String {
   let mut txt = String::new();
-  for i in 0 .. rt.get_mcap() {
+  for i in 0..rt.get_mcap() {
     txt.push(if rt.read(Loc(i)) == RawCell(0) { '_' } else { 'X' });
   }
   return txt;
@@ -4040,14 +3720,14 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
     rt: &Runtime,
     term: RawCell,
     names: &mut HashMap<Loc, String>,
-    focus: Option<RawCell>
+    focus: Option<RawCell>,
   ) -> String {
     let mut lets: HashMap<Loc, Loc> = HashMap::new();
     let mut kinds: HashMap<Loc, u128> = HashMap::new();
     let mut count: u128 = 0;
     let mut stack = vec![term];
     let mut text = String::new();
-    while !stack.is_empty() { 
+    while !stack.is_empty() {
       let term = stack.pop().unwrap();
       match term.get_tag() {
         CellTag::LAM => {
@@ -4190,7 +3870,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               let mut arit = rt.get_arity(&name).unwrap();
               // NOTE: arity should never be zero (read from memory)
               // TODO: remove unwrap
-              let mut name = view_name(name);
+              let mut name = name.to_string();
               // Pretty print names
               if name == "Name" && arit == 1 {
                 let arg = ask_arg(rt, term, 0);
@@ -4226,7 +3906,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               // println!("{}", show_ptr(term));
               // println!("{}", show_term(rt,  ask_lnk(rt, term), None));
               output.push(format!("?g({})", term.get_tag() as u128))
-            },
+            }
           }
         }
       }
@@ -4234,11 +3914,10 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
 
     let res = output.join("");
     return res;
-
   }
 
   let mut text = find_lets(rt, term, &mut names, focus);
-  text.push_str( &go(rt, term, &names, focus));
+  text.push_str(&go(rt, term, &names, focus));
   text
 }
 
@@ -4255,7 +3934,7 @@ pub fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist.", stmt_index),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}.", name, expected, got),
     RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
-    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", view_term(&term), var),
+    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", term, var),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
@@ -4333,7 +4012,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
         _ => {}
       }
     }
- }
+  }
 
   struct DupStore {
     stacks: HashMap<u128, Vec<bool>>, // ext -> bool
@@ -4361,7 +4040,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
     term: RawCell,
     names: &mut LocMap<String>,
     dup_store: &mut DupStore,
-    limit: Option<usize>
+    limit: Option<usize>,
   ) -> Option<Term> {
     enum StackItem {
       Term(RawCell),
@@ -4478,7 +4157,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
           }
         }
         StackItem::SUPResolverSome(term, old) => {
-          let col = term.get_ext(); 
+          let col = term.get_ext();
           dup_store.push(col, old);
         }
         StackItem::SUPResolverNone(term) => {
@@ -4533,9 +4212,8 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
       }
     }
     if let Some(item) = output.pop() {
-          Some(item)
-    }
-    else {
+      Some(item)
+    } else {
       panic!("Readback output is empty")
     }
   }
@@ -4546,232 +4224,6 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
   readback(rt, term, &mut names, &mut dup_store, limit)
 }
 
-
-// View
-// ----
-
-// TODO: move to Display trait
-pub fn view_name(name: Name) -> String {
-  if name.is_none() {
-    return "~".to_string();
-  } else {
-    return name.to_string();
-  }
-}
-
-pub fn view_term(term: &Term) -> String {
-  enum StackItem<'a> {
-    Term(&'a Term),
-    Str(String),
-  }
-
-  let mut stack = vec![StackItem::Term(term)];
-  let mut output = Vec::new();
-
-  while !stack.is_empty() {
-    let item = stack.pop().unwrap();
-
-    match item {
-      StackItem::Str(str) => {
-        output.push(str);
-      }
-      StackItem::Term(term) => {  
-        match term {
-          Term::Var { name } => {
-            output.push(view_name(*name));
-          }
-          Term::Dup { nam0, nam1, expr, body } => {
-            output.push("dup ".to_string());
-            output.push(view_name(*nam0));
-            output.push(" ".to_string());
-            output.push(view_name(*nam1));
-            output.push(" = ".to_string());
-            stack.push(StackItem::Term(body));
-            stack.push(StackItem::Str("; ".to_string()));
-            stack.push(StackItem::Term(expr));
-          }
-          Term::Lam { name, body } => {
-            output.push(format!("@{} ", view_name(*name)));
-            stack.push(StackItem::Term(body));
-          }
-          Term::App { func, argm } => {
-            output.push("(!".to_string());
-            stack.push(StackItem::Str(")".to_string()));
-            stack.push(StackItem::Term(argm));
-            stack.push(StackItem::Str(" ".to_string()));
-            stack.push(StackItem::Term(func));
-          }
-          Term::Ctr { name, args } => {
-            let name = view_name(*name);
-            // Pretty print names
-            if name == "Name" && args.len() == 1 {
-              if let Term::Num { numb } = args[0] {
-                output.push(format!("{{Name '{}'}}", view_name(numb.into())));
-              }
-            } else {
-              output.push("{".to_string());
-              output.push(name);
-              stack.push(StackItem::Str("}".to_string()));
-              for arg in args.iter().rev() {
-                stack.push(StackItem::Term(arg));
-                stack.push(StackItem::Str(" ".to_string()));
-              }
-            }
-          }
-          Term::Fun { name, args } => {
-            let name = view_name(*name);
-            output.push("(".to_string());
-            output.push(name);
-            stack.push(StackItem::Str(")".to_string()));
-            for arg in args.iter().rev() {
-              stack.push(StackItem::Term(arg));
-              stack.push(StackItem::Str(" ".to_string()));
-            }
-          }
-          Term::Num { numb } => {
-            // If it has 26-30 bits, pretty-print as a name
-            //if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
-              //return format!("@{}", view_name(*numb));
-            //} else {
-              output.push(format!("#{}", numb));
-            //}
-          }
-          Term::Op2 { oper, val0, val1 } => {
-            let oper = view_oper(oper);
-            output.push(format!("({} ", oper));
-            stack.push(StackItem::Str(")".to_string()));
-            stack.push(StackItem::Term(val1));
-            stack.push(StackItem::Str(" ".to_string()));
-            stack.push(StackItem::Term(val0));
-          }
-        }
-      }
-    }
-  }
-  let res = output.join("");
-  res
-}
-
-pub fn view_oper(oper: &Oper) -> String {
-  match oper {
-    Oper::Add => "+",
-    Oper::Sub => "-",
-    Oper::Mul => "*",
-    Oper::Div => "/",
-    Oper::Mod => "%",
-    Oper::And => "&",
-    Oper::Or  => "|",
-    Oper::Xor => "^",
-    Oper::Shl => "<<",
-    Oper::Shr => ">>",
-    Oper::Ltn => "<",
-    Oper::Lte => "<=",
-    Oper::Eql => "==",
-    Oper::Gte => ">=",
-    Oper::Gtn => ">",
-    Oper::Neq => "!=",
-  }.to_string()
-}
-
-// TODO: move these functions to impl Statement?
-pub fn view_statement_header(statement: &Statement) -> String {
-  let statement  = remove_sign(statement);
-  if let Statement::Fun { name, args, .. } = statement {
-    let args = 
-      args
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
-    format!("fun ({} {})", name, args)
-  } else {
-    view_statement(&statement)
-  }
-}
-
-pub fn view_statement(statement: &Statement) -> String {
-  fn view_sign(sign: &Option<crypto::Signature>) -> String {
-    fn format_sign(sign: &crypto::Signature) -> String {
-      let hex = sign.to_hex();
-      let mut text = String::new();
-      for i in 0 .. 5 {
-        text.push_str("  ");
-        text.push_str(&hex[i * 26 .. (i+1) * 26]);
-        text.push_str("\n");
-      }
-      return text;
-    }
-    match sign {
-      None       => String::new(),
-      Some(sign) => format!(" sign {{\n{}}}", format_sign(sign)),
-    }
-  }
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
-      let func = func.collect::<Vec<String>>().join("");
-      let args = args.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(" ");
-      let init = if let Some(init) = init {
-        let init = view_term(init);
-        format!(" with {{\n  {}\n}}", init)
-      } else {
-        "\n".to_string()
-      };
-      let sign = view_sign(sign);
-      return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
-    }
-    Statement::Ctr { name, args, sign } => {
-      // correct:
-      let name = name;
-      let args = args.iter().map(|x| format!(" {}", x)).collect::<Vec<String>>().join("");
-      let sign = view_sign(sign);
-      return format!("ctr {{{}{}}}{}", name, args, sign);
-    }
-    Statement::Run { expr, sign } => {
-      let expr = view_term(expr);
-      let sign = view_sign(sign);
-      return format!("run {{\n  {}\n}}{}", expr, sign);
-    }
-    Statement::Reg { name, ownr, sign } => {
-      let name = name;
-      let ownr = format!("#x{:0>30x}", **ownr);
-      let sign = view_sign(sign);
-      return format!("reg {} {{ {} }}{}", name, ownr, sign);
-    }
-  }
-}
-
-pub fn view_statements(statements: &[Statement]) -> String {
-  let mut result = String::new();
-  for statement in statements {
-    result.push_str(&view_statement(statement));
-    result.push_str("\n");
-  }
-  return result;
-}
-
-impl fmt::Display for Term {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "{}", view_term(self))
-  }
-}
-
-impl fmt::Display for Statement {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "{}", view_statement(self))
-  }
-}
-
-// Hashing
-// -------
-
-pub fn hash_term(term: &Term) -> crypto::Hash {
-  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
-}
-
-pub fn hash_statement(statement: &Statement) -> crypto::Hash {
-  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
-}
 
 // Tests
 // -----
@@ -4794,8 +4246,9 @@ pub fn print_io_consts() {
 
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
-  let str_0 = view_statements(statements);
-  let str_1 = view_statements(&Vec::proto_deserialized(&statements.proto_serialized()).unwrap());
+  let str_0 = ast::view_statements(statements);
+  let statements = &Vec::proto_deserialized(&statements.proto_serialized()).unwrap();
+  let str_1 = ast::view_statements(statements);
 
   println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   println!("=====");

@@ -1,6 +1,8 @@
 [workspace]
 members = [
   "kindelia",
+  "kindelia_common",
+  "kindelia_lang",
   "kindelia_core",
   "kindelia_ws",
   "kindelia_server",

@@ -2,13 +2,9 @@
 
 //use std::hash::{Hash, Hasher};
 //use std::collections::hash_map;
-use crate::hvm::{compile_func, show_runtime_error};
-use crate::hvm::{CompFunc, Statement, Func, Oper, Rule, Term};
-use crate::common::{U120, Name};
-use crate::crypto;
-
-use serde::{Serialize, Deserialize};
-
+use crate::ast::{Func, Oper, Rule, Statement, Term};
+use kindelia_common::{crypto, Name, U120};
+use serde::{Deserialize, Serialize};
 
 pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
 
@@ -20,9 +16,9 @@ pub struct ParseErr {
 
 impl ParseErr {
   fn new<C, E>(code: C, erro: E) -> Self
-  where 
+  where
     C: Into<String>,
-    E: Into<String>
+    E: Into<String>,
   {
     ParseErr { code: code.into(), erro: erro.into() }
   }
@@ -42,7 +38,7 @@ fn tail(code: &str) -> &str {
 
 fn drop(code: &str, amount: u128) -> &str {
   let mut code = code;
-  for _ in 0 .. amount {
+  for _ in 0..amount {
     code = tail(code);
   }
   return code;
@@ -61,7 +57,7 @@ fn skip(code: &str) -> &str {
       }
       continue;
     }
-    if head(code) == '/' && nth(code,1) == '/' {
+    if head(code) == '/' && nth(code, 1) == '/' {
       while head(code) != '\n' && head(code) != '\0' {
         code = tail(code);
       }
@@ -79,10 +75,11 @@ fn skip(code: &str) -> &str {
 // }
 
 fn is_name_char(chr: char) -> bool {
-  return chr == '_' || chr == '.'
-      || chr >= 'a' && chr <= 'z'
-      || chr >= 'A' && chr <= 'Z'
-      || chr >= '0' && chr <= '9';
+  return chr == '_'
+    || chr == '.'
+    || chr >= 'a' && chr <= 'z'
+    || chr >= 'A' && chr <= 'Z'
+    || chr >= '0' && chr <= '9';
 }
 
 pub fn parse_char(code: &str, chr: char) -> ParseResult<()> {
@@ -154,7 +151,7 @@ pub fn parse_name(code: &str) -> ParseResult<Name> {
     if name.is_empty() {
       return Err(ParseErr {
         code: code.to_string(),
-        erro: format!("Expected identifier, found `{}`.", head(code))
+        erro: format!("Expected identifier, found `{}`.", head(code)),
       });
     }
     if name == "ask" || name == "dup" || name == "let" {
@@ -199,7 +196,7 @@ pub fn parse_strict_name(code: &str) -> ParseResult<Name> {
   if name.is_empty() {
     return Err(ParseErr {
       code: code.to_string(),
-      erro: format!("Expected identifier, found `{}`.", head(code))
+      erro: format!("Expected identifier, found `{}`.", head(code)),
     });
   }
   let name = Name::from_str(&name);
@@ -217,7 +214,7 @@ pub fn parse_strict_name(code: &str) -> ParseResult<Name> {
 }
 
 pub fn parse_hex(code: &str) -> ParseResult<Vec<u8>> {
-  let mut data : Vec<u8> = Vec::new();
+  let mut data: Vec<u8> = Vec::new();
   let mut code = skip(code);
   while nth(code,0).is_ascii_hexdigit() && nth(code,1).is_ascii_hexdigit() {
     data.append(&mut hex::decode(&String::from_iter([nth(code,0),nth(code,1)])).unwrap());
@@ -249,7 +246,7 @@ pub fn parse_term(code: &str) -> ParseResult<Term> {
       let (code, body) = parse_term(code)?;
       let term = Term::lam(name, Box::new(body));
       return Ok((code, term));
-    },
+    }
     // Redex
     '(' => {
       let code = skip(tail(code));
@@ -278,7 +275,7 @@ pub fn parse_term(code: &str) -> ParseResult<Term> {
         let term = Term::fun(name, args);
         return Ok((code, term));
       }
-    },
+    }
     // Constructor
     '{' => {
       let code = tail(code);
@@ -286,7 +283,7 @@ pub fn parse_term(code: &str) -> ParseResult<Term> {
       let (code, args) = parse_until(code, '}', parse_term)?;
       let term = Term::ctr(name, args);
       return Ok((code, term));
-    },
+    }
     // Tuple sugar
     '[' => {
       let code = tail(code);
@@ -299,24 +296,23 @@ pub fn parse_term(code: &str) -> ParseResult<Term> {
       } else {
         return Err(ParseErr { code: code.to_string(), erro: "Tuple too long".to_string() });
       }
-    },
+    }
     // Number
     '#' => {
       let code = tail(code);
       let (code, numb) = parse_numb(code)?;
       let term = Term::num(numb);
       return Ok((code, term));
-    },
+    }
     // Name to number sugar
     '\'' => {
       let code = tail(code);
       let (code, name) = parse_strict_name(code)?;
       let (code, _unit) = parse_char(code, '\'')?;
-      let numb = *name;
-      let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
+      let numb = name.into();
       let term = Term::num(numb);
       return Ok((code, term));
-    },
+    }
     _ => {
       if let ('d','u','p',' ') = (nth(code,0), nth(code,1), nth(code,2), nth(code,3)) {
         let code = drop(code,3);
@@ -411,25 +407,12 @@ pub fn parse_rule(code: &str) -> ParseResult<Rule> {
   let (code, lhs) = parse_term(code)?;
   let (code, ())  = parse_char(code, '=')?;
   let (code, rhs) = parse_term(code)?;
-  return Ok((code, Rule{lhs, rhs}));
+  return Ok((code, Rule { lhs, rhs }));
 }
 
 pub fn parse_rules(code: &str) -> ParseResult<Vec<Rule>> {
   let (code, rules) = parse_until(code, '\0', parse_rule)?;
   return Ok((code, rules));
-}
-
-pub fn parse_func(code: &str) -> ParseResult<CompFunc> {
-  let (code, rules) = parse_until(code, '\0', parse_rule)?;
-  let func = Func { rules };
-  let comp_func = compile_func(&func, false);
-  match comp_func {
-    Ok(func) => Ok((code, func)),
-    Err(def_err) => Err(ParseErr {
-      code: code.to_string(),
-      erro: show_runtime_error(def_err)
-    })
-  }
 }
 
 pub fn parse_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {
@@ -506,7 +489,7 @@ pub fn parse_statement(code: &str) -> ParseResult<Statement> {
         '#' => {
           let code = tail(code);
           parse_numb(code)?
-        },
+        }
         '\'' => {
           let code = tail(code);
           let (code, name) = parse_strict_name(code)?;

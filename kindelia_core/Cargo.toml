@@ -21,6 +21,9 @@ harness = false
 
 
 [dependencies]
+kindelia_common = { path = "../kindelia_common" }
+kindelia_lang = { path = "../kindelia_lang" }
+
 fastrand = "1.7.0"
 rand = "0.8.5"
 
@@ -40,7 +43,6 @@ sha3 = "0.9.1"
 
 # Datastructures
 bit-vec = "0.6.3"
-# nohash-hasher = "0.2.0" # inlined, because we need u128
 primitive-types = { version = "0.11.1" }
 priority-queue = "1.2.1"
 # num = "0.1.36"

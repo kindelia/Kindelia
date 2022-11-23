@@ -14,16 +14,19 @@ use serde::{Deserialize, Serialize};
 use sha3::Digest;
 use thiserror::Error;
 
+use kindelia_common::crypto::{self, Hashed, Keccakable};
+use kindelia_common::Name;
+use kindelia_lang::ast::Statement;
+use kindelia_lang::parser;
+
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
-use crate::bits::{serialized_block_size, ProtoSerialize};
-use crate::common::Name;
+use crate::bits;
+use crate::bits::ProtoSerialize;
 use crate::config::MineConfig;
 use crate::constants;
-use crate::crypto::{self, Hashed, Keccakable};
-use crate::hvm::{self, *};
+use crate::hvm::*;
 use crate::net::{ProtoAddr, ProtoComm};
-use crate::parser;
 use crate::persistence::BlockStorage;
 use crate::util::*;
 
@@ -110,7 +113,7 @@ impl Transaction {
   }
 
   pub fn to_statement(&self) -> Option<Statement> {
-    hvm::Statement::proto_deserialized(&BitVec::from_bytes(&self.data))
+    Statement::proto_deserialized(&BitVec::from_bytes(&self.data))
   }
 }
 
@@ -304,7 +307,7 @@ pub enum PoolError {
 // Peers
 // -----
 
-#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Peer<A: ProtoAddr> {
   pub seen_at: u128,
   pub address: A,
@@ -1437,7 +1440,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               break;
             }
             let block = &self.block[bhash];
-            let bsize = serialized_block_size(block) as usize;
+            let bsize = bits::serialized_block_size(block) as usize;
             if tsize + bsize > MAX_UDP_SIZE_SLOW {
               break;
             }

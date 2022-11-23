@@ -8,7 +8,7 @@ use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use tiny_keccak::Hasher;
 
-use crate::common::Name;
+use crate::Name;
 
 // Hash
 // ====

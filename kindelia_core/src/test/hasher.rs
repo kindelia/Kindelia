@@ -1,10 +1,11 @@
-use crate::{
-  util::{u128map_new, u256map_new, u64map_new, U128Map},
-  NoHashHasher::NoHashHasher,
-};
-use primitive_types::U256;
-use proptest::{arbitrary::any, array, proptest};
 use std::{collections::HashMap, hash::{Hasher, Hash}};
+
+use proptest::{arbitrary::any, array, proptest};
+
+use kindelia_common::nohash_hasher::NoHashHasher;
+use kindelia_common::U256;
+
+use crate::util::{u128map_new, u256map_new, u64map_new, U128Map};
 
 fn get_insertion_elapsed<K, H>(map: &mut HashMap<K, u32, H>, n_items: u32) -> u128
 where

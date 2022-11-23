@@ -1,17 +1,17 @@
 use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
-  crypto,
-  common::{Name, U120},
   hvm::{
-    init_u128_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
-    Heap, Nodes, Oper, Ownrs, Rollback, Rule, Runtime, Loc, RawCell,
-    Statement, Store, Term, Var, Indxs,
+    init_loc_map, init_name_map, init_u120_map, init_u128_map, Arits, CompFunc,
+    CompRule, Funcs, Hashs, Heap, Indxs, Loc, Nodes, Ownrs, RawCell, Rollback,
+    Runtime, Store,
   },
-  util::{U128Map, NameMap, U120Map, LocMap},
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
+  util::{LocMap, NameMap, U120Map, U128Map},
 };
+use kindelia_common::{crypto, Name, U120};
+use kindelia_lang::ast::{Func, Oper, Rule, Statement, Term, Var};
 use primitive_types::U256;
 use proptest::{
   arbitrary::any,
@@ -273,7 +273,7 @@ pub fn heap() -> impl Strategy<Value = Heap> {
         ownr,
         file,
         indx,
-        hash
+        hash,
       )| Heap {
         mcap,
         disk,

@@ -1449,7 +1449,9 @@ dependencies = [
  "hex",
  "httpmock",
  "kindelia_client",
+ "kindelia_common",
  "kindelia_core",
+ "kindelia_lang",
  "kindelia_server",
  "kindelia_ws",
  "rstest",
@@ -1464,8 +1466,22 @@ name = "kindelia_client"
 version = "0.1.0"
 dependencies = [
  "kindelia_core",
+ "kindelia_lang",
  "reqwest",
  "serde",
+]
+
+[[package]]
+name = "kindelia_common"
+version = "0.1.5"
+dependencies = [
+ "bit-vec",
+ "hex",
+ "primitive-types",
+ "secp256k1",
+ "serde",
+ "sha3",
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -1479,6 +1495,8 @@ dependencies = [
  "dirs",
  "fastrand",
  "hex",
+ "kindelia_common",
+ "kindelia_lang",
  "petgraph",
  "primitive-types",
  "priority-queue",
@@ -1497,12 +1515,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kindelia_lang"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "kindelia_common",
+ "serde",
+]
+
+[[package]]
 name = "kindelia_server"
 version = "0.1.0"
 dependencies = [
  "bit-vec",
  "hex",
+ "kindelia_common",
  "kindelia_core",
+ "kindelia_lang",
  "serde",
  "serde_json",
  "tokio",

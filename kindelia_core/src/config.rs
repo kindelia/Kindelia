@@ -39,7 +39,7 @@ pub struct MineConfig {
 #[builder(setter(strip_option))]
 pub struct UiConfig {
   pub json: bool,
-  pub tags: Vec<NodeEventDiscriminant>
+  pub tags: Vec<NodeEventDiscriminant>,
 }
 
 // API config

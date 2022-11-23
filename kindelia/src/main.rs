@@ -19,25 +19,20 @@ use config::{arg_from_file_or_stdin, ConfigSettingsBuilder};
 
 use files::FileInput;
 use kindelia_client::ApiClient;
+use kindelia_common::{crypto, Name};
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::common::Name;
 use kindelia_core::config::{ApiConfig, MineConfig, NodeConfig, UiConfig};
-use kindelia_core::crypto;
-use kindelia_core::events;
-use kindelia_core::hvm::{
-  self, view_statement, view_statement_header, Statement,
-};
-use kindelia_core::net;
 use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, TransactionError, MAX_TRANSACTION_SIZE,
 };
-use kindelia_core::parser;
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
 use kindelia_core::util::bytes_to_bitvec;
+use kindelia_core::{events, hvm, net};
+use kindelia_lang::{ast, parser};
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
 };
@@ -165,7 +160,7 @@ pub fn run_cli() -> Result<(), String> {
             }
             // println!("Name: {}") // TODO
             // header printing
-            println!("{}\n", view_statement_header(stmt));
+            println!("{}\n", ast::view_statement_header(stmt));
           }
         }
       };
@@ -198,7 +193,7 @@ pub fn run_cli() -> Result<(), String> {
       if encoded_output {
         println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
       } else {
-        println!("{}", view_statement(&statement));
+        println!("{}", statement);
       };
       Ok(())
     }
@@ -359,7 +354,7 @@ pub fn run_cli() -> Result<(), String> {
 
 fn run_on_remote<T, P, F>(
   api_url: &str,
-  stmts: Vec<Statement>,
+  stmts: Vec<ast::Statement>,
   f: F,
 ) -> Result<T, String>
 where
@@ -429,11 +424,11 @@ pub async fn get_info(
         let func_info = client.get_function(name).await?;
         print_json_else(json, func_info, |func_info| {
           let func = func_info.func;
-          let statement = hvm::Statement::Fun {
+          let statement = ast::Statement::Fun {
             name,
             args: vec![Name::NONE],
             func,
-            init: Some(hvm::Term::var(Name::NONE)), // to show that we are actually not returning the initial state
+            init: Some(ast::Term::var(Name::NONE)), // to show that we are actually not returning the initial state
             sign: None,
           };
           println!("{}", statement);
@@ -520,38 +515,38 @@ pub fn serialize_code(code: &str) {
 pub fn deserialize_code(content: &str) -> Result<(), String> {
   let statements = statements_from_hex_seq(content)?;
   for statement in statements {
-    println!("{}", view_statement(&statement))
+    println!("{}", statement)
   }
   Ok(())
 }
 
 pub fn sign_code(
-  statement: &Statement,
+  statement: &ast::Statement,
   skey: &[u8; 32],
-) -> Result<Statement, String> {
+) -> Result<ast::Statement, String> {
   let user = crypto::Account::from_private_key(skey);
   let hash = hvm::hash_statement(statement);
   let sign = user.sign(&hash);
   match statement {
-    Statement::Fun { sign, .. }
-    | Statement::Ctr { sign, .. }
-    | Statement::Run { sign, .. }
-    | Statement::Reg { sign, .. } => {
+    ast::Statement::Fun { sign, .. }
+    | ast::Statement::Ctr { sign, .. }
+    | ast::Statement::Run { sign, .. }
+    | ast::Statement::Reg { sign, .. } => {
       if sign.is_some() {
         return Err("Statement already has a signature.".to_string());
       }
     }
   };
-  let stat = hvm::set_sign(statement, sign);
+  let stat = ast::set_sign(statement, sign);
   Ok(stat)
 }
 
-fn load_code(file: FileInput, encoded: bool) -> Result<Vec<Statement>, String> {
+fn load_code(file: FileInput, encoded: bool) -> Result<Vec<ast::Statement>, String> {
   let code = file.read_to_string()?;
   handle_code(&code, encoded)
 }
 
-fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
+fn handle_code(code: &str, encoded: bool) -> Result<Vec<ast::Statement>, String> {
   if encoded {
     statements_from_hex_seq(code)
   } else {
@@ -559,7 +554,7 @@ fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
   }
 }
 
-fn statements_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
+fn statements_from_hex_seq(txt: &str) -> Result<Vec<ast::Statement>, String> {
   txt
     .trim()
     .split(|c: char| c.is_whitespace())
@@ -567,15 +562,15 @@ fn statements_from_hex_seq(txt: &str) -> Result<Vec<Statement>, String> {
     .collect()
 }
 
-fn statement_from_hex(hex: &str) -> Result<Statement, String> {
+fn statement_from_hex(hex: &str) -> Result<ast::Statement, String> {
   let bytes = hex::decode(hex)
     .map_err(|err| format!("Invalid hexadecimal '{}': {}", hex, err))?;
-  hvm::Statement::proto_deserialized(&bytes_to_bitvec(&bytes))
+  ast::Statement::proto_deserialized(&bytes_to_bitvec(&bytes))
     .ok_or(format!("Failed to deserialize '{}'", hex))
 }
 pub fn publish_code(
   api_url: &str,
-  stmts: Vec<Statement>,
+  stmts: Vec<ast::Statement>,
   hosts: Vec<SocketAddr>,
 ) -> Result<(), String> {
   // setup tokio runtime and unordered joinset (tasks).

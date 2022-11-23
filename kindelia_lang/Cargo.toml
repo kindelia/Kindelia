@@ -1,0 +1,14 @@
+[package]
+name = "kindelia_lang"
+version = "0.1.0"
+edition = "2021"
+description = "An efficient, secure cryptocomputer."
+license = "MIT"
+repository = "https://github.com/Kindelia/Kindelia"
+
+
+[dependencies]
+kindelia_common = { path = "../kindelia_common" }
+
+serde = { version = "1.0.137", features = ["derive"] }
+hex = "0.4"

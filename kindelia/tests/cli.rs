@@ -4,10 +4,9 @@ mod cli {
 
   use rstest::rstest;
 
+  use kindelia_common::Name;
   use kindelia_core::api;
-  use kindelia_core::common;
-  use kindelia_core::hvm;
-  use kindelia_core::parser;
+  use kindelia_lang::{ast, parser};
 
   const CRATE_NAME: &str = assert_cmd::crate_name!();
 
@@ -109,10 +108,10 @@ mod cli {
     eprintln!("{}", file);
     let txt = std::fs::read_to_string(file).unwrap();
     let stmts = parser::parse_code(&txt).unwrap();
-    let str_0 = hvm::view_statements(&stmts);
+    let str_0 = ast::view_statements(&stmts);
     let ser = stmts.proto_serialized();
     let deser = Vec::proto_deserialized(&ser).unwrap();
-    let str_1 = hvm::view_statements(&deser);
+    let str_1 = ast::view_statements(&deser);
     assert_eq!(str_0, str_1);
   }
 
@@ -243,11 +242,11 @@ mod cli {
   }
 
   fn reg_response_1() -> api::RegInfo {
-    let names: Vec<common::Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
+    let names: Vec<Name> = vec!["Foo", "Foo.Bar", "Foo.Bar.cats"]
       .iter()
       .map(|s| (*s).try_into().unwrap())
       .collect();
-    api::RegInfo { ownr: common::Name::from_u128_unchecked(1024), stmt: names }
+    api::RegInfo { ownr: Name::from_u128_unchecked(1024), stmt: names }
   }
 
   // fn peers_response_1() -> Vec<node::Peer> {
@@ -263,10 +262,10 @@ mod cli {
     (Test a b) = #1
   } with { #42 }";
 
-  fn fun_response_1() -> (api::FuncInfo, Option<hvm::Term>) {
+  fn fun_response_1() -> (api::FuncInfo, Option<ast::Term>) {
     let code = FUN_CODE;
     let func = parser::parse_statement(code).unwrap().1;
-    if let hvm::Statement::Fun { func, init, .. } = func {
+    if let ast::Statement::Fun { func, init, .. } = func {
       (api::FuncInfo { func }, init)
     } else {
       panic!("Not a function")
