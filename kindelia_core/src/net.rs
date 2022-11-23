@@ -7,9 +7,6 @@ use thiserror::Error;
 use crate::bits::ProtoSerialize;
 use crate::node::Message;
 
-// Traits
-// ======
-
 /// A representation of a ProtoComm address
 pub trait ProtoAddr
 where
