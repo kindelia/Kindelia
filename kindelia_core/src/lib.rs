@@ -3,13 +3,13 @@
 #[allow(non_snake_case)]
 pub mod api;
 pub mod bits;
+pub mod config;
 pub mod constants;
 pub mod hvm;
 pub mod net;
 pub mod node;
-pub mod util;
-pub mod config;
 pub mod persistence;
+pub mod util;
 
 #[cfg(feature = "events")]
 pub mod events;

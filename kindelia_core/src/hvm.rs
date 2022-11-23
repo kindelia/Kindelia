@@ -243,43 +243,42 @@
 
 use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
+use std::fs::File;
 use std::hash::{BuildHasherDefault, Hash};
 use std::path::PathBuf;
-use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use kindelia_common::{crypto, nohash_hasher, Name, U120};
 use kindelia_common::nohash_hasher::NoHashHasher;
+use kindelia_common::{crypto, nohash_hasher, Name, U120};
 use kindelia_lang::ast;
 use kindelia_lang::ast::{Func, Oper, Statement, Term, Var};
-use kindelia_lang::parser::{parse_statements, parse_code, ParseErr};
+use kindelia_lang::parser::{parse_code, parse_statements, ParseErr};
 
 use crate::bits::ProtoSerialize;
 use crate::constants;
 use crate::persistence::DiskSer;
-use crate::util::{self, U128_SIZE, mask};
-use crate::util::{LocMap, NameMap, U128Map, U120Map};
-
+use crate::util::{self, mask, U128_SIZE};
+use crate::util::{LocMap, NameMap, U120Map, U128Map};
 
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<RawCell>,          // left-hand side matching conditions
-  pub vars: Vec<Var>,          // left-hand side variable locations
+  pub cond: Vec<RawCell>,    // left-hand side matching conditions
+  pub vars: Vec<Var>,        // left-hand side variable locations
   pub eras: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
-  pub body: Term,              // right-hand side body of rule
+  pub body: Term,            // right-hand side body of rule
 }
 
 // Compiled information about a function.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   pub func: Func,           // the original function
-  pub arity: u64,          // number of arguments
-  pub redux: Vec<u64>,     // index of strict arguments
+  pub arity: u64,           // number of arguments
+  pub redux: Vec<u64>,      // index of strict arguments
   pub rules: Vec<CompRule>, // vector of rules
 }
 
@@ -354,20 +353,20 @@ impl RawCell {
   pub fn get_tag(&self) -> CellTag {
     let tag = (**self / TAG_SHL) as u8;
     match tag {
-      tag if tag == CellTag::DP0 as u8 => CellTag::DP0 ,
-      tag if tag == CellTag::DP1 as u8 => CellTag::DP1 ,
-      tag if tag == CellTag::VAR as u8 => CellTag::VAR ,
-      tag if tag == CellTag::ARG as u8 => CellTag::ARG ,
-      tag if tag == CellTag::ERA as u8 => CellTag::ERA ,
-      tag if tag == CellTag::LAM as u8 => CellTag::LAM ,
-      tag if tag == CellTag::APP as u8 => CellTag::APP ,
-      tag if tag == CellTag::SUP as u8 => CellTag::SUP ,
-      tag if tag == CellTag::CTR as u8 => CellTag::CTR ,
-      tag if tag == CellTag::FUN as u8 => CellTag::FUN ,
-      tag if tag == CellTag::OP2 as u8 => CellTag::OP2 ,
-      tag if tag == CellTag::NUM as u8 => CellTag::NUM ,
-      tag if tag == CellTag::NIL as u8 => CellTag::NIL ,
-      _ => panic!("Unkown rawcell tag")
+      tag if tag == CellTag::DP0 as u8 => CellTag::DP0,
+      tag if tag == CellTag::DP1 as u8 => CellTag::DP1,
+      tag if tag == CellTag::VAR as u8 => CellTag::VAR,
+      tag if tag == CellTag::ARG as u8 => CellTag::ARG,
+      tag if tag == CellTag::ERA as u8 => CellTag::ERA,
+      tag if tag == CellTag::LAM as u8 => CellTag::LAM,
+      tag if tag == CellTag::APP as u8 => CellTag::APP,
+      tag if tag == CellTag::SUP as u8 => CellTag::SUP,
+      tag if tag == CellTag::CTR as u8 => CellTag::CTR,
+      tag if tag == CellTag::FUN as u8 => CellTag::FUN,
+      tag if tag == CellTag::OP2 as u8 => CellTag::OP2,
+      tag if tag == CellTag::NUM as u8 => CellTag::NUM,
+      tag if tag == CellTag::NIL as u8 => CellTag::NIL,
+      _ => panic!("Unkown rawcell tag"),
     }
   }
 
@@ -448,7 +447,7 @@ pub struct Nodes {
   pub nodes: LocMap<RawCell>,
 }
 
-#[derive(Debug, Clone, PartialEq)] 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Hashs {
   pub stmt_hashes: U128Map<crypto::Hash>,
 }
@@ -464,19 +463,19 @@ pub struct Heap {
   pub indx: Indxs, // function name to position in heap
   pub hash: Hashs,
   pub ownr: Ownrs, // namespace owners
-  pub tick: u64,  // tick counter
+  pub tick: u64,   // tick counter
   pub time: u128,  // block timestamp
   pub meta: u128,  // block metadata
   pub hax0: u128,  // block hash, part 0
   pub hax1: u128,  // block hash, part 1
-  pub funs: u64,  // total function count
-  pub dups: u64,  // total dups count
-  pub rwts: u64,  // total graph rewrites
-  pub mana: u64,  // total mana cost
-  pub size: u64,  // total used memory (in 64-bit words)
-  pub mcap: u64,  // memory capacity (in 64-bit words)
-  pub next: u64,  // memory index that *may* be empty
-  // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
+  pub funs: u64,   // total function count
+  pub dups: u64,   // total dups count
+  pub rwts: u64,   // total graph rewrites
+  pub mana: u64,   // total mana cost
+  pub size: u64,   // total used memory (in 64-bit words)
+  pub mcap: u64,   // memory capacity (in 64-bit words)
+  pub next: u64,   // memory index that *may* be empty
+                   // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -494,12 +493,12 @@ pub enum Rollback {
 
 // The current and past states
 pub struct Runtime {
-  heap: Vec<Heap>,      // heap objects
-  draw: u64,            // drawing heap index
-  curr: u64,            // current heap index
-  nuls: Vec<u64>,       // reuse heap indices
-  back: Arc<Rollback>,  // past states
-  path: PathBuf,        // where to save runtime state
+  heap: Vec<Heap>,     // heap objects
+  draw: u64,           // drawing heap index
+  curr: u64,           // current heap index
+  nuls: Vec<u64>,      // reuse heap indices
+  back: Arc<Rollback>, // past states
+  path: PathBuf,       // where to save runtime state
 }
 
 #[derive(Debug, Clone)]
@@ -507,16 +506,16 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   DivisionByZero,
-  TermIsInvalidNumber { term: RawCell},
+  TermIsInvalidNumber { term: RawCell },
   CtrOrFunNotDefined { name: Name },
-  StmtDoesntExist { stmt_index: u128},
+  StmtDoesntExist { stmt_index: u128 },
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
   NameTooBig { numb: u128 },
   TermIsNotLinear { term: Term, var: Name },
   TermExceedsMaxDepth,
   EffectFailure(EffectFailure),
-  DefinitionError(DefinitionError)
+  DefinitionError(DefinitionError),
 }
 #[derive(Debug, Clone)]
 pub enum DefinitionError {
@@ -524,18 +523,17 @@ pub enum DefinitionError {
   LHSIsNotAFunction, // TODO: check at compile time
   LHSArityMismatch { rule_index: usize, expected: usize, got: usize }, // TODO: check at compile time
   LHSNotConstructor { rule_index: usize }, // TODO: check at compile time
-  VarIsUsedTwiceInDefinition { name : Name, rule_index: usize },
-  VarIsNotLinearInBody { name : Name, rule_index: usize },
-  VarIsNotUsed { name : Name, rule_index: usize },
+  VarIsUsedTwiceInDefinition { name: Name, rule_index: usize },
+  VarIsNotLinearInBody { name: Name, rule_index: usize },
+  VarIsNotUsed { name: Name, rule_index: usize },
   NestedMatch { rule_index: usize },
   UnsupportedMatch { rule_index: usize },
-  
 }
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
-  InvalidCallArg {caller: U120, callee: U120, arg: RawCell},
+  InvalidCallArg { caller: U120, callee: U120, arg: RawCell },
   InvalidIOCtr { name: Name },
   InvalidIONonCtr { ptr: RawCell },
   IoFail { err: RawCell },
@@ -644,23 +642,23 @@ pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 #[derive(PartialEq)]
 #[repr(u8)]
 pub enum CellTag {
- DP0 = 0x0,
- DP1 = 0x1,
- VAR = 0x2,
- ARG = 0x3,
- ERA = 0x4,
- LAM = 0x5,
- APP = 0x6,
- SUP = 0x7,
- CTR = 0x8,
- FUN = 0x9,
- OP2 = 0xA,
- NUM = 0xB,
- NIL = 0xF,
+  DP0 = 0x0,
+  DP1 = 0x1,
+  VAR = 0x2,
+  ARG = 0x3,
+  ERA = 0x4,
+  LAM = 0x5,
+  APP = 0x6,
+  SUP = 0x7,
+  CTR = 0x8,
+  FUN = 0x9,
+  OP2 = 0xA,
+  NUM = 0xB,
+  NIL = 0xF,
 }
-  
-pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
-pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
+pub const U128_NONE: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+pub const I128_NONE: i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const U64_NONE: u64 = u64::MAX; //TODO: rewrite as FFF's?if think it is easier to read like this.
 
 // TODO: r -> U120
@@ -693,10 +691,10 @@ const IO_NORM : u128 = 0x619717; // name_to_u128("NORM")
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u64 = 4_000_000;
+pub const BLOCK_MANA_LIMIT: u64 = 4_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : u64 = 2048; // 1024 bits per sec = about 8 GB per year
+pub const BLOCK_BITS_LIMIT: u64 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
@@ -989,7 +987,7 @@ impl Heap {
     return self.rwts;
   }
   // NOTE: u64 for mana suffices
-  fn set_mana(&mut self, mana: u64) { 
+  fn set_mana(&mut self, mana: u64) {
     self.mana = mana;
   }
   fn get_mana(&self) -> u64 {
@@ -1310,14 +1308,14 @@ pub fn init_runtime(heaps_path: PathBuf, init_stmts: &[Statement]) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
   let mut heap = Vec::new();
-  for i in 0 .. MAX_HEAPS {
+  for i in 0..MAX_HEAPS {
     heap.push(init_heap());
   }
   let mut rt = Runtime {
     heap,
     draw: 0,
     curr: 1,
-    nuls: (2 .. MAX_HEAPS).collect(),
+    nuls: (2..MAX_HEAPS).collect(),
     back: Arc::new(Rollback::Nil),
     path: heaps_path,
   };
@@ -1423,7 +1421,7 @@ impl Runtime {
         }
         Err(..) => {
           results.push(res);
-          break
+          break;
         }
       }
     }
@@ -1456,7 +1454,7 @@ impl Runtime {
   pub fn normalize(&mut self, host: Loc, mana:u64, seen: &mut HashSet<RawCell>) -> Result<RawCell, RuntimeError> {
     enum StackItem {
       Host(Loc),
-      Linker(Loc)
+      Linker(Loc),
     }
     let mut stack = vec![StackItem::Host(host)];
     let mut output = vec![];
@@ -1516,7 +1514,7 @@ impl Runtime {
     }
     Ok(output.pop().unwrap())
   }
-  
+
   pub fn show_term(&self, lnk: RawCell) -> String {
     return show_term(self, lnk, None);
   }
@@ -2548,7 +2546,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
       if index <= mcap - arity {
         let index = Loc(index);
         let mut has_space = true;
-        for i in 0 .. arity {
+        for i in 0..arity {
           if *rt.read(index + i) != 0 {
             has_space = false;
             break;
@@ -2559,7 +2557,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
           rt.set_next(rt.get_next() + arity);
           rt.set_size(rt.get_size() + arity);
           //println!("{}", show_memo(rt));
-          for i in 0 .. arity {
+          for i in 0..arity {
             rt.write(index + i, RawCell(CellTag::NIL as u128 * TAG_SHL)); // millions perished for forgetting this line
           }
           return index;
@@ -2578,7 +2576,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
 }
 
 pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
-  for i in 0 .. size {
+  for i in 0..size {
     if rt.read(loc + i) == RawCell(0) {
       panic!("Cleared twice: {}", *loc);
     }
@@ -2589,9 +2587,9 @@ pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
 }
 
 pub fn collect(rt: &mut Runtime, term: RawCell) {
-  let mut stack : Vec<RawCell> = Vec::new();
+  let mut stack: Vec<RawCell> = Vec::new();
   let mut next = term;
-  let mut dups : Vec<RawCell> = Vec::new();
+  let mut dups: Vec<RawCell> = Vec::new();
   loop {
     let term = next;
     match term.get_tag() {
@@ -2638,7 +2636,7 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
         let arity = rt.get_arity(&term.get_name_from_ext()).unwrap();
         // NOTE: should never be none, should panic
         // TODO: remove unwrap?
-        for i in 0 .. arity {
+        for i in 0..arity {
           if i < arity - 1 {
             stack.push(ask_arg(rt, term, i));
           } else {
@@ -2799,7 +2797,7 @@ pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
     match term {
       Term::Var { name } => {
         return Ok(());
-      },
+      }
       Term::Dup { nam0, nam1, expr, body } => {
         check_term_depth(expr, depth + 1)?;
         check_term_depth(body, depth + 1)?;
@@ -2962,7 +2960,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
   let mut strict = vec![false; arity as usize];
 
   // For each rule (lhs/rhs pair)
-  for rule_index in 0 .. rules.len() {
+  for rule_index in 0..rules.len() {
     let rule = &func.rules[rule_index];
 
     // Validates that:
@@ -3050,7 +3048,7 @@ pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> 
 
   // Builds the redux object, with the index of strict arguments
   let mut redux = Vec::new();
-  for i in 0 .. strict.len() {
+  for i in 0..strict.len() {
     if strict[i] {
       redux.push(i as u64);
     }
@@ -3073,7 +3071,7 @@ pub fn create_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> RawCell {
 
 pub fn create_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> RawCell {
   let node = alloc(rt, args.len() as u64);
-  for i in 0 .. args.len() {
+  for i in 0..args.len() {
     link(rt, node + (i as u64), args[i]);
   }
   Fun(fun, node)
@@ -3116,8 +3114,8 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
   let mut init = 1;
   let mut host = root;
 
-  let mut func_val : Option<CompFunc>;
-  let mut func_ref : Option<&mut CompFunc>;
+  let mut func_val: Option<CompFunc>;
+  let mut func_ref: Option<&mut CompFunc>;
 
   loop {
     let term = ask_lnk(rt, host);
@@ -3173,7 +3171,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
           }
         }
         // We don't need to reduce further
-        _ => {},
+        _ => {}
       }
     } else {
       match term.get_tag() {
@@ -3485,7 +3483,7 @@ pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, Runtime
               let mut matched = true;
               //println!("- matching rule");
               // Tests each rule condition (ex: `args[0].get_tag() == SUCC`)
-              for i in 0 .. rule.cond.len() as u64 {
+              for i in 0..rule.cond.len() as u64 {
                 let argi = ask_arg(rt, term, i);
                 let cond = rule.cond[i as usize];
                 match cond.get_tag() {
@@ -3652,7 +3650,7 @@ pub fn compute_at(rt: &mut Runtime, loc: Loc, mana: u64) -> Result<RawCell, Runt
             _ => {}
           };
         }
-      },
+      }
       StackItem::LinkResolver { loc } => {
         let cell = output.pop().expect("No term to resolve link");
         link(rt, loc, cell);
@@ -3686,7 +3684,7 @@ pub fn show_ptr(x: RawCell) -> String {
       CellTag::FUN => "FUN",
       CellTag::OP2 => "OP2",
       CellTag::NUM => "NUM",
-      _   => "?",
+      _ => "?",
     };
     let name = x.get_name_from_ext();
     format!("{}:{}:{:x}", tgs, name, val)
@@ -3706,7 +3704,7 @@ pub fn show_rt(rt: &Runtime) -> String {
 
 fn show_memo(rt: &Runtime) -> String {
   let mut txt = String::new();
-  for i in 0 .. rt.get_mcap() {
+  for i in 0..rt.get_mcap() {
     txt.push(if rt.read(Loc(i)) == RawCell(0) { '_' } else { 'X' });
   }
   return txt;
@@ -3722,14 +3720,14 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
     rt: &Runtime,
     term: RawCell,
     names: &mut HashMap<Loc, String>,
-    focus: Option<RawCell>
+    focus: Option<RawCell>,
   ) -> String {
     let mut lets: HashMap<Loc, Loc> = HashMap::new();
     let mut kinds: HashMap<Loc, u128> = HashMap::new();
     let mut count: u128 = 0;
     let mut stack = vec![term];
     let mut text = String::new();
-    while !stack.is_empty() { 
+    while !stack.is_empty() {
       let term = stack.pop().unwrap();
       match term.get_tag() {
         CellTag::LAM => {
@@ -3908,7 +3906,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               // println!("{}", show_ptr(term));
               // println!("{}", show_term(rt,  ask_lnk(rt, term), None));
               output.push(format!("?g({})", term.get_tag() as u128))
-            },
+            }
           }
         }
       }
@@ -3916,11 +3914,10 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
 
     let res = output.join("");
     return res;
-
   }
 
   let mut text = find_lets(rt, term, &mut names, focus);
-  text.push_str( &go(rt, term, &names, focus));
+  text.push_str(&go(rt, term, &names, focus));
   text
 }
 
@@ -4015,7 +4012,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
         _ => {}
       }
     }
- }
+  }
 
   struct DupStore {
     stacks: HashMap<u128, Vec<bool>>, // ext -> bool
@@ -4043,7 +4040,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
     term: RawCell,
     names: &mut LocMap<String>,
     dup_store: &mut DupStore,
-    limit: Option<usize>
+    limit: Option<usize>,
   ) -> Option<Term> {
     enum StackItem {
       Term(RawCell),
@@ -4160,7 +4157,7 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
           }
         }
         StackItem::SUPResolverSome(term, old) => {
-          let col = term.get_ext(); 
+          let col = term.get_ext();
           dup_store.push(col, old);
         }
         StackItem::SUPResolverNone(term) => {
@@ -4215,9 +4212,8 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
       }
     }
     if let Some(item) = output.pop() {
-          Some(item)
-    }
-    else {
+      Some(item)
+    } else {
       panic!("Readback output is empty")
     }
   }

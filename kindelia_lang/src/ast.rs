@@ -1,9 +1,9 @@
 use std::fmt;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-pub use kindelia_common::{Name, U120};
 pub use kindelia_common::crypto::Signature;
+pub use kindelia_common::{Name, U120};
 
 /// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
 /// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
@@ -26,7 +26,7 @@ pub enum Term {
   Ctr { name: Name, args: Vec<Term> },
   Fun { name: Name, args: Vec<Term> },
   Num { numb: U120 },
-  Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
+  Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> }, // FIXME: refactor `oper` u128 to enum
 }
 
 /// A native HVM 120-bit machine integer operation.
@@ -74,10 +74,10 @@ pub struct Func {
 // Compiled information about a left-hand side variable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
-  pub name : Name,         // this variable's name
+  pub name: Name,         // this variable's name
   pub param: u64,         // in what parameter is this variable located?
   pub field: Option<u64>, // in what field is this variable located? (if any)
-  pub erase: bool,         // should this variable be collected (because it is unused)?
+  pub erase: bool,        // should this variable be collected (because it is unused)?
 }
 
 /// A global statement that alters the state of the blockchain
@@ -90,7 +90,6 @@ pub enum Statement {
   Run { expr: Term, sign: Option<Signature> },
   Reg { name: Name, ownr: U120, sign: Option<Signature> },
 }
-
 
 // Term
 // ====
@@ -136,18 +135,18 @@ impl fmt::Display for Term {
         Term(&'a Term),
         Str(String),
       }
-    
+
       let mut stack = vec![StackItem::Term(term)];
       let mut output = Vec::new();
-    
+
       while !stack.is_empty() {
         let item = stack.pop().unwrap();
-    
+
         match item {
           StackItem::Str(str) => {
             output.push(str);
           }
-          StackItem::Term(term) => {  
+          StackItem::Term(term) => {
             match term {
               Term::Var { name } => {
                 output.push(name.to_string());
@@ -225,7 +224,7 @@ impl fmt::Display for Term {
       let res = output.join("");
       res
     }
-    
+
     f.write_str(&view_term(self))
   }
 }
@@ -238,8 +237,8 @@ impl Drop for Term {
       fn term_is_num_or_var(term: &Term) -> bool {
         match term {
           Term::Num { .. } | Term::Var { .. } => true,
-          _ => false
-        } 
+          _ => false,
+        }
       }
       match term {
         Term::Var { .. } => false,
@@ -256,14 +255,14 @@ impl Drop for Term {
     // if term is not recursive it will not enter this if
     // and will be dropped normally
     if term_is_recursive(&self) {
-      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`. 
+      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`.
       // It is being repeated to avoid create a Term variable that would be dropped
-      // and would call this implementation (could generate a stack overflow, 
+      // and would call this implementation (could generate a stack overflow,
       // or unecessary calls, depending where putted)
       let term = std::mem::replace(self, Self::Num { numb: U120::ZERO });
       let mut stack = vec![term]; // this will store the recursive terms
       while let Some(mut in_term) = stack.pop() {
-        // if `in_term` is not recursive nothing will be done and, therefore, 
+        // if `in_term` is not recursive nothing will be done and, therefore,
         // it will be dropped. This will call this drop function from the start
         // with `in_term` as `self` and it will not pass the first
         // `if term_is_recursive`, dropping the term normally.
@@ -272,8 +271,8 @@ impl Drop for Term {
           // The `in_term` will be dropped after this, but it will not be recursive anymore,
           // so the drop will occur normally. The while will repeat this for all `in_term` children
           match &mut in_term {
-            Term::Var { .. } => {},
-            Term::Num { .. } => {},
+            Term::Var { .. } => {}
+            Term::Num { .. } => {}
             Term::Dup { expr, body, .. } => {
               let expr = std::mem::replace(expr.as_mut(), Self::Num { numb: U120::ZERO });
               let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
@@ -308,23 +307,19 @@ impl Drop for Term {
               let val1 = std::mem::replace(val1.as_mut(), Self::Num { numb: U120::ZERO });
               stack.push(val0);
               stack.push(val1);
-            },
+            }
           }
         }
       }
     }
-
   }
 }
-
 
 // Rule
 // ====
 
-
 // Func
 // ====
-
 
 // Oper
 // ====
@@ -333,49 +328,48 @@ impl Drop for Term {
 // However, because the trait below needs it, I had to put it here.
 #[repr(u8)]
 pub enum Op {
- ADD = 0x00,
- SUB = 0x01,
- MUL = 0x02,
- DIV = 0x03,
- MOD = 0x04,
- AND = 0x05,
- OR  = 0x06,
- XOR = 0x07,
- SHL = 0x08,
- SHR = 0x09,
- LTN = 0x0A,
- LTE = 0x0B,
- EQL = 0x0C,
- GTE = 0x0D,
- GTN = 0x0E,
- NEQ = 0x0F,
+  ADD = 0x00,
+  SUB = 0x01,
+  MUL = 0x02,
+  DIV = 0x03,
+  MOD = 0x04,
+  AND = 0x05,
+  OR = 0x06,
+  XOR = 0x07,
+  SHL = 0x08,
+  SHR = 0x09,
+  LTN = 0x0A,
+  LTE = 0x0B,
+  EQL = 0x0C,
+  GTE = 0x0D,
+  GTN = 0x0E,
+  NEQ = 0x0F,
 }
 
 impl TryFrom<u128> for Oper {
   type Error = String;
   fn try_from(value: u128) -> Result<Self, Self::Error> {
-      match value {
-        x if x == Op::ADD as u128 => Ok(Oper::Add),
-        x if x == Op::SUB as u128 => Ok(Oper::Sub),
-        x if x == Op::MUL as u128 => Ok(Oper::Mul),
-        x if x == Op::DIV as u128 => Ok(Oper::Div),
-        x if x == Op::MOD as u128 => Ok(Oper::Mod),
-        x if x == Op::AND as u128 => Ok(Oper::And),
-        x if x == Op::OR  as u128 => Ok(Oper::Or),
-        x if x == Op::XOR as u128 => Ok(Oper::Xor),
-        x if x == Op::SHL as u128 => Ok(Oper::Shl),
-        x if x == Op::SHR as u128 => Ok(Oper::Shr),
-        x if x == Op::LTN as u128 => Ok(Oper::Ltn),
-        x if x == Op::LTE as u128 => Ok(Oper::Lte),
-        x if x == Op::EQL as u128 => Ok(Oper::Eql),
-        x if x == Op::GTE as u128 => Ok(Oper::Gte),
-        x if x == Op::GTN as u128 => Ok(Oper::Gtn),
-        x if x == Op::NEQ as u128 => Ok(Oper::Neq),
-        _ => Err(format!("Invalid value for operation: {}", value))
-      }
+    match value {
+      x if x == Op::ADD as u128 => Ok(Oper::Add),
+      x if x == Op::SUB as u128 => Ok(Oper::Sub),
+      x if x == Op::MUL as u128 => Ok(Oper::Mul),
+      x if x == Op::DIV as u128 => Ok(Oper::Div),
+      x if x == Op::MOD as u128 => Ok(Oper::Mod),
+      x if x == Op::AND as u128 => Ok(Oper::And),
+      x if x == Op::OR as u128 => Ok(Oper::Or),
+      x if x == Op::XOR as u128 => Ok(Oper::Xor),
+      x if x == Op::SHL as u128 => Ok(Oper::Shl),
+      x if x == Op::SHR as u128 => Ok(Oper::Shr),
+      x if x == Op::LTN as u128 => Ok(Oper::Ltn),
+      x if x == Op::LTE as u128 => Ok(Oper::Lte),
+      x if x == Op::EQL as u128 => Ok(Oper::Eql),
+      x if x == Op::GTE as u128 => Ok(Oper::Gte),
+      x if x == Op::GTN as u128 => Ok(Oper::Gtn),
+      x if x == Op::NEQ as u128 => Ok(Oper::Neq),
+      _ => Err(format!("Invalid value for operation: {}", value)),
+    }
   }
 }
-
 
 impl fmt::Display for Oper {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -401,20 +395,18 @@ impl fmt::Display for Oper {
   }
 }
 
-
 // Statement
 // =========
 
 // TODO: move these functions to impl Statement?
 pub fn view_statement_header(statement: &Statement) -> String {
-  let statement  = remove_sign(statement);
+  let statement = remove_sign(statement);
   if let Statement::Fun { name, args, .. } = statement {
-    let args = 
-      args
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
+    let args = args
+      .iter()
+      .map(|x| x.to_string())
+      .collect::<Vec<String>>()
+      .join(" ");
     format!("fun ({} {})", name, args)
   } else {
     statement.to_string()
@@ -426,9 +418,9 @@ pub fn view_statement(statement: &Statement) -> String {
     fn format_sign(sign: &Signature) -> String {
       let hex = sign.to_hex();
       let mut text = String::new();
-      for i in 0 .. 5 {
+      for i in 0..5 {
         text.push_str("  ");
-        text.push_str(&hex[i * 26 .. (i+1) * 26]);
+        text.push_str(&hex[i * 26..(i + 1) * 26]);
         text.push_str("\n");
       }
       return text;
@@ -454,7 +446,11 @@ pub fn view_statement(statement: &Statement) -> String {
     Statement::Ctr { name, args, sign } => {
       // correct:
       let name = name;
-      let args = args.iter().map(|x| format!(" {}", x)).collect::<Vec<String>>().join("");
+      let args = args
+        .iter()
+        .map(|x| format!(" {}", x))
+        .collect::<Vec<String>>()
+        .join("");
       let sign = view_sign(sign);
       return format!("ctr {{{}{}}}{}", name, args, sign);
     }
@@ -482,7 +478,7 @@ pub fn view_statements(statements: &[Statement]) -> String {
 
 impl fmt::Display for Statement {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      f.write_str(&view_statement(self))
+    f.write_str(&view_statement(self))
   }
 }
 

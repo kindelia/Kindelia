@@ -12,15 +12,15 @@ use kindelia_lang::ast;
 use kindelia_lang::parser::parse_statements;
 
 use crate::hvm::{
-  readback_term, show_term,
-  Rollback, Runtime, StatementInfo, Heap, StatementErr
+  readback_term, show_term, Heap, Rollback, Runtime, StatementErr,
+  StatementInfo,
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
 use crate::test::util::{
   self, advance, init_runtime, rollback, rollback_path, rollback_simple,
-  run_term_and, run_term_from_code_and, temp_dir, temp_file, test_heap_checksum,
-  view_rollback_ticks, RuntimeStateTest, TempPath,
+  run_term_and, run_term_from_code_and, temp_dir, temp_file,
+  test_heap_checksum, view_rollback_ticks, RuntimeStateTest, TempPath,
 };
 
 #[template]
@@ -54,7 +54,6 @@ pub fn simple_rollback(
     &temp_dir.path
   ));
 }
-
 
 #[apply(hvm_cases)]
 pub fn advanced_rollback_in_random_state(
@@ -203,11 +202,9 @@ fn fail_opcode(temp_dir: TempPath) {
   let result_term = results.last().unwrap().clone();
   if let Err(StatementErr { err }) = result_term {
     assert_eq!("Failed: 'NUM::0'", err);
-  }
-  else {
+  } else {
     panic!("Wrong result");
   }
-    
 }
 
 #[rstest]
@@ -228,7 +225,7 @@ fn one_hundred_snapshots(temp_dir: TempPath) {
 
 // Statement Indexes
 #[rstest]
-fn test_simple_idx(temp_dir: TempPath){
+fn test_simple_idx(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path.clone());
   rt.open();
   rt.commit();
@@ -257,13 +254,13 @@ fn test_simple_idx(temp_dir: TempPath){
   let idx = rt.get_index(&name).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!(format!("#{}", idx), done_term.to_string());
-              // (3 << 60) |  1
+    //            (3 << 60) |  1
   } else {
     panic!("Wrong result");
   }
 }
 #[rstest]
-fn test_genesis_idx(temp_dir: TempPath){
+fn test_genesis_idx(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    run {
@@ -275,11 +272,10 @@ fn test_genesis_idx(temp_dir: TempPath){
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!("#2", done_term.to_string());
-              // (1 << 60) |  1
+    //           (1 << 60) |  1
   } else {
     panic!("Wrong result");
   }
-
 }
 #[rstest]
 fn test_thousand_idx(temp_dir: TempPath) {
@@ -301,14 +297,14 @@ fn test_thousand_idx(temp_dir: TempPath) {
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
     assert_eq!("#1152921504606846976000", done_term.to_string());
-              // (1000 << 60) |  1
+    //            (1000 << 60) |  1
   } else {
     panic!("Wrong result");
   }
 }
-  
+
 #[rstest]
-fn test_stmt_hash(temp_dir: TempPath){
+fn test_stmt_hash(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path.clone());
   rt.open();
   let code = "
@@ -333,10 +329,10 @@ fn test_stmt_hash(temp_dir: TempPath){
     assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
   } else {
     panic!("Wrong result");
-  } 
+  }
 }
 #[rstest]
-fn test_two_stmt_hash(temp_dir: TempPath){
+fn test_two_stmt_hash(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    fun (Test1 x) {
@@ -368,14 +364,17 @@ fn test_two_stmt_hash(temp_dir: TempPath){
   let sth2 = rt.get_sth0(indx2).unwrap();
   let sth3 = rt.get_sth1(indx2).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), done_term.to_string());
+    assert_eq!(
+      format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3),
+      done_term.to_string()
+    );
   } else {
     panic!("Wrong result");
-  } 
+  }
 }
 
 #[rstest]
-fn test_stmt_hash_after_commit(temp_dir: TempPath){
+fn test_stmt_hash_after_commit(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path.clone());
   let code = "
    fun (Test x) {
@@ -406,7 +405,7 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
     assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
   } else {
     panic!("Wrong result");
-  } 
+  }
 }
 
 #[rstest]
@@ -714,19 +713,18 @@ fn normalize_cases(#[case] term: &str, #[case] expected: &str, temp_dir: TempPat
   let mut rt = init_runtime(&temp_dir.path);
   let result = rt.run_statements_from_code(&code, true, true);
   match result.last().unwrap() {
-    Ok(StatementInfo::Run { done_term, used_mana , size_diff, end_size }) => {
+    Ok(StatementInfo::Run { done_term, used_mana, size_diff, end_size }) => {
       if let ast::Term::Ctr { name, args } = done_term {
         if let [normal] = args.as_slice() {
           assert_eq!(*name, Name::from_str("DONE").unwrap());
-          assert_eq!(format!("{}",normal), expected);
+          assert_eq!(format!("{}", normal), expected);
           assert_eq!(*size_diff, 0);
         }
-      }
-      else {
+      } else {
         panic!("Not constructor.")
       }
     }
-    _ => panic!("Unexpected result.")
+    _ => panic!("Unexpected result."),
   };
 }
 

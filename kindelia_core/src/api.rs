@@ -301,7 +301,7 @@ pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
 #[derive(Debug, Error, Serialize, Deserialize)]
 #[error(transparent)]
 pub enum PublishError {
-  PoolError( #[from] PoolError),
+  PoolError(#[from] PoolError),
   TransactionError(#[from] TransactionError),
 }
 

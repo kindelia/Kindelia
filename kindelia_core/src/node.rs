@@ -1440,7 +1440,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               break;
             }
             let block = &self.block[bhash];
-              let bsize = bits::serialized_block_size(block) as usize;
+            let bsize = bits::serialized_block_size(block) as usize;
             if tsize + bsize > MAX_UDP_SIZE_SLOW {
               break;
             }

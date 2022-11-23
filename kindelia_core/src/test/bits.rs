@@ -11,8 +11,8 @@ use crate::test::strategies::{
 };
 use crate::{
   bits::{
-    deserialize_fixlen_big, deserialize_list, deserialize_varlen, serialize_fixlen_big,
-    serialize_list, serialize_varlen, ProtoSerialize,
+    deserialize_fixlen_big, deserialize_list, deserialize_varlen,
+    serialize_fixlen_big, serialize_list, serialize_varlen, ProtoSerialize,
   },
   net,
   node::Message,

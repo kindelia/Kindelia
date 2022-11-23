@@ -27,24 +27,24 @@ impl U120 {
   pub fn new(numb: u128) -> Option<Self> {
     if numb >> 120 == 0 {
       Some(U120(numb))
-    }
-    else {
+    } else {
       None
     }
   }
 
-  pub fn from_u128_unchecked(numb: u128) -> Self { 
+  pub fn from_u128_unchecked(numb: u128) -> Self {
     debug_assert_eq!(numb >> 120, 0_u128);
     U120(numb)
   }
 
-  pub fn wrapping_add(self, other:U120) -> U120 {
+  pub fn wrapping_add(self, other: U120) -> U120 {
     let res = self.0 + other.0;
     U120(res & U120::MAX.0)
   }
 
   pub fn wrapping_sub(self, other: U120) -> U120 {
-    let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
+    let other_complement =
+      U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
     U120::wrapping_add(self, other_complement)
   }
 
@@ -52,7 +52,7 @@ impl U120 {
   // maybe this is too much work for an easy function?
   // idk, maybe there's a better way to do this
   pub fn wrapping_mul(self, other: U120) -> U120 {
-    const LO_MASK : u128  =  (1 << 60) - 1;
+    const LO_MASK: u128 = (1 << 60) - 1;
     let a = self.0;
     let b = other.0;
     let a_lo = a & LO_MASK;
@@ -82,7 +82,7 @@ impl U120 {
   // Wrapping shift left is only defined for
   // values `other` between 0 and 120. For values bigger than
   // that, it will wrap the value module 120 before doing the shift.
-  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
+  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120
   pub fn wrapping_shl(self, other: U120) -> U120 {
     U120((self.0 << (other.0 % 120)) & U120::MAX.0)
   }
@@ -122,16 +122,15 @@ impl From<Name> for U120 {
 
 impl fmt::Display for U120 {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-      write!(f, "{}", self.0)
+    write!(f, "{}", self.0)
   }
 }
 
 impl From<U120> for String {
   fn from(num: U120) -> Self {
-      num.to_string()
+    num.to_string()
   }
 }
-
 
 impl TryFrom<&str> for U120 {
   type Error = String;
@@ -286,24 +285,24 @@ impl std::ops::Deref for Name {
 impl fmt::Display for Name {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
     let name: String = if self.is_none() {
-        String::from("~")
+      String::from("~")
     } else {
-        let mut name = String::new();
-        let mut num = self.0;
-        while num > 0 {
-          let chr = (num % 64) as u8;
-          let chr = match chr {
-            0 => '.',
-            1..=10 => (chr - 1 + b'0') as char,
-            11..=36 => (chr - 11 + b'A') as char,
-            37..=62 => (chr - 37 + b'a') as char,
-            63 => '_',
-            64.. => panic!("Impossible letter value."),
-          };
-          name.push(chr);
-          num /= 64;
-        }
-        name.chars().rev().collect()
+      let mut name = String::new();
+      let mut num = self.0;
+      while num > 0 {
+        let chr = (num % 64) as u8;
+        let chr = match chr {
+          0 => '.',
+          1..=10 => (chr - 1 + b'0') as char,
+          11..=36 => (chr - 11 + b'A') as char,
+          37..=62 => (chr - 37 + b'a') as char,
+          63 => '_',
+          64.. => panic!("Impossible letter value."),
+        };
+        name.push(chr);
+        num /= 64;
+      }
+      name.chars().rev().collect()
     };
     f.write_str(&name)
   }

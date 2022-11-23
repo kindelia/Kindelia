@@ -5,14 +5,13 @@ use std::sync::Arc;
 
 use rstest::fixture;
 
-use kindelia_common::{Name, U120};
-use kindelia_lang::{ast, parser};
 use crate::constants;
 use crate::hvm::{
-  self, show_term, Rollback, Runtime, StatementInfo,
-  U128_NONE, U64_NONE,
+  self, show_term, Rollback, Runtime, StatementInfo, U128_NONE, U64_NONE,
 };
 use crate::node;
+use kindelia_common::{Name, U120};
+use kindelia_lang::{ast, parser};
 
 pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
   let genesis_stmts =

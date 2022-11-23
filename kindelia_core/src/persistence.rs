@@ -271,8 +271,7 @@ impl DiskSer for U120 {
       Some(num) => {
         if num >> 120 == 0 {
           Ok(Some(U120(num)))
-        }
-        else {
+        } else {
           Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
         }
       }
@@ -288,11 +287,10 @@ impl DiskSer for Name {
     let num = u128::disk_deserialize(source)?;
     match num {
       None => Ok(None),
-      Some(num) => Ok(Name::new(num))
+      Some(num) => Ok(Name::new(num)),
     }
   }
 }
-
 
 // Node persistence
 // ================

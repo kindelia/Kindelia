@@ -13,7 +13,11 @@
 
 //#![cfg_attr(not(feature = "std"), no_std)]
 
-use core::{fmt, hash::{BuildHasherDefault, Hasher}, marker::PhantomData};
+use core::{
+  fmt,
+  hash::{BuildHasherDefault, Hasher},
+  marker::PhantomData,
+};
 pub use primitive_types::U256;
 
 /// A `HashMap` with an integer domain, using `NoHashHasher` to perform no hashing at all.

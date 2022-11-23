@@ -20,7 +20,6 @@ use config::{arg_from_file_or_stdin, ConfigSettingsBuilder};
 use files::FileInput;
 use kindelia_client::ApiClient;
 use kindelia_common::{crypto, Name};
-use kindelia_core::{events, hvm, net};
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::{ApiConfig, MineConfig, NodeConfig, UiConfig};
@@ -32,6 +31,7 @@ use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
 use kindelia_core::util::bytes_to_bitvec;
+use kindelia_core::{events, hvm, net};
 use kindelia_lang::{ast, parser};
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,

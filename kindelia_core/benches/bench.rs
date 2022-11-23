@@ -7,12 +7,7 @@ use kindelia_core::persistence::BlockStorage;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::constants;
-use kindelia_core::hvm;
-use kindelia_core::parser;
-use kindelia_core::net;
-use kindelia_core::node;
-use kindelia_core::util;
+use kindelia_core::{constants, hvm, net, node, parser, util};
 
 // KHVM
 // ====
