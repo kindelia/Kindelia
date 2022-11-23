@@ -1,12 +1,12 @@
 use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
+use kindelia_common::{crypto, Name, U120};
+use kindelia_lang::ast::{Func, Oper, Rule, Statement, Term, Var};
 use crate::{
-  crypto,
-  common::{Name, U120},
   hvm::{
-    init_u128_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
-    Heap, Nodes, Oper, Ownrs, Rollback, Rule, Runtime, Loc, RawCell,
-    Statement, Store, Term, Var, Indxs,
+    init_u128_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Funcs, Hashs,
+    Heap, Nodes, Ownrs, Rollback, Runtime, Loc, RawCell,
+    Store, Indxs,
   },
   util::{U128Map, NameMap, U120Map, LocMap},
   net::Address,

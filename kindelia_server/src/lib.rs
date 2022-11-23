@@ -15,15 +15,15 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
+use kindelia_common::{Name, U256};
 use kindelia_core::api::{
   u256_to_hex, HexStatement, NodeRequest, PublishError, ReqAnsRecv,
 };
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::common::Name;
 use kindelia_core::config::ApiConfig;
-use kindelia_core::hvm::{self, StatementErr, StatementInfo};
+use kindelia_core::hvm::{StatementErr, StatementInfo};
 use kindelia_core::net::ProtoComm;
-use kindelia_core::util::U256;
+use kindelia_lang::ast;
 
 // Util
 // ====
@@ -408,7 +408,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     move |code: Vec<HexStatement>| {
       let query_tx = query_tx.clone();
       async move {
-        let code: Vec<hvm::Statement> =
+        let code: Vec<ast::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results = ask(query_tx, NodeRequest::run(code)).await;
         // TODO: resulte type will be different
@@ -430,7 +430,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     move |code: Vec<HexStatement>| {
       let query_tx = query_tx.clone();
       async move {
-        let code: Vec<hvm::Statement> =
+        let code: Vec<ast::Statement> =
           code.into_iter().map(|x| x.into()).collect();
         let results = ask(query_tx, NodeRequest::publish(code)).await;
         let result: Vec<Result<(), PublishError>> =

@@ -5,8 +5,11 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
+use kindelia_common::{crypto, Name, U120};
+use kindelia_lang::ast::Func;
+
 use crate::bits::ProtoSerialize;
-use crate::hvm::{compile_func, CompFunc, Func};
+use crate::hvm::{compile_func, CompFunc};
 use crate::node::{self, HashedBlock};
 use crate::util::{self, bitvec_to_bytes};
 
@@ -209,13 +212,13 @@ impl<T: DiskSer + Default + std::marker::Copy, const N: usize> DiskSer
   }
 }
 
-impl DiskSer for crate::crypto::Hash {
+impl DiskSer for crypto::Hash {
   fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     self.0.disk_serialize(sink)
   }
   fn disk_deserialize<R: Read>(source: &mut R) -> IoResult<Option<Self>> {
     let hash = <[u8; 32]>::disk_deserialize(source)?;
-    Ok(hash.map(crate::crypto::Hash))
+    Ok(hash.map(crypto::Hash))
   }
 }
 
@@ -256,6 +259,40 @@ impl DiskSer for crate::hvm::Loc {
     }
   }
 }
+
+impl DiskSer for U120 {
+  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+    let num = u128::disk_deserialize(source)?;
+    match num {
+      None => Ok(None),
+      Some(num) => {
+        if num >> 120 == 0 {
+          Ok(Some(U120(num)))
+        }
+        else {
+          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+        }
+      }
+    }
+  }
+}
+
+impl DiskSer for Name {
+  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+    self.0.disk_serialize(sink)
+  }
+  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+    let num = u128::disk_deserialize(source)?;
+    match num {
+      None => Ok(None),
+      Some(num) => Ok(Name::new(num))
+    }
+  }
+}
+
 
 // Node persistence
 // ================

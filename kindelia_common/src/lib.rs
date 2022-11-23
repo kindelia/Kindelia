@@ -1,10 +1,13 @@
+pub mod crypto;
+pub mod nohash_hasher;
+
+pub use primitive_types::U256;
+
 use std::fmt;
 use std::str::FromStr;
 use std::string::ToString;
 
 use serde::{Deserialize, Serialize};
-
-use crate::hvm::EXT_SIZE;
 
 // U120
 // ====
@@ -15,7 +18,7 @@ use crate::hvm::EXT_SIZE;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
 #[repr(transparent)]
-pub struct U120(u128);
+pub struct U120(pub u128);
 
 impl U120 {
   pub const ZERO: U120 = U120(0);
@@ -132,20 +135,43 @@ impl From<U120> for String {
 
 impl TryFrom<&str> for U120 {
   type Error = String;
-  fn try_from(numb: &str) -> Result<Self, Self::Error> {
+  fn try_from(txt: &str) -> Result<Self, Self::Error> {
     fn err_msg<E: fmt::Debug>(e: E) -> String {
       format!("Invalid number string '{:?}'", e)
     }
-    let (rest, result) = crate::parser::parse_numb(numb).map_err(err_msg)?;
-    if !rest.is_empty() {
-      Err(err_msg(numb))
+    let mut chrs = txt.chars();
+    let is_hex = txt.chars().peekable().peek().map_or(false, |x| x == &'x');
+    if is_hex {
+      chrs.next();
+      let mut digits = 0;
+      let mut num = 0;
+      for char in chrs {
+        match char {
+          '0'..='9' => num = (num << 4) + ((char as u128) - ('0' as u128)),
+          'a'..='f' => num = (num << 4) + ((char as u128) - ('a' as u128) + 10),
+          'A'..='F' => num = (num << 4) + ((char as u128) - ('A' as u128) + 10),
+          _ => return Err(err_msg(txt)),
+        }
+        digits += 1;
+        if digits > 30 {
+          return Err(err_msg(txt));
+        }
+      }
+      Ok(U120(num))
     } else {
-      Ok(result)
+      let mut num = 0;
+      for char in chrs {
+        match char {
+          '0'..='9' => num = (num * 10) + ((char as u128) - ('0' as u128)),
+          _ => return Err(err_msg(txt)),
+        }
+      }
+      Ok(U120(num))
     }
   }
 }
 
-impl crate::NoHashHasher::IsEnabled for U120 {}
+impl nohash_hasher::IsEnabled for U120 {}
 
 // Name
 // ====
@@ -164,9 +190,9 @@ impl crate::NoHashHasher::IsEnabled for U120 {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
 #[repr(transparent)]
-pub struct Name(u128);
+pub struct Name(pub u128);
 
-impl crate::NoHashHasher::IsEnabled for Name {}
+impl nohash_hasher::IsEnabled for Name {}
 
 pub fn char_to_code(chr: char) -> Result<u128, String> {
   let num = match chr {
@@ -183,7 +209,7 @@ pub fn char_to_code(chr: char) -> Result<u128, String> {
 }
 
 impl Name {
-  pub const MAX_BITS: usize = EXT_SIZE;
+  pub const MAX_BITS: usize = 72;
   pub const MAX_CHARS: usize = Self::MAX_BITS / 6;
 
   pub const _NONE: u128 = 0x3FFFF; // ?? '___'
@@ -259,23 +285,27 @@ impl std::ops::Deref for Name {
 
 impl fmt::Display for Name {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-    let mut name = String::new();
-    let mut num = self.0;
-    while num > 0 {
-      let chr = (num % 64) as u8;
-      let chr = match chr {
-        0 => '.',
-        1..=10 => (chr - 1 + b'0') as char,
-        11..=36 => (chr - 11 + b'A') as char,
-        37..=62 => (chr - 37 + b'a') as char,
-        63 => '_',
-        64.. => panic!("Impossible letter value."),
-      };
-      name.push(chr);
-      num /= 64;
-    }
-    let name: String = name.chars().rev().collect();
-    write!(f, "{}", name)
+    let name: String = if self.is_none() {
+        String::from("~")
+    } else {
+        let mut name = String::new();
+        let mut num = self.0;
+        while num > 0 {
+          let chr = (num % 64) as u8;
+          let chr = match chr {
+            0 => '.',
+            1..=10 => (chr - 1 + b'0') as char,
+            11..=36 => (chr - 11 + b'A') as char,
+            37..=62 => (chr - 37 + b'a') as char,
+            63 => '_',
+            64.. => panic!("Impossible letter value."),
+          };
+          name.push(chr);
+          num /= 64;
+        }
+        name.chars().rev().collect()
+    };
+    f.write_str(&name)
   }
 }
 
@@ -318,41 +348,5 @@ impl FromStr for Name {
   type Err = String;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     s.try_into()
-  }
-}
-
-// Persistence
-// ===========
-
-impl crate::persistence::DiskSer for U120 {
-  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
-    self.0.disk_serialize(sink)
-  }
-  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
-    let num = u128::disk_deserialize(source)?;
-    match num {
-      None => Ok(None),
-      Some(num) => {
-        if num >> 120 == 0 {
-          Ok(Some(U120(num)))
-        }
-        else {
-          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-        }
-      }
-    }
-  }
-}
-
-impl crate::persistence::DiskSer for Name {
-  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
-    self.0.disk_serialize(sink)
-  }
-  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
-    let num = u128::disk_deserialize(source)?;
-    match num {
-      None => Ok(None),
-      Some(num) => Ok(Name::new(num))
-    }
   }
 }

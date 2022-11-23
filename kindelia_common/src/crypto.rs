@@ -8,7 +8,7 @@ use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use tiny_keccak::Hasher;
 
-use crate::common::Name;
+use crate::Name;
 
 // Hash
 // ====
@@ -228,6 +228,7 @@ impl TryFrom<&str> for Signature {
   }
 }
 
+
 // Name
 // ====
 
@@ -244,6 +245,7 @@ impl Name {
     Name::from_u128_unchecked(u128::from_be_bytes(bytes) >> 8)
   }
 }
+
 
 // ==== //
 

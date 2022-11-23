@@ -2,12 +2,10 @@
 
 //use std::hash::{Hash, Hasher};
 //use std::collections::hash_map;
-use crate::hvm::{compile_func, show_runtime_error};
-use crate::hvm::{CompFunc, Statement, Func, Oper, Rule, Term};
-use crate::common::{U120, Name};
-use crate::crypto;
-
 use serde::{Serialize, Deserialize};
+use kindelia_common::{crypto, Name, U120};
+use crate::ast::{Statement, Func, Oper, Rule, Term};
+
 
 
 pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
@@ -312,8 +310,7 @@ pub fn parse_term(code: &str) -> ParseResult<Term> {
       let code = tail(code);
       let (code, name) = parse_strict_name(code)?;
       let (code, _unit) = parse_char(code, '\'')?;
-      let numb = *name;
-      let numb: U120 = numb.try_into().map_err(|erro| ParseErr::new(code, erro))?;
+      let numb = name.into();
       let term = Term::num(numb);
       return Ok((code, term));
     },
@@ -417,19 +414,6 @@ pub fn parse_rule(code: &str) -> ParseResult<Rule> {
 pub fn parse_rules(code: &str) -> ParseResult<Vec<Rule>> {
   let (code, rules) = parse_until(code, '\0', parse_rule)?;
   return Ok((code, rules));
-}
-
-pub fn parse_func(code: &str) -> ParseResult<CompFunc> {
-  let (code, rules) = parse_until(code, '\0', parse_rule)?;
-  let func = Func { rules };
-  let comp_func = compile_func(&func, false);
-  match comp_func {
-    Ok(func) => Ok((code, func)),
-    Err(def_err) => Err(ParseErr {
-      code: code.to_string(),
-      erro: show_runtime_error(def_err)
-    })
-  }
 }
 
 pub fn parse_sign(code: &str) -> ParseResult<Option<crypto::Signature>> {

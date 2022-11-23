@@ -252,179 +252,18 @@ use std::time::Instant;
 use serde::{Serialize, Deserialize};
 use serde_with::{serde_as, DisplayFromStr};
 
+use kindelia_common::{crypto, nohash_hasher, Name, U120};
+use kindelia_common::nohash_hasher::NoHashHasher;
+use kindelia_lang::ast;
+use kindelia_lang::ast::{Func, Oper, Statement, Term, Var};
+use kindelia_lang::parser::{parse_statements, parse_code, ParseErr};
+
 use crate::bits::ProtoSerialize;
 use crate::constants;
-use crate::crypto;
+use crate::persistence::DiskSer;
 use crate::util::{self, U128_SIZE, mask};
 use crate::util::{LocMap, NameMap, U128Map, U120Map};
-use crate::NoHashHasher::NoHashHasher;
 
-use crate::common::{Name, U120};
-use crate::persistence::DiskSer;
-use crate::parser::{parse_statements, parse_code, ParseErr};
-
-/// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
-/// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
-/// later on. Below is a description of each variant:
-/// - Var: variable. It stores up to 12 6-bit letters.
-/// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
-/// - Lam: an affine lambda. Written as: `@var body`.
-/// - App: a lambda application. Written as: `(!f x)`.
-/// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
-/// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
-/// - Num: an unsigned integer.
-/// - Op2: a numeric operation.
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Term {
-  Var { name: Name },
-  Dup { nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term> },
-  Lam { name: Name, body: Box<Term> },
-  App { func: Box<Term>, argm: Box<Term> },
-  Ctr { name: Name, args: Vec<Term> },
-  Fun { name: Name, args: Vec<Term> },
-  Num { numb: U120 },
-  Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
-}
-
-
-impl Drop for Term {
-  fn drop(&mut self) {
-    /// Verify if `term` has recursive childs (any of its
-    /// `Term`'s properties is not a var or a num)
-    fn term_is_recursive(term: &Term) -> bool {
-      fn term_is_num_or_var(term: &Term) -> bool {
-        match term {
-          Term::Num { .. } | Term::Var { .. } => true,
-          _ => false
-        } 
-      }
-      match term {
-        Term::Var { name } => false,
-        Term::Dup { nam0, nam1, expr, body } => !(term_is_num_or_var(expr) && term_is_num_or_var(body)),
-        Term::Lam { name, body } => !term_is_num_or_var(body),
-        Term::App { func, argm } => !(term_is_num_or_var(func) && term_is_num_or_var(argm)),
-        Term::Ctr { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
-        Term::Fun { name, args } => args.iter().any(|term| !term_is_num_or_var(&term)),
-        Term::Num { numb } => false,
-        Term::Op2 { oper, val0, val1 } => !(term_is_num_or_var(val0) && term_is_num_or_var(val1)),
-      }
-    }
-
-    // if term is not recursive it will not enter this if
-    // and will be dropped normally
-    if term_is_recursive(&self) {
-      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`. 
-      // It is being repeated to avoid create a Term variable that would be dropped
-      // and would call this implementation (could generate a stack overflow, 
-      // or unecessary calls, depending where putted)
-      let term = std::mem::replace(self, Self::Num { numb: U120::ZERO });
-      let mut stack = vec![term]; // this will store the recursive terms
-      while let Some(mut in_term) = stack.pop() {
-        // if `in_term` is not recursive nothing will be done and, therefore, 
-        // it will be dropped. This will call this drop function from the start
-        // with `in_term` as `self` and it will not pass the first
-        // `if term_is_recursive`, dropping the term normally.
-        if term_is_recursive(&in_term) {
-          // if the `in_term` is recursive, its children will be erased, and added to stack.
-          // The `in_term` will be dropped after this, but it will not be recursive anymore,
-          // so the drop will occur normally. The while will repeat this for all `in_term` children
-          match &mut in_term {
-            Term::Var { name } => {},
-            Term::Num { numb } => {},
-            Term::Dup { nam0, nam1, expr, body } => {
-              let expr = std::mem::replace(expr.as_mut(), Self::Num { numb: U120::ZERO });
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(expr);
-              stack.push(body);
-              
-            },
-            Term::Lam { name, body } => {
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(body);
-            },
-            Term::App { func, argm } => {
-              let func = std::mem::replace(func.as_mut(), Self::Num { numb: U120::ZERO });
-              let argm = std::mem::replace(argm.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(func);
-              stack.push(argm);
-            },
-            Term::Ctr { name, args } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Fun { name, args } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Op2 { oper, val0, val1 } => {
-              let val0 = std::mem::replace(val0.as_mut(), Self::Num { numb: U120::ZERO });
-              let val1 = std::mem::replace(val1.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(val0);
-              stack.push(val1);
-            },
-          }
-        }
-      }
-    }
-
-  }
-}
-
-/// A native HVM 120-bit machine integer operation.
-/// - Add: addition
-/// - Sub: subtraction
-/// - Mul: multiplication
-/// - Div: division
-/// - Mod: modulo
-/// - And: bitwise and
-/// - Or : bitwise or
-/// - Xor: bitwise xor
-/// - Shl: shift left
-/// - Shr: shift right
-/// - Ltn: less than
-/// - Lte: less than or equal
-/// - Eql: equal
-/// - Gte: greater than or equal
-/// - Gtn: greater than
-/// - Neq: not equal
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Oper {
-  Add, Sub, Mul, Div,
-  Mod, And, Or,  Xor,
-  Shl, Shr, Ltn, Lte,
-  Eql, Gte, Gtn, Neq,
-}
-
-/// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Rule {
-  pub lhs: Term,
-  pub rhs: Term,
-}
-
-/// A function, which is just a vector of rewrite rules.
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
-pub struct Func {
-  pub rules: Vec<Rule>,
-}
-
-// The types below are used by the runtime to evaluate rewrite rules. They store the same data as
-// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
-
-// Compiled information about a left-hand side variable.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Var {
-  pub name : Name,         // this variable's name
-  pub param: u64,         // in what parameter is this variable located?
-  pub field: Option<u64>, // in what field is this variable located? (if any)
-  pub erase: bool,         // should this variable be collected (because it is unused)?
-}
 
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
@@ -482,14 +321,6 @@ pub struct Store {
   pub links: U120Map<RawCell>,
 }
 
-/// A global statement that alters the state of the blockchain
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Statement {
-  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<crypto::Signature> },
-  Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
-  Run { expr: Term, sign: Option<crypto::Signature> },
-  Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
-}
 
 /// RawCell
 /// =======
@@ -574,7 +405,7 @@ impl RawCell {
 #[repr(transparent)]
 pub struct Loc(u64);
 
-impl crate::NoHashHasher::IsEnabled for crate::hvm::Loc {}
+impl nohash_hasher::IsEnabled for crate::hvm::Loc {}
 
 impl Loc {
   pub const _MAX: u64 = (1 << VAL_SIZE) - 1;
@@ -759,6 +590,14 @@ pub struct StatementErr {
   pub err: String,
 }
 
+pub fn hash_statement(statement: &Statement) -> crypto::Hash {
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&ast::remove_sign(&statement).proto_serialized()))
+}
+
+pub fn hash_term(term: &Term) -> crypto::Hash {
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
+}
+
 // Constants
 // ---------
 
@@ -779,7 +618,7 @@ pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
 // Size of each RawCell field in bits
 pub const VAL_SIZE: usize = 48;
-pub const EXT_SIZE: usize = 72;
+pub const EXT_SIZE: usize = Name::MAX_BITS;
 pub const TAG_SIZE: usize = 8;
 pub const NUM_SIZE: usize = EXT_SIZE + VAL_SIZE;
 
@@ -818,26 +657,6 @@ pub enum CellTag {
  OP2 = 0xA,
  NUM = 0xB,
  NIL = 0xF,
-}
-
-#[repr(u8)]
-pub enum Op {
- ADD = 0x00,
- SUB = 0x01,
- MUL = 0x02,
- DIV = 0x03,
- MOD = 0x04,
- AND = 0x05,
- OR  = 0x06,
- XOR = 0x07,
- SHL = 0x08,
- SHR = 0x09,
- LTN = 0x0A,
- LTE = 0x0B,
- EQL = 0x0C,
- GTE = 0x0D,
- GTN = 0x0E,
- NEQ = 0x0F,
 }
   
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -1032,71 +851,6 @@ fn show_addr(addr: U120) -> String {
 }
 
 
-// Oper
-// ====
-
-impl TryFrom<u128> for Oper {
-  type Error = String;
-  fn try_from(value: u128) -> Result<Self, Self::Error> {
-      match value {
-        x if x == Op::ADD as u128 => Ok(Oper::Add),
-        x if x == Op::SUB as u128 => Ok(Oper::Sub),
-        x if x == Op::MUL as u128 => Ok(Oper::Mul),
-        x if x == Op::DIV as u128 => Ok(Oper::Div),
-        x if x == Op::MOD as u128 => Ok(Oper::Mod),
-        x if x == Op::AND as u128 => Ok(Oper::And),
-        x if x == Op::OR  as u128 => Ok(Oper::Or),
-        x if x == Op::XOR as u128 => Ok(Oper::Xor),
-        x if x == Op::SHL as u128 => Ok(Oper::Shl),
-        x if x == Op::SHR as u128 => Ok(Oper::Shr),
-        x if x == Op::LTN as u128 => Ok(Oper::Ltn),
-        x if x == Op::LTE as u128 => Ok(Oper::Lte),
-        x if x == Op::EQL as u128 => Ok(Oper::Eql),
-        x if x == Op::GTE as u128 => Ok(Oper::Gte),
-        x if x == Op::GTN as u128 => Ok(Oper::Gtn),
-        x if x == Op::NEQ as u128 => Ok(Oper::Neq),
-        _ => Err(format!("Invalid value for operation: {}", value))
-      }
-  }
-}
-
-// Term
-// ====
-
-impl Term {
-  pub fn num(numb: U120) -> Self {
-    Term::Num { numb }
-  }
-
-  pub fn var(name: Name) -> Self {
-    Term::Var { name }
-  }
-
-  pub fn lam(name: Name, body: Box<Term>) -> Self {
-    Term::Lam { name, body }
-  }
-
-  pub fn dup(nam0: Name, nam1: Name, expr: Box<Term>, body: Box<Term>) -> Self {
-    Term::Dup { nam0, nam1, expr, body }
-  }
-
-  pub fn op2(oper: Oper, val0: Box<Term>, val1: Box<Term>) -> Self {
-    Term::Op2 { oper, val0, val1 }
-  }
-
-  pub fn app(func: Box<Term>, argm: Box<Term>) -> Self {
-    Term::App { func, argm }
-  }
-
-  pub fn fun(name: Name, args: Vec<Term>) -> Self {
-    Term::Fun { name, args }
-  }
-
-  pub fn ctr(name: Name, args: Vec<Term>) -> Self {
-    Term::Ctr { name, args }
-  }
-}
-
 // Parser
 // ======
 
@@ -1117,78 +871,6 @@ pub fn get_namespace(name: Name) -> Option<Name> {
   }
 }
 
-// Statements
-// ----------
-
-// Removes the signature from a statement
-pub fn remove_sign(statement: &Statement) -> Statement {
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      Statement::Fun {
-        name: *name,
-        args: args.clone(),
-        func: func.clone(),
-        init: init.clone(),
-        sign: None,
-      }
-    }
-    Statement::Ctr { name, args, sign } => {
-      Statement::Ctr {
-        name: *name,
-        args: args.clone(),
-        sign: None,
-      }
-    }
-    Statement::Run { expr, sign } => {
-      Statement::Run {
-        expr: expr.clone(),
-        sign: None,
-      }
-    }
-    Statement::Reg { name, ownr, sign } => {
-      Statement::Reg {
-        name: *name,
-        ownr: *ownr,
-        sign: None,
-      }
-    }
-  }
-}
-
-pub fn set_sign(statement: &Statement, new_sign: crypto::Signature) -> Statement {
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      Statement::Fun {
-        name: *name,
-        args: args.clone(),
-        func: func.clone(),
-        init: init.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Ctr { name, args, sign } => {
-      Statement::Ctr {
-        name: *name,
-        args: args.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Run { expr, sign } => {
-      Statement::Run {
-        expr: expr.clone(),
-        sign: Some(new_sign),
-      }
-    }
-    Statement::Reg { name, ownr, sign } => {
-      Statement::Reg {
-        name: *name,
-        ownr: *ownr,
-        sign: Some(new_sign),
-      }
-    }
-  }
-}
-
 // StatementInfo
 // =============
 
@@ -1199,7 +881,7 @@ impl fmt::Display for StatementInfo {
       StatementInfo::Fun { name, args } => write!(f, "[fun] {}", name),
       StatementInfo::Reg { name, .. } => write!(f, "[reg] {}", name),
       StatementInfo::Run { done_term, used_mana, size_diff, .. } =>
-        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", view_term(&done_term), used_mana, size_diff)
+        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", done_term, used_mana, size_diff)
     }
   }
 }
@@ -1406,7 +1088,7 @@ impl Heap {
         .read(true)
         .open(file_path)
     }
-    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + crate::NoHashHasher::IsEnabled, V: DiskSer>
+    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + nohash_hasher::IsEnabled, V: DiskSer>
       (uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<K, V, std::hash::BuildHasherDefault<NoHashHasher<K>>>> {
       HashMap::disk_deserialize(&mut open_reader(uuid, path, buffer_name)?)?
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
@@ -3053,7 +2735,7 @@ fn count_uses(term: &Term, name: Name) -> u128 {
 // - Every non-erased variable is used exactly once
 // - Every erased variable is never used
 pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
-  // println!("{}", view_term(term));
+  // println!("{}", term);
   let res = match term {
     Term::Var { name: var_name } => {
       // TODO: check unbound variables
@@ -3104,7 +2786,7 @@ pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
     }
   };
 
-  // println!("{}: {}", view_term(term), res);
+  // println!("{}: {}", term, res);
   res
 }
 
@@ -4190,7 +3872,7 @@ pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String 
               let mut arit = rt.get_arity(&name).unwrap();
               // NOTE: arity should never be zero (read from memory)
               // TODO: remove unwrap
-              let mut name = view_name(name);
+              let mut name = name.to_string();
               // Pretty print names
               if name == "Name" && arit == 1 {
                 let arg = ask_arg(rt, term, 0);
@@ -4255,7 +3937,7 @@ pub fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist.", stmt_index),
     RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}.", name, expected, got),
     RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
-    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", view_term(&term), var),
+    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", term, var),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
@@ -4547,232 +4229,6 @@ pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option
 }
 
 
-// View
-// ----
-
-// TODO: move to Display trait
-pub fn view_name(name: Name) -> String {
-  if name.is_none() {
-    return "~".to_string();
-  } else {
-    return name.to_string();
-  }
-}
-
-pub fn view_term(term: &Term) -> String {
-  enum StackItem<'a> {
-    Term(&'a Term),
-    Str(String),
-  }
-
-  let mut stack = vec![StackItem::Term(term)];
-  let mut output = Vec::new();
-
-  while !stack.is_empty() {
-    let item = stack.pop().unwrap();
-
-    match item {
-      StackItem::Str(str) => {
-        output.push(str);
-      }
-      StackItem::Term(term) => {  
-        match term {
-          Term::Var { name } => {
-            output.push(view_name(*name));
-          }
-          Term::Dup { nam0, nam1, expr, body } => {
-            output.push("dup ".to_string());
-            output.push(view_name(*nam0));
-            output.push(" ".to_string());
-            output.push(view_name(*nam1));
-            output.push(" = ".to_string());
-            stack.push(StackItem::Term(body));
-            stack.push(StackItem::Str("; ".to_string()));
-            stack.push(StackItem::Term(expr));
-          }
-          Term::Lam { name, body } => {
-            output.push(format!("@{} ", view_name(*name)));
-            stack.push(StackItem::Term(body));
-          }
-          Term::App { func, argm } => {
-            output.push("(!".to_string());
-            stack.push(StackItem::Str(")".to_string()));
-            stack.push(StackItem::Term(argm));
-            stack.push(StackItem::Str(" ".to_string()));
-            stack.push(StackItem::Term(func));
-          }
-          Term::Ctr { name, args } => {
-            let name = view_name(*name);
-            // Pretty print names
-            if name == "Name" && args.len() == 1 {
-              if let Term::Num { numb } = args[0] {
-                output.push(format!("{{Name '{}'}}", view_name(numb.into())));
-              }
-            } else {
-              output.push("{".to_string());
-              output.push(name);
-              stack.push(StackItem::Str("}".to_string()));
-              for arg in args.iter().rev() {
-                stack.push(StackItem::Term(arg));
-                stack.push(StackItem::Str(" ".to_string()));
-              }
-            }
-          }
-          Term::Fun { name, args } => {
-            let name = view_name(*name);
-            output.push("(".to_string());
-            output.push(name);
-            stack.push(StackItem::Str(")".to_string()));
-            for arg in args.iter().rev() {
-              stack.push(StackItem::Term(arg));
-              stack.push(StackItem::Str(" ".to_string()));
-            }
-          }
-          Term::Num { numb } => {
-            // If it has 26-30 bits, pretty-print as a name
-            //if *numb > 0x3FFFFFF && *numb <= 0x3FFFFFFF {
-              //return format!("@{}", view_name(*numb));
-            //} else {
-              output.push(format!("#{}", numb));
-            //}
-          }
-          Term::Op2 { oper, val0, val1 } => {
-            let oper = view_oper(oper);
-            output.push(format!("({} ", oper));
-            stack.push(StackItem::Str(")".to_string()));
-            stack.push(StackItem::Term(val1));
-            stack.push(StackItem::Str(" ".to_string()));
-            stack.push(StackItem::Term(val0));
-          }
-        }
-      }
-    }
-  }
-  let res = output.join("");
-  res
-}
-
-pub fn view_oper(oper: &Oper) -> String {
-  match oper {
-    Oper::Add => "+",
-    Oper::Sub => "-",
-    Oper::Mul => "*",
-    Oper::Div => "/",
-    Oper::Mod => "%",
-    Oper::And => "&",
-    Oper::Or  => "|",
-    Oper::Xor => "^",
-    Oper::Shl => "<<",
-    Oper::Shr => ">>",
-    Oper::Ltn => "<",
-    Oper::Lte => "<=",
-    Oper::Eql => "==",
-    Oper::Gte => ">=",
-    Oper::Gtn => ">",
-    Oper::Neq => "!=",
-  }.to_string()
-}
-
-// TODO: move these functions to impl Statement?
-pub fn view_statement_header(statement: &Statement) -> String {
-  let statement  = remove_sign(statement);
-  if let Statement::Fun { name, args, .. } = statement {
-    let args = 
-      args
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
-    format!("fun ({} {})", name, args)
-  } else {
-    view_statement(&statement)
-  }
-}
-
-pub fn view_statement(statement: &Statement) -> String {
-  fn view_sign(sign: &Option<crypto::Signature>) -> String {
-    fn format_sign(sign: &crypto::Signature) -> String {
-      let hex = sign.to_hex();
-      let mut text = String::new();
-      for i in 0 .. 5 {
-        text.push_str("  ");
-        text.push_str(&hex[i * 26 .. (i+1) * 26]);
-        text.push_str("\n");
-      }
-      return text;
-    }
-    match sign {
-      None       => String::new(),
-      Some(sign) => format!(" sign {{\n{}}}", format_sign(sign)),
-    }
-  }
-  match statement {
-    Statement::Fun { name, args, func, init, sign } => {
-      let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
-      let func = func.collect::<Vec<String>>().join("");
-      let args = args.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(" ");
-      let init = if let Some(init) = init {
-        let init = view_term(init);
-        format!(" with {{\n  {}\n}}", init)
-      } else {
-        "\n".to_string()
-      };
-      let sign = view_sign(sign);
-      return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
-    }
-    Statement::Ctr { name, args, sign } => {
-      // correct:
-      let name = name;
-      let args = args.iter().map(|x| format!(" {}", x)).collect::<Vec<String>>().join("");
-      let sign = view_sign(sign);
-      return format!("ctr {{{}{}}}{}", name, args, sign);
-    }
-    Statement::Run { expr, sign } => {
-      let expr = view_term(expr);
-      let sign = view_sign(sign);
-      return format!("run {{\n  {}\n}}{}", expr, sign);
-    }
-    Statement::Reg { name, ownr, sign } => {
-      let name = name;
-      let ownr = format!("#x{:0>30x}", **ownr);
-      let sign = view_sign(sign);
-      return format!("reg {} {{ {} }}{}", name, ownr, sign);
-    }
-  }
-}
-
-pub fn view_statements(statements: &[Statement]) -> String {
-  let mut result = String::new();
-  for statement in statements {
-    result.push_str(&view_statement(statement));
-    result.push_str("\n");
-  }
-  return result;
-}
-
-impl fmt::Display for Term {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "{}", view_term(self))
-  }
-}
-
-impl fmt::Display for Statement {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      write!(f, "{}", view_statement(self))
-  }
-}
-
-// Hashing
-// -------
-
-pub fn hash_term(term: &Term) -> crypto::Hash {
-  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
-}
-
-pub fn hash_statement(statement: &Statement) -> crypto::Hash {
-  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
-}
-
 // Tests
 // -----
 
@@ -4794,8 +4250,9 @@ pub fn print_io_consts() {
 
 // Serializes, deserializes and evaluates statements
 pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
-  let str_0 = view_statements(statements);
-  let str_1 = view_statements(&Vec::proto_deserialized(&statements.proto_serialized()).unwrap());
+  let str_0 = ast::view_statements(statements);
+  let statements = &Vec::proto_deserialized(&statements.proto_serialized()).unwrap();
+  let str_1 = ast::view_statements(statements);
 
   println!("Block {}", if str_0 == str_1 { "" } else { "(note: serialization error, please report)" });
   println!("=====");

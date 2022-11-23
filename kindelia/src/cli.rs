@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-use kindelia_core::{api::LimitStats, common::Name};
+use kindelia_common::Name;
+use kindelia_core::api::LimitStats;
 
 use crate::files::FileInput;
 

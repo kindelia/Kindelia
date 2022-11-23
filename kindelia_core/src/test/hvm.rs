@@ -7,11 +7,13 @@ use proptest::{collection::vec, strategy::Strategy};
 use rstest::rstest;
 use rstest_reuse::{apply, template};
 
-use crate::common::{Name, U120};
-use crate::parser::parse_statements;
+use kindelia_common::{Name, U120};
+use kindelia_lang::ast;
+use kindelia_lang::parser::parse_statements;
+
 use crate::hvm::{
-  self, init_u128_map, readback_term, show_term, view_statements,
-  view_term, Rollback, Runtime, StatementInfo, Term, Heap, StatementErr
+  readback_term, show_term,
+  Rollback, Runtime, StatementInfo, Heap, StatementErr
 };
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
@@ -254,7 +256,7 @@ fn test_simple_idx(temp_dir: TempPath){
   let name = Name::from_str("B").unwrap();
   let idx = rt.get_index(&name).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("#{}", idx), view_term(&done_term));
+    assert_eq!(format!("#{}", idx), done_term.to_string());
               // (3 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -272,7 +274,7 @@ fn test_genesis_idx(temp_dir: TempPath){
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#2", view_term(&done_term));
+    assert_eq!("#2", done_term.to_string());
               // (1 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -298,7 +300,7 @@ fn test_thousand_idx(temp_dir: TempPath) {
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#1152921504606846976000", view_term(&done_term));
+    assert_eq!("#1152921504606846976000", done_term.to_string());
               // (1000 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -328,7 +330,7 @@ fn test_stmt_hash(temp_dir: TempPath){
   let sth1 = rt.get_sth1(indx).unwrap();
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
   } else {
     panic!("Wrong result");
   } 
@@ -366,7 +368,7 @@ fn test_two_stmt_hash(temp_dir: TempPath){
   let sth2 = rt.get_sth0(indx2).unwrap();
   let sth3 = rt.get_sth1(indx2).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), view_term(&done_term));
+    assert_eq!(format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3), done_term.to_string());
   } else {
     panic!("Wrong result");
   } 
@@ -401,7 +403,7 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath){
   let sth0 = rt.get_sth0(indx).unwrap();
   let sth1 = rt.get_sth1(indx).unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), view_term(&done_term));
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
   } else {
     panic!("Wrong result");
   } 
@@ -427,7 +429,7 @@ fn test_name_sanitizing(temp_dir: TempPath) {
   rt.commit();
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #5 #5)"), view_term(&done_term));
+    assert_eq!(format!("(T2 #5 #5)"), done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -462,7 +464,7 @@ fn compute_at_funs(temp_dir: TempPath) {
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("@x0 @x1 (Add x0 x1)", view_term(&done_term));
+    assert_eq!("@x0 @x1 (Add x0 x1)", done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -484,22 +486,22 @@ fn dupped_state_test(temp_dir: TempPath) {
     println!("original: {}", show_term(&rt, original_state, None));
     println!(
       "original readback: {}",
-      view_term(&readback_term(&rt, original_state, None).unwrap())
+      readback_term(&rt, original_state, None).unwrap()
     );
     assert_eq!(
       expected_original_readback,
-      view_term(&readback_term(&rt, original_state, None).unwrap())
+      readback_term(&rt, original_state, None).unwrap().to_string()
     );
     println!();
     println!("other ptr: {}", *other_state);
     println!("other: {}", show_term(&rt, other_state, None));
     println!(
       "other readback: {}",
-      view_term(&readback_term(&rt, other_state, None).unwrap())
+      readback_term(&rt, other_state, None).unwrap()
     );
     assert_eq!(
       expected_other_readback,
-      view_term(&readback_term(&rt, other_state, None).unwrap())
+      readback_term(&rt, other_state, None).unwrap().to_string()
     );
     println!();
   }
@@ -533,7 +535,7 @@ fn shadowing(temp_dir: TempPath) {
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
   if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#7", view_term(&done_term));
+    assert_eq!("#7", done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -584,8 +586,7 @@ fn readback(
 
   // verify readback
   if let StatementInfo::Run { done_term, .. } = result {
-    let readback = view_term(&done_term);
-    assert_eq!(expected_readback, readback);
+    assert_eq!(expected_readback, done_term.to_string());
   } else {
     panic!("Expected Run statement, got {:?}", result);
   }
@@ -603,7 +604,7 @@ proptest! {
 
   #[test]
   fn parser(statements in vec(statement(), 0..10)) {
-    let str = view_statements(&statements);
+    let str = ast::view_statements(&statements);
     let (.., s1) = parse_statements(&str).unwrap();
     assert_eq!(statements, s1);
   }
@@ -634,8 +635,8 @@ proptest! {
     // and that their results are numbers
     run_term_and(&op, |res| {
       match res {
-        Term::Num {..} => (),
-        _ => panic!("Not a number: {}", view_term(res))
+        ast::Term::Num {..} => (),
+        _ => panic!("Not a number: {}", res)
       }
     });
   }
@@ -646,8 +647,8 @@ proptest! {
     // 0 or 1
     run_term_and(&op, |res| {
       match res {
-        Term::Num {numb} => assert!(**numb == 0 || **numb == 1),
-        _ => panic!("Not a number: {}", view_term(res))
+        ast::Term::Num {numb} => assert!(**numb == 0 || **numb == 1),
+        _ => panic!("Not a number: {}", res)
       }
     });
   }
@@ -691,8 +692,8 @@ proptest! {
 #[case(&format!("(+ #{} #123456)", U120::MAX), 123455)]
 fn operators_cases(#[case] code: &str, #[case] expected: u128) {
   run_term_from_code_and(code, |res| match res {
-    Term::Num { numb } => assert_eq!(**numb, expected),
-    _ => panic!("Not a number as result: {}", view_term(res)),
+    ast::Term::Num { numb } => assert_eq!(**numb, expected),
+    _ => panic!("Not a number as result: {}", res),
   })
 }
 
@@ -714,7 +715,7 @@ fn normalize_cases(#[case] term: &str, #[case] expected: &str, temp_dir: TempPat
   let result = rt.run_statements_from_code(&code, true, true);
   match result.last().unwrap() {
     Ok(StatementInfo::Run { done_term, used_mana , size_diff, end_size }) => {
-      if let Term::Ctr { name, args } = done_term {
+      if let ast::Term::Ctr { name, args } = done_term {
         if let [normal] = args.as_slice() {
           assert_eq!(*name, Name::from_str("DONE").unwrap());
           assert_eq!(format!("{}",normal), expected);
@@ -783,14 +784,14 @@ pub const COUNTER: &'static str = "
 ";
 
 fn counter_validators() -> [util::Validator; 2] {
-  fn count_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
+  fn count_validator(tick: u64, term: &ast::Term, _: &mut Runtime) -> bool {
     let counter = tick;
-    assert_eq!(view_term(term), format!("#{}", counter));
-    view_term(term) == format!("#{}", counter)
+    assert_eq!(term.to_string(), format!("#{}", counter));
+    term.to_string() == format!("#{}", counter)
   }
-  fn store_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
+  fn store_validator(tick: u64, term: &ast::Term, _: &mut Runtime) -> bool {
     let counter = tick;
-    view_term(term).matches("Succ").count() as u64 == counter
+    term.to_string().matches("Succ").count() as u64 == counter
   }
   [("Count", count_validator), ("Store", store_validator)]
 }
@@ -877,9 +878,9 @@ pub const BANK: &'static str = "
 ";
 
 fn bank_validators() -> [util::Validator; 1] {
-  fn tree_validator(tick: u64, term: &Term, _: &mut Runtime) -> bool {
+  fn tree_validator(tick: u64, term: &ast::Term, _: &mut Runtime) -> bool {
     let counter = tick;
-    view_term(term).matches("Node").count() as u64 == counter
+    term.to_string().matches("Node").count() as u64 == counter
   }
   [("Bank", tree_validator)]
 }
@@ -947,8 +948,7 @@ run {
 
 // TODO: this code generate stack overflow on the parser
 // fn bit_validators() -> [util::Validator; 1] {
-//   fn bit_validator(tick: u128, term: &Term, rt: &mut Runtime) -> bool {
-//     let term = view_term(term);
+//   fn bit_validator(tick: u128, term: &ast::Term, rt: &mut Runtime) -> bool {
 //     let code = format!(" run {{ (Done (ToNum {})) }} ", term);
 //     let res = rt
 //       .run_statements_from_code(&code, true, true)
@@ -956,8 +956,8 @@ run {
 //       .unwrap()
 //       .clone()
 //       .unwrap();
-//     if let hvm::StatementInfo::Run { done_term, .. } = res {
-//       view_term(&done_term) == format!("#{}", tick)
+//     if let StatementInfo::Run { done_term, .. } = res {
+//       done_term.to_string() == format!("#{}", tick)
 //     } else {
 //       panic!();
 //     }

@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use rstest::fixture;
 
+use kindelia_common::{Name, U120};
+use kindelia_lang::{ast, parser};
 use crate::constants;
-use crate::common::{Name, U120};
-use crate::parser;
 use crate::hvm::{
-  self, show_term, Rollback, Runtime, Statement, StatementInfo,
-  Term, U128_NONE, U64_NONE,
+  self, show_term, Rollback, Runtime, StatementInfo,
+  U128_NONE, U64_NONE,
 };
 use crate::node;
 
@@ -24,7 +24,7 @@ pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
 // Aux types
 
 pub type Validator =
-  (&'static str, fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool);
+  (&'static str, fn(u64, &ast::Term, &mut hvm::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -245,18 +245,18 @@ pub fn rollback_path(
   states_store.values().all(|vec| are_all_elemenets_equal(vec))
 }
 
-pub fn run_term_and<A>(term: &Term, action: A)
+pub fn run_term_and<A>(term: &ast::Term, action: A)
 where
-  A: Fn(&Term),
+  A: Fn(&ast::Term),
 {
   let temp_dir = temp_dir();
   let mut rt = init_runtime(&temp_dir.path);
 
-  let term = Term::Fun {
+  let term = ast::Term::Fun {
     name: "Done".try_into().unwrap(),
     args: [term.clone()].to_vec(),
   };
-  let stmt = Statement::Run { expr: term, sign: None };
+  let stmt = ast::Statement::Run { expr: term, sign: None };
   let result = rt.run_statement(&stmt, false, true, None).unwrap();
 
   if let StatementInfo::Run { done_term, .. } = result {
@@ -266,7 +266,7 @@ where
 
 pub fn run_term_from_code_and<A>(code: &str, action: A)
 where
-  A: Fn(&Term),
+  A: Fn(&ast::Term),
 {
   let (_, term) = parser::parse_term(code).unwrap();
   run_term_and(&term, action)
@@ -275,7 +275,7 @@ where
 // ===========
 // validations
 
-fn validate<P: Fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool>(
+fn validate<P: Fn(u64, &ast::Term, &mut hvm::Runtime) -> bool>(
   rt: &mut Runtime,
   name: &str,
   predicate: P,

@@ -6,19 +6,19 @@
 
 use std::collections::HashMap;
 
-pub use primitive_types::U256;
 use bit_vec::BitVec;
 
-use crate::NoHashHasher as NHH;
-use crate::common::{Name, U120};
+use kindelia_common::{Name, U120, U256};
+use kindelia_common::nohash_hasher::NoHashHasher;
+
 use crate::hvm::Loc;
 
-pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u64 >>>;
-pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U120>>>;
-pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<u128>>>;
-pub type U256Map<T> = HashMap<U256, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<U256>>>;
-pub type NameMap<T> = HashMap<Name, T, std::hash::BuildHasherDefault<NHH::NoHashHasher<Name>>>;
-pub type LocMap <T> = HashMap<Loc , T, std::hash::BuildHasherDefault<NHH::NoHashHasher<Loc >>>;
+pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NoHashHasher<u64 >>>;
+pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NoHashHasher<U120>>>;
+pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NoHashHasher<u128>>>;
+pub type U256Map<T> = HashMap<U256, T, std::hash::BuildHasherDefault<NoHashHasher<U256>>>;
+pub type NameMap<T> = HashMap<Name, T, std::hash::BuildHasherDefault<NoHashHasher<Name>>>;
+pub type LocMap <T> = HashMap<Loc , T, std::hash::BuildHasherDefault<NoHashHasher<Loc >>>;
 
 
 pub type Hash = U256;

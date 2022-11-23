@@ -19,6 +19,8 @@ bench = false
 
 
 [dependencies]
+kindelia_common = { path = "../kindelia_common" }
+kindelia_lang = { path = "../kindelia_lang" }
 kindelia_core = { path = "../kindelia_core" }
 kindelia_ws = { path = "../kindelia_ws" }
 kindelia_server = { path = "../kindelia_server" }

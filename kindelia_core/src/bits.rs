@@ -4,9 +4,9 @@
 use bit_vec::BitVec;
 use std::collections::HashMap;
 
-use crate::common::{Name, U120};
-use crate::crypto::Signature;
-use crate::hvm::*;
+use kindelia_common::{Name, U120};
+use kindelia_common::crypto::Signature;
+use kindelia_lang::ast::{Func, Rule, Statement, Term};
 use crate::net;
 use crate::net::ProtoAddr;
 use crate::node::*;

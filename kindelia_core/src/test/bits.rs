@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+use bit_vec::BitVec;
+use proptest::{collection::vec, proptest};
+
+use kindelia_common::Name;
+use kindelia_lang::ast;
+
 use crate::test::strategies::{
   message, name, statement, u256 as u256_strategy,
 };
@@ -8,22 +14,18 @@ use crate::{
     deserialize_fixlen_big, deserialize_list, deserialize_varlen, serialize_fixlen_big,
     serialize_list, serialize_varlen, ProtoSerialize,
   },
-  common,
-  hvm::{view_statements, Term},
   net,
   node::Message,
   util::u256,
 };
-use bit_vec::BitVec;
-use proptest::{collection::vec, proptest};
 
 proptest! {
   #[test]
   fn serialize_deserialize_statements(statements in vec(statement(), 0..20)) {
-    let s1 = view_statements(&statements);
+    let s1 = ast::view_statements(&statements);
     let bits = statements.proto_serialized();
     let statements2 = Vec::proto_deserialized(&bits).unwrap();
-    let s2 = view_statements(&statements2);
+    let s2 = ast::view_statements(&statements2);
     assert_eq!(s1, s2);
   }
 
@@ -37,7 +39,7 @@ proptest! {
   #[test]
   fn serialize_deserialize_name(name in name()) {
     let bits = name.proto_serialized();
-    let name2 = common::Name::proto_deserialized(&bits).unwrap();
+    let name2 = Name::proto_deserialized(&bits).unwrap();
     assert_eq!(format!("{:?}", name), format!("{:?}", name2));
   }
 }

@@ -6,13 +6,13 @@ use std::ops::Deref;
 use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
+use kindelia_lang::ast;
+use kindelia_core::{hvm, node};
 use kindelia_core::api::{
   BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, PublishError,
   RegInfo, Stats,
 };
-use kindelia_core::hvm::{self, Term};
 use kindelia_core::net::ProtoComm;
-use kindelia_core::node;
 
 pub struct ApiClient {
   client: reqwest::Client,
@@ -110,8 +110,8 @@ impl ApiClient {
     self.get::<FuncInfo>(&format!("/functions/{}", name)).await
   }
 
-  pub async fn get_function_state(&self, name: Name) -> ApiResult<Term> {
-    self.get::<Term>(&format!("/functions/{}/state", name)).await
+  pub async fn get_function_state(&self, name: Name) -> ApiResult<ast::Term> {
+    self.get::<ast::Term>(&format!("/functions/{}/state", name)).await
   }
 
   pub async fn get_constructor(&self, name: Name) -> ApiResult<CtrInfo> {

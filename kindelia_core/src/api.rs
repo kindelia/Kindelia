@@ -20,7 +20,8 @@ use crate::net::ProtoComm;
 use crate::node::{self, PoolError, TransactionError};
 use crate::util;
 
-pub use crate::common::Name;
+pub use kindelia_common::Name;
+use kindelia_lang::ast;
 
 // Util
 // ====
@@ -109,23 +110,23 @@ impl From<Hash> for String {
 /// Decorator for Statement that serializes it as hexadecimal string of the
 /// protocol's serialization format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HexStatement(hvm::Statement);
+pub struct HexStatement(ast::Statement);
 
 impl std::ops::Deref for HexStatement {
-  type Target = hvm::Statement;
+  type Target = ast::Statement;
   fn deref(&self) -> &Self::Target {
     &self.0
   }
 }
 
-impl From<HexStatement> for hvm::Statement {
+impl From<HexStatement> for ast::Statement {
   fn from(hex_statement: HexStatement) -> Self {
     hex_statement.0
   }
 }
 
-impl From<hvm::Statement> for HexStatement {
-  fn from(statement: hvm::Statement) -> Self {
+impl From<ast::Statement> for HexStatement {
+  fn from(statement: ast::Statement) -> Self {
     HexStatement(statement)
   }
 }
@@ -144,14 +145,14 @@ impl TryFrom<&str> for HexStatement {
     let bytes = hex::decode(value).map_err(|e| e.to_string())?;
     let bits = util::bytes_to_bitvec(&bytes);
     let stmt =
-      hvm::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())
+      ast::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())
         .ok_or_else(|| format!("invalid Statement serialization: {}", value))?;
     Ok(HexStatement(stmt))
   }
 }
 
 // mod statement_ser_hex {
-//   use crate::hvm::Statement;
+//   use kindelia_lang::ast::Statement;
 //   use serde::{Deserializer, Serializer};
 //   type T = U256;
 //   pub fn serialize<S>(v: &T, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
@@ -277,7 +278,7 @@ pub struct BlockInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FuncInfo {
-  pub func: hvm::Func,
+  pub func: ast::Func,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -331,7 +332,7 @@ pub enum NodeRequest<C: ProtoComm> {
   },
   GetState {
     name: Name,
-    tx: ReqAnsSend<Option<hvm::Term>>,
+    tx: ReqAnsSend<Option<ast::Term>>,
   },
   GetPeers {
     all: bool,
@@ -356,11 +357,11 @@ pub enum NodeRequest<C: ProtoComm> {
     tx: ReqAnsSend<Result<PublishResults, String>>,
   },
   Run {
-    code: Vec<hvm::Statement>,
+    code: Vec<ast::Statement>,
     tx: ReqAnsSend<Vec<hvm::StatementResult>>,
   },
   Publish {
-    code: Vec<hvm::Statement>,
+    code: Vec<ast::Statement>,
     tx: ReqAnsSend<PublishResults>,
   },
 }
@@ -390,7 +391,7 @@ impl<C: ProtoComm> NodeRequest<C> {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetFunction { name, tx }, rx)
   }
-  pub fn get_state(name: Name) -> (Self, ReqAnsRecv<Option<hvm::Term>>) {
+  pub fn get_state(name: Name) -> (Self, ReqAnsRecv<Option<ast::Term>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetState { name, tx }, rx)
   }
@@ -421,13 +422,13 @@ impl<C: ProtoComm> NodeRequest<C> {
     (NodeRequest::PublishCode { code, tx }, rx)
   }
   pub fn run(
-    code: Vec<hvm::Statement>,
+    code: Vec<ast::Statement>,
   ) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Run { code, tx }, rx)
   }
   pub fn publish(
-    code: Vec<hvm::Statement>,
+    code: Vec<ast::Statement>,
   ) -> (Self, ReqAnsRecv<PublishResults>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Publish { code, tx }, rx)
