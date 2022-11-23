@@ -14,15 +14,13 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
-use kindelia_common::{Name, U256};
-use kindelia_core::api::{
-  u256_to_hex, HexStatement, NodeRequest, PublishError, ReqAnsRecv,
-};
+use kindelia_common::U256;
+use kindelia_core::api::{HexStatement, NodeRequest, PublishError, ReqAnsRecv};
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::ApiConfig;
 use kindelia_core::net::ProtoComm;
 use kindelia_core::runtime::{StatementErr, StatementInfo};
-use kindelia_lang::ast;
+use kindelia_lang::ast::{self, Name};
 
 // Util
 // ====
@@ -198,7 +196,8 @@ pub async fn api_serve<'a, C: ProtoComm + 'static>(
         let hash_hex = hash_hex.strip_prefix("0x").unwrap_or(&hash_hex);
         match hex_to_u256(hash_hex) {
           Ok(hash) => {
-            let block = ask(query_tx, NodeRequest::get_block(hash)).await;
+            let block =
+              ask(query_tx, NodeRequest::get_block(hash.into())).await;
             match block {
               Some(block) => Ok(block),
               None => {
@@ -226,7 +225,7 @@ pub async fn api_serve<'a, C: ProtoComm + 'static>(
           let message = format!("Block with index {} not found", index);
           Err(Rejection::from(NotFound::from(message)))
         }
-        Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
+        Some(block_hash) => Ok(ok_json(block_hash.to_string())),
       }
     }
   });

@@ -630,7 +630,7 @@ pub fn publish_code(
     // spawn'd, the task should begin executing immediately.
     tasks.spawn_on(
       async move {
-        let results = match client.publish_code(stmts_hex.clone()).await {
+        let results = match client.publish_code(stmts_hex).await {
           Ok(r) => r,
           Err(e) => {
             println!("NOT PUBLISHED to {}. ({})", *client, e);

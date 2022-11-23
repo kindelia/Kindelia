@@ -165,6 +165,13 @@ mod transaction {
       self.hash.hash(state);
     }
   }
+
+  // needed for serde::Deserialize
+  impl From<&Transaction> for String {
+    fn from(transaction: &Transaction) -> Self {
+      hex::encode(&**transaction)
+    }
+  }
 }
 
 pub use block::{Block, Body, HashedBlock};
@@ -1339,7 +1346,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       }
       NodeRequest::GetBlockHash { index, tx } => {
         let info = self.get_block_hash_by_index(index);
-        handle_ans_err("GetBlockHash", tx.send(info));
+        let info = info.map(|numb| numb.into()); // transform in Option<api::Hash>
+        handle_ans_err("GetBlockHash", tx.send(info))
       }
       NodeRequest::GetFunctions { tx } => {
         let mut funcs: HashSet<u128> = HashSet::new();
