@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use kindelia_core::crypto::Keccakable;
+use kindelia_common::crypto::Keccakable;
 use kindelia_core::persistence;
 use kindelia_core::persistence::BlockStorage;
+use kindelia_lang::parser;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::{constants, hvm, net, node, parser, util};
+use kindelia_core::{constants, hvm, net, node, util};
 
 // KHVM
 // ====
