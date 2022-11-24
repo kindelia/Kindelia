@@ -1,6 +1,5 @@
 #![allow(clippy::style)]
 
-use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{Func, Oper, Rule, Statement, Term};

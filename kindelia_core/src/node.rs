@@ -27,7 +27,7 @@ use crate::runtime::*;
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
-use crate::heartbeat;
+use crate::heartbeat_gen;
 
 macro_rules! event {
   ($tx: expr, $event: expr) => {
@@ -1694,7 +1694,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
     tip_blocks.reverse();
 
-    let event = heartbeat! {
+    let event = heartbeat_gen! {
       peers: { num: peers_num },
       tip: {
         height: tip_height,

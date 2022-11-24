@@ -30,6 +30,7 @@ use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
 };
+
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
