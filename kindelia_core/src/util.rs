@@ -5,6 +5,7 @@
 // #![allow(clippy::style)]
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use bit_vec::BitVec;
 
@@ -13,7 +14,6 @@ use kindelia_common::{Name, U120, U256};
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use crate::runtime::Loc;
-use std::path::PathBuf;
 
 use thiserror::Error;
 
@@ -243,4 +243,41 @@ pub struct FileSystemError {
   pub path: PathBuf,
   pub context: String,
   pub source: std::io::Error,
+}
+
+
+// Genesis
+// =======
+
+#[derive(Error, Debug)]
+pub(crate) enum GenesisPathError {
+  #[error("Home directory not found")]
+  HomeDirNotFound,
+  #[error("File not found in {0}")] 
+  FileNotFound(PathBuf)
+}
+
+pub(crate) fn genesis_path(network_id: u32) -> Result<PathBuf, GenesisPathError> {
+  let path = dirs::home_dir().ok_or(GenesisPathError::HomeDirNotFound)?.join(".kindelia").join("genesis").join(format!("{:#02X}.kdl", network_id));
+  match path.exists() {
+    true => Ok(path),
+    false => Err(GenesisPathError::FileNotFound(path)),
+  }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum GenesisCodeError {
+  #[error(transparent)]
+  PathError(#[from] GenesisPathError),
+
+  #[error("Genesis block could not be read from {path:?}.")]
+  ReadError {
+    path: PathBuf,
+    cause: std::io::Error,
+  }
+}
+
+pub(crate) fn genesis_code(network_id: u32) -> Result<String, GenesisCodeError> {
+  let path = genesis_path(network_id)?;
+  std::fs::read_to_string(&path).map_err(|e| GenesisCodeError::ReadError{path, cause: e})
 }

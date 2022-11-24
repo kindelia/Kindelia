@@ -125,9 +125,20 @@ pub fn run_cli() -> anyhow::Result<()> {
   );
 
   match parsed.command {
-    CliCommand::Test { file, sudo } => {
+    CliCommand::Test { file, sudo, network_id } => {
+      let config = handle_config_file(&config_path).map_err(|e| anyhow!(e))?;
+      let config = Some(&config);
+
+      let network_id = resolve_cfg!(
+        env = "KINDELIA_NETWORK_ID",
+        prop = "node.network.network_id".to_string(),
+        no_default = anyhow!("Missing `network_id` parameter."),
+        cli_val = network_id,
+        cfg = config,
+      );
+
       let code: String = file.read_to_string()?;
-      test_code(&code, sudo);
+      test_code(network_id, &code, sudo);
       Ok(())
     }
     CliCommand::Check { file, encoded, command } => {
@@ -664,8 +675,8 @@ async fn join_all(
   Ok(())
 }
 
-pub fn test_code(code: &str, sudo: bool) {
-  runtime::test_statements_from_code(code, sudo);
+pub fn test_code(network_id: u32, code: &str, sudo: bool) {
+  runtime::test_statements_from_code(network_id, code, sudo);
 }
 
 fn init_socket() -> Option<UdpSocket> {

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
+use clap_num::maybe_hex;
 
 use kindelia_common::Name;
 use kindelia_core::api::LimitStats;
@@ -120,6 +121,9 @@ pub enum CliCommand {
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
     sudo: bool,
+    /// Network id / magic number.
+    #[clap(long, value_parser=maybe_hex::<u32>)]
+    network_id: Option<u32>,
   },
   /// Checks for statements in kdl file
   Check {
@@ -205,7 +209,7 @@ pub enum CliCommand {
     #[clap(long)]
     data_dir: Option<PathBuf>,
     /// Network id / magic number.
-    #[clap(long)]
+    #[clap(long, value_parser=maybe_hex::<u32>)]
     network_id: Option<u32>,
   },
   /// Generate auto-completion for a shell.
