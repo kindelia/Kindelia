@@ -933,6 +933,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
           // Updates the tip work and block hash
           let cur_tip = self.tip;
           let new_tip = bhash;
+          // Reorgs happens
           if self.work[&new_tip] > self.work[&cur_tip] {
             // When the tip updates, stop mining the last built block, which is
             // based on the outdated tip

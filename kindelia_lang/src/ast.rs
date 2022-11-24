@@ -55,22 +55,6 @@ pub enum Oper {
   Eql, Gte, Gtn, Neq,
 }
 
-/// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Rule {
-  pub lhs: Term,
-  pub rhs: Term,
-}
-
-/// A function, which is just a vector of rewrite rules.
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
-pub struct Func {
-  pub rules: Vec<Rule>,
-}
-
-// The types below are used by the runtime to evaluate rewrite rules. They store the same data as
-// the type aboves, except in a semi-compiled, digested form, allowing faster computation.
-
 // Compiled information about a left-hand side variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Var {
@@ -78,17 +62,6 @@ pub struct Var {
   pub param: u64,         // in what parameter is this variable located?
   pub field: Option<u64>, // in what field is this variable located? (if any)
   pub erase: bool,        // should this variable be collected (because it is unused)?
-}
-
-/// A global statement that alters the state of the blockchain
-// TODO: It would probably good to have a separate Signature object as part of the AST,
-// to decouple the AST from the crypto parts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Statement {
-  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<Signature> },
-  Ctr { name: Name, args: Vec<Name>, sign: Option<Signature> },
-  Run { expr: Term, sign: Option<Signature> },
-  Reg { name: Name, ownr: U120, sign: Option<Signature> },
 }
 
 // Term
@@ -228,95 +201,6 @@ impl fmt::Display for Term {
   }
 }
 
-impl Drop for Term {
-  fn drop(&mut self) {
-    /// Verify if `term` has recursive childs (any of its
-    /// `Term`'s properties is not a var or a num)
-    fn term_is_recursive(term: &Term) -> bool {
-      fn term_is_num_or_var(term: &Term) -> bool {
-        matches!(term, Term::Num { .. } | Term::Var { .. })
-      }
-      match term {
-        Term::Var { .. } => false,
-        Term::Dup { expr, body, .. } => !(term_is_num_or_var(expr) && term_is_num_or_var(body)),
-        Term::Lam { body, .. } => !term_is_num_or_var(body),
-        Term::App { func, argm } => !(term_is_num_or_var(func) && term_is_num_or_var(argm)),
-        Term::Ctr { args, .. } => args.iter().any(|term| !term_is_num_or_var(term)),
-        Term::Fun { args, .. } => args.iter().any(|term| !term_is_num_or_var(term)),
-        Term::Num { .. } => false,
-        Term::Op2 { val0, val1, .. } => !(term_is_num_or_var(val0) && term_is_num_or_var(val1)),
-      }
-    }
-
-    // if term is not recursive it will not enter this if
-    // and will be dropped normally
-    if term_is_recursive(self) {
-      // `Self::Num { numb: U120::ZERO }` is being used as a default `Term`.
-      // It is being repeated to avoid create a Term variable that would be dropped
-      // and would call this implementation (could generate a stack overflow,
-      // or unecessary calls, depending where putted)
-      let term = std::mem::replace(self, Self::Num { numb: U120::ZERO });
-      let mut stack = vec![term]; // this will store the recursive terms
-      while let Some(mut in_term) = stack.pop() {
-        // if `in_term` is not recursive nothing will be done and, therefore,
-        // it will be dropped. This will call this drop function from the start
-        // with `in_term` as `self` and it will not pass the first
-        // `if term_is_recursive`, dropping the term normally.
-        if term_is_recursive(&in_term) {
-          // if the `in_term` is recursive, its children will be erased, and added to stack.
-          // The `in_term` will be dropped after this, but it will not be recursive anymore,
-          // so the drop will occur normally. The while will repeat this for all `in_term` children
-          match &mut in_term {
-            Term::Var { .. } => {}
-            Term::Num { .. } => {}
-            Term::Dup { expr, body, .. } => {
-              let expr = std::mem::replace(expr.as_mut(), Self::Num { numb: U120::ZERO });
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(expr);
-              stack.push(body);
-              
-            },
-            Term::Lam { body, .. } => {
-              let body = std::mem::replace(body.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(body);
-            },
-            Term::App { func, argm } => {
-              let func = std::mem::replace(func.as_mut(), Self::Num { numb: U120::ZERO });
-              let argm = std::mem::replace(argm.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(func);
-              stack.push(argm);
-            },
-            Term::Ctr { args, .. } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Fun { args, .. } => {
-              for arg in args {
-                let arg = std::mem::replace(arg, Self::Num { numb: U120::ZERO });
-                stack.push(arg);
-              }
-            },
-            Term::Op2 { val0, val1, .. } => {
-              let val0 = std::mem::replace(val0.as_mut(), Self::Num { numb: U120::ZERO });
-              let val1 = std::mem::replace(val1.as_mut(), Self::Num { numb: U120::ZERO });
-              stack.push(val0);
-              stack.push(val1);
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-// Rule
-// ====
-
-// Func
-// ====
-
 // Oper
 // ====
 
@@ -393,6 +277,18 @@ impl fmt::Display for Oper {
 
 // Statement
 // =========
+
+/// A global statement that alters the state of the blockchain
+// TODO: It would probably good to have a separate Signature object as part of
+// the AST, to decouple the AST from the crypto parts. A single buffer should
+// suffice.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Statement {
+  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<Signature> },
+  Ctr { name: Name, args: Vec<Name>, sign: Option<Signature> },
+  Run { expr: Term, sign: Option<Signature> },
+  Reg { name: Name, ownr: U120, sign: Option<Signature> },
+}
 
 // TODO: move these functions to impl Statement?
 pub fn view_statement_header(statement: &Statement) -> String {
@@ -542,6 +438,115 @@ pub fn set_sign(statement: &Statement, new_sign: Signature) -> Statement {
         name: *name,
         ownr: *ownr,
         sign: Some(new_sign),
+      }
+    }
+  }
+}
+
+// Function
+// --------
+
+/// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Rule {
+  pub lhs: Term,
+  pub rhs: Term,
+}
+
+/// A function, which is just a vector of rewrite rules.
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct Func {
+  pub rules: Vec<Rule>,
+}
+
+// Term Drop implementation
+// ========================
+
+// This implementation is necessary as Rust is unable do dealloc deeply nested
+// structures without it.
+//
+// References:
+// - https://rust-unofficial.github.io/too-many-lists/first-drop.html
+// - https://doc.rust-lang.org/nomicon/destructors.html
+
+impl Drop for Term {
+  fn drop(&mut self) {
+    // `Self::Num { numb: U120::ZERO }` is being used as a placeholder `Term`.
+    // This needs to be a constant to avoid creating a Term variable that would
+    // be dropped and would call this implementation again (could generate a
+    // stack overflow, or unecessary calls, depending of the position)
+    const ZERO: Term = Term::Num { numb: U120::ZERO };
+
+    /// Verify if `term` has a non-atom child (any of its `Term`'s fields is not
+    /// a Var or a Num)
+    fn term_is_nested(term: &Term) -> bool {
+      fn is_atom(term: &Term) -> bool {
+        matches!(term, Term::Num { .. } | Term::Var { .. })
+      }
+      match term {
+        Term::Var { name: _ } => false,
+        Term::Dup { nam0: _, nam1: _, expr, body } => !(is_atom(expr) && is_atom(body)),
+        Term::Lam { name: _, body } => !is_atom(body),
+        Term::App { func, argm } => !(is_atom(func) && is_atom(argm)),
+        Term::Ctr { name: _, args } => args.iter().any(|term| !is_atom(term)),
+        Term::Fun { name: _, args } => args.iter().any(|term| !is_atom(term)),
+        Term::Num { numb: _ } => false,
+        Term::Op2 { oper: _, val0, val1 } => !(is_atom(val0) && is_atom(val1)),
+      }
+    }
+
+    // If term is not recursive it and will be dropped normally
+    if term_is_nested(self) {
+      let term = std::mem::replace(self, ZERO);
+      let mut stack = vec![term]; // this will store the recursive terms
+      while let Some(mut in_term) = stack.pop() {
+        // if `in_term` is not recursive nothing will be done and, therefore, 
+        // it will be dropped. This will call this drop function from the start
+        // with `in_term` as `self` and it will not pass the first
+        // `if term_is_recursive`, dropping the term normally.
+        if term_is_nested(&in_term) {
+          // if the `in_term` is recursive, its children will be erased, and added to stack.
+          // The `in_term` will be dropped after this, but it will not be recursive anymore,
+          // so the drop will occur normally. The while will repeat this for all `in_term` children
+          match &mut in_term {
+            Term::Var { name: _ } => {},
+            Term::Num { numb: _ } => {},
+            Term::Dup { nam0: _, nam1: _, expr, body } => {
+              let expr = std::mem::replace(expr.as_mut(), ZERO);
+              let body = std::mem::replace(body.as_mut(), ZERO);
+              stack.push(expr);
+              stack.push(body);
+            },
+            Term::Lam { name: _, body } => {
+              let body = std::mem::replace(body.as_mut(), ZERO);
+              stack.push(body);
+            },
+            Term::App { func, argm } => {
+              let func = std::mem::replace(func.as_mut(), ZERO);
+              let argm = std::mem::replace(argm.as_mut(), ZERO);
+              stack.push(func);
+              stack.push(argm);
+            },
+            Term::Ctr { name: _, args } => {
+              for arg in args {
+                let arg = std::mem::replace(arg, ZERO);
+                stack.push(arg);
+              }
+            },
+            Term::Fun { name: _, args } => {
+              for arg in args {
+                let arg = std::mem::replace(arg, ZERO);
+                stack.push(arg);
+              }
+            },
+            Term::Op2 { oper: _, val0, val1 } => {
+              let val0 = std::mem::replace(val0.as_mut(), ZERO);
+              let val1 = std::mem::replace(val1.as_mut(), ZERO);
+              stack.push(val0);
+              stack.push(val1);
+            },
+          }
+        }
       }
     }
   }

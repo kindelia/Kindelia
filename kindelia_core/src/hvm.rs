@@ -264,6 +264,13 @@ use crate::persistence::DiskSer;
 use crate::util::{self, mask, U128_SIZE};
 use crate::util::{LocMap, NameMap, U120Map, U128Map};
 
+// Functions
+// =========
+
+// The types below are used by the runtime to evaluate rewrite rules. They store
+// the same data as the types on `ast`, except in a semi-compiled, digested
+// form, allowing faster computation.
+
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
@@ -282,7 +289,8 @@ pub struct CompFunc {
   pub rules: Vec<CompRule>, // vector of rules
 }
 
-// TODO: refactor all these maps to use `Name` newtype
+// Runtime data
+// ============
 
 // A file, which is just a map of `FuncID -> CompFunc`
 // It is used to find a function when it is called, in order to apply its rewrite rules.
@@ -290,8 +298,6 @@ pub struct CompFunc {
 pub struct Funcs {
   pub funcs: NameMap<Arc<CompFunc>>,
 }
-
-// TODO: arity with no u128
 
 // A map of `FuncID -> Arity`
 // It is used in many places to find the arity (argument count) of functions and constructors.
@@ -312,7 +318,6 @@ pub struct Indxs {
   pub indxs: NameMap<u128>
 }
 
-
 // A map of `FuncID -> RawCell`
 // It links a function id to its state on the runtime memory.
 #[derive(Clone, Debug, PartialEq)]
@@ -320,9 +325,8 @@ pub struct Store {
   pub links: U120Map<RawCell>,
 }
 
-
 /// RawCell
-/// =======
+/// -------
 
 /// An HVM memory cell/word.
 /// It can point to an HVM node, a variable ocurrence, or store an unboxed U120.
@@ -396,7 +400,7 @@ impl RawCell {
 }
 
 // Loc
-// ===
+// ---
 
 /// A HVM memory location, or "pointer".
 
@@ -517,6 +521,7 @@ pub enum RuntimeError {
   EffectFailure(EffectFailure),
   DefinitionError(DefinitionError),
 }
+
 #[derive(Debug, Clone)]
 pub enum DefinitionError {
   FunctionHasNoRules,
@@ -538,30 +543,6 @@ pub enum EffectFailure {
   InvalidIONonCtr { ptr: RawCell },
   IoFail { err: RawCell },
 }
-
-//pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
-  //let mut seen = vec![0u8; 10];
-  //let mut heaps = vec![0u64; 0];
-  //let mut push = |id: u64| {
-    //let idx = id as usize;
-    //seen[idx] += 1;
-    //heaps.push(id);
-  //};
-  //push(rt.draw);
-  //push(rt.curr);
-  //for nul in &rt.nuls {
-    //push(*nul);
-  //}
-  //{
-    //let mut back = &*rt.back;
-    //while let Rollback::Cons { keep, life, head, tail } = back {
-      //push(*head);
-      //back = &*tail;
-    //}
-  //}
-  //let failed = seen.iter().all(|c| *c == 1);
-  //(failed, seen, heaps)
-//}
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
@@ -4283,19 +4264,3 @@ pub fn test_statements_from_code(code: &str, debug: bool) {
 pub fn test_statements_from_file(file: &str, debug: bool) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"), debug);
 }
-
-// Term Drop implementation
-// ========================
-
-// This implementation is necessary as Rust is unable do dealloc deeply nested
-// structures without it.
-//
-// References:
-// - https://rust-unofficial.github.io/too-many-lists/first-drop.html
-// - https://doc.rust-lang.org/nomicon/destructors.html
-
-// impl Drop for Term {
-//     fn drop(&mut self) {
-//         todo!()
-//     }
-// }

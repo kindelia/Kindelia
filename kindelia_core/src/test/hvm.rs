@@ -1043,3 +1043,27 @@ run {
   (Done #1)
 }
 ";
+
+//pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
+  //let mut seen = vec![0u8; 10];
+  //let mut heaps = vec![0u64; 0];
+  //let mut push = |id: u64| {
+    //let idx = id as usize;
+    //seen[idx] += 1;
+    //heaps.push(id);
+  //};
+  //push(rt.draw);
+  //push(rt.curr);
+  //for nul in &rt.nuls {
+    //push(*nul);
+  //}
+  //{
+    //let mut back = &*rt.back;
+    //while let Rollback::Cons { keep, life, head, tail } = back {
+      //push(*head);
+      //back = &*tail;
+    //}
+  //}
+  //let failed = seen.iter().all(|c| *c == 1);
+  //(failed, seen, heaps)
+//}
