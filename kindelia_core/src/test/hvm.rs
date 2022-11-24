@@ -11,7 +11,7 @@ use kindelia_common::{Name, U120};
 use kindelia_lang::ast;
 use kindelia_lang::parser::parse_statements;
 
-use crate::hvm::{
+use crate::runtime::{
   readback_term, show_term, Heap, Rollback, Runtime, StatementErr,
   StatementInfo,
 };

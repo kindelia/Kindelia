@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
-  hvm::{
+  runtime::{
     init_loc_map, init_name_map, init_u120_map, init_u128_map, Arits, CompFunc,
     CompRule, Funcs, Hashs, Heap, Indxs, Loc, Nodes, Ownrs, RawCell, Rollback,
     Runtime, Store,

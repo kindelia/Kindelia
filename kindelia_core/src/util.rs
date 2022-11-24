@@ -11,7 +11,7 @@ use bit_vec::BitVec;
 use kindelia_common::nohash_hasher::NoHashHasher;
 use kindelia_common::{Name, U120, U256};
 
-use crate::hvm::Loc;
+use crate::runtime::Loc;
 
 pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NoHashHasher<u64 >>>;
 pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NoHashHasher<U120>>>;

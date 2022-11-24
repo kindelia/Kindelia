@@ -25,7 +25,7 @@ use crate::bits;
 use crate::bits::ProtoSerialize;
 use crate::config::MineConfig;
 use crate::constants;
-use crate::hvm::*;
+use crate::runtime::*;
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::persistence::BlockStorage;
 use crate::util::*;

@@ -11,7 +11,7 @@ use kindelia_core::api::{
   RegInfo, Stats,
 };
 use kindelia_core::net::ProtoComm;
-use kindelia_core::{hvm, node};
+use kindelia_core::{runtime, node};
 use kindelia_lang::ast;
 
 pub struct ApiClient {
@@ -121,7 +121,7 @@ impl ApiClient {
   pub async fn run_code(
     &self,
     code: Vec<HexStatement>,
-  ) -> ApiResult<Vec<hvm::StatementInfo>> {
+  ) -> ApiResult<Vec<runtime::StatementInfo>> {
     self.req(Method::POST, "/run", Some(code)).await
   }
 

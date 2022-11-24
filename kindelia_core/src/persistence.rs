@@ -9,7 +9,7 @@ use kindelia_common::{crypto, Name, U120};
 use kindelia_lang::ast::Func;
 
 use crate::bits::ProtoSerialize;
-use crate::hvm::{compile_func, CompFunc};
+use crate::runtime::{compile_func, CompFunc};
 use crate::node::{self, HashedBlock};
 use crate::util::{self, bitvec_to_bytes};
 
@@ -222,7 +222,7 @@ impl DiskSer for crypto::Hash {
   }
 }
 
-impl DiskSer for crate::hvm::RawCell {
+impl DiskSer for crate::runtime::RawCell {
   fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     (**self).disk_serialize(sink)
   }
@@ -231,7 +231,7 @@ impl DiskSer for crate::hvm::RawCell {
     match cell {
       None => Ok(None),
       Some(num) => {
-        let rawcell = crate::hvm::RawCell::new(num);
+        let rawcell = crate::runtime::RawCell::new(num);
         match rawcell {
           Some(rawcell) => Ok(Some(rawcell)),
           None => Err(Error::from(ErrorKind::InvalidData)),
@@ -241,7 +241,7 @@ impl DiskSer for crate::hvm::RawCell {
   }
 }
 
-impl DiskSer for crate::hvm::Loc {
+impl DiskSer for crate::runtime::Loc {
   fn disk_serialize<W: Write>(&self, sink: &mut W) -> IoResult<usize> {
     (**self).disk_serialize(sink)
   }
@@ -250,7 +250,7 @@ impl DiskSer for crate::hvm::Loc {
     match loc {
       None => Ok(None),
       Some(num) => {
-        let loc = crate::hvm::Loc::new(num);
+        let loc = crate::runtime::Loc::new(num);
         match loc {
           Some(loc) => Ok(Some(loc)),
           None => Err(Error::from(ErrorKind::InvalidData)),

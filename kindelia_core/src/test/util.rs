@@ -6,24 +6,24 @@ use std::sync::Arc;
 use rstest::fixture;
 
 use crate::constants;
-use crate::hvm::{
+use crate::runtime::{
   self, show_term, Rollback, Runtime, StatementInfo, U128_NONE, U64_NONE,
 };
 use crate::node;
 use kindelia_common::{Name, U120};
 use kindelia_lang::{ast, parser};
 
-pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
+pub fn init_runtime(path: &PathBuf) -> runtime::Runtime {
   let genesis_stmts =
     parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
-  hvm::init_runtime(path.clone(), &genesis_stmts)
+  runtime::init_runtime(path.clone(), &genesis_stmts)
 }
 
 // ===========================================================
 // Aux types
 
 pub type Validator =
-  (&'static str, fn(u64, &ast::Term, &mut hvm::Runtime) -> bool);
+  (&'static str, fn(u64, &ast::Term, &mut runtime::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -274,7 +274,7 @@ where
 // ===========
 // validations
 
-fn validate<P: Fn(u64, &ast::Term, &mut hvm::Runtime) -> bool>(
+fn validate<P: Fn(u64, &ast::Term, &mut runtime::Runtime) -> bool>(
   rt: &mut Runtime,
   name: &str,
   predicate: P,
@@ -283,7 +283,7 @@ fn validate<P: Fn(u64, &ast::Term, &mut hvm::Runtime) -> bool>(
   let name = Name::from_str(name).unwrap();
   let name = U120::from(name);
   let state = rt.read_disk(name).unwrap();
-  let state = hvm::readback_term(rt, state, None).unwrap();
+  let state = runtime::readback_term(rt, state, None).unwrap();
   assert!(predicate(tick, &state, rt))
 }
 

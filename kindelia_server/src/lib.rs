@@ -21,7 +21,7 @@ use kindelia_core::api::{
 };
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::ApiConfig;
-use kindelia_core::hvm::{StatementErr, StatementInfo};
+use kindelia_core::runtime::{StatementErr, StatementInfo};
 use kindelia_core::net::ProtoComm;
 use kindelia_lang::ast;
 

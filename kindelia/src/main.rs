@@ -31,7 +31,7 @@ use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
 use kindelia_core::util::bytes_to_bitvec;
-use kindelia_core::{events, hvm, net};
+use kindelia_core::{events, runtime, net};
 use kindelia_lang::{ast, parser};
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
@@ -525,7 +525,7 @@ pub fn sign_code(
   skey: &[u8; 32],
 ) -> Result<ast::Statement, String> {
   let user = crypto::Account::from_private_key(skey);
-  let hash = hvm::hash_statement(statement);
+  let hash = runtime::hash_statement(statement);
   let sign = user.sign(&hash);
   match statement {
     ast::Statement::Fun { sign, .. }
@@ -653,7 +653,7 @@ async fn join_all(
 }
 
 pub fn test_code(code: &str, sudo: bool) {
-  hvm::test_statements_from_code(code, sudo);
+  runtime::test_statements_from_code(code, sudo);
 }
 
 fn init_socket() -> Option<UdpSocket> {

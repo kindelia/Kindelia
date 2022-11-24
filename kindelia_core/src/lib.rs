@@ -5,7 +5,7 @@ pub mod api;
 pub mod bits;
 pub mod config;
 pub mod constants;
-pub mod hvm;
+pub mod runtime;
 pub mod net;
 pub mod node;
 pub mod persistence;

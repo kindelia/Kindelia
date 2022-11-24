@@ -15,7 +15,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 
 use crate::bits::ProtoSerialize;
-use crate::hvm;
+use crate::runtime;
 use crate::net::ProtoComm;
 use crate::node::{self, PoolError, TransactionError};
 use crate::util;
@@ -273,7 +273,7 @@ pub struct BlockInfo {
   pub block: BlockRepr,
   pub hash: Hash,
   pub height: u64,
-  pub results: Option<Vec<hvm::StatementResult>>,
+  pub results: Option<Vec<runtime::StatementResult>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -349,7 +349,7 @@ pub enum NodeRequest<C: ProtoComm> {
   /// DEPRECATED
   RunCode {
     code: String,
-    tx: ReqAnsSend<Vec<hvm::StatementResult>>,
+    tx: ReqAnsSend<Vec<runtime::StatementResult>>,
   },
   /// DEPRECATED
   PublishCode {
@@ -358,7 +358,7 @@ pub enum NodeRequest<C: ProtoComm> {
   },
   Run {
     code: Vec<ast::Statement>,
-    tx: ReqAnsSend<Vec<hvm::StatementResult>>,
+    tx: ReqAnsSend<Vec<runtime::StatementResult>>,
   },
   Publish {
     code: Vec<ast::Statement>,
@@ -411,7 +411,7 @@ impl<C: ProtoComm> NodeRequest<C> {
   }
   pub fn test_code(
     code: String,
-  ) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+  ) -> (Self, ReqAnsRecv<Vec<runtime::StatementResult>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::RunCode { code, tx }, rx)
   }
@@ -423,7 +423,7 @@ impl<C: ProtoComm> NodeRequest<C> {
   }
   pub fn run(
     code: Vec<ast::Statement>,
-  ) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+  ) -> (Self, ReqAnsRecv<Vec<runtime::StatementResult>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Run { code, tx }, rx)
   }

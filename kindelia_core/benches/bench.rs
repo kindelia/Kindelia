@@ -8,7 +8,7 @@ use kindelia_lang::parser;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::{constants, hvm, net, node, util};
+use kindelia_core::{constants, runtime, net, node, util};
 
 // KHVM
 // ====
@@ -23,10 +23,10 @@ pub fn temp_dir() -> PathBuf {
   path
 }
 
-pub fn init_runtime(path: PathBuf) -> hvm::Runtime {
+pub fn init_runtime(path: PathBuf) -> runtime::Runtime {
   let genesis_stmts =
     parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
-  hvm::init_runtime(path, &genesis_stmts)
+  runtime::init_runtime(path, &genesis_stmts)
 }
 
 fn khvm_benches(c: &mut Criterion) {

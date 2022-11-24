@@ -408,7 +408,7 @@ impl RawCell {
 #[repr(transparent)]
 pub struct Loc(u64);
 
-impl nohash_hasher::IsEnabled for crate::hvm::Loc {}
+impl nohash_hasher::IsEnabled for Loc {}
 
 impl Loc {
   pub const _MAX: u64 = (1 << VAL_SIZE) - 1;
