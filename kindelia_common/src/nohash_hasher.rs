@@ -64,7 +64,7 @@ pub type IntSet<T> = std::collections::HashSet<T, BuildNoHashHasher<T>>;
 ///
 /// # Examples
 ///
-/// See also [`IntMap`] and [`IntSet`] for some easier usage examples.
+/// See also `IntMap` and `IntSet` for some easier usage examples.
 ///
 /// ```text
 /// use nohash_hasher::BuildNoHashHasher;
@@ -96,7 +96,7 @@ pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;
 ///
 /// # Examples
 ///
-/// See also [`BuildNoHashHasher`], [`IntMap`] and [`IntSet`] for some easier
+/// See also [`BuildNoHashHasher`], `IntMap` and `IntSet` for some easier
 /// usage examples. See [`IsEnabled`] for use with custom types.
 ///
 /// ```text

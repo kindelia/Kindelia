@@ -7,10 +7,11 @@ use std::sync::Arc;
 use rstest::fixture;
 
 use crate::constants;
-use crate::runtime::{
-  self, show_term, Rollback, Runtime, StatementInfo, U128_NONE, U64_NONE,
-};
 use crate::node;
+use crate::runtime::debug::show_term;
+use crate::runtime::{
+  self, Rollback, Runtime, StatementInfo, U128_NONE, U64_NONE,
+};
 use kindelia_common::{Name, U120};
 use kindelia_lang::{ast, parser};
 

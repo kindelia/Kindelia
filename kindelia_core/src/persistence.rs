@@ -11,7 +11,7 @@ use kindelia_lang::ast::Func;
 
 use crate::bits::ProtoSerialize;
 use crate::node::{self, HashedBlock};
-use crate::runtime::{compile_func, CompFunc};
+use crate::runtime::functions::{compile_func, CompFunc};
 use crate::util::{self, bitvec_to_bytes, FileSystemError};
 
 /// Trait that represents serialization of a type to memory.

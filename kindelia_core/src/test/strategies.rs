@@ -1,24 +1,26 @@
 use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc, str::FromStr};
 
-use crate::{
-  runtime::{
-    init_loc_map, init_name_map, init_u120_map, init_u128_map, Arits, CompFunc,
-    CompRule, Funcs, Hashs, Heap, Indxs, Loc, Nodes, Ownrs, RawCell, Rollback,
-    Runtime, Store,
-  },
-  net::Address,
-  node::{hash_bytes, Block, Body, Message, Peer, Transaction},
-  util::{LocMap, NameMap, U120Map, U128Map},
-};
+use primitive_types::U256;
+
 use kindelia_common::{crypto, Name, U120};
 use kindelia_lang::ast::{Func, Oper, Rule, Statement, Term, Var};
-use primitive_types::U256;
 use proptest::{
   arbitrary::any,
   array,
   collection::{hash_map, vec},
   option, prop_oneof,
   strategy::{Just, Strategy},
+};
+
+use crate::runtime::functions::{CompFunc, CompRule};
+use crate::runtime::{
+  init_loc_map, init_name_map, init_u120_map, init_u128_map, Arits, Funcs,
+  Hashs, Heap, Indxs, Loc, Nodes, Ownrs, RawCell, Rollback, Runtime, Store,
+};
+use crate::{
+  net::Address,
+  node::{hash_bytes, Block, Body, Message, Peer, Transaction},
+  util::{LocMap, NameMap, U120Map, U128Map},
 };
 
 // generate valid names
@@ -38,7 +40,7 @@ pub fn u120() -> impl Strategy<Value = U120> {
 }
 
 pub fn loc() -> impl Strategy<Value = Loc> {
-  (0_u64..Loc::_MAX+1).prop_map(|n| Loc::new(n).unwrap())
+  (0_u64..Loc::_MAX + 1).prop_map(|n| Loc::new(n).unwrap())
 }
 
 pub fn rawcell() -> impl Strategy<Value = RawCell> {
@@ -46,8 +48,7 @@ pub fn rawcell() -> impl Strategy<Value = RawCell> {
 }
 
 pub fn small_name() -> impl Strategy<Value = Name> {
-  "[A-Z][a-zA-Z0-9_]{0,11}"
-    .prop_map(|s| Name::from_str(&s).unwrap())
+  "[A-Z][a-zA-Z0-9_]{0,11}".prop_map(|s| Name::from_str(&s).unwrap())
 }
 
 // generate terms
@@ -232,23 +233,15 @@ pub fn comp_func() -> impl Strategy<Value = CompFunc> {
 }
 
 pub fn funcs() -> impl Strategy<Value = Funcs> {
-  name_map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
+  name_map(comp_func().prop_map(|cf| Arc::new(cf)))
+    .prop_map(|m| Funcs { funcs: m })
 }
 
 pub fn heap() -> impl Strategy<Value = Heap> {
-  let u64_tuple_strategy = (
-    any::<u64>(),
-    any::<u64>(),
-    any::<u64>(),
-    any::<u64>(),
-  );
-  let u128_tuple_strategy = (
-    any::<u128>(),
-    any::<u128>(),
-    any::<u128>(),
-    any::<u128>(),
-    any::<u128>(),
-  );
+  let u64_tuple_strategy =
+    (any::<u64>(), any::<u64>(), any::<u64>(), any::<u64>());
+  let u128_tuple_strategy =
+    (any::<u128>(), any::<u128>(), any::<u128>(), any::<u128>(), any::<u128>());
 
   (
     u64_tuple_strategy,
@@ -335,11 +328,17 @@ pub fn transaction() -> impl Strategy<Value = Transaction> {
 
 pub fn message() -> impl Strategy<Value = Message<Address>> {
   prop_oneof![
-    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10), any::<u32>()).prop_map(
-      |(g, b, p, m)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p, magic: m },
-    ),
-    (u256(), any::<u32>()).prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
-    (transaction(), any::<u32>())
-      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { tx: t, magic: m })
+    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10), any::<u32>())
+      .prop_map(|(g, b, p, m)| Message::NoticeTheseBlocks {
+        gossip: g,
+        blocks: b,
+        peers: p,
+        magic: m
+      },),
+    (u256(), any::<u32>())
+      .prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
+    (transaction(), any::<u32>()).prop_map(|(t, m)| {
+      Message::PleaseMineThisTransaction { tx: t, magic: m }
+    })
   ]
 }

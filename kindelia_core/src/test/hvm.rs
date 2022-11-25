@@ -13,9 +13,10 @@ use kindelia_lang::ast;
 use kindelia_lang::parser::parse_statements;
 
 use crate::runtime::{
-  readback_term, show_term, Heap, Rollback, Runtime, StatementErr,
+  readback_term, Heap, Rollback, Runtime, StatementErr,
   StatementInfo,
 };
+use crate::runtime::debug::show_term;
 use crate::node;
 use crate::test::strategies::{func, heap, name, op2, statement, term};
 use crate::test::util::{
