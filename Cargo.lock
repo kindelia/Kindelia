@@ -479,6 +479,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap-num"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "488557e97528174edaa2ee268b23a809e0c598213a4bbcb4f34575a46fda147e"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "clap_complete"
 version = "4.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1355,6 +1364,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "include_dir"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18762faeff7122e89e0857b02f7ce6fcc0d101d5e9ad2ad7846cc01d61b7f19e"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b139284b5cf57ecfa712bcc66950bb635b31aff41c188e8a4cfc758eca374a3f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1450,12 +1478,14 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap 4.0.22",
+ "clap-num",
  "clap_complete",
  "derive_builder",
  "dirs",
  "fastrand",
  "hex",
  "httpmock",
+ "include_dir",
  "kindelia_client",
  "kindelia_common",
  "kindelia_core",
@@ -1465,6 +1495,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "toml",
  "warp",

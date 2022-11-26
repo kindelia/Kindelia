@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod files;
+mod genesis;
 mod util;
 
 use anyhow::{anyhow, Context};
@@ -41,6 +42,7 @@ use util::{
 };
 
 use crate::cli::{GetStatsKind, NodeCleanBlocksCommand, NodeCleanCommand};
+use crate::genesis::{genesis_code, init_genesis};
 use crate::util::init_config_file;
 
 fn main() -> anyhow::Result<()> {
@@ -241,6 +243,7 @@ pub fn run_cli() -> anyhow::Result<()> {
       let path = default_config_path()?;
       eprintln!("Writing default configuration to '{}'...", path.display());
       init_config_file(&path).map_err(|e| anyhow!(e))?;
+      init_genesis(&default_base_path()?.join("genesis"))?;
       Ok(())
     }
     CliCommand::Node { command, data_dir, network_id } => {
@@ -676,7 +679,11 @@ async fn join_all(
 }
 
 pub fn test_code(network_id: u32, code: &str, sudo: bool) {
-  runtime::test_statements_from_code(network_id, code, sudo);
+  let genesis_stmts =
+    parser::parse_code(&genesis_code(network_id).expect("Genesis code loads"))
+      .expect("Genesis code parses");
+
+  runtime::test_statements_from_code(&genesis_stmts, code, sudo);
 }
 
 fn init_socket() -> Option<UdpSocket> {
@@ -845,11 +852,17 @@ pub fn start_node<C: ProtoComm + 'static>(
   // File writter
   let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
+  let genesis_stmts = parser::parse_code(
+    &genesis_code(node_config.network_id).expect("Genesis code loads"),
+  )
+  .expect("Genesis code parses");
+
   // Node state object
   let (node_query_sender, node) = Node::new(
     node_config.data_path,
     node_config.network_id,
     addr,
+    &genesis_stmts,
     initial_peers,
     comm,
     miner_comm,

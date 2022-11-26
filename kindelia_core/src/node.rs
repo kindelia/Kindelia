@@ -820,6 +820,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     data_path: PathBuf,
     network_id: u32,
     addr: C::Address, // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
+    genesis_stmts: &[Statement],
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
@@ -830,13 +831,12 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
     let (query_sender, query_receiver) = mpsc::sync_channel(1);
 
-    let genesis_stmts =
-      parser::parse_code(&genesis_code(network_id).unwrap()).expect("Genesis code parses");
-    let genesis_block = build_genesis_block(&genesis_stmts).expect("Genesis block builds");
+    let genesis_block =
+      build_genesis_block(genesis_stmts).expect("Genesis block builds");
     let genesis_block = genesis_block.hashed();
     let genesis_hash = genesis_block.get_hash().into();
 
-    let runtime = init_runtime(data_path.join("heaps"), &genesis_stmts);
+    let runtime = init_runtime(data_path.join("heaps"), genesis_stmts);
 
     #[rustfmt::skip]
     let mut node = Node {

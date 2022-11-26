@@ -8,7 +8,7 @@ use kindelia_lang::parser;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::{constants, runtime, net, node, util};
+use kindelia_core::{runtime, net, node, util};
 use kindelia_core::net::ProtoComm;
 
 // KHVM
@@ -25,8 +25,9 @@ pub fn temp_dir() -> PathBuf {
 }
 
 pub fn init_runtime(path: PathBuf) -> runtime::Runtime {
+  const GENESIS_CODE: &str = include_str!("../genesis-tests.kdl");
   let genesis_stmts =
-    parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+    parser::parse_code(GENESIS_CODE).expect("Genesis code parses.");
   runtime::init_runtime(path, &genesis_stmts)
 }
 
@@ -155,7 +156,7 @@ fn block_loading(c: &mut Criterion) {
 
   // create Node
   let (_, mut node) =
-    node::Node::new(dir.clone(), 0, addr, vec![], comm, None, storage, None);
+    node::Node::new(dir.clone(), 0, addr, &[], vec![], comm, None, storage, None);
 
   // benchmark block loading
   c.bench_function("block_loading", |b| b.iter(|| node.load_blocks()));

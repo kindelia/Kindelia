@@ -102,7 +102,7 @@ mod cli {
   #[case("../example/block_3.kdl")]
   #[case("../example/block_4.kdl")]
   #[case("../example/block_5.kdl")]
-  #[case("../kindelia_core/genesis.kdl")]
+  #[case("../kindelia_core/genesis-tests.kdl")]
   fn test_ser_deser(#[case] file: &str) {
     use kindelia_core::bits::ProtoSerialize;
     eprintln!("{}", file);

@@ -11,6 +11,7 @@ use crate::events;
 use crate::net::{self, ProtoComm, ProtoCommError};
 use crate::node;
 use crate::{bits, persistence};
+use kindelia_lang::parser;
 
 use super::util::temp_dir;
 
@@ -115,12 +116,17 @@ fn start_simulation<C: ProtoComm + 'static>(
   // Storage
   let storage = persistence::EmptyStorage;
 
+  let GENESIS_CODE = include_str!("../../genesis-tests.kdl");
+  let genesis_stmts =
+    parser::parse_code(GENESIS_CODE).expect("Genesis code parses.");
+
   // Node
   let node_thread = {
     let (node_query_sender, node) = node::Node::new(
       node_config.data_path,
       node_config.network_id,
       addr,
+      &genesis_stmts,
       initial_peers,
       comm,
       miner_comm,
