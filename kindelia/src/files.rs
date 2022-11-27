@@ -45,16 +45,15 @@ impl FileInput {
     match self {
       FileInput::Path { path } => {
         // read from file
-        std::fs::read_to_string(path).map_err(|e| {
-          anyhow!(format!("Cannot read from '{:?}' file: {}", path, e))
-        })
+        std::fs::read_to_string(path)
+          .map_err(|e| anyhow!("Cannot read from '{:?}' cause: {}", path, e))
       }
       FileInput::Stdin => {
         // read from stdin
         let mut buff = String::new();
         std::io::stdin()
           .read_to_string(&mut buff)
-          .map_err(|e| anyhow!(format!("Could not read from stdin: {}", e)))?;
+          .map_err(|e| anyhow!("Could not read from stdin: {}", e))?;
         Ok(buff)
       }
     }

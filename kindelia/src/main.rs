@@ -184,17 +184,15 @@ pub fn run_cli() -> anyhow::Result<()> {
       let skey: String = arg_from_file_or_stdin(secret_file.into())?;
       let skey = skey.trim();
       let skey = hex::decode(skey).map_err(|err| {
-        anyhow!(format!("Secret key should be valid hex string: {}", err))
+        anyhow!("Secret key should be valid hex string: {}", err)
       })?;
-      let skey: [u8; 32] = skey.try_into().map_err(|_| {
-        anyhow!("Secret key should have exactly 64 bytes".to_string())
-      })?;
+      let skey: [u8; 32] = skey
+        .try_into()
+        .map_err(|_| anyhow!("Secret key should have exactly 64 bytes"))?;
       let code = load_code(file, encoded)?;
       let statement = match &code[..] {
         [stmt] => sign_code(stmt, &skey),
-        _ => Err(anyhow!(
-          "Input file should contain exactly one statement".to_string()
-        )),
+        _ => Err(anyhow!("Input file should contain exactly one statement")),
       }?;
       if encoded_output {
         println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
@@ -249,7 +247,7 @@ pub fn run_cli() -> anyhow::Result<()> {
       let network_id = resolve_cfg!(
         env = "KINDELIA_NETWORK_ID",
         prop = "node.network.network_id".to_string(),
-        no_default = anyhow!("Missing `network_id` parameter.".to_string()),
+        no_default = anyhow!("Missing `network_id` parameter."),
         cli_val = network_id,
         cfg = config,
       );
@@ -264,11 +262,8 @@ pub fn run_cli() -> anyhow::Result<()> {
       .join(format!("{:#02X}", network_id));
 
       match command {
-        NodeCommand::Clean { command } => {
-          clean(&data_path, command).map_err(|err| {
-            anyhow!(format!("Could not clean kindelia's data: {}", err))
-          })
-        }
+        NodeCommand::Clean { command } => clean(&data_path, command)
+          .map_err(|err| anyhow!("Could not clean kindelia's data: {}", err)),
         NodeCommand::Start { initial_peers, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
@@ -337,8 +332,8 @@ pub fn run_cli() -> anyhow::Result<()> {
           .map(|s| s.strip_prefix("0x").unwrap_or(s))
           .map(hex::decode)
           .collect();
-        let data = data
-          .map_err(|err| anyhow!(format!("Invalid hex string: {}", err)))?;
+        let data =
+          data.map_err(|err| anyhow!("Invalid hex string: {}", err))?;
         let nums = data.iter().map(|v| bytes_to_u128(v));
         for num in nums {
           if let Some(num) = num {
@@ -540,7 +535,7 @@ pub fn sign_code(
     | ast::Statement::Run { sign, .. }
     | ast::Statement::Reg { sign, .. } => {
       if sign.is_some() {
-        return Err(anyhow!("Statement already has a signature.".to_string()));
+        return Err(anyhow!("Statement already has a signature."));
       }
     }
   };
@@ -576,11 +571,10 @@ fn statements_from_hex_seq(txt: &str) -> anyhow::Result<Vec<ast::Statement>> {
 }
 
 fn statement_from_hex(hex: &str) -> anyhow::Result<ast::Statement> {
-  let bytes = hex::decode(hex).map_err(|err| {
-    anyhow!(format!("Invalid hexadecimal '{}': {}", hex, err))
-  })?;
+  let bytes = hex::decode(hex)
+    .map_err(|err| anyhow!("Invalid hexadecimal '{}': {}", hex, err))?;
   ast::Statement::proto_deserialized(&bytes_to_bitvec(&bytes))
-    .ok_or_else(|| anyhow!(format!("Failed to deserialize '{}'", hex)))
+    .ok_or_else(|| anyhow!("Failed to deserialize '{}'", hex))
 }
 pub fn publish_code(
   api_url: &str,
@@ -883,13 +877,11 @@ pub fn start_node<C: ProtoComm + 'static>(
 fn print_shell_completions(shell: Shell) -> anyhow::Result<()> {
   // obtain name of present executable
   let exec_name = std::env::current_exe()
-    .map_err(|e| anyhow!(format!("Error getting current executable: {}", e)))?
+    .map_err(|e| anyhow!("Error getting current executable: {}", e))?
     .file_name()
-    .ok_or_else(|| anyhow!("Error getting executable file name".to_string()))?
+    .ok_or_else(|| anyhow!("Error getting executable file name"))?
     .to_str()
-    .ok_or_else(|| {
-      anyhow!("Error decoding executable name as utf8".to_string())
-    })?
+    .ok_or_else(|| anyhow!("Error decoding executable name as utf8"))?
     .to_string();
 
   // Generates completions for <shell> and prints to stdout

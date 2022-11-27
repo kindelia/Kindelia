@@ -87,10 +87,11 @@ where
         let value = Self::get_prop(config_values, &prop_path);
         if let Some(value) = value {
           return T::arg_from(value).map(|v| Some(v)).map_err(|e| {
-            anyhow!(format!(
+            anyhow!(
               "Could not convert value of '{}' into desired type: {}",
-              prop_path, e
-            ))
+              prop_path,
+              e
+            )
           });
         }
       }
@@ -108,13 +109,14 @@ where
     T: ArgumentFrom<toml::Value>,
   {
     let value = Self::get_prop(config_values, prop_path).ok_or_else(|| {
-      anyhow!(format!("Could not find prop '{}' in config file.", prop_path))
+      anyhow!("Could not find prop '{}' in config file.", prop_path)
     })?;
     T::arg_from(value).map_err(|e| {
-      anyhow!(format!(
+      anyhow!(
         "Could not convert value of '{}' into desired type: {}",
-        prop_path, e
-      ))
+        prop_path,
+        e
+      )
     })
   }
 
@@ -147,13 +149,13 @@ impl ArgumentFrom<String> for String {
 
 impl ArgumentFrom<String> for u32 {
   fn arg_from(t: String) -> anyhow::Result<Self> {
-    t.parse().map_err(|e| anyhow!(format!("Invalid integer: `{}`", e)))
+    t.parse().map_err(|e| anyhow!("Invalid integer: `{}`", e))
   }
 }
 
 impl ArgumentFrom<String> for u64 {
   fn arg_from(t: String) -> anyhow::Result<Self> {
-    t.parse().map_err(|e| anyhow!(format!("Invalid integer: `{}`", e)))
+    t.parse().map_err(|e| anyhow!("Invalid integer: `{}`", e))
   }
 }
 
@@ -163,12 +165,11 @@ impl ArgumentFrom<toml::Value> for u32 {
       toml::Value::Integer(i) => Ok(i as Self),
       toml::Value::String(s) => {
         let s = s.trim_start_matches("0x");
-        let num = u32::from_str_radix(s, 16).map_err(|e| {
-          anyhow!(format!("Invalid hexadecimal '{}': {}", s, e))
-        })?;
+        let num = u32::from_str_radix(s, 16)
+          .map_err(|e| anyhow!("Invalid hexadecimal '{}': {}", s, e))?;
         Ok(num)
       }
-      _ => Err(anyhow!(format!("Invalid integer '{}'", value))),
+      _ => Err(anyhow!("Invalid integer '{}'", value)),
     }
   }
 }
@@ -179,12 +180,11 @@ impl ArgumentFrom<toml::Value> for u64 {
       toml::Value::Integer(i) => Ok(i as u64),
       toml::Value::String(s) => {
         let s = s.trim_start_matches("0x");
-        let num = u64::from_str_radix(s, 16).map_err(|e| {
-          anyhow!(format!("Invalid hexadecimal '{}': {}", s, e))
-        })?;
+        let num = u64::from_str_radix(s, 16)
+          .map_err(|e| anyhow!("Invalid hexadecimal '{}': {}", s, e))?;
         Ok(num)
       }
-      _ => Err(anyhow!(format!("Invalid integer '{}'", value))),
+      _ => Err(anyhow!("Invalid integer '{}'", value)),
     }
   }
 }
@@ -202,7 +202,7 @@ impl ArgumentFrom<String> for bool {
     } else if t == "false" {
       Ok(false)
     } else {
-      Err(anyhow!(format!("Invalid boolean value: {}", t)))
+      Err(anyhow!("Invalid boolean value: {}", t))
     }
   }
 }
@@ -214,7 +214,7 @@ impl ArgumentFrom<String> for PathBuf {
         .ok_or_else(|| anyhow!("Could not find $HOME directory."))?;
       Ok(home_dir.join(path))
     } else {
-      PathBuf::from_str(&t).map_err(|_| anyhow!(format!("Invalid path: {}", t)))
+      PathBuf::from_str(&t).map_err(|_| anyhow!("Invalid path: {}", t))
     }
   }
 }
@@ -230,28 +230,25 @@ impl ArgumentFrom<toml::Value> for PathBuf {
 
 impl ArgumentFrom<toml::Value> for String {
   fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
-    t.try_into()
-      .map_err(|_| anyhow!("Could not convert value into String".to_string()))
+    t.try_into().map_err(|_| anyhow!("Could not convert value into String"))
   }
 }
 
 impl ArgumentFrom<toml::Value> for Vec<String> {
   fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
-    t.try_into()
-      .map_err(|_| anyhow!("Could not convert value into array".to_string()))
+    t.try_into().map_err(|_| anyhow!("Could not convert value into array"))
   }
 }
 
 impl ArgumentFrom<toml::Value> for bool {
   fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
-    t.as_bool().ok_or_else(|| anyhow!(format!("Invalid boolean value: {}", t)))
+    t.as_bool().ok_or_else(|| anyhow!("Invalid boolean value: {}", t))
   }
 }
 
 impl ArgumentFrom<toml::Value> for kindelia_core::config::ApiConfig {
   fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
-    t.try_into()
-      .map_err(|_| anyhow!("Could not convert value into array".to_string()))
+    t.try_into().map_err(|_| anyhow!("Could not convert value into array"))
   }
 }
 
@@ -262,7 +259,7 @@ pub fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
     FileInput::Path { path } => {
       // read from file
       let content = std::fs::read_to_string(&path).map_err(|err| {
-        anyhow!(format!("Cannot read from '{:?}' file: {}", path, err))
+        anyhow!("Cannot read from '{:?}' file: {}", path, err)
       })?;
       T::arg_from(content)
     }
@@ -271,7 +268,7 @@ pub fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
       let mut input = String::new();
       match std::io::stdin().read_line(&mut input) {
         Ok(_) => T::arg_from(input.trim().to_string()),
-        Err(err) => Err(anyhow!(format!("Could not read from stdin: {}", err))),
+        Err(err) => Err(anyhow!("Could not read from stdin: {}", err)),
       }
     }
   }
