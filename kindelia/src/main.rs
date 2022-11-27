@@ -3,7 +3,7 @@ mod config;
 mod files;
 mod util;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use std::future::Future;
 use std::net::{SocketAddr, UdpSocket};
 use std::path::Path;
@@ -57,10 +57,8 @@ macro_rules! resolve_cfg {
     ConfigSettingsBuilder::default()
       .env($env)
       .default_value($default)
-      .build()
-      .unwrap()
-      .resolve($cli, None)
-      .map_err(|e| anyhow!(e))?
+      .build()?
+      .resolve($cli, None)?
   };
 
   // No default value
@@ -69,10 +67,8 @@ macro_rules! resolve_cfg {
       .env($env)
       .prop($prop)
       .default_value($default)
-      .build()
-      .unwrap()
-      .resolve($cli, None)
-      .map_err(|e| anyhow!(e))?
+      .build()?
+      .resolve($cli, None)?
   };
 
   // Resolve config value with file
@@ -84,10 +80,8 @@ macro_rules! resolve_cfg {
       .env($env)
       .prop($prop)
       .default_value(|| Ok($default))
-      .build()
-      .unwrap()
-      .resolve($cli, $cfg)
-      .map_err(|e| anyhow!(e))?
+      .build()?
+      .resolve($cli, $cfg)?
   };
 
   // No default value
@@ -96,10 +90,8 @@ macro_rules! resolve_cfg {
       .env($env)
       .prop($prop)
       .default_value(|| Err($default))
-      .build()
-      .unwrap()
-      .resolve($cli, $cfg)
-      .map_err(|e| anyhow!(e))?
+      .build()?
+      .resolve($cli, $cfg)?
   };
 }
 
@@ -109,8 +101,7 @@ macro_rules! resolve_cfg {
 pub fn run_cli() -> anyhow::Result<()> {
   let parsed = Cli::parse();
   let default_base_path = || {
-    let home_dir =
-      dirs::home_dir().ok_or_else(|| anyhow!("Could not find $HOME path"))?;
+    let home_dir = dirs::home_dir().context("Could not find $HOME path")?;
     Ok::<_, anyhow::Error>(home_dir.join(".kindelia"))
   };
   let default_node_data_path =
@@ -183,9 +174,8 @@ pub fn run_cli() -> anyhow::Result<()> {
     CliCommand::Sign { file, secret_file, encoded, encoded_output } => {
       let skey: String = arg_from_file_or_stdin(secret_file.into())?;
       let skey = skey.trim();
-      let skey = hex::decode(skey).map_err(|err| {
-        anyhow!("Secret key should be valid hex string: {}", err)
-      })?;
+      let skey =
+        hex::decode(skey).context("Secret key should be valid hex string")?;
       let skey: [u8; 32] = skey
         .try_into()
         .map_err(|_| anyhow!("Secret key should have exactly 64 bytes"))?;
@@ -204,8 +194,9 @@ pub fn run_cli() -> anyhow::Result<()> {
     CliCommand::RunRemote { file, encoded } => {
       // TODO: client timeout
       let code = file.read_to_string()?;
-      let f =
-        |client: ApiClient, stmts| async move { client.run_code(stmts).await };
+      let f = |client: ApiClient, stmts| async move {
+        client.run_code(stmts).await.map_err(|e| anyhow!(e))
+      };
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
@@ -232,7 +223,7 @@ pub fn run_cli() -> anyhow::Result<()> {
     }
     CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &api_url);
-      run_async_blocking(prom).map_err(|e| anyhow!(e))
+      run_async_blocking(prom)
     }
     CliCommand::Init => {
       let path = default_config_path()?;
@@ -262,8 +253,9 @@ pub fn run_cli() -> anyhow::Result<()> {
       .join(format!("{:#02X}", network_id));
 
       match command {
-        NodeCommand::Clean { command } => clean(&data_path, command)
-          .map_err(|err| anyhow!("Could not clean kindelia's data: {}", err)),
+        NodeCommand::Clean { command } => {
+          clean(&data_path, command).context("Could not clean kindelia's data")
+        }
         NodeCommand::Start { initial_peers, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
@@ -304,7 +296,7 @@ pub fn run_cli() -> anyhow::Result<()> {
           let node_comm = init_socket().expect("Could not open a UDP socket");
           let initial_peers = initial_peers
             .into_iter()
-            .map(|x| net::parse_address(&x).map_err(|e| anyhow!(e)))
+            .map(|x| net::parse_address(&x).context("parsing peer addr"))
             .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
           let node_cfg = NodeConfig {
@@ -332,8 +324,7 @@ pub fn run_cli() -> anyhow::Result<()> {
           .map(|s| s.strip_prefix("0x").unwrap_or(s))
           .map(hex::decode)
           .collect();
-        let data =
-          data.map_err(|err| anyhow!("Invalid hex string: {}", err))?;
+        let data = data.context("Invalid hex string")?;
         let nums = data.iter().map(|v| bytes_to_u128(v));
         for num in nums {
           if let Some(num) = num {
@@ -361,11 +352,11 @@ fn run_on_remote<T, P, F>(
 ) -> anyhow::Result<T>
 where
   F: FnOnce(ApiClient, Vec<HexStatement>) -> P,
-  P: Future<Output = Result<T, String>>,
+  P: Future<Output = anyhow::Result<T>>,
 {
   let stmts: Vec<HexStatement> = stmts.into_iter().map(|s| s.into()).collect();
   let client = ApiClient::new(api_url, None)?;
-  run_async_blocking(f(client, stmts)).map_err(|e| anyhow!(e))
+  run_async_blocking(f(client, stmts))
 }
 
 fn print_json_else<T: Serialize, F: Fn(T)>(
@@ -391,22 +382,24 @@ pub async fn get_info(
   kind: GetKind,
   json: bool,
   host_url: &str,
-) -> Result<(), String> {
-  let client = ApiClient::new(host_url, None).map_err(|e| e.to_string())?;
+) -> anyhow::Result<()> {
+  let client = ApiClient::new(host_url, None)?;
   match kind {
     GetKind::BlockHash { index } => {
-      let block_hash = client.get_block_hash(index).await?;
+      let block_hash =
+        client.get_block_hash(index).await.map_err(|e| anyhow!(e))?;
       println!("{}", block_hash);
       Ok(())
     }
     GetKind::Block { hash } => {
-      let hash = Hash::try_from(hash.as_str())?;
-      let block = client.get_block(hash).await?;
+      let hash = Hash::try_from(hash.as_str()).map_err(|e| anyhow!(e))?;
+      let block = client.get_block(hash).await.map_err(|e| anyhow!(e))?;
       println!("{:#?}", block);
       Ok(())
     }
     GetKind::Ctr { name, stat } => {
-      let ctr_info = client.get_constructor(name).await?;
+      let ctr_info =
+        client.get_constructor(name).await.map_err(|e| anyhow!(e))?;
       match stat {
         GetCtrKind::Arity => {
           println!("{}", ctr_info.arit)
@@ -423,7 +416,8 @@ pub async fn get_info(
     }
     GetKind::Fun { name, stat } => match stat {
       GetFunKind::Code => {
-        let func_info = client.get_function(name).await?;
+        let func_info =
+          client.get_function(name).await.map_err(|e| anyhow!(e))?;
         print_json_else(json, func_info, |func_info| {
           let func = func_info.func;
           let statement = ast::Statement::Fun {
@@ -438,14 +432,16 @@ pub async fn get_info(
         Ok(())
       }
       GetFunKind::State => {
-        let state = client.get_function_state(name).await?;
+        let state =
+          client.get_function_state(name).await.map_err(|e| anyhow!(e))?;
         print_json_else(json, &state, |state| println!("{}", state));
         Ok(())
       }
       GetFunKind::Slots => todo!(),
     },
     GetKind::Reg { name, stat } => {
-      let reg_info = client.get_reg_info(&name).await?;
+      let reg_info =
+        client.get_reg_info(&name).await.map_err(|e| anyhow!(e))?;
       match stat {
         GetRegKind::Owner => {
           println!("{:x}", *(reg_info.ownr))
@@ -459,7 +455,7 @@ pub async fn get_info(
       Ok(())
     }
     GetKind::Stats { stat_kind } => {
-      let stats = client.get_stats().await?;
+      let stats = client.get_stats().await.map_err(|e| anyhow!(e))?;
       match stat_kind {
         None => {
           print_json_else(json, &stats, |stats| println!("{:#?}", stats));
@@ -494,7 +490,7 @@ pub async fn get_info(
       Ok(())
     }
     GetKind::Peers { all } => {
-      let peers = client.get_peers::<NC>(all).await?;
+      let peers = client.get_peers::<NC>(all).await.map_err(|e| anyhow!(e))?;
       for peer in peers {
         println!("{}", peer.address)
       }
@@ -571,10 +567,10 @@ fn statements_from_hex_seq(txt: &str) -> anyhow::Result<Vec<ast::Statement>> {
 }
 
 fn statement_from_hex(hex: &str) -> anyhow::Result<ast::Statement> {
-  let bytes = hex::decode(hex)
-    .map_err(|err| anyhow!("Invalid hexadecimal '{}': {}", hex, err))?;
+  let bytes =
+    hex::decode(hex).context(anyhow!("Invalid hexadecimal '{}'", hex))?;
   ast::Statement::proto_deserialized(&bytes_to_bitvec(&bytes))
-    .ok_or_else(|| anyhow!("Failed to deserialize '{}'", hex))
+    .context(anyhow!("Failed to deserialize '{}'", hex))
 }
 pub fn publish_code(
   api_url: &str,
@@ -589,8 +585,10 @@ pub fn publish_code(
 
   let peer_urls: Vec<String> = if hosts.is_empty() {
     // obtain list of active peers known to "our" node.
-    let prom = async move { client.get_peers::<NC>(false).await };
-    let peers = runtime.block_on(prom).map_err(|e| anyhow!(e))?;
+    let prom = async move {
+      client.get_peers::<NC>(false).await.map_err(|e| anyhow!(e))
+    };
+    let peers = runtime.block_on(prom)?;
     let mut urls: Vec<String> = peers
       .iter()
       .map(|p| match p.address {
@@ -877,11 +875,11 @@ pub fn start_node<C: ProtoComm + 'static>(
 fn print_shell_completions(shell: Shell) -> anyhow::Result<()> {
   // obtain name of present executable
   let exec_name = std::env::current_exe()
-    .map_err(|e| anyhow!("Error getting current executable: {}", e))?
+    .context("getting current executable")?
     .file_name()
-    .ok_or_else(|| anyhow!("Error getting executable file name"))?
+    .context("getting executable file name")?
     .to_str()
-    .ok_or_else(|| anyhow!("Error decoding executable name as utf8"))?
+    .context("decoding executable name as utf8")?
     .to_string();
 
   // Generates completions for <shell> and prints to stdout

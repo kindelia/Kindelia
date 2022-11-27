@@ -20,9 +20,9 @@ pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
 // Async
 // =====
 
-pub fn run_async_blocking<T, E: ToString, P>(prom: P) -> Result<T, E>
+pub fn run_async_blocking<T, P>(prom: P) -> anyhow::Result<T>
 where
-  P: Future<Output = Result<T, E>>,
+  P: Future<Output = anyhow::Result<T>>,
 {
   let runtime = tokio::runtime::Runtime::new().unwrap();
   runtime.block_on(prom)

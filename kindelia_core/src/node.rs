@@ -764,7 +764,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   pub fn new(
     data_path: PathBuf,
     network_id: u32,
-    addr: C::Address,
+    addr: C::Address,  // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
