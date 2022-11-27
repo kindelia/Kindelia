@@ -223,7 +223,7 @@ pub fn run_cli() -> anyhow::Result<()> {
     }
     CliCommand::Get { kind, json } => {
       let prom = get_info(kind, json, &api_url);
-      run_async_blocking(prom)
+      run_async_blocking(prom).map_err(|e| anyhow!(e))
     }
     CliCommand::Init => {
       let path = default_config_path()?;
