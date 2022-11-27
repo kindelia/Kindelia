@@ -8,7 +8,7 @@ use std::thread;
 use crate::config;
 #[cfg(feature = "events")]
 use crate::events;
-use crate::net::{self, ProtoComm};
+use crate::net::{self, ProtoComm, ProtoCommError};
 use crate::node;
 use crate::{bits, persistence};
 
@@ -103,7 +103,7 @@ fn start_simulation<C: ProtoComm + 'static>(
   initial_peers: Vec<C::Address>,
   tags: Vec<events::NodeEventDiscriminant>,
 ) {
-  let addr = comm.get_addr();
+  let addr = comm.get_addr().unwrap();
 
   // Events
   #[cfg(feature = "events")]
@@ -121,6 +121,7 @@ fn start_simulation<C: ProtoComm + 'static>(
     let (node_query_sender, node) = node::Node::new(
       node_config.data_path,
       node_config.network_id,
+      addr,
       initial_peers,
       comm,
       miner_comm,
@@ -239,8 +240,8 @@ impl net::ProtoComm for SocketMock {
     }
   }
 
-  fn get_addr(&self) -> Self::Address {
-    self.addr
+  fn get_addr(&self) -> Result<Self::Address, ProtoCommError> {
+    Ok(self.addr)
   }
 }
 

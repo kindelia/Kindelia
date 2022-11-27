@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use std::fmt::{Display, Formatter};
 use std::io::Read;
 use std::path::PathBuf;
@@ -40,19 +41,20 @@ impl Display for FileInput {
 
 // TODO: alternative that do not read the whole file immediately
 impl FileInput {
-  pub fn read_to_string(&self) -> Result<String, String> {
+  pub fn read_to_string(&self) -> anyhow::Result<String> {
     match self {
       FileInput::Path { path } => {
         // read from file
-        std::fs::read_to_string(path)
-          .map_err(|e| format!("Cannot read from '{:?}' file: {}", path, e))
+        std::fs::read_to_string(path).map_err(|e| {
+          anyhow!(format!("Cannot read from '{:?}' file: {}", path, e))
+        })
       }
       FileInput::Stdin => {
         // read from stdin
         let mut buff = String::new();
         std::io::stdin()
           .read_to_string(&mut buff)
-          .map_err(|e| format!("Could not read from stdin: {}", e))?;
+          .map_err(|e| anyhow!(format!("Could not read from stdin: {}", e)))?;
         Ok(buff)
       }
     }

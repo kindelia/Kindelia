@@ -47,7 +47,7 @@ serde_json = "1.0"
 
 # Events API
 tokio = { version = "1.19.1", features = ["sync"] }
-
+anyhow = { version = "1.0.66", features = ["backtrace"] }
 
 [dev-dependencies]
 assert_cmd = "1.0.1"

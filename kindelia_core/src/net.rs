@@ -2,9 +2,11 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 pub use std::net::UdpSocket;
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::num::ParseIntError;
 
 use bit_vec::BitVec;
 use serde;
+use thiserror::Error;
 
 use crate::bits::ProtoSerialize;
 use crate::node::Message;
@@ -29,6 +31,18 @@ where
 {
 }
 
+/// Errors associated with the ProtoComm trait.
+/// 
+/// Source error types are dynamic to enable trait implementors
+/// to provide their own error type if needed.
+#[derive(Error, Debug)]
+pub enum ProtoCommError {
+  #[error("Address is unavailable")]
+  AddrUnavailable{source: Box<dyn std::error::Error + Send + Sync + 'static>},
+  #[error(transparent)]
+  Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
 /// Defines how the messages will be sent and received
 /// by the chain nodes.
 pub trait ProtoComm
@@ -36,13 +50,14 @@ where
   Self: Sized + Send,
 {
   type Address: ProtoAddr;
+
   fn proto_send(
     &mut self,
     addresses: Vec<Self::Address>,
     message: &Message<Self::Address>,
   );
   fn proto_recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)>;
-  fn get_addr(&self) -> Self::Address;
+  fn get_addr(&self) -> Result<Self::Address, ProtoCommError>;
 }
 
 // UDP Implementation
@@ -72,23 +87,46 @@ impl std::fmt::Display for Address {
   }
 }
 
+#[derive(Error, Debug)]
+pub enum ParseAddressError {
+  #[error("Invalid IP Address '{value:?}'")]
+  InvalidAddress {
+    value: String,
+    source: ParseIntError,
+  },
+  #[error("Invalid Port '{value:?}'")]
+  InvalidPort {
+    value: String,
+    source: ParseIntError,
+  },
+}
+
 /// Converts a string to an UDP Address.
 /// TODO: UNSAFE.
-pub fn parse_address(code: &str) -> Address {
+pub fn parse_address(code: &str) -> Result<Address, ParseAddressError> {
   let strs = code.split(':').collect::<Vec<&str>>();
-  let vals =
-    strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();
-  let port = strs.get(1).map(|s| s.parse::<u16>().unwrap()).unwrap_or(UDP_PORT);
-  Address::IPv4 {
+  let vals = strs[0]
+    .split('.')
+    .map(|o| {
+      o.parse::<u8>()
+        .map_err(|e| ParseAddressError::InvalidAddress{value: strs[0].to_string(), source: e}) })
+    .collect::<Result<Vec<u8>, ParseAddressError>>()?;
+  let port = match strs.get(1) {
+    Some(s) => s
+      .parse::<u16>()
+      .map_err(|e| ParseAddressError::InvalidAddress{value: strs[0].to_string(), source: e})?,
+    None => UDP_PORT,
+  };
+  Ok(Address::IPv4 {
     val0: vals[0],
     val1: vals[1],
     val2: vals[2],
     val3: vals[3],
     port,
-  }
+  })
 }
 
-/// The UDP implementation based on `std::netUdpSocket` struct
+/// The UDP implementation based on `std::net::UdpSocket` struct
 impl ProtoComm for UdpSocket {
   type Address = Address;
   fn proto_send(
@@ -119,7 +157,7 @@ impl ProtoComm for UdpSocket {
             Address::IPv4 { val0, val1, val2, val3, port: sender_addr.port() }
           }
           _ => {
-            panic!("TODO: IPv6")
+            unimplemented!("TODO: IPv6")
           }
         };
         messages.push((addr, msge));
@@ -127,14 +165,16 @@ impl ProtoComm for UdpSocket {
     }
     messages
   }
-  fn get_addr(&self) -> Self::Address {
-    // TODO: remove unwrap and panic
-    let addr = self.local_addr().unwrap();
+  fn get_addr(&self) -> Result<Self::Address, ProtoCommError> {
+    // TODO: impl IPV6
+    let addr = self
+      .local_addr()
+      .map_err(|e| ProtoCommError::AddrUnavailable { source: Box::new(e) })?;
     if let std::net::IpAddr::V4(v4addr) = addr.ip() {
       let [val0, val1, val2, val3] = v4addr.octets();
-      Address::IPv4 { val0, val1, val2, val3, port: addr.port() }
+      Ok(Address::IPv4 { val0, val1, val2, val3, port: addr.port() })
     } else {
-      panic!("TODO: IPv6")
+      unimplemented!("TODO: IPv6")
     }
   }
 }
@@ -168,8 +208,8 @@ impl ProtoAddr for EmptyAddress {}
 impl ProtoComm for EmptySocket {
   type Address = EmptyAddress;
 
-  fn get_addr(&self) -> Self::Address {
-    EmptyAddress
+  fn get_addr(&self) -> Result<Self::Address, ProtoCommError> {
+    Ok(EmptyAddress)
   }
   fn proto_recv(&mut self) -> Vec<(Self::Address, Message<Self::Address>)> {
     vec![]

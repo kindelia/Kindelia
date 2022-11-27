@@ -9,6 +9,7 @@ use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::{constants, runtime, net, node, util};
+use kindelia_core::net::ProtoComm;
 
 // KHVM
 // ====
@@ -150,10 +151,11 @@ fn block_loading(c: &mut Criterion) {
 
   // empty `ProtoComm` to pass the created node
   let comm = net::EmptySocket;
+  let addr = comm.get_addr().unwrap();
 
   // create Node
   let (_, mut node) =
-    node::Node::new(dir.clone(), 0, vec![], comm, None, storage, None);
+    node::Node::new(dir.clone(), 0, addr, vec![], comm, None, storage, None);
 
   // benchmark block loading
   c.bench_function("block_loading", |b| b.iter(|| node.load_blocks()));
