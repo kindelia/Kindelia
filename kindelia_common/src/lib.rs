@@ -247,7 +247,9 @@ impl Name {
 
   #[allow(clippy::should_implement_trait)]
   pub fn from_str(name_txt: &str) -> Result<Name, String> {
-    if name_txt.len() > Self::MAX_CHARS {
+    if name_txt == "~" {
+      Ok(Name::NONE)
+    } else if name_txt.len() > Self::MAX_CHARS {
       Err(format!("Name '{}' exceeds {} letters.", name_txt, Self::MAX_CHARS))
     } else {
       let mut num: u128 = 0;
