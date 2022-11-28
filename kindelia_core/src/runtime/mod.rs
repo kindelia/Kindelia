@@ -841,7 +841,7 @@ pub fn split_names(name: Name) -> Vec<String> {
 pub fn get_namespace(name: Name) -> Option<Name> {
   let names = split_names(name);
   // TODO: pattern match
-  // TODO: operate on number instead of string
+  // TODO: operate on numbers instead of string
   if names.len() > 1 {
     let name = Name::from_str_unsafe(&names[0 .. names.len() - 1].join("."));
     return Some(name);

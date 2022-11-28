@@ -245,23 +245,9 @@ impl Name {
     Name(numb)
   }
 
-  #[allow(clippy::should_implement_trait)]
-  pub fn from_str(name_txt: &str) -> Result<Name, String> {
-    if name_txt == "~" {
-      Ok(Name::NONE)
-    } else if name_txt.len() > Self::MAX_CHARS {
-      Err(format!("Name '{}' exceeds {} letters.", name_txt, Self::MAX_CHARS))
-    } else {
-      let mut num: u128 = 0;
-      for chr in name_txt.chars() {
-        num = (num << 6) + char_to_code(chr)?;
-      }
-      Ok(Name(num))
-    }
-  }
-
-  /// Converts a name string to a Name. Same as `from_str`, but panics
-  /// when name length > 12 or on invalid letter. **DEPRECATED**.
+  /// Converts a name string to a Name. Same as `from_str`, but panics when name
+  /// length > 12 or on invalid letter. It also does not handle `~` (NONE)
+  /// syntax. **DEPRECATED**.
   // TODO: This should be removed.
   pub fn from_str_unsafe(name_txt: &str) -> Name {
     let mut num: u128 = 0;
@@ -310,6 +296,24 @@ impl fmt::Display for Name {
   }
 }
 
+// Necessary for serde `try_from` attr
+impl TryFrom<&str> for Name {
+  type Error = String;
+  fn try_from(name_txt: &str) -> Result<Self, Self::Error> {
+    if name_txt == "~" {
+      Ok(Name::NONE)
+    } else if name_txt.len() > Self::MAX_CHARS {
+      Err(format!("Name '{}' exceeds {} letters.", name_txt, Self::MAX_CHARS))
+    } else {
+      let mut num: u128 = 0;
+      for chr in name_txt.chars() {
+        num = (num << 6) + char_to_code(chr)?;
+      }
+      Ok(Name(num))
+    }
+  }
+}
+
 impl TryFrom<u128> for Name {
   type Error = String;
   fn try_from(name: u128) -> Result<Self, Self::Error> {
@@ -326,14 +330,6 @@ impl From<U120> for Name {
   fn from(num: U120) -> Self {
     assert!(*num >> Name::MAX_BITS == 0);
     Name(*num)
-  }
-}
-
-// Necessary for serde `try_from` attr
-impl TryFrom<&str> for Name {
-  type Error = String;
-  fn try_from(name: &str) -> Result<Self, Self::Error> {
-    Name::from_str(name)
   }
 }
 
