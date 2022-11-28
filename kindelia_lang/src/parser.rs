@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::{Func, Oper, Rule, Statement, Term};
 use kindelia_common::{crypto, Name, U120};
+use thiserror::Error;
 
 pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+#[error("Parser error")]
 pub struct ParseErr {
   pub code: String,
   pub erro: String,

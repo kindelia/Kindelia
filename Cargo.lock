@@ -1567,6 +1567,7 @@ dependencies = [
  "hex",
  "kindelia_common",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
