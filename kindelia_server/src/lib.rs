@@ -1,5 +1,4 @@
-// TODO: spam control system
-
+use std::str::FromStr;
 use std::sync::mpsc::SyncSender;
 
 use bit_vec::BitVec;

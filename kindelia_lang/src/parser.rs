@@ -1,10 +1,10 @@
 #![allow(clippy::style)]
 
-//use std::hash::{Hash, Hasher};
-//use std::collections::hash_map;
+use std::str::FromStr;
+use serde::{Deserialize, Serialize};
+
 use crate::ast::{Func, Oper, Rule, Statement, Term};
 use kindelia_common::{crypto, Name, U120};
-use serde::{Deserialize, Serialize};
 
 pub type ParseResult<'a, A> = Result<(&'a str, A), ParseErr>;
 

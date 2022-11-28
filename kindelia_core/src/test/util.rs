@@ -1,6 +1,7 @@
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use rstest::fixture;

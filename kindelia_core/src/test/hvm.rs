@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use proptest::prelude::ProptestConfig;
 use proptest::proptest;

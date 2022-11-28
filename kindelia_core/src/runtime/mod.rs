@@ -246,6 +246,7 @@ use std::fmt::{self, Write};
 use std::fs::File;
 use std::hash::{BuildHasherDefault, Hash};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
