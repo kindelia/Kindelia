@@ -4,13 +4,14 @@ use std::io::{Error, ErrorKind, Read, Result as IoResult, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
+use thiserror::Error as ThisError;
 
 use kindelia_common::{crypto, Name, U120};
 use kindelia_lang::ast::Func;
 
 use crate::bits::ProtoSerialize;
-use crate::runtime::{compile_func, CompFunc};
 use crate::node::{self, HashedBlock};
+use crate::runtime::{compile_func, CompFunc};
 use crate::util::{self, bitvec_to_bytes};
 
 /// Trait that represents serialization of a type to memory.
@@ -261,10 +262,15 @@ impl DiskSer for crate::runtime::Loc {
 }
 
 impl DiskSer for U120 {
-  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+  fn disk_serialize<W: std::io::Write>(
+    &self,
+    sink: &mut W,
+  ) -> std::io::Result<usize> {
     self.0.disk_serialize(sink)
   }
-  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+  fn disk_deserialize<R: std::io::Read>(
+    source: &mut R,
+  ) -> std::io::Result<Option<Self>> {
     let num = u128::disk_deserialize(source)?;
     match num {
       None => Ok(None),
@@ -280,10 +286,15 @@ impl DiskSer for U120 {
 }
 
 impl DiskSer for Name {
-  fn disk_serialize<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize>{ 
+  fn disk_serialize<W: std::io::Write>(
+    &self,
+    sink: &mut W,
+  ) -> std::io::Result<usize> {
     self.0.disk_serialize(sink)
   }
-  fn disk_deserialize<R: std::io::Read>(source: &mut R) -> std::io::Result<Option<Self>> {
+  fn disk_deserialize<R: std::io::Read>(
+    source: &mut R,
+  ) -> std::io::Result<Option<Self>> {
     let num = u128::disk_deserialize(source)?;
     match num {
       None => Ok(None),
@@ -297,14 +308,37 @@ impl DiskSer for Name {
 
 pub const BLOCKS_DIR: &str = "blocks";
 
+/// Errors associated with the BlockStorage trait.
+///
+/// Source error types are dynamic to enable trait implementors
+/// to provide their own error type if needed.
+#[derive(ThisError, Debug)]
+pub enum BlockStorageError {
+  #[error("Block storage write error")]
+  Write { source: Box<dyn std::error::Error + Send + Sync + 'static> },
+  #[error("Block storage read error")]
+  Read { source: Box<dyn std::error::Error + Send + Sync + 'static> },
+  #[error("Block storage serialization error")]
+  Serialization {
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+  },
+}
+
 /// A block writter interface, used to tell the node
 /// how it should write a block (in file system, in a mocked container, etc).
 pub trait BlockStorage
 where
   Self: Clone,
 {
-  fn write_block(&self, height: u128, block: HashedBlock);
-  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, then: F);
+  fn write_block(
+    &self,
+    height: u128,
+    block: HashedBlock,
+  ) -> Result<(), BlockStorageError>;
+  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+    &self,
+    then: F,
+  ) -> Result<(), BlockStorageError>;
   fn disable(&mut self);
   fn enable(&mut self);
 }
@@ -328,13 +362,13 @@ impl SimpleFileStorage {
   ///
   /// But this function is only used in `node start` function, therefore
   /// this thread will be terminated together with the other node threads (mining, events, etc).
-  pub fn new(path: PathBuf) -> Self {
+  pub fn new(path: PathBuf) -> Result<Self, BlockStorageError> {
     // create channel
     let (tx, rx) = mpsc::channel::<FileWritterChannelInfo>();
     // blocks are stored in `blocks` dir
     let blocks_path = path.join(BLOCKS_DIR);
     std::fs::create_dir_all(&blocks_path)
-      .expect("Could not create block storage folder");
+      .map_err(|e| BlockStorageError::Write { source: Box::new(e) })?;
 
     let moved_path = blocks_path.clone();
     // spawn thread for write the blocks files
@@ -347,37 +381,53 @@ impl SimpleFileStorage {
         // create file buffer
         let file_buff = bitvec_to_bytes(&block.proto_serialized());
         // write file
-        std::fs::write(file_path, file_buff)
-          .expect("Couldn't save block to disk."); // remove panick?
+        if let Err(e) = std::fs::write(file_path, file_buff)
+          .map_err(|e| BlockStorageError::Write { source: Box::new(e) })
+        {
+          eprintln!("Couldn't save block to disk.\n{}", e);
+        }
       }
     });
 
-    SimpleFileStorage { tx, path: blocks_path, enabled: true }
+    Ok(SimpleFileStorage { tx, path: blocks_path, enabled: true })
   }
 }
 
 impl BlockStorage for SimpleFileStorage {
-  fn write_block(&self, height: u128, block: HashedBlock) {
+  fn write_block(
+    &self,
+    height: u128,
+    block: HashedBlock,
+  ) -> Result<(), BlockStorageError> {
     // if file storage is enabled
     if self.enabled {
       // try to send the info for the file writter
       // if an error occurr, print it
       if let Err(err) = self.tx.send((height, block)) {
         eprintln!("Could not save block of height {}: {}", height, err);
+        return Err(BlockStorageError::Write { source: Box::new(err) });
       }
     }
+    Ok(())
   }
-  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, then: F) {
-    let file_paths = get_ordered_blocks_path(&self.path);
-    file_paths
-      .into_iter()
-      .map(|(_, file_path)| {
-        let buffer = std::fs::read(&file_path).unwrap();
-        let block =
-          node::Block::proto_deserialized(&util::bytes_to_bitvec(&buffer));
-        (block, file_path)
-      })
-      .for_each(then);
+  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+    &self,
+    then: F,
+  ) -> Result<(), BlockStorageError> {
+    let file_paths = get_ordered_blocks_path(&self.path)
+      .map_err(|e| BlockStorageError::Read { source: Box::new(e) })?;
+
+    let mut items = vec![];
+    for (_, file_path) in file_paths.into_iter() {
+      let buffer = std::fs::read(&file_path)
+        .map_err(|e| BlockStorageError::Read { source: Box::new(e) })?;
+      let block =
+        node::Block::proto_deserialized(&util::bytes_to_bitvec(&buffer))
+          .ok_or(BlockStorageError::Serialization { source: None })?;
+      items.push((block, file_path));
+    }
+    items.into_iter().for_each(then);
+    Ok(())
   }
   fn disable(&mut self) {
     self.enabled = false;
@@ -387,27 +437,60 @@ impl BlockStorage for SimpleFileStorage {
   }
 }
 
-// TODO: remove unwraps, return Result instead
+/// Errors associated with get_ordered_blocks_path
+#[derive(ThisError, Debug)]
+pub enum OrderedBlocksError {
+  #[error("Could not read directory {path:?}")]
+  ReadDir { path: PathBuf, source: std::io::Error },
+  #[error("Could not read filename in {0}")]
+  BadFileName(PathBuf),
+  #[error("Missing extension {0}")]
+  MissingExtension(PathBuf),
+  #[error("Filename is not numeric {path:?}")]
+  NotNumeric { path: PathBuf, source: std::num::ParseIntError },
+}
+
 /// Get all block entries in the `path`, sort it by the name/height and
 /// returns a vector containing ordered (height, paths).
 ///
 /// Expects all the dir entries to be a kindelia block, named as
 /// <block_height>.kindelia_block.bin.
-pub fn get_ordered_blocks_path(path: &Path) -> Vec<(u64, PathBuf)> {
-  let mut file_paths = std::fs::read_dir(path)
-    .unwrap()
-    .map(|entry| {
-      // Extract block height from block file path for fast sort
-      let path = entry.unwrap().path();
-      let name = path.file_name().unwrap().to_str().unwrap();
-      let bnum = name.split('.').next().unwrap();
-      let bnum = u64::from_str_radix(bnum, 16).unwrap();
-      (bnum, path)
-    })
-    .collect::<Vec<_>>();
-  file_paths.sort_unstable();
+///
+/// note: presently we error out immediately if any file naming
+/// abnormality is detected.  We could just ignore that
+/// entry instead.
+pub fn get_ordered_blocks_path(
+  path: &Path,
+) -> Result<Vec<(u64, PathBuf)>, OrderedBlocksError> {
+  let mut file_paths = vec![];
 
-  file_paths
+  for entry in std::fs::read_dir(path).map_err(|e| {
+    OrderedBlocksError::ReadDir { path: path.to_path_buf(), source: e }
+  })? {
+    // Extract block height from block file path for fast sort
+    let path = entry
+      .map_err(|e| OrderedBlocksError::ReadDir {
+        path: path.to_path_buf(),
+        source: e,
+      })?
+      .path();
+    let name = path
+      .file_name()
+      .ok_or_else(|| OrderedBlocksError::BadFileName(path.to_path_buf()))?
+      .to_str()
+      .ok_or_else(|| OrderedBlocksError::BadFileName(path.to_path_buf()))?;
+    let bnum = name
+      .split('.')
+      .next()
+      .ok_or_else(|| OrderedBlocksError::MissingExtension(path.join(name)))?;
+    let bnum = u64::from_str_radix(bnum, 16).map_err(|e| {
+      OrderedBlocksError::NotNumeric { path: path.join(name), source: e }
+    })?;
+    file_paths.push((bnum, path));
+  }
+
+  file_paths.sort_unstable();
+  Ok(file_paths)
 }
 
 #[derive(Clone)]
@@ -416,6 +499,17 @@ pub struct EmptyStorage;
 impl BlockStorage for EmptyStorage {
   fn enable(&mut self) {}
   fn disable(&mut self) {}
-  fn read_blocks<F: FnMut((Option<node::Block>, PathBuf))>(&self, _: F) {}
-  fn write_block(&self, _: u128, _: HashedBlock) {}
+  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+    &self,
+    _: F,
+  ) -> Result<(), BlockStorageError> {
+    Ok(())
+  }
+  fn write_block(
+    &self,
+    _: u128,
+    _: HashedBlock,
+  ) -> Result<(), BlockStorageError> {
+    Ok(())
+  }
 }

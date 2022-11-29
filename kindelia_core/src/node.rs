@@ -26,7 +26,7 @@ use crate::bits::ProtoSerialize;
 use crate::config::MineConfig;
 use crate::constants;
 use crate::net::{ProtoAddr, ProtoComm};
-use crate::persistence::BlockStorage;
+use crate::persistence::{BlockStorage, BlockStorageError};
 use crate::runtime::*;
 use crate::util::*;
 
@@ -759,12 +759,19 @@ pub fn miner_loop(
 // Node
 // ----
 
+/// Errors associated with Node.
+#[derive(Error, Debug)]
+pub enum NodeError {
+  #[error(transparent)]
+  BlockStorage(#[from] BlockStorageError),
+}
+
 impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
     data_path: PathBuf,
     network_id: u32,
-    addr: C::Address,  // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
+    addr: C::Address, // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
@@ -981,9 +988,12 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               // TODO: on separate thread
               for bhash_comp in must_compute.iter().rev() {
                 let block_height = self.height[bhash_comp];
-                self
+                if let Err(e) = self
                   .storage
-                  .write_block(block_height, self.block[bhash_comp].clone());
+                  .write_block(block_height, self.block[bhash_comp].clone())
+                {
+                  eprintln!("WARN: Error writing block to disk.\n{}", e)
+                }
               }
               // 4. Reverts the runtime to a state older than that block
               //    On the example above, we'd find `runtime.tick = 1`
@@ -1536,21 +1546,13 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     self.send_blocks_to(addrs, true, blocks, 3);
   }
 
-  pub fn load_blocks(&mut self) {
+  pub fn load_blocks(&mut self) -> Result<(), NodeError> {
     self.storage.disable();
     let storage = self.storage.clone();
-    storage.read_blocks(|(block, file_path)| match block {
-      Some(block) => {
-        self.add_block(&block.hashed());
-      }
-      None => {
-        eprintln!(
-          "WARN: Could not load block from file '{}'",
-          file_path.display()
-        );
-      }
-    });
+    storage
+      .read_blocks(|(block, _file_path)| self.add_block(&block.hashed()))?;
     self.storage.enable();
+    Ok(())
   }
 
   fn send_to_miner(&mut self, msg: MinerMessage) {
@@ -1666,8 +1668,10 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       eprintln!("  - {}", peer.address);
     }
 
-    eprintln!("Loading block from disk...");
-    self.load_blocks();
+    eprintln!("Loading blocks from disk...");
+    if let Err(e) = self.load_blocks() {
+      eprintln!("Error loading blocks from disk.\n{}", e);
+    };
 
     // A task that is executed continuously on the main loop
     struct Task<C: ProtoComm, S: BlockStorage> {

@@ -672,10 +672,7 @@ fn init_socket() -> Option<UdpSocket> {
 }
 
 // Clean
-fn clean(
-  data_path: &Path,
-  command: NodeCleanCommand,
-) -> Result<(), std::io::Error> {
+fn clean(data_path: &Path, command: NodeCleanCommand) -> anyhow::Result<()> {
   fn user_confirm(data_path: &Path) -> Result<bool, std::io::Error> {
     // warning
     println!(
@@ -697,8 +694,8 @@ fn clean(
   fn exclude_n_files(
     data_path: &std::path::Path,
     n: usize,
-  ) -> Result<(), std::io::Error> {
-    let entries = get_ordered_blocks_path(data_path);
+  ) -> anyhow::Result<()> {
+    let entries = get_ordered_blocks_path(data_path)?;
     let mut count = 0;
     for entry in entries.iter().rev() {
       if entry.1.is_file() {
@@ -715,7 +712,7 @@ fn clean(
   fn clean_node(
     data_path: &Path,
     command: NodeCleanCommand,
-  ) -> Result<(), std::io::Error> {
+  ) -> anyhow::Result<()> {
     match command {
       NodeCleanCommand::All => std::fs::remove_dir_all(data_path)?,
       NodeCleanCommand::Blocks { command } => {
@@ -832,7 +829,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   threads.extend(miner_thrds.into_iter());
 
   // File writter
-  let file_writter = SimpleFileStorage::new(node_config.data_path.clone());
+  let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
   // Node state object
   let (node_query_sender, node) = Node::new(
