@@ -146,6 +146,19 @@ impl std::hash::Hash for Transaction {
 // Block body
 // ----------
 
+/// Errors associated with Block Body
+#[derive(Error, Debug)]
+pub enum BlockBodyError {
+  #[error(
+    "Block full. no space left for transaction. ({len} exceeds {maxlen})"
+  )]
+  BlockFull { len: usize, maxlen: usize },
+  #[error("Tx count of {count} exceeds limit: {limit}")]
+  TooManyTx { count: usize, limit: usize },
+  #[error(transparent)]
+  Transaction(#[from] TransactionError),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
   pub data: Vec<u8>,
@@ -180,16 +193,18 @@ impl Body {
 
   /// Build a body from a sequence of transactions.
   /// Fails if they can't fit in a block body.
-  pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
+  pub fn from_transactions_iter<I, T>(
+    transactions: I,
+  ) -> Result<Body, BlockBodyError>
   where
     I: IntoIterator<Item = T>,
-    T: TryInto<Transaction>,
+    T: TryInto<Transaction, Error = TransactionError>,
   {
     // Reserve a byte in the beginning for the number of transactions
     let mut data = vec![0];
     let mut tx_count = 0;
     for transaction in transactions.into_iter() {
-      let transaction = transaction.try_into().map_err(|_| ())?;
+      let transaction = transaction.try_into()?;
       // Ignore transaction if it's empty
       let tx_len = transaction.data.len();
       if tx_len == 0 {
@@ -197,11 +212,17 @@ impl Body {
       }
       // Fails if there's no space left for the transaction
       if data.len() + 2 + tx_len > MAX_BODY_SIZE {
-        return Err(());
+        return Err(BlockBodyError::BlockFull {
+          len: data.len() + 2 + tx_len,
+          maxlen: MAX_BODY_SIZE,
+        });
       }
       // Fails if tx count overflows 255, as we store it in a single byte.
       if tx_count + 1 > 255 {
-        return Err(());
+        return Err(BlockBodyError::TooManyTx {
+          count: tx_count + 1,
+          limit: 255,
+        });
       }
       tx_count += 1;
       // Pair of bytes we will store as the length
@@ -269,7 +290,7 @@ pub enum InclusionState {
   INCLUDED,
 }
 
-// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
+// TODO: refactor .block as map to struct? Better safety. Why not?
 #[rustfmt::skip]
 pub struct Node<C: ProtoComm, S: BlockStorage> {
   pub network_id : u32,                               // Network ID / magic number
@@ -667,10 +688,11 @@ pub fn zero_hash() -> U256 {
 }
 
 /// Builds the Genesis Block.
-pub fn build_genesis_block(stmts: &[Statement]) -> Block {
-  let body = Body::from_transactions_iter(stmts)
-    .expect("Genesis statements should fit in a block body");
-  Block::new(zero_hash(), 0, 0, body)
+pub fn build_genesis_block(
+  stmts: &[Statement],
+) -> Result<Block, BlockBodyError> {
+  let body = Body::from_transactions_iter(stmts)?;
+  Ok(Block::new(zero_hash(), 0, 0, body))
 }
 
 // Mining
@@ -709,12 +731,26 @@ impl MinerCommunication {
 
   // Writes the shared MinerCommunication object
   pub fn write(&mut self, new_message: MinerMessage) {
-    let mut value = self.message.lock().unwrap();
+    // todo: investigate how best to handle lock poisoning error.
+    // see https://doc.rust-lang.org/std/sync/struct.Mutex.html#poisoning
+    // and https://blog.rust-lang.org/2020/12/11/lock-poisoning-survey.html
+    let mut value = self
+      .message
+      .lock()
+      .expect("Miner message mutex lock should be acquired for write acceess");
     *value = new_message;
   }
 
   pub fn read(&self) -> MinerMessage {
-    return (*self.message.lock().unwrap()).clone();
+    // todo: investigate how best to handle lock poisoning error.
+    // see https://doc.rust-lang.org/std/sync/struct.Mutex.html#poisoning
+    // and https://blog.rust-lang.org/2020/12/11/lock-poisoning-survey.html
+    // note: parking_lot crate provides non poisoning mutexes.
+    return (*self
+      .message
+      .lock()
+      .expect("Miner message mutex lock should be acquired for read acceess"))
+    .clone();
   }
 }
 
@@ -766,6 +802,19 @@ pub enum NodeError {
   BlockStorage(#[from] BlockStorageError),
 }
 
+/// Errors associated with Blocks
+#[derive(Error, Debug)]
+pub enum BlockLookupError {
+  #[error("Invalid Block: {0}")]
+  InvalidBlock(U256),
+  #[error("Invalid Height: {0}")]
+  InvalidHeight(U256),
+  #[error("Invalid Target: {0}")]
+  InvalidTarget(U256),
+  #[error("Invalid Work: {0}")]
+  InvalidWork(U256),
+}
+
 impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
@@ -784,7 +833,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
 
     let genesis_stmts =
       parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
-    let genesis_block = build_genesis_block(&genesis_stmts);
+    let genesis_block =
+      build_genesis_block(&genesis_stmts).expect("Genesis block builds");
     let genesis_block = genesis_block.hashed();
     let genesis_hash = genesis_block.get_hash().into();
 
@@ -986,7 +1036,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               }
 
               // 3. Saves overwritten blocks to disk and remove their
-              //    transactions from mempool. 
+              //    transactions from mempool.
               for bhash_comp in must_compute.iter().rev() {
                 let block_height = self.height[bhash_comp];
                 if let Err(e) = self
@@ -998,7 +1048,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
                 // Removes this block's transactions from mempool
                 let block_comp = &self.block[bhash_comp];
                 // TODO: refactor out redundant `extract_transactions`
-                for tx in extract_transactions(&block_comp.body) { 
+                for tx in extract_transactions(&block_comp.body) {
                   self.pool.remove(&tx);
                 }
               }
@@ -1127,9 +1177,11 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
-    while self.block.contains_key(&bhash) && bhash != zero_hash() {
+    while let Some(block) = self.block.get(&bhash) {
       // TODO: zero check seems redundant
-      let block = self.block.get(&bhash).unwrap();
+      if bhash != zero_hash() {
+        break;
+      }
       longest.push(bhash);
       bhash = block.prev;
       count += 1;
@@ -1172,19 +1224,30 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     return Some(hsh);
   }
 
-  pub fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
+  pub fn get_block_info(
+    &self,
+    hash: &U256,
+  ) -> Result<Option<BlockInfo>, BlockLookupError> {
     // TODO: cache
-    let block = self.block.get(hash)?;
-    let height = self.height.get(hash).expect("Missing block height.");
-    let height: u64 = (*height).try_into().expect("Block height is too big.");
-    let results = self.results.get(hash).map(|r| r.clone());
-    let info = BlockInfo {
-      block: (&**block).into(),
-      hash: (*hash).into(),
-      height,
-      results,
-    };
-    Some(info)
+    Ok(match self.block.get(hash) {
+      Some(block) => {
+        let height = self
+          .height
+          .get(hash)
+          .ok_or(BlockLookupError::InvalidHeight(*hash))?;
+        let height: u64 = (*height)
+          .try_into()
+          .map_err(|_e| BlockLookupError::InvalidHeight(*hash))?;
+        let results = self.results.get(hash).map(|r| r.clone());
+        Some(BlockInfo {
+          block: (&**block).into(),
+          hash: (*hash).into(),
+          height,
+          results,
+        })
+      }
+      None => None,
+    })
   }
 
   pub fn get_func_info(&self, name: &Name) -> Option<FuncInfo> {
@@ -1220,7 +1283,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         eprintln!("WARN: failed to send node request {} answer back", req_txt);
       }
     }
-    // TODO: handle unwraps
+    // TODO: handle unwraps/expects
     // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
     match request {
       NodeRequest::GetStats { tx } => {
@@ -1267,12 +1330,19 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         let hashes = self.get_longest_chain(Some(num));
         let infos = hashes
           .iter()
-          .map(|h| self.get_block_info(h).expect("Missing block."))
+          .map(|h| {
+            self
+              .get_block_info(h)
+              .expect("should obtain block info result ok")
+              .expect("should find block")
+          })
           .collect();
         handle_ans_err("GetBlocks", tx.send(infos));
       }
       NodeRequest::GetBlock { hash, tx } => {
-        let info = self.get_block_info(&hash);
+        let info = self
+          .get_block_info(&hash)
+          .expect("should obtain block info result ok");
         handle_ans_err("GetBlock", tx.send(info));
       }
       NodeRequest::GetBlockHash { index, tx } => {
@@ -1596,12 +1666,16 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     Body::fill_from(txs)
   }
 
-  fn log_heartbeat(&self) {
+  fn log_heartbeat(&self) -> Result<(), BlockLookupError> {
     let tip = self.tip;
-    let tip_height = *self.height.get(&tip).unwrap() as u64;
-    let tip_work = *self.work.get(&tip).unwrap();
+    let tip_height =
+      *self.height.get(&tip).ok_or(BlockLookupError::InvalidHeight(tip))?
+        as u64;
+    let tip_work =
+      *self.work.get(&tip).ok_or(BlockLookupError::InvalidWork(tip))?;
 
-    let tip_target = *self.target.get(&tip).unwrap();
+    let tip_target =
+      *self.target.get(&tip).ok_or(BlockLookupError::InvalidTarget(tip))?;
     let difficulty = target_to_difficulty(tip_target);
 
     // Counts missing, pending and included blocks
@@ -1666,6 +1740,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     };
 
     emit_event!(self.event_emitter, event, tags = heartbeat);
+    Ok(())
   }
 
   pub fn main(mut self) -> ! {
@@ -1725,7 +1800,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       Task {
         delay: 5_000,
         action: |node| {
-          node.log_heartbeat();
+          if let Err(e) = node.log_heartbeat() {
+            eprintln!("Error logging heartbeat.\n{}", e);
+          }
         },
       },
     ];
