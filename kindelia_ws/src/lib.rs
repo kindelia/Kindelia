@@ -46,7 +46,7 @@ where
     .and(with_rx(ws_tx.clone()))
     .and(warp::query::<QueryParams>().map(parse_query))
     .and_then(ws_handler::<T, D>);
-  warp::serve(ws_route).run(([127, 0, 0, 1], port)).await;
+  warp::serve(ws_route).run(([0, 0, 0, 0], port)).await;
 }
 
 fn parse_query(query: QueryParams) -> Query {
