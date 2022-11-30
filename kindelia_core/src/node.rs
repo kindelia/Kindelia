@@ -25,9 +25,9 @@ use crate::bits;
 use crate::bits::ProtoSerialize;
 use crate::config::MineConfig;
 use crate::constants;
-use crate::runtime::*;
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::persistence::BlockStorage;
+use crate::runtime::*;
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
@@ -1009,22 +1009,12 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
                 new_bhash = self.block[&new_bhash].prev;
                 tick -= 1;
               }
-              emit_event!(
-                self.event_emitter,
-                NodeEventType::computed(
-                  &block,
-                  self.height[&self.tip],
-                  &must_compute
-                ),
-                tags = add_block,
-                computed
-              ); // emitting computed blocks for measurement
 
               // 6. Computes every block after that on the new timeline
               //    On the example above, we'd compute `C, D, P, Q, R, S, T`
               for bhash_comp in must_compute.iter().rev() {
                 let block_comp = &self.block[bhash_comp];
-                self.compute_block(&block_comp.clone()); // TODO: avoid clone
+                self.compute_block(&block_comp.clone(), &block); // TODO: avoid clone
               }
             }
           }
@@ -1074,7 +1064,11 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  pub fn compute_block(&mut self, block: &HashedBlock) {
+  pub fn compute_block(
+    &mut self,
+    block: &HashedBlock,
+    added_block: &HashedBlock,
+  ) {
     let transactions = extract_transactions(&block.body);
     let mut statements = Vec::new();
     for transaction in transactions {
@@ -1089,6 +1083,17 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     self.runtime.set_hax1((bhash >> 120).low_u128() >> 8);
     self.runtime.open();
     let result = self.runtime.run_statements(&statements, false, false);
+    // emitting computed blocks
+    emit_event!(
+      self.event_emitter,
+      NodeEventType::computed(
+        (added_block, self.height[&self.tip]),
+        (block, self.height[&bhash]),
+        &result
+      ),
+      tags = add_block,
+      computed_block
+    );
     self.results.insert(bhash, result);
     self.runtime.commit();
   }

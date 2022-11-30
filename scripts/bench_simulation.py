@@ -208,10 +208,9 @@ class ComputedBlocks(Bencher):
         if addr == self.addr:
             if 'AddBlock' in event:
                 data = event['AddBlock']
-                if 'Computed' in data['event']:
-                    data = data['event']['Computed']
-                    blocks = data['blocks']
-                    self.total += len(blocks)
+                if 'ComputedBlock' in data['event']:
+                    data = data['event']['ComputedBlock']
+                    self.total += 1
 
     def get_result(self):
         return self.total
