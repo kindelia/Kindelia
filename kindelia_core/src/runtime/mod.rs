@@ -1602,9 +1602,9 @@ impl Runtime {
     // for i in 0 .. std::cmp::max(uuids.len(), 8) {
     //   self.heap[i + 2].load_buffers(uuids[i])?;
     // }
-    let mut keeps = util::u8s_to_u128s(&std::fs::read(self.path.join("_keeps_"))?);
-    let mut lifes = util::u8s_to_u128s(&std::fs::read(self.path.join("_lifes_"))?);
-    let mut uuids = util::u8s_to_u128s(&std::fs::read(self.path.join("_uuids_"))?);
+    let mut keeps = util::u8s_to_u128s(&std::fs::read(self.path.join("_keeps_"))?).unwrap();
+    let mut lifes = util::u8s_to_u128s(&std::fs::read(self.path.join("_lifes_"))?).unwrap();
+    let mut uuids = util::u8s_to_u128s(&std::fs::read(self.path.join("_uuids_"))?).unwrap();
     fn load_heaps(rt: &mut Runtime, keeps: &mut Vec<u128>, lifes: &mut Vec<u128>, uuids: &mut Vec<u128>, index: u64, back: Arc<Rollback>) -> std::io::Result<Arc<Rollback>> {
       let keep = keeps.pop();
       let life = lifes.pop();
