@@ -539,6 +539,7 @@ pub enum DefinitionError {
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
+  InvalidArg { caller: U120, arg: RawCell },
   InvalidCallArg { caller: U120, callee: U120, arg: RawCell },
   InvalidIOCtr { name: Name },
   InvalidIONonCtr { ptr: RawCell },
@@ -548,21 +549,49 @@ pub enum EffectFailure {
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
 // TODO: refactor (de)serialization out or simplify
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StatementInfo {
   Ctr { name: Name, args: Vec<Name> },
   Fun { name: Name, args: Vec<Name> },
   Run {
-    done_term: Term,
-    #[serde_as(as = "DisplayFromStr")]
-    used_mana: u64,
-    #[serde_as(as = "DisplayFromStr")]
-    size_diff: i64,
-    #[serde_as(as = "DisplayFromStr")]
-    end_size: u64,
+    info: RunInfo,
   },
   Reg { name: Name, ownr: U120 },
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunInfo {
+  pub done_term: Term,
+  pub events: Vec<EventInfo>,
+  #[serde_as(as = "DisplayFromStr")]
+  pub used_mana: u64,
+  #[serde_as(as = "DisplayFromStr")]
+  pub size_diff: i64,
+  #[serde_as(as = "DisplayFromStr")]
+  pub end_size: u64,
+}
+
+pub struct Event {
+  fnid: U120,
+  argm: RawCell,
+  term: RawCell
+}
+
+impl Event {
+  fn as_info(&self, rt: &Runtime) -> EventInfo {
+    let fnid = self.fnid.into();
+    let argm = rt.show_term(self.argm);
+    let term = rt.show_term(self.term);
+    EventInfo { fnid, argm, term }
+  }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventInfo {
+  pub fnid: Name,
+  pub argm: String,
+  pub term: String
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -670,6 +699,7 @@ const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
 const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
 const IO_FAIL : u128 = 0x40b4d6; // name_to_u128("FAIL")
 const IO_NORM : u128 = 0x619717; // name_to_u128("NORM")
+const IO_EMIT : u128 = 0x3d74de; // name_to_u128("EMIT");
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
@@ -854,14 +884,22 @@ pub fn get_namespace(name: Name) -> Option<Name> {
 // StatementInfo
 // =============
 
+impl fmt::Display for EventInfo {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(f, "[event] ({}, {}) => {}", self.fnid, self.argm, self.term)
+  }
+}
+
 impl fmt::Display for StatementInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       StatementInfo::Ctr { name, args } => write!(f, "[ctr] {}", name),
       StatementInfo::Fun { name, args } => write!(f, "[fun] {}", name),
       StatementInfo::Reg { name, .. } => write!(f, "[reg] {}", name),
-      StatementInfo::Run { done_term, used_mana, size_diff, .. } =>
-        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m", done_term, used_mana, size_diff)
+      StatementInfo::Run { info } => {
+        let events: String = info.events.iter().map(|event| format!("\t\t{}\n", event)).collect();
+        write!(f, "[run] {} \x1b[2m[{} mana | {} size]\x1b[0m\n{}", info.done_term, info.used_mana, info.size_diff, events)
+      }
     }
   }
 }
@@ -1543,7 +1581,32 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: U120, caller: U120, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
+  /// Checks if the argument is a constructor with numeric fields. This is needed since
+  /// Kindelia's language is untyped, yet contracts can call each other freely. That would
+  /// allow a contract to pass an argument with an unexpected type to another, corrupting
+  /// its state. To avoid that, we only allow contracts to communicate by passing flat
+  /// constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
+  fn check_ctr_argm(&mut self, subject: U120, fnid: Option<U120>, mana: u64, argm: RawCell) -> Result<(), RuntimeError> {
+    let arg_name = Name::new(argm.get_ext()).ok_or_else(|| RuntimeError::NameTooBig { numb: *argm })?;
+    let arg_arit = self
+      .get_arity(&arg_name)
+      .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: arg_name })?;
+    for i in 0 .. arg_arit {
+      let argm = reduce(self, argm.get_loc(0), mana)?;
+      if argm.get_tag() != CellTag::NUM {
+        let f = match fnid {
+          None => 
+            EffectFailure::InvalidArg { caller: subject, arg: argm },
+          Some(fnid) => 
+            EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm }
+        };
+        return Err(RuntimeError::EffectFailure(f));
+      }
+    }
+    Ok(())
+  }
+
+  pub fn run_io(&mut self, subject: U120, caller: U120, host: Loc, mana: u64, call_term: Option<RawCell>, events: &mut Vec<Event>) -> Result<RawCell, RuntimeError> {
     // eprintln!("-- {}", show_term(self, host, None));
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term, None));
@@ -1564,7 +1627,7 @@ impl Runtime {
               if state != RawCell(U128_NONE) {
                 self.write_disk(subject, RawCell(U128_NONE));
                 let cont = alloc_app(self, cont, state);
-                let done = self.run_io(subject, subject, cont, mana);
+                let done = self.run_io(subject, subject, cont, mana, call_term, events);
                 clear(self, host, 1);
                 clear(self, term.get_loc(0), 1);
                 return done;
@@ -1585,7 +1648,7 @@ impl Runtime {
             self.write_disk(subject, save);
             let cont = ask_arg(self, term, 1);
             let cont = alloc_app(self, cont, Num(0));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
@@ -1595,31 +1658,15 @@ impl Runtime {
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
             let fnid = self.check_num(fnid, mana)?;
-            
-            let arg_name = Name::new(argm.get_ext()).ok_or_else(|| RuntimeError::NameTooBig { numb: *argm })?;
-            let arg_arit = self
-              .get_arity(&arg_name)
-              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: arg_name })?;
-            // Checks if the argument is a constructor with numeric fields. This is needed since
-            // Kindelia's language is untyped, yet contracts can call each other freely. That would
-            // allow a contract to pass an argument with an unexpected type to another, corrupting
-            // its state. To avoid that, we only allow contracts to communicate by passing flat
-            // constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
-            for i in 0 .. arg_arit {
-              let argm = reduce(self, argm.get_loc(0), mana)?;
-              if argm.get_tag() != CellTag::NUM {
-                let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
-                return Err(RuntimeError::EffectFailure(f));
-              }
-            }
+            self.check_ctr_argm(subject, Some(fnid), mana, argm)?;
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
             let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
             let ioxp = alloc_fun(self, name, &[argm]);
-            let retr = self.run_io(fnid, subject, ioxp, mana)?;
+            let retr = self.run_io(fnid, subject, ioxp, mana, Some(argm), events)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, Some(argm), events);
             // Clears memory
             clear(self, host, 1);
             //clear(self, argm.get_loc(0), arit);
@@ -1631,7 +1678,28 @@ impl Runtime {
             let cont = ask_arg(self, term, 1);
             let normalized = self.normalize(unnormalized, mana, &mut HashSet::new())?;
             let cont = alloc_app(self, cont, normalized);
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
+            clear(self, host, 1);
+            clear(self, term.get_loc(0), 2);
+            return done;
+          }
+          IO_EMIT => {
+            let term_to_emit = ask_arg(self, term, 0);
+            // checks if args is a number
+            if self.check_num(term_to_emit, mana).is_err() {
+              // if not a number, checks if is a flat CTR
+              self.check_ctr_argm(subject, None, mana, term_to_emit)?;
+            }
+            if let Some(call_term) = call_term {
+              events.push(Event {
+                fnid: subject,
+                argm: call_term,
+                term: term_to_emit
+              });
+            }
+            let cont = ask_arg(self, term, 1);
+            let cont = alloc_app(self, cont, Num(0));
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
@@ -1642,7 +1710,7 @@ impl Runtime {
             let name = self.check_name(fnid, mana)?;
             let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
             let cont = alloc_app(self, cont, Num(indx));
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
@@ -1653,7 +1721,7 @@ impl Runtime {
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
@@ -1664,7 +1732,7 @@ impl Runtime {
             let indx = self.check_num(indx, mana)?;
             let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
             let cont = alloc_app(self, cont, Num(stmt_hash));
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 2);
             return done;
@@ -1672,7 +1740,7 @@ impl Runtime {
           IO_SUBJ => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(*subject));
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1680,7 +1748,7 @@ impl Runtime {
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(*caller));
-            let done = self.run_io(subject, caller, cont, mana);
+            let done = self.run_io(subject, caller, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1688,7 +1756,7 @@ impl Runtime {
           IO_TICK => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(self.get_tick() as u128));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1696,7 +1764,7 @@ impl Runtime {
           IO_TIME => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(self.get_time()));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1704,7 +1772,7 @@ impl Runtime {
           IO_META => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(self.get_meta()));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1712,7 +1780,7 @@ impl Runtime {
           IO_HAX0 => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(self.get_hax0()));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1720,7 +1788,7 @@ impl Runtime {
           IO_HAX1 => {
             let cont = ask_arg(self, term, 0);
             let cont = alloc_app(self, cont, Num(self.get_hax1()));
-            let done = self.run_io(subject, subject, cont, mana);
+            let done = self.run_io(subject, subject, cont, mana, call_term, events);
             clear(self, host, 1);
             clear(self, term.get_loc(0), 1);
             return done;
@@ -1877,7 +1945,8 @@ impl Runtime {
         let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
-        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim);
+        let mut events = vec![];
+        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim, None, &mut events);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
@@ -1906,11 +1975,16 @@ impl Runtime {
         if size_end > size_lim && !sudo {
           return error(self, "run", format!("Not enough space."));
         }
+        // `Event`'s -> `EventInfo`'s (U120 -> Name, RawCell -> String)
+        let events = events.iter().map(|event| event.as_info(self)).collect();
         StatementInfo::Run {
-          done_term,
-          used_mana: mana_dif,
-          size_diff: size_dif,
-          end_size: size_end, // TODO: rename to done_size for consistency?
+          info: RunInfo {
+            done_term,
+            used_mana: mana_dif,
+            size_diff: size_dif,
+            end_size: size_end, // TODO: rename to done_size for consistency?
+            events
+          }
         }
         // TODO: save run to statement array?
       }
@@ -3920,6 +3994,10 @@ pub fn show_runtime_error(err: RuntimeError) -> String {
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
+        EffectFailure::InvalidArg { caller, arg } => {
+          let pos = arg.get_val();
+          format!("'{}' has invalid argument '{}'.", show_addr(caller), show_ptr(arg))
+        },
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
           let pos = arg.get_val();
           format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg))

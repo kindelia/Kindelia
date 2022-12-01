@@ -253,8 +253,8 @@ fn test_simple_idx(temp_dir: TempPath) {
   let result_term = results.last().unwrap().clone().unwrap();
   let name = Name::from_str("B").unwrap();
   let idx = rt.get_index(&name).unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("#{}", idx), done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!(format!("#{}", idx), info.done_term.to_string());
     //            (3 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -271,8 +271,8 @@ fn test_genesis_idx(temp_dir: TempPath) {
    ";
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#2", done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!("#2", info.done_term.to_string());
     //           (1 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -296,8 +296,8 @@ fn test_thousand_idx(temp_dir: TempPath) {
    ";
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#1152921504606846976000", done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!("#1152921504606846976000", info.done_term.to_string());
     //            (1000 << 60) |  1
   } else {
     panic!("Wrong result");
@@ -326,8 +326,8 @@ fn test_stmt_hash(temp_dir: TempPath) {
   let sth0 = rt.get_sth0(indx).unwrap();
   let sth1 = rt.get_sth1(indx).unwrap();
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), info.done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -364,10 +364,10 @@ fn test_two_stmt_hash(temp_dir: TempPath) {
   let sth1 = rt.get_sth1(indx1).unwrap();
   let sth2 = rt.get_sth0(indx2).unwrap();
   let sth3 = rt.get_sth1(indx2).unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
+  if let StatementInfo::Run { info } = result_term {
     assert_eq!(
       format!("(T4 #{} #{} #{} #{})", sth0, sth1, sth2, sth3),
-      done_term.to_string()
+      info.done_term.to_string()
     );
   } else {
     panic!("Wrong result");
@@ -402,8 +402,8 @@ fn test_stmt_hash_after_commit(temp_dir: TempPath) {
   let indx = rt.get_index(&name).unwrap();
   let sth0 = rt.get_sth0(indx).unwrap();
   let sth1 = rt.get_sth1(indx).unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!(format!("(T2 #{} #{})", sth0, sth1), info.done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -428,8 +428,8 @@ fn test_name_sanitizing(temp_dir: TempPath) {
   let results = rt.run_statements_from_code(code, false, true);
   rt.commit();
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!(format!("(T2 #5 #5)"), done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!(format!("(T2 #5 #5)"), info.done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -463,8 +463,8 @@ fn compute_at_funs(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path);
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("@x0 @x1 (Add x0 x1)", done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!("@x0 @x1 (Add x0 x1)", info.done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -534,8 +534,8 @@ fn shadowing(temp_dir: TempPath) {
   let mut rt = init_runtime(&temp_dir.path);
   let results = rt.run_statements_from_code(code, false, true);
   let result_term = results.last().unwrap().clone().unwrap();
-  if let StatementInfo::Run { done_term, .. } = result_term {
-    assert_eq!("#7", done_term.to_string());
+  if let StatementInfo::Run { info } = result_term {
+    assert_eq!("#7", info.done_term.to_string());
   } else {
     panic!("Wrong result");
   }
@@ -585,8 +585,8 @@ fn readback(
   let result = result.unwrap(); // expect result not to be an error (fails test if it is)
 
   // verify readback
-  if let StatementInfo::Run { done_term, .. } = result {
-    assert_eq!(expected_readback, done_term.to_string());
+  if let StatementInfo::Run { info } = result {
+    assert_eq!(expected_readback, info.done_term.to_string());
   } else {
     panic!("Expected Run statement, got {:?}", result);
   }
@@ -714,12 +714,12 @@ fn normalize_cases(#[case] term: &str, #[case] expected: &str, temp_dir: TempPat
   let mut rt = init_runtime(&temp_dir.path);
   let result = rt.run_statements_from_code(&code, true, true);
   match result.last().unwrap() {
-    Ok(StatementInfo::Run { done_term, used_mana, size_diff, end_size }) => {
-      if let ast::Term::Ctr { name, args } = done_term {
+    Ok(StatementInfo::Run { ref info }) => {
+      if let ast::Term::Ctr { name, args } = &info.done_term {
         if let [normal] = args.as_slice() {
           assert_eq!(*name, Name::from_str("DONE").unwrap());
           assert_eq!(format!("{}", normal), expected);
-          assert_eq!(*size_diff, 0);
+          assert_eq!(info.size_diff, 0);
         }
       } else {
         panic!("Not constructor.")
