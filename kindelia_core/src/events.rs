@@ -76,7 +76,7 @@ pub enum AddBlockEvent {
     siblings: Vec<Hash>,
     work: Hash,
   },
-  ComputedBlock {
+  Computed {
     block: BlockInfo,
     results: Vec<Result<StatementInfo, StatementErr>>,
   },
@@ -363,7 +363,7 @@ impl std::fmt::Display for NodeEventType {
         AddBlockEvent::Included { .. } => {
           format!("[included] block {}", block)
         }
-        AddBlockEvent::ComputedBlock { block, results } => {
+        AddBlockEvent::Computed { block, results } => {
           let results: String = results
             .iter()
             .map(|statement_result| match statement_result {
@@ -460,7 +460,7 @@ impl NodeEventType {
         parent: block.prev.into(),
         height: Some(added_height),
       },
-      event: Box::new(AddBlockEvent::ComputedBlock {
+      event: Box::new(AddBlockEvent::Computed {
         block: BlockInfo {
           hash: hash.into(),
           parent: block.prev.into(),
