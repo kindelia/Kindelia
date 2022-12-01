@@ -5,6 +5,7 @@ use serde;
 use crate::api::Hash;
 use crate::net::ProtoAddr;
 use crate::node::{HashedBlock, Peer};
+use crate::runtime::{StatementErr, StatementInfo};
 
 fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
   match x {
@@ -76,7 +77,8 @@ pub enum AddBlockEvent {
     work: Hash,
   },
   Computed {
-    blocks: Vec<Hash>,
+    block: BlockInfo,
+    results: Vec<Result<StatementInfo, StatementErr>>,
   },
   MissingParent {
     parent: Hash,
@@ -361,10 +363,15 @@ impl std::fmt::Display for NodeEventType {
         AddBlockEvent::Included { .. } => {
           format!("[included] block {}", block)
         }
-        AddBlockEvent::Computed { blocks } => {
-          let blocks: String =
-            blocks.iter().map(|b| format!("{}", b)).collect();
-          format!("[computed] block {} | computed_blocks: {}", block, blocks)
+        AddBlockEvent::Computed { block, results } => {
+          let results: String = results
+            .iter()
+            .map(|statement_result| match statement_result {
+              Ok(statement_info) => format!("{}", statement_info),
+              Err(statement_err) => statement_err.err.to_string(),
+            })
+            .collect();
+          format!("[computed] block {} | results: {}", block, results)
         }
       },
       NodeEventType::Mining { event } => match event {
@@ -437,16 +444,30 @@ impl NodeEventType {
       event: Box::new(AddBlockEvent::Included { siblings, work: work.into() }),
     }
   }
-  pub fn computed(block: &HashedBlock, height: u128, blocks: &[U256]) -> Self {
+  pub fn computed(
+    added_block: (&HashedBlock, u128),
+    block: (&HashedBlock, u128),
+    results: &[Result<StatementInfo, StatementErr>],
+  ) -> Self {
+    let (added_block, added_height) = added_block;
+    let (block, height) = block;
+    let added_hash = U256::from(added_block.get_hash());
     let hash = U256::from(block.get_hash());
-    let blocks = blocks.iter().map(|b| (*b).into()).collect();
+
     NodeEventType::AddBlock {
       block: BlockInfo {
-        hash: hash.into(),
+        hash: added_hash.into(),
         parent: block.prev.into(),
-        height: Some(height),
+        height: Some(added_height),
       },
-      event: Box::new(AddBlockEvent::Computed { blocks }),
+      event: Box::new(AddBlockEvent::Computed {
+        block: BlockInfo {
+          hash: hash.into(),
+          parent: block.prev.into(),
+          height: Some(height),
+        },
+        results: results.to_vec(),
+      }),
     }
   }
   pub fn reorg(
