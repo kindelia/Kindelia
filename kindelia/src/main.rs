@@ -872,12 +872,14 @@ pub fn start_node<C: ProtoComm + 'static>(
       }
       Err(e) => {
         // When join() returns an error, that means a child thread panicked.
-        let msg = if let Some(s) = e.downcast_ref::<&str>() {
-          format!("Child thread panicked with message:\n{}", s)
-        } else if let Some(s) = e.downcast_ref::<String>() {
-          format!("Child thread panicked with message:\n{}", s)
-        } else {
-          format!("Child thread panicked!\n{:?}", e)
+        let msg = {
+          if let Some(s) = e.downcast_ref::<&str>() {
+            format!("Child thread panicked with message:\n{}", s)
+          } else if let Some(s) = e.downcast_ref::<String>() {
+            format!("Child thread panicked with message:\n{}", s)
+          } else {
+            format!("Child thread panicked!\n{:?}", e)
+          }
         };
 
         // We return the panic error to propagate upwards so that
