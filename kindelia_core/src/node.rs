@@ -760,9 +760,11 @@ pub fn miner_loop(
 // ----
 
 impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
+  #[allow(clippy::too_many_arguments)]
   pub fn new(
     data_path: PathBuf,
     network_id: u32,
+    addr: C::Address,  // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
     initial_peers: Vec<C::Address>,
     comm: C,
     miner_comm: Option<MinerCommunication>,
@@ -784,7 +786,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     #[rustfmt::skip]
     let mut node = Node {
       network_id,
-      addr: comm.get_addr(),
+      addr,
       comm,
       runtime,
       pool     : PriorityQueue:: new(),

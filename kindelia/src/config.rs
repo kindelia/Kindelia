@@ -1,6 +1,7 @@
 use std::{path::PathBuf, str::FromStr};
 
 use crate::files::FileInput;
+use anyhow::{anyhow, Context};
 
 // ConfigSettings
 // ==============
@@ -10,7 +11,7 @@ use crate::files::FileInput;
 pub struct ConfigSettings<T, F>
 where
   T: Clone + Sized,
-  F: Fn() -> Result<T, String>,
+  F: Fn() -> anyhow::Result<T>,
 {
   #[builder(default)]
   env: Option<&'static str>,
@@ -22,7 +23,7 @@ where
 impl<T, F> ConfigSettings<T, F>
 where
   T: Clone + Sized,
-  F: Fn() -> Result<T, String>,
+  F: Fn() -> anyhow::Result<T>,
 {
   /// Resolve config value.
   ///
@@ -35,7 +36,7 @@ where
     self,
     cli_value: Option<T>,
     config_values: Option<&toml::Value>,
-  ) -> Result<T, String>
+  ) -> anyhow::Result<T>
   where
     T: ArgumentFrom<String> + ArgumentFrom<toml::Value>,
   {
@@ -59,7 +60,7 @@ where
   pub fn resolve_from_file_only(
     self,
     config_values: Option<&toml::Value>,
-  ) -> Result<T, String>
+  ) -> anyhow::Result<T>
   where
     T: ArgumentFrom<toml::Value>,
   {
@@ -77,7 +78,7 @@ where
   pub fn resolve_from_file_opt(
     self,
     config_values: Option<&toml::Value>,
-  ) -> Result<Option<T>, String>
+  ) -> anyhow::Result<Option<T>>
   where
     T: ArgumentFrom<toml::Value>,
   {
@@ -85,35 +86,35 @@ where
       if let Some(config_values) = config_values {
         let value = Self::get_prop(config_values, &prop_path);
         if let Some(value) = value {
-          return T::arg_from(value).map(|v| Some(v)).map_err(|e| {
-            format!(
-              "Could not convert value of '{}' into desired type: {}",
-              prop_path, e
-            )
-          });
+          return T::arg_from(value).map(|v| Some(v)).context(anyhow!(
+            "Could not convert value of '{}' into desired type",
+            prop_path
+          ));
         }
       }
       Ok(None)
     } else {
-      panic!("Cannot resolve from config file config without 'prop' field set")
+      Err(anyhow!(
+        "Cannot resolve from config file config without 'prop' field set"
+      ))
     }
   }
 
   fn resolve_from_config_aux(
     config_values: &toml::Value,
     prop_path: &str,
-  ) -> Result<T, String>
+  ) -> anyhow::Result<T>
   where
     T: ArgumentFrom<toml::Value>,
   {
-    let value = Self::get_prop(config_values, prop_path)
-      .ok_or(format!("Could not find prop '{}' in config file.", prop_path))?;
-    T::arg_from(value).map_err(|e| {
-      format!(
-        "Could not convert value of '{}' into desired type: {}",
-        prop_path, e
-      )
-    })
+    let value = Self::get_prop(config_values, prop_path).context(anyhow!(
+      "Could not find prop '{}' in config file.",
+      prop_path
+    ))?;
+    T::arg_from(value).context(anyhow!(
+      "Could not convert value of '{}' into desired type",
+      prop_path,
+    ))
   }
 
   fn get_prop(mut value: &toml::Value, prop_path: &str) -> Option<toml::Value> {
@@ -134,128 +135,127 @@ where
 /// it has the From<String> for Vec<String> implementation.
 /// As like From, the conversion must be perfect.
 pub trait ArgumentFrom<T>: Sized {
-  fn arg_from(value: T) -> Result<Self, String>;
+  fn arg_from(value: T) -> anyhow::Result<Self>;
 }
 
 impl ArgumentFrom<String> for String {
-  fn arg_from(t: String) -> Result<Self, String> {
+  fn arg_from(t: String) -> anyhow::Result<Self> {
     Ok(t)
   }
 }
 
 impl ArgumentFrom<String> for u32 {
-  fn arg_from(t: String) -> Result<Self, String> {
-    t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  fn arg_from(t: String) -> anyhow::Result<Self> {
+    t.parse().context(anyhow!("Invalid integer: `{}`", t))
   }
 }
 
 impl ArgumentFrom<String> for u64 {
-  fn arg_from(t: String) -> Result<Self, String> {
-    t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  fn arg_from(t: String) -> anyhow::Result<Self> {
+    t.parse().context(anyhow!("Invalid integer: `{}`", t))
   }
 }
 
 impl ArgumentFrom<toml::Value> for u32 {
-  fn arg_from(value: toml::Value) -> Result<Self, String> {
+  fn arg_from(value: toml::Value) -> anyhow::Result<Self> {
     match value {
       toml::Value::Integer(i) => Ok(i as Self),
       toml::Value::String(s) => {
         let s = s.trim_start_matches("0x");
         let num = u32::from_str_radix(s, 16)
-          .map_err(|e| format!("Invalid hexadecimal '{}': {}", s, e))?;
+          .context(anyhow!("Invalid hexadecimal '{}'", s))?;
         Ok(num)
       }
-      _ => Err(format!("Invalid integer '{}'", value)),
+      _ => Err(anyhow!("Invalid integer '{}'", value)),
     }
   }
 }
 
 impl ArgumentFrom<toml::Value> for u64 {
-  fn arg_from(value: toml::Value) -> Result<Self, String> {
+  fn arg_from(value: toml::Value) -> anyhow::Result<Self> {
     match value {
       toml::Value::Integer(i) => Ok(i as u64),
       toml::Value::String(s) => {
         let s = s.trim_start_matches("0x");
         let num = u64::from_str_radix(s, 16)
-          .map_err(|e| format!("Invalid hexadecimal '{}': {}", s, e))?;
+          .context(anyhow!("Invalid hexadecimal '{}'", s))?;
         Ok(num)
       }
-      _ => Err(format!("Invalid integer '{}'", value)),
+      _ => Err(anyhow!("Invalid integer '{}'", value)),
     }
   }
 }
 
 impl ArgumentFrom<String> for Vec<String> {
-  fn arg_from(t: String) -> Result<Self, String> {
+  fn arg_from(t: String) -> anyhow::Result<Self> {
     Ok(t.split(',').map(|x| x.to_string()).collect())
   }
 }
 
 impl ArgumentFrom<String> for bool {
-  fn arg_from(t: String) -> Result<Self, String> {
+  fn arg_from(t: String) -> anyhow::Result<Self> {
     if t == "true" {
       Ok(true)
     } else if t == "false" {
       Ok(false)
     } else {
-      Err(format!("Invalid boolean value: {}", t))
+      Err(anyhow!("Invalid boolean value: {}", t))
     }
   }
 }
 
 impl ArgumentFrom<String> for PathBuf {
-  fn arg_from(t: String) -> Result<Self, String> {
+  fn arg_from(t: String) -> anyhow::Result<Self> {
     if let Some(path) = t.strip_prefix("~/") {
       let home_dir =
-        dirs::home_dir().ok_or("Could not find $HOME directory.")?;
+        dirs::home_dir().context("Could not find $HOME directory.")?;
       Ok(home_dir.join(path))
     } else {
-      PathBuf::from_str(&t).map_err(|_| format!("Invalid path: {}", t))
+      PathBuf::from_str(&t).context(anyhow!("Invalid path: {}", t))
     }
   }
 }
 
 impl ArgumentFrom<toml::Value> for PathBuf {
-  fn arg_from(value: toml::Value) -> Result<Self, String> {
+  fn arg_from(value: toml::Value) -> anyhow::Result<Self> {
     let t: String =
-      value.try_into().map_err(|_| "Could not convert value to PahtBuf")?;
+      value.try_into().context("Could not convert value to PathBuf")?;
     PathBuf::arg_from(t)
   }
 }
 
 impl ArgumentFrom<toml::Value> for String {
-  fn arg_from(t: toml::Value) -> Result<Self, String> {
-    t.try_into().map_err(|_| "Could not convert value into String".to_string())
+  fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
+    t.try_into().context("Could not convert value into String")
   }
 }
 
 impl ArgumentFrom<toml::Value> for Vec<String> {
-  fn arg_from(t: toml::Value) -> Result<Self, String> {
-    t.try_into().map_err(|_| "Could not convert value into array".to_string())
+  fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
+    t.try_into().context("Could not convert value into array")
   }
 }
 
 impl ArgumentFrom<toml::Value> for bool {
-  fn arg_from(t: toml::Value) -> Result<Self, String> {
-    t.as_bool().ok_or(format!("Invalid boolean value: {}", t))
+  fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
+    t.as_bool().context(anyhow!("Invalid boolean value: {}", t))
   }
 }
 
 impl ArgumentFrom<toml::Value> for kindelia_core::config::ApiConfig {
-  fn arg_from(t: toml::Value) -> Result<Self, String> {
-    t.try_into().map_err(|_| "Could not convert value into array".to_string())
+  fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
+    t.try_into().context("Could not convert value into array")
   }
 }
 
 pub fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
   file: FileInput,
-) -> Result<T, String> {
+) -> anyhow::Result<T> {
   match file {
     FileInput::Path { path } => {
       // read from file
-      let content = std::fs::read_to_string(&path).map_err(|err| {
-        format!("Cannot read from '{:?}' file: {}", path, err)
-      })?;
+      let content = std::fs::read_to_string(&path)
+        .context(anyhow!("Cannot read from '{:?}'", path))?;
       T::arg_from(content)
     }
     FileInput::Stdin => {
@@ -263,7 +263,7 @@ pub fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
       let mut input = String::new();
       match std::io::stdin().read_line(&mut input) {
         Ok(_) => T::arg_from(input.trim().to_string()),
-        Err(err) => Err(format!("Could not read from stdin: {}", err)),
+        Err(err) => Err(anyhow!("Could not read from stdin: {}", err)),
       }
     }
   }
