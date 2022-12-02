@@ -12,3 +12,4 @@ kindelia_common = { path = "../kindelia_common" }
 
 serde = { version = "1.0.137", features = ["derive"] }
 hex = "0.4"
+thiserror = "1.0.37"

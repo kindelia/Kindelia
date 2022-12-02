@@ -24,7 +24,7 @@ pub fn run_async_blocking<T, P>(prom: P) -> anyhow::Result<T>
 where
   P: Future<Output = anyhow::Result<T>>,
 {
-  let runtime = tokio::runtime::Runtime::new().unwrap();
+  let runtime = tokio::runtime::Runtime::new()?;
   runtime.block_on(prom)
 }
 

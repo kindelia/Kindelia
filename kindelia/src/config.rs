@@ -71,7 +71,9 @@ where
         (self.default_value)()
       }
     } else {
-      panic!("Cannot resolve from config file config without 'prop' field set")
+      Err(anyhow!(
+        "Cannot resolve from config file config without 'prop' field set"
+      ))
     }
   }
 

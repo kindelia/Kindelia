@@ -32,7 +32,7 @@ use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
 use kindelia_core::util::bytes_to_bitvec;
-use kindelia_core::{events, runtime, net};
+use kindelia_core::{events, net, runtime};
 use kindelia_lang::{ast, parser};
 use util::{
   bytes_to_u128, flag_to_option, handle_config_file, run_async_blocking,
@@ -163,8 +163,7 @@ pub fn run_cli() -> anyhow::Result<()> {
     }
     CliCommand::Serialize { file } => {
       let code: String = file.read_to_string()?;
-      serialize_code(&code);
-      Ok(())
+      serialize_code(&code)
     }
     CliCommand::Deserialize { file } => {
       let code: String = file.read_to_string()?;
@@ -281,19 +280,18 @@ pub fn run_cli() -> anyhow::Result<()> {
             .env("KINDELIA_SLOW_MINING")
             .prop("node.debug.slow_mining".to_string())
             .default_value(|| Ok(0))
-            .build()
-            .unwrap()
+            .build()?
             .resolve_from_file_opt(config)?;
 
           let api_config = ConfigSettingsBuilder::default()
             .prop("node.api".to_string())
             .default_value(|| Ok(ApiConfig::default()))
-            .build()
-            .unwrap()
+            .build()?
             .resolve_from_file_only(config)?;
 
           // Start
-          let node_comm = init_socket().expect("Could not open a UDP socket");
+          let node_comm =
+            init_socket().context("Could not open a UDP socket")?;
           let initial_peers = initial_peers
             .into_iter()
             .map(|x| net::parse_address(&x).context("parsing peer addr"))
@@ -363,12 +361,13 @@ fn print_json_else<T: Serialize, F: Fn(T)>(
   json: bool,
   printable: T,
   when_not_json: F,
-) {
+) -> anyhow::Result<()> {
   if json {
-    println!("{}", serde_json::to_string_pretty(&printable).unwrap());
+    println!("{}", serde_json::to_string_pretty(&printable)?);
   } else {
     when_not_json(printable)
   }
+  Ok(())
 }
 
 // Client
@@ -428,14 +427,12 @@ pub async fn get_info(
             sign: None,
           };
           println!("{}", statement);
-        });
-        Ok(())
+        })
       }
       GetFunKind::State => {
         let state =
           client.get_function_state(name).await.map_err(|e| anyhow!(e))?;
-        print_json_else(json, &state, |state| println!("{}", state));
-        Ok(())
+        print_json_else(json, &state, |state| println!("{}", state))
       }
       GetFunKind::Slots => todo!(),
     },
@@ -458,7 +455,7 @@ pub async fn get_info(
       let stats = client.get_stats().await.map_err(|e| anyhow!(e))?;
       match stat_kind {
         None => {
-          print_json_else(json, &stats, |stats| println!("{:#?}", stats));
+          print_json_else(json, &stats, |stats| println!("{:#?}", stats))?;
         }
         Some(stat_kind) => {
           match stat_kind {
@@ -473,7 +470,7 @@ pub async fn get_info(
             GetStatsKind::Mana { limit_stat: None } => {
               print_json_else(json, &stats.mana, |stats| {
                 println!("{:#?}", stats)
-              });
+              })?;
             }
             GetStatsKind::Space { limit_stat: Some(limit_stat) } => {
               let stat = limit_stat.get_field(stats.space);
@@ -482,7 +479,7 @@ pub async fn get_info(
             GetStatsKind::Space { limit_stat: None } => {
               print_json_else(json, &stats.space, |stats| {
                 println!("{:#?}", stats)
-              });
+              })?;
             }
           };
         }
@@ -502,12 +499,12 @@ pub async fn get_info(
 // Code
 // ====
 
-pub fn serialize_code(code: &str) {
-  let statements =
-    parser::parse_statements(code).map_err(|err| err.erro).unwrap().1;
+pub fn serialize_code(code: &str) -> anyhow::Result<()> {
+  let statements = parser::parse_statements(code)?.1;
   for statement in statements {
     println!("{}", hex::encode(statement.proto_serialized().to_bytes()));
   }
+  Ok(())
 }
 
 pub fn deserialize_code(content: &str) -> anyhow::Result<()> {
@@ -750,14 +747,15 @@ fn clean(
 // ================
 
 // event threads
+#[allow(clippy::type_complexity)]
 pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
   ws_config: kindelia_core::config::WsConfig,
   ui_config: Option<UiConfig>,
   addr: A,
-) -> (
+) -> anyhow::Result<(
   std::sync::mpsc::Sender<(events::NodeEventType, u128)>,
   Vec<std::thread::JoinHandle<()>>,
-) {
+)> {
   let (event_tx, event_rx) =
     std::sync::mpsc::channel::<(events::NodeEventType, u128)>();
   let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
@@ -785,7 +783,10 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
         {
           let event = events::NodeEvent { time, addr, event };
           if ui_cfg.json {
-            println!("{}", serde_json::to_string(&event).unwrap());
+            match serde_json::to_string(&event) {
+              Ok(s) => println!("{}", s),
+              Err(e) => eprintln!("json error: {}", e),
+            }
           } else {
             println!("{}", event);
           }
@@ -794,7 +795,7 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
     }
   });
 
-  (event_tx, vec![thread_1, thread_2])
+  Ok((event_tx, vec![thread_1, thread_2]))
 }
 
 // TODO: I don't know why 'static is needed here or why it works
@@ -820,7 +821,7 @@ pub fn start_node<C: ProtoComm + 'static>(
       node_config.ws.unwrap_or_default(),
       node_config.ui,
       addr,
-    );
+    )?;
     threads.extend(event_thrds);
     event_tx
   };
@@ -860,9 +861,35 @@ pub fn start_node<C: ProtoComm + 'static>(
   });
   threads.insert(0, node_thread);
 
-  // Joins all threads
+  // Joins all threads and checks for panics.
   for thread in threads {
-    thread.join().unwrap();
+    match thread.join() {
+      Ok(_) => {
+        // For now at least, child threads are expected to handle their
+        // own errors, eg by logging.  We do not propagate them up.
+        // For a way to do it, see:
+        //   https://stackoverflow.com/a/62823352/10087197
+      }
+      Err(e) => {
+        // When join() returns an error, that means a child thread panicked.
+        let msg = {
+          if let Some(s) = e.downcast_ref::<&str>() {
+            format!("Child thread panicked with message:\n{}", s)
+          } else if let Some(s) = e.downcast_ref::<String>() {
+            format!("Child thread panicked with message:\n{}", s)
+          } else {
+            format!("Child thread panicked!\n{:?}", e)
+          }
+        };
+
+        // We return the panic error to propagate upwards so that
+        // panic in any thread will result in process termination
+        // as per rust default behavior.
+        // Alternatively we could just log the error and keep going
+        // without the thread that panicked, or even restart it.
+        return Err(anyhow!(msg));
+      }
+    }
   }
 
   Ok(())
