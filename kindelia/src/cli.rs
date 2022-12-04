@@ -121,9 +121,9 @@ pub enum CliCommand {
     /// Whether to consider size and mana in the execution.
     #[clap(long)]
     sudo: bool,
-    /// Network id / magic number.
-    #[clap(long, value_parser=maybe_hex::<u32>)]
-    network_id: Option<u32>,
+    /// Path to genesis file. else use default genesis for tests.
+    #[clap(short, long)]
+    genesis: Option<PathBuf>,
   },
   /// Checks for statements in kdl file
   Check {

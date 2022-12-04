@@ -127,20 +127,21 @@ pub fn run_cli() -> anyhow::Result<()> {
   );
 
   match parsed.command {
-    CliCommand::Test { file, sudo, network_id } => {
-      let config = handle_config_file(&config_path).map_err(|e| anyhow!(e))?;
-      let config = Some(&config);
+    CliCommand::Test { file, sudo, genesis } => {
+      let genesis_code = match genesis {
+        Some(p) => std::fs::read_to_string(&p).context(anyhow!(
+          "reading user-provided genesis prelude in {}",
+          p.display()
+        ))?,
+        None => {
+          include_str!("../../kindelia_core/genesis-tests.kdl").to_string()
+        }
+      };
+      let code = file
+        .read_to_string()
+        .context(anyhow!("reading user-provided code in {}", file))?;
 
-      let network_id = resolve_cfg!(
-        env = "KINDELIA_NETWORK_ID",
-        prop = "node.network.network_id".to_string(),
-        no_default = anyhow!("Missing `network_id` parameter."),
-        cli_val = network_id,
-        cfg = config,
-      );
-
-      let code: String = file.read_to_string()?;
-      test_code(network_id, &code, sudo);
+      test_code(&genesis_code, &code, sudo);
       Ok(())
     }
     CliCommand::Check { file, encoded, command } => {
@@ -678,10 +679,9 @@ async fn join_all(
   Ok(())
 }
 
-pub fn test_code(network_id: u32, code: &str, sudo: bool) {
+pub fn test_code(genesis_code: &str, code: &str, sudo: bool) {
   let genesis_stmts =
-    parser::parse_code(&genesis_code(network_id).expect("Genesis code loads"))
-      .expect("Genesis code parses");
+    parser::parse_code(genesis_code).expect("Genesis code parses");
 
   runtime::test_statements_from_code(&genesis_stmts, code, sudo);
 }
