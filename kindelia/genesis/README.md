@@ -11,8 +11,3 @@ in the config file with extension `.kdl`.  For example, `network/0xCAFE0006.kdl`
 
 Typically a new network is created by bumping this value, eg creating the
 file `networks/0xCAFE0007.kdl`. Also `../default.toml` should be updated to match.
-
-The genesis file with the highest hex value is installed into the 
-user's home directory when `kindelia init` is run.
-
-

@@ -42,7 +42,7 @@ use util::{
 };
 
 use crate::cli::{GetStatsKind, NodeCleanBlocksCommand, NodeCleanCommand};
-use crate::genesis::{genesis_code, init_genesis};
+use crate::genesis::genesis_code;
 use crate::util::init_config_file;
 
 fn main() -> anyhow::Result<()> {
@@ -244,7 +244,6 @@ pub fn run_cli() -> anyhow::Result<()> {
       let path = default_config_path()?;
       eprintln!("Writing default configuration to '{}'...", path.display());
       init_config_file(&path).map_err(|e| anyhow!(e))?;
-      init_genesis(&default_base_path()?.join("genesis"))?;
       Ok(())
     }
     CliCommand::Node { command, data_dir, network_id } => {
@@ -853,7 +852,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
   let genesis_stmts = parser::parse_code(
-    &genesis_code(node_config.network_id).expect("Genesis code loads"),
+    genesis_code(node_config.network_id).expect("Genesis code loads"),
   )
   .expect("Genesis code parses");
 
