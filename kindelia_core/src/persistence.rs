@@ -12,7 +12,7 @@ use kindelia_lang::ast::Func;
 use crate::bits::ProtoSerialize;
 use crate::node::{self, HashedBlock};
 use crate::runtime::{compile_func, CompFunc};
-use crate::util::{self, bitvec_to_bytes};
+use crate::util::{self, bitvec_to_bytes, FileSystemError};
 
 /// Trait that represents serialization of a type to memory.
 /// `disk_serialize` expects a sink to write to and returns the amount of bytes written
@@ -367,8 +367,15 @@ impl SimpleFileStorage {
     let (tx, rx) = mpsc::channel::<FileWritterChannelInfo>();
     // blocks are stored in `blocks` dir
     let blocks_path = path.join(BLOCKS_DIR);
-    std::fs::create_dir_all(&blocks_path)
-      .map_err(|e| BlockStorageError::Write { source: Box::new(e) })?;
+    std::fs::create_dir_all(&blocks_path).map_err(|e| {
+      BlockStorageError::Write {
+        source: Box::new(FileSystemError {
+          path: blocks_path.clone(),
+          source: e,
+          context: "creating blocks directory".to_string(),
+        }),
+      }
+    })?;
 
     let moved_path = blocks_path.clone();
     // spawn thread for write the blocks files
@@ -381,9 +388,15 @@ impl SimpleFileStorage {
         // create file buffer
         let file_buff = bitvec_to_bytes(&block.proto_serialized());
         // write file
-        if let Err(e) = std::fs::write(file_path, file_buff)
-          .map_err(|e| BlockStorageError::Write { source: Box::new(e) })
-        {
+        if let Err(e) = std::fs::write(&file_path, file_buff).map_err(|e| {
+          BlockStorageError::Write {
+            source: Box::new(FileSystemError {
+              path: file_path,
+              source: e,
+              context: "writing block to file".to_string(),
+            }),
+          }
+        }) {
           eprintln!("Couldn't save block to disk.\n{}", e);
         }
       }

@@ -12,6 +12,9 @@ use kindelia_common::nohash_hasher::NoHashHasher;
 use kindelia_common::{Name, U120, U256};
 
 use crate::runtime::Loc;
+use std::path::PathBuf;
+
+use thiserror::Error;
 
 pub type U64Map <T> = HashMap<u64 , T, std::hash::BuildHasherDefault<NoHashHasher<u64 >>>;
 pub type U120Map<T> = HashMap<U120, T, std::hash::BuildHasherDefault<NoHashHasher<U120>>>;
@@ -180,4 +183,27 @@ macro_rules! print_with_timestamp {
   ($($arg:tt)*) => {
     println!("{} ~~ {}", get_time_micro(), format!($($arg)*));
   };
+}
+
+
+// Errors
+// ======
+
+/// An error for providing metadata (path, context) for
+/// filesystem errors.
+///
+/// This is useful because std::io::error does not provide
+/// the path, and so error messages can be quite unhelpful
+/// as one does not even know the path being operated on.
+///
+/// See: https://github.com/rust-lang/rfcs/issues/2885
+///
+/// It is intended that any calls to std lib filesystem calls
+/// will map_err() the result to FileSystemError.
+#[derive(Error, Debug)]
+#[error("Filesystem error for path: {path}.  context: {context}")]
+pub struct FileSystemError {
+  pub path: PathBuf,
+  pub context: String,
+  pub source: std::io::Error,
 }
