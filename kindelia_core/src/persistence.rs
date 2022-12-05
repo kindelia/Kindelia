@@ -432,8 +432,14 @@ impl BlockStorage for SimpleFileStorage {
 
     let mut items = vec![];
     for (_, file_path) in file_paths.into_iter() {
-      let buffer = std::fs::read(&file_path)
-        .map_err(|e| BlockStorageError::Read { source: Box::new(e) })?;
+      let buffer =
+        std::fs::read(&file_path).map_err(|e| BlockStorageError::Read {
+          source: Box::new(FileSystemError {
+            path: file_path.clone(),
+            source: e,
+            context: "reading block from file".to_string(),
+          }),
+        })?;
       let block =
         node::Block::proto_deserialized(&util::bytes_to_bitvec(&buffer))
           .ok_or(BlockStorageError::Serialization { source: None })?;
@@ -453,8 +459,8 @@ impl BlockStorage for SimpleFileStorage {
 /// Errors associated with get_ordered_blocks_path
 #[derive(ThisError, Debug)]
 pub enum OrderedBlocksError {
-  #[error("Could not read directory {path:?}")]
-  ReadDir { path: PathBuf, source: std::io::Error },
+  #[error(transparent)]
+  ReadDir(#[from] FileSystemError),
   #[error("Could not read filename in {0}")]
   BadFileName(PathBuf),
   #[error("Missing extension {0}")]
@@ -478,13 +484,20 @@ pub fn get_ordered_blocks_path(
   let mut file_paths = vec![];
 
   for entry in std::fs::read_dir(path).map_err(|e| {
-    OrderedBlocksError::ReadDir { path: path.to_path_buf(), source: e }
+    OrderedBlocksError::ReadDir(FileSystemError {
+      path: path.to_path_buf(),
+      source: e,
+      context: "reading blocks directory".to_string(),
+    })
   })? {
     // Extract block height from block file path for fast sort
     let path = entry
-      .map_err(|e| OrderedBlocksError::ReadDir {
-        path: path.to_path_buf(),
-        source: e,
+      .map_err(|e| {
+        OrderedBlocksError::ReadDir(FileSystemError {
+          path: path.to_path_buf(),
+          source: e,
+          context: "reading blocks directory".to_string(),
+        })
       })?
       .path();
     let name = path
