@@ -371,7 +371,7 @@ impl RawCell {
       tag if tag == CellTag::OP2 as u8 => CellTag::OP2,
       tag if tag == CellTag::NUM as u8 => CellTag::NUM,
       tag if tag == CellTag::NIL as u8 => CellTag::NIL,
-      _ => panic!("Unkown rawcell tag"),
+      _ => panic!("Unkown rawcell tag: {}", tag),
     }
   }
 
@@ -624,19 +624,19 @@ pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 #[derive(PartialEq)]
 #[repr(u8)]
 pub enum CellTag {
-  DP0 = 0x0,
-  DP1 = 0x1,
-  VAR = 0x2,
-  ARG = 0x3,
-  ERA = 0x4,
-  LAM = 0x5,
-  APP = 0x6,
-  SUP = 0x7,
-  CTR = 0x8,
-  FUN = 0x9,
-  OP2 = 0xA,
-  NUM = 0xB,
-  NIL = 0xF,
+  DP0 = 0x02,
+  DP1 = 0x03,
+  VAR = 0x04,
+  ARG = 0x05,
+  ERA = 0x06,
+  LAM = 0x07,
+  APP = 0x08,
+  SUP = 0x09,
+  CTR = 0x0A,
+  FUN = 0x0B,
+  OP2 = 0x0C,
+  NUM = 0x0D,
+  NIL = 0x0F,
 }
 
 pub const U128_NONE: u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
@@ -2571,17 +2571,23 @@ pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
 pub fn collect(rt: &mut Runtime, term: RawCell) {
   let mut stack: Vec<RawCell> = Vec::new();
   let mut next = term;
-  let mut dups: Vec<RawCell> = Vec::new();
+  // TODO: the HashSet here is more costly than a `Vec` used before. Maybe we
+  // should test if dup-nodes can be cleared directly on the DP0/DP1 arms
+  // instead of postponing it with this structure.
+  let mut dup_nodes: HashSet<Loc> = HashSet::new();
+
   loop {
     let term = next;
     match term.get_tag() {
       CellTag::DP0 => {
         link(rt, term.get_loc(0), Era());
-        dups.push(term);
+        let dup_node_loc = term.get_loc(0);
+        dup_nodes.insert(dup_node_loc);
       }
       CellTag::DP1 => {
         link(rt, term.get_loc(1), Era());
-        dups.push(term);
+        let dup_node_loc = term.get_loc(0);
+        dup_nodes.insert(dup_node_loc);
       }
       CellTag::VAR => {
         link(rt, term.get_loc(0), Era());
@@ -2638,12 +2644,12 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
       break;
     }
   }
-  for dup in dups {
-    let fst = ask_arg(rt, dup, 0);
-    let snd = ask_arg(rt, dup, 1);
+  for dup_node in dup_nodes {
+    let fst = rt.read(dup_node + 0);
+    let snd = rt.read(dup_node + 1);
     if fst.get_tag() == CellTag::ERA && snd.get_tag() == CellTag::ERA {
-      collect(rt, ask_arg(rt, dup, 2));
-      clear(rt, dup.get_loc(0), 3);
+      let body = rt.read(dup_node + 2);
+      clear(rt, dup_node, 3);
     }
   }
 }
