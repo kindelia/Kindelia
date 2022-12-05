@@ -1,14 +1,18 @@
 // Deploys a simple Counter function
 // ---------------------------------
 
+ctr {Test x}
+
 fun (Counter action) {
 
   (Counter {Inc}) =
+    ask (Emit {Test #2});
     ask x = (Take);
     ask (Save (+ x #1));
     (Done #0)
 
   (Counter {Get}) =
+    ask (Emit #1);
     ask x = (Load);
     (Done x)
 

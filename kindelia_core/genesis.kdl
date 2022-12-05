@@ -129,6 +129,12 @@ fun (Norm term) {
   (Norm term) = @cont {NORM term cont}
 }
 
+// EMIT emits a term
+ctr {EMIT term cont}
+fun (Emit term) {
+  (Emit term) = @cont {EMIT term cont}
+}
+
 // LOAD works like TAKE, but clones the state
 fun (Load) {
   (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (!cont x1)}}

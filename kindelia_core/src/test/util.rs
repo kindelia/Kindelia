@@ -259,8 +259,8 @@ where
   let stmt = ast::Statement::Run { expr: term, sign: None };
   let result = rt.run_statement(&stmt, false, true, None).unwrap();
 
-  if let StatementInfo::Run { done_term, .. } = result {
-    action(&done_term)
+  if let StatementInfo::Run { info } = result {
+    action(&info.done_term)
   }
 }
 
