@@ -140,13 +140,13 @@ fn block_loading(c: &mut Criterion) {
   // creates a temporary directory
   let dir = temp_dir();
   // creates the storage with temp dir
-  let storage = persistence::SimpleFileStorage::new(dir.clone());
+  let storage = persistence::SimpleFileStorage::new(dir.clone()).unwrap();
 
   // writes `n` max blocks in disk
   let n = 1000;
   let block = max_block();
   for i in 0..n {
-    storage.write_block(i, block.clone().hashed());
+    storage.write_block(i, block.clone().hashed()).unwrap();
   }
 
   // empty `ProtoComm` to pass the created node
