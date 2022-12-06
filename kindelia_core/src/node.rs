@@ -953,12 +953,10 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               tags = mining,
               stopped
             );
-            // Removes this block's transactions from mempool
-            for tx in extract_transactions(&block.body) {
-              self.pool.remove(&tx);
-            }
             self.tip = bhash;
             if true {
+              // TODO: re-add transactions of reversed blocks to mempool
+
               // Block reorganization (* marks blocks for which we have runtime snapshots):
               // tick: |  0 | *1 |  2 |  3 |  4 | *5 |  6 | *7 | *8 |
               // hash: |  A |  B |  C |  D |  E |  F |  G |  H |    |  <- old timeline
@@ -968,8 +966,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               let mut must_compute = Vec::new();
               let mut old_bhash = cur_tip;
               let mut new_bhash = new_tip;
+
               // 1. Finds the highest block with same height on both timelines
-              //    On the example above, we'd have `H, S`
+              //    On the example above, we'd have `H, S`.
               while self.height[&new_bhash] > self.height[&old_bhash] {
                 must_compute.push(new_bhash);
                 new_bhash = self.block[&new_bhash].prev;
@@ -977,15 +976,17 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               while self.height[&old_bhash] > self.height[&new_bhash] {
                 old_bhash = self.block[&old_bhash].prev;
               }
-              // 2. Finds highest block with same value on both timelines
-              //    On the example above, we'd have `D`
+
+              // 2. Finds highest block with same value on both timelines. On
+              //    the example above, we'd have `D`.
               while old_bhash != new_bhash {
                 must_compute.push(new_bhash);
                 old_bhash = self.block[&old_bhash].prev;
                 new_bhash = self.block[&new_bhash].prev;
               }
-              // 3. Saves overwritten blocks to disk
-              // TODO: on separate thread
+
+              // 3. Saves overwritten blocks to disk and remove their
+              //    transactions from mempool. 
               for bhash_comp in must_compute.iter().rev() {
                 let block_height = self.height[bhash_comp];
                 if let Err(e) = self
@@ -994,9 +995,16 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
                 {
                   eprintln!("WARN: Error writing block to disk.\n{}", e)
                 }
+                // Removes this block's transactions from mempool
+                let block_comp = &self.block[bhash_comp];
+                // TODO: refactor out redundant `extract_transactions`
+                for tx in extract_transactions(&block_comp.body) { 
+                  self.pool.remove(&tx);
+                }
               }
-              // 4. Reverts the runtime to a state older than that block
-              //    On the example above, we'd find `runtime.tick = 1`
+
+              // 4. Reverts the runtime to a state older than that block. On the
+              //    example above, we'd find `runtime.tick = 1`
               let mut tick = self.height[&old_bhash];
 
               let runtime_old_tick = self.runtime.get_tick();
@@ -1025,8 +1033,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               // 6. Computes every block after that on the new timeline
               //    On the example above, we'd compute `C, D, P, Q, R, S, T`
               for bhash_comp in must_compute.iter().rev() {
-                let block_comp = &self.block[bhash_comp];
-                self.compute_block(&block_comp.clone(), &block); // TODO: avoid clone
+                let block_comp = &self.block[bhash_comp].clone();
+                self.compute_block(block_comp, &block); // TODO: avoid clone
               }
             }
           }
