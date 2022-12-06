@@ -211,6 +211,9 @@ pub enum CliCommand {
     /// Network id / magic number.
     #[clap(long, value_parser=maybe_hex::<u32>)]
     network_id: Option<u32>,
+    /// File containing genesis statements.
+    #[clap(long)]
+    genesis: Option<PathBuf>,
   },
   /// Generate auto-completion for a shell.
   Completion {
