@@ -2649,6 +2649,7 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
     let snd = rt.read(dup_node + 1);
     if fst.get_tag() == CellTag::ERA && snd.get_tag() == CellTag::ERA {
       let body = rt.read(dup_node + 2);
+      rt.collect(body);
       clear(rt, dup_node, 3);
     }
   }
