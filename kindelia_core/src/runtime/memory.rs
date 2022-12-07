@@ -127,7 +127,7 @@
 //! 5. Function and Constructor arities depends on the user-provided definition.
 //!
 //! ## Examples
-//! 
+//!
 //! ### Example 0
 //!
 //! Term: `{T2 #7 #8}`
@@ -240,25 +240,19 @@ impl RawCell {
   pub const NONE: RawCell = RawCell(U128_NONE);
 
   // Size of each RawCell field in bits
-  pub const VAL_SIZE: usize = 48;
+  pub const PTR_SIZE: usize = 48;
   pub const EXT_SIZE: usize = Name::MAX_BITS;
   pub const TAG_SIZE: usize = 8;
-  pub const NUM_SIZE: usize = Self::EXT_SIZE + Self::VAL_SIZE;
+  pub const NUM_SIZE: usize = Self::EXT_SIZE + Self::PTR_SIZE;
 
   // Position of each RawCell field
-  pub const VAL_POS: usize = 0;
-  pub const EXT_POS: usize = Self::VAL_POS + Self::VAL_SIZE;
+  pub const PTR_POS: usize = 0;
+  pub const EXT_POS: usize = Self::PTR_POS + Self::PTR_SIZE;
   pub const TAG_POS: usize = Self::EXT_POS + Self::EXT_SIZE;
   pub const NUM_POS: usize = 0;
 
-  // First bit of each field
-  pub const VAL_SHL: u128 = 1 << Self::VAL_POS;
-  pub const EXT_SHL: u128 = 1 << Self::EXT_POS;
-  pub const TAG_SHL: u128 = 1 << Self::TAG_POS;
-  pub const NUM_SHL: u128 = 1 << Self::NUM_POS;
-
   // Bit mask for each field
-  pub const VAL_MASK: u128 = mask(Self::VAL_SIZE, Self::VAL_POS);
+  pub const PTR_MASK: u128 = mask(Self::PTR_SIZE, Self::PTR_POS);
   pub const EXT_MASK: u128 = mask(Self::EXT_SIZE, Self::EXT_POS);
   pub const TAG_MASK: u128 = mask(Self::TAG_SIZE, Self::TAG_POS);
   pub const NUM_MASK: u128 = mask(Self::NUM_SIZE, Self::NUM_POS);
@@ -267,80 +261,56 @@ impl RawCell {
 // Constructors
 impl RawCell {
   pub fn var(pos: Loc) -> RawCell {
-    RawCell((CellTag::VAR as u128 * Self::TAG_SHL) | *pos as u128)
+    RawCell(CellTag::VAR.on_u128() | *pos as u128)
   }
 
   pub fn dp0(col: u128, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::DP0 as u128 * Self::TAG_SHL)
-        | (col * Self::EXT_SHL)
-        | *pos as u128,
-    )
+    RawCell(CellTag::DP0.on_u128() | (col << Self::EXT_POS) | *pos as u128)
   }
 
   pub fn dp1(col: u128, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::DP1 as u128 * Self::TAG_SHL)
-        | (col * Self::EXT_SHL)
-        | *pos as u128,
-    )
+    RawCell(CellTag::DP1.on_u128() | (col << Self::EXT_POS) | *pos as u128)
   }
 
   pub fn arg(pos: Loc) -> RawCell {
-    RawCell((CellTag::ARG as u128 * Self::TAG_SHL) | *pos as u128)
+    RawCell(CellTag::ARG.on_u128() | *pos as u128)
   }
 
   pub fn era() -> RawCell {
-    RawCell(CellTag::ERA as u128 * Self::TAG_SHL)
+    RawCell(CellTag::ERA.on_u128())
   }
 
   pub fn lam(pos: Loc) -> RawCell {
-    RawCell((CellTag::LAM as u128 * Self::TAG_SHL) | *pos as u128)
+    RawCell(CellTag::LAM.on_u128() | *pos as u128)
   }
 
   pub fn app(pos: Loc) -> RawCell {
-    RawCell((CellTag::APP as u128 * Self::TAG_SHL) | *pos as u128)
+    RawCell(CellTag::APP.on_u128() | *pos as u128)
   }
 
   pub fn par(col: u128, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::SUP as u128 * Self::TAG_SHL)
-        | (col * Self::EXT_SHL)
-        | *pos as u128,
-    )
+    RawCell(CellTag::SUP.on_u128() | (col << Self::EXT_POS) | *pos as u128)
   }
 
-  pub fn op2(ope: u128, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::OP2 as u128 * Self::TAG_SHL)
-        | (ope * Self::EXT_SHL)
-        | *pos as u128,
-    )
+  pub fn op2(op: u128, pos: Loc) -> RawCell {
+    RawCell(CellTag::OP2.on_u128() | (op << Self::EXT_POS) | *pos as u128)
   }
 
   pub fn num(val: u128) -> RawCell {
     debug_assert!((!Self::NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-    RawCell((CellTag::NUM as u128 * Self::TAG_SHL) | (val & Self::NUM_MASK))
+    RawCell(CellTag::NUM.on_u128() | (val & Self::NUM_MASK))
   }
 
-  pub fn ctr(fun: Name, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::CTR as u128 * Self::TAG_SHL)
-        | (*fun * Self::EXT_SHL)
-        | *pos as u128,
-    )
+  pub fn ctr(label: Name, pos: Loc) -> RawCell {
+    RawCell(CellTag::CTR.on_u128() | (*label << Self::EXT_POS) | *pos as u128)
   }
 
-  pub fn fun(fun: Name, pos: Loc) -> RawCell {
-    RawCell(
-      (CellTag::FUN as u128 * Self::TAG_SHL)
-        | (*fun * Self::EXT_SHL)
-        | *pos as u128,
-    )
+  pub fn fun(label: Name, pos: Loc) -> RawCell {
+    RawCell(CellTag::FUN.on_u128() | (*label << Self::EXT_POS) | *pos as u128)
   }
 
   pub fn nil() -> RawCell {
-    RawCell(CellTag::NIL as u128 * RawCell::TAG_SHL)
+    RawCell(CellTag::NIL.on_u128())
   }
 }
 
@@ -363,17 +333,17 @@ impl RawCell {
   }
 
   pub fn get_tag(&self) -> CellTag {
-    let tag = (**self / Self::TAG_SHL) as u8;
+    let tag = (**self >> Self::TAG_POS) as u8;
     let tag = CellTag::try_from(tag);
     tag.expect("Unknown cell tag")
   }
 
   pub fn get_ext(&self) -> u128 {
-    (**self / Self::EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
+    (**self & Self::EXT_MASK) >> Self::EXT_POS
   }
 
   pub fn get_ptr(&self) -> Loc {
-    Loc((**self & 0xFFFF_FFFF_FFFF) as u64)
+    Loc((**self & Self::PTR_MASK) as u64)
   }
 
   pub fn get_loc(&self, arg: u64) -> Loc {
@@ -413,6 +383,12 @@ pub enum CellTag {
   OP2 = 0x0C,
   NUM = 0x0D,
   NIL = 0x0F,
+}
+
+impl CellTag {
+  pub fn on_u128(self) -> u128 {
+    (self as u128) << RawCell::TAG_POS
+  }
 }
 
 impl TryFrom<u8> for CellTag {
@@ -476,11 +452,11 @@ pub struct Loc(u64);
 impl Loc {
   pub const ZERO: Loc = Loc(0);
 
-  pub const _MAX: u64 = (1 << RawCell::VAL_SIZE) - 1;
+  pub const _MAX: u64 = (1 << RawCell::PTR_SIZE) - 1;
   pub const MAX: Loc = Loc(Loc::_MAX);
 
   pub fn new(value: u64) -> Option<Self> {
-    if value >> RawCell::VAL_SIZE == 0 {
+    if value >> RawCell::PTR_SIZE == 0 {
       Some(Loc(value))
     } else {
       None
