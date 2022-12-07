@@ -372,20 +372,16 @@ impl RawCell {
     (**self / Self::EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
   }
 
-  pub fn get_val(&self) -> u64 {
-    (**self & 0xFFFF_FFFF_FFFF) as u64
+  pub fn get_ptr(&self) -> Loc {
+    Loc((**self & 0xFFFF_FFFF_FFFF) as u64)
+  }
+
+  pub fn get_loc(&self, arg: u64) -> Loc {
+    self.get_ptr() + arg
   }
 
   pub fn get_num(&self) -> U120 {
     U120::from_u128_unchecked(**self & Self::NUM_MASK)
-  }
-
-  //pub fn get_ari(lnk: RawCell) -> u128 {
-  //(lnk / ARI) & 0xF
-  //}
-
-  pub fn get_loc(&self, arg: u64) -> Loc {
-    Loc(self.get_val() + arg)
   }
 
   pub fn get_name_from_ext(&self) -> Name {
@@ -447,7 +443,7 @@ impl Display for RawCell {
       f.write_str("?")
     } else {
       let tag = self.get_tag();
-      let val = self.get_val();
+      let ptr = self.get_ptr();
       let tag_str = match tag {
         CellTag::DP0 => "DP0",
         CellTag::DP1 => "DP1",
@@ -464,7 +460,7 @@ impl Display for RawCell {
         _ => "?",
       };
       let name = self.get_name_from_ext();
-      f.write_fmt(format_args!("{}:{}:{:x}", tag_str, name, val))
+      f.write_fmt(format_args!("{}:{}:{:x}", tag_str, name, *ptr))
     }
   }
 }

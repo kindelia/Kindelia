@@ -2084,7 +2084,7 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
     match tag {
       CellTag::DP0 | CellTag::DP1 => {
         let side = matches!(tag, CellTag::DP1);
-        let dup_node_loc = term.get_loc(0);
+        let dup_node_loc = term.get_ptr();
         let body = collect_dp_and_check_dup(rt, dup_node_loc, side);
         if let Some(body) = body {
           next = body;
@@ -2913,7 +2913,7 @@ pub fn show_runtime_error(err: RuntimeError) -> String {
       match effect_failure {
         EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
-          let pos = arg.get_val();
+          let pos = arg.get_ptr();
           format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), arg)
         },
         EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
