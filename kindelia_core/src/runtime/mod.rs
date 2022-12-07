@@ -2571,23 +2571,41 @@ pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
 pub fn collect(rt: &mut Runtime, term: RawCell) {
   let mut stack: Vec<RawCell> = Vec::new();
   let mut next = term;
-  // TODO: the HashSet here is more costly than a `Vec` used before. Maybe we
-  // should test if dup-nodes can be cleared directly on the DP0/DP1 arms
-  // instead of postponing it with this structure.
-  let mut dup_nodes: HashSet<Loc> = HashSet::new();
+
+  /// Collects the DP and checks if the entire dup-node can be collected, clears
+  /// it and returns the body to be collected, if so.
+  fn collect_dp_and_check_dup(rt: &mut Runtime, dup_loc: Loc, side: bool) -> Option<RawCell> {
+    // Arg cell inside the dup-node corresponding to the DP we are collecting
+    let dp_arg_loc = dup_loc + (side as u64);
+    link(rt, dp_arg_loc, Era());
+
+    // Arg cell corresponding to the counterpart DP
+    let co_dp_arg_loc = dup_loc + (!side as u64);
+    let co_dp_arg = rt.read(co_dp_arg_loc);
+
+    // If both DPs have been collected, collect the entire dup-node
+    if co_dp_arg.get_tag() == CellTag::ERA {
+      let dup_body = rt.read(dup_loc + 2);
+      clear(rt, dup_loc, 3);
+      // Returns the dup body to be collected
+      Some(dup_body)
+    } else {
+      None
+    }
+  }
 
   loop {
     let term = next;
-    match term.get_tag() {
-      CellTag::DP0 => {
-        link(rt, term.get_loc(0), Era());
+    let tag = term.get_tag();
+    match tag {
+      CellTag::DP0 | CellTag::DP1 => {
+        let side = matches!(tag, CellTag::DP1);
         let dup_node_loc = term.get_loc(0);
-        dup_nodes.insert(dup_node_loc);
-      }
-      CellTag::DP1 => {
-        link(rt, term.get_loc(1), Era());
-        let dup_node_loc = term.get_loc(0);
-        dup_nodes.insert(dup_node_loc);
+        let body = collect_dp_and_check_dup(rt, dup_node_loc, side);
+        if let Some(body) = body {
+          next = body;
+          continue;
+        }
       }
       CellTag::VAR => {
         link(rt, term.get_loc(0), Era());
@@ -2642,15 +2660,6 @@ pub fn collect(rt: &mut Runtime, term: RawCell) {
       next = got;
     } else {
       break;
-    }
-  }
-  for dup_node in dup_nodes {
-    let fst = rt.read(dup_node + 0);
-    let snd = rt.read(dup_node + 1);
-    if fst.get_tag() == CellTag::ERA && snd.get_tag() == CellTag::ERA {
-      let body = rt.read(dup_node + 2);
-      rt.collect(body);
-      clear(rt, dup_node, 3);
     }
   }
 }
