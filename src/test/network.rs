@@ -1,39 +1,38 @@
-use petgraph::{
-  algo::astar, graph::NodeIndices, prelude::UnGraph, visit::IntoNodeIdentifiers,
-};
-use std::{
-  collections::HashMap,
-  path::PathBuf,
-  sync::mpsc::{self, Receiver},
-  thread,
-};
-use tokio::sync::oneshot;
+use futures_util::future::join_all;
+use petgraph::algo::astar;
+use petgraph::prelude::UnGraph;
 
-use std::sync::mpsc::Sender;
+use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 
-use crate::{
-  bits::{self, deserialize_number, serialize_number},
-  net::{self, ProtoComm},
-  node::{self, Message, MinerCommunication},
-  util::u256,
-};
+use crate::bits;
+use crate::config;
+#[cfg(feature = "events")]
+use crate::events;
+use crate::net;
+use crate::node;
 
 use super::util::temp_dir;
 
 #[test]
 #[ignore = "network simulation"]
 fn network() {
-  let mut g = UnGraph::new_undirected();
-  let a = g.add_node(0_u32);
-  let b = g.add_node(1);
-  let c = g.add_node(2);
-  g.extend_with_edges(&[
-    (a, b, RouterMockConnection::new(2, 0.5)),
-    (b, c, RouterMockConnection::new(5, 1.)),
-  ]);
+  let simulation_time = std::env::var("SIMULATION_TIME").ok();
+
+  let mut graph = UnGraph::new_undirected();
+  let a = graph.add_node(0_u32);
+  let b = graph.add_node(1);
+  let c = graph.add_node(2);
+  let d = graph.add_node(3);
+  let e = graph.add_node(4);
+  graph.extend_with_edges(&[(a, b, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(b, c, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(c, d, RouterMockConnection::new(20, 0.5))]);
+  graph.extend_with_edges(&[(d, e, RouterMockConnection::new(20, 0.5))]);
 
   // creates the router
-  let (router_mock, sockets) = RouterMock::from_graph(g.clone());
+  let (router_mock, sockets) = RouterMock::from_graph(graph.clone());
   let mut threads = vec![];
 
   // Spawns the router thread
@@ -43,19 +42,48 @@ fn network() {
     }
   });
   threads.push(router_thread);
-
   // Spawns the nodes threads
   for (socket, idx) in sockets {
-    let initial_peers =
-      g.neighbors(idx).map(|node| *g.node_weight(node).unwrap()).collect();
+    let initial_peers = graph
+      .neighbors(idx)
+      .map(|node| *graph.node_weight(node).unwrap())
+      .collect();
+    let addr = socket.addr;
     let socket_thread = thread::spawn(move || {
-      let state_path = temp_dir()
-        .path
-        .join(".kindelia")
-        .join(format!(".test-{}", socket.addr));
-      node::start(state_path, 0, socket, &Some(initial_peers), true, false);
+      let data_path =
+        temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
+
+      #[cfg(feature = "events")]
+      let ws_config =
+        config::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+
+      let mine_cfg = config::MineConfigBuilder::default()
+        .enabled(true)
+        .slow_mining(100)
+        .build()
+        .unwrap();
+
+      let node_cfg = config::NodeConfig {
+        network_id: 0,
+        data_path,
+        mining: mine_cfg,
+        ui: Some(config::UiConfig { json: true, tags: vec![] }),
+        api: None,
+        ws: Some(ws_config), // Some(ws_config),
+      };
+      node::start(node_cfg, socket, initial_peers);
     });
     threads.push(socket_thread);
+  }
+
+  if let Some(simulation_time) = simulation_time {
+    if let Ok(simulation_time) = simulation_time.parse() {
+      let killer = thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(simulation_time));
+        std::process::exit(0);
+      });
+      threads.push(killer);
+    }
   }
 
   // Joins all threads
@@ -80,14 +108,14 @@ impl bits::ProtoSerialize for u32 {
     bits: &mut bit_vec::BitVec,
     names: &mut bits::Names,
   ) {
-    bits::serialize_number(&u256(*self as u128), bits, names);
+    bits::serialize_number(*self as u128, bits);
   }
   fn proto_deserialize(
     bits: &bit_vec::BitVec,
-    index: &mut u128,
+    index: &mut usize,
     names: &mut bits::Names,
   ) -> Option<Self> {
-    bits::deserialize_number(bits, index, names).map(|n| n.low_u32())
+    bits::deserialize_number(bits, index).map(|n| n.low_u32())
   }
 }
 
@@ -242,9 +270,12 @@ impl RouterMock {
 
   fn send(&self, router_message: &RouterMessage) {
     let RouterMessage { to_addr, from_addr, msg } = router_message;
+    let to_addr = *to_addr;
+    let from_addr = *from_addr;
+    let msg = msg.clone();
     let tx = self.sockets.get(&to_addr).unwrap();
 
-    let connection = self.connection(*to_addr, *from_addr);
+    let connection = self.connection(to_addr, from_addr);
     if let Some(connection) = connection {
       let chance: f32 = rand::random();
       // println!(
@@ -252,55 +283,19 @@ impl RouterMock {
       //   connection.error, from_addr, to_addr
       // );
       if chance > connection.error {
-        // println!(
-        //   "Awaiting {} from {} to {}",
-        //   connection.delay, from_addr, to_addr
-        // );
-        thread::sleep(std::time::Duration::from_millis(connection.delay));
-        tx.send(RouterMessage {
-          to_addr: *to_addr,
-          from_addr: *from_addr,
-          msg: msg.to_owned(),
-        })
-        .unwrap()
+        let tx = tx.clone();
+        thread::spawn(move || {
+          // println!(
+          //   "Awaiting {} from {} to {}",
+          //   connection.delay, from_addr, to_addr
+          // );
+          thread::sleep(std::time::Duration::from_millis(connection.delay));
+          // println!("Sending from {} to {}", from_addr, to_addr);
+          tx.send(RouterMessage { to_addr, from_addr, msg }).unwrap()
+        });
       } else {
         // println!("Not sending from {} to {}", from_addr, to_addr);
       }
     }
-  }
-}
-
-fn start(init_peers: &Option<Vec<u32>>, socket_mock: SocketMock) {
-  eprintln!("Starting Kindelia node.");
-
-  let state_path = dirs::home_dir().unwrap().join(".kindelia");
-  let port = socket_mock.get_addr();
-
-  // Node state object
-  let (node_query_sender, node) =
-    node::Node::new(state_path, init_peers, port as u64, socket_mock);
-
-  // Node to Miner communication object
-  let miner_comm_0 = MinerCommunication::new();
-  let miner_comm_1 = miner_comm_0.clone();
-
-  // Threads
-  let mut threads = vec![];
-
-  // Spawns the node thread
-  let node_thread = thread::spawn(move || {
-    node.main(miner_comm_0, true);
-  });
-  threads.push(node_thread);
-
-  // Spawns the miner thread
-  let miner_thread = thread::spawn(move || {
-    node::miner_loop(miner_comm_1);
-  });
-  threads.push(miner_thread);
-
-  // Joins all threads
-  for thread in threads {
-    thread.join().unwrap();
   }
 }

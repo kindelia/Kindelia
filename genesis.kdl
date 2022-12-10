@@ -71,6 +71,21 @@ fun (Tick) {
   (Tick) = @cont {TICK cont}
 }
 
+ctr {GIDX name cont}
+fun (GetIdx name) {
+  (GetIdx name) = @cont {GIDX name cont}
+}
+
+ctr {STH0 idx cont}
+fun (GetStmHash0 idx) {
+  (GetStmHash0 idx) = @cont {STH0 idx cont}
+}
+
+ctr {STH1 idx cont}
+fun (GetStmHash1 idx) {
+  (GetStmHash1 idx) = @cont {STH1 idx cont}
+}
+
 // TIME returns the current block timestamp
 ctr {TIME cont}
 fun (Time) {
@@ -106,6 +121,8 @@ ctr {Get}
 fun (Count action) {
   (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
   (Count {Get}) = ((Load) @x {DONE x})
+} with {
+  #0
 }
 
 // Registers the empty namespace.

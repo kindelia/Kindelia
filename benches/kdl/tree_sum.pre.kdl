@@ -1,0 +1,18 @@
+ctr {Leaf value}        // Tree element
+ctr {Branch left right} // Tree branch
+
+fun (Sum tree) {
+  (Sum {Leaf x})     = x
+  (Sum {Branch a b}) = (+ (Sum a) (Sum b))
+}
+
+fun (Gen depth) {
+  (Gen #0) =
+    {Leaf #1}
+  (Gen x) =
+    dup x0 x1 = x;
+    {Branch
+      (Gen (- x0 #1))
+      (Gen (- x1 #1))
+    }
+}

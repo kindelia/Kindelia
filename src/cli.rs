@@ -1,19 +1,3 @@
-// TODO: `subject` command
-
-// TODO: list names inside of .kdl file
-// TODO: kindelia get name
-
-// TODO: command to get number of txs on mempool
-
-// TODO: way to check if transaction fits in a block
-// TODO: publish to multiple nodes
-
-// TODO: flag enable logging statements results (disabled by default)
-// TODO: limit readback computational resources on aforementioned log and API calls
-
-// TODO: flag to enable printing events (heartbeat) ?
-// TODO: some way to pretty-print events (heartbeat) ?
-
 use std::fmt;
 use std::io::Read;
 use std::net::UdpSocket;
@@ -25,17 +9,18 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use warp::Future;
 
-use crate::api::{client as api_client, Hash, HexStatement};
-use crate::common::Name;
-use crate::crypto;
-use crate::bits::ProtoSerialize;
-use crate::hvm::{self, view_statement, Statement};
-use crate::net;
-use crate::node;
-use crate::util::bytes_to_bitvec;
+use kindelia::api::{client as api_client, Hash, HexStatement};
+use kindelia::bits::ProtoSerialize;
+use kindelia::common::Name;
+use kindelia::crypto;
+use kindelia::hvm::{self, view_statement, Statement};
+use kindelia::net;
+use kindelia::node;
+use kindelia::util::bytes_to_bitvec;
+use kindelia::{config, events};
 
-// This client is meant to talk with node implementing Udp protocol comunication
-// (the default)
+// This client is meant to talk with a node implementing UDP protocol
+// communication (the default)
 type NC = UdpSocket;
 
 /*
@@ -192,8 +177,8 @@ pub enum CliCommand {
     /// The kind of information to get.
     #[clap(subcommand)]
     kind: GetKind,
-    #[clap(long, short)]
     /// Outputs JSON machine readable output.
+    #[clap(long, short)]
     json: bool,
   },
   /// Initialize the configuration file.
@@ -225,24 +210,25 @@ pub enum NodeCommand {
   Clean,
   /// Starts a Kindelia node.
   Start {
+    /// Network id / magic number.
+    #[clap(long)]
+    network_id: Option<u32>,
     /// Initial peer nodes.
     #[clap(long, short = 'p')]
     initial_peers: Option<Vec<String>>,
-    /// Network id / magic number.
-    #[clap(long)]
-    network_id: Option<u64>,
     /// Mine blocks.
     #[clap(long, short = 'm')]
     mine: bool,
+    /// Log events as JSON
+    #[clap(long, short)]
+    json: bool,
   },
 }
 
 #[derive(Subcommand)]
 pub enum UtilCommand {
   /// Generate a new keypair.
-  DecodeName {
-    file: FileInput,
-  },
+  DecodeName { file: FileInput },
 }
 
 #[derive(Subcommand)]
@@ -335,18 +321,23 @@ pub enum GetStatsKind {
   RegCount,
 }
 
-struct ConfigValueOption<'a, T, F>
+// Config Resolution
+// =================
+
+#[derive(derive_builder::Builder)]
+#[builder(setter(strip_option))]
+struct ConfigSettings<T, F>
 where
   T: Clone + Sized,
   F: Fn() -> Result<T, String>,
 {
-  value: Option<T>,
-  env: Option<&'a str>,
-  config: ConfigFileOptions<'a>,
-  default: F,
+  #[builder(default)]
+  env: Option<&'static str>,
+  prop: Option<&'static str>,
+  default_value: F,
 }
 
-impl<'a, T, F> ConfigValueOption<'a, T, F>
+impl<T, F> ConfigSettings<T, F>
 where
   T: Clone + Sized,
   F: Fn() -> Result<T, String>,
@@ -358,41 +349,123 @@ where
   /// 2. Environment variable
   /// 3. Config file
   /// 4. Default value
-  fn get_config_value(self) -> Result<T, String>
+  pub fn resolve(
+    self,
+    cli_value: Option<T>,
+    config_values: Option<&toml::Value>,
+  ) -> Result<T, String>
   where
     T: ArgumentFrom<String> + ArgumentFrom<toml::Value>,
   {
-    if let Some(value) = self.value {
-      // read from var
-      Ok(value)
-    } else if let Some(Ok(env_value)) = self.env.map(std::env::var) {
-      // if env var is set and valid, read from env var
-      T::arg_from(env_value)
-    } else if let ConfigFileOptions {
-      toml: Some(toml_value),
-      prop: Some(prop_path),
-    } = self.config
-    {
-      // if config file is set and valid, read from config file
-      // doing this way because of issue #469 toml-rs
-      let props: Vec<_> = prop_path.split('.').collect();
-      let mut value = toml_value.get(&props[0]).ok_or(format!(
-        "Could not found prop '{}' in config file.",
-        prop_path
-      ))?;
-      for prop in &props[1..] {
-        value = value.get(&prop).ok_or(format!(
-          "Could not found prop {} in config file.",
-          prop_path
-        ))?;
+    if let Some(value) = cli_value {
+      // Read from CLI argument
+      return Ok(value);
+    }
+    if let Some(Ok(env_value)) = self.env.map(std::env::var) {
+      // If env var is set, read from it
+      return T::arg_from(env_value);
+    }
+    if let (Some(prop_path), Some(config_values)) = (self.prop, config_values) {
+      // If config file and argument prop path are set, read from config file
+      return Self::resolve_from_config_aux(config_values, prop_path);
+    }
+    (self.default_value)()
+  }
+
+  // TODO: refactor
+
+  fn resolve_from_file_only(
+    self,
+    config_values: Option<&toml::Value>,
+  ) -> Result<T, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    if let Some(prop_path) = self.prop {
+      if let Some(config_values) = config_values {
+        Self::resolve_from_config_aux(config_values, prop_path)
+      } else {
+        (self.default_value)()
       }
-      T::arg_from(value.clone()).map_err(|e| {
-        format!("Could not convert value '{}' into desired type: {}", value, e)
-      })
     } else {
-      (self.default)()
+      panic!("Cannot resolve from config file config without 'prop' field set")
     }
   }
+
+  fn resolve_from_file_opt(
+    self,
+    config_values: Option<&toml::Value>,
+  ) -> Result<Option<T>, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    if let Some(prop_path) = self.prop {
+      if let Some(config_values) = config_values {
+        let value = Self::get_prop(config_values, prop_path);
+        if let Some(value) = value {
+          return T::arg_from(value).map(|v| Some(v)).map_err(|e| {
+            format!(
+              "Could not convert value of '{}' into desired type: {}",
+              prop_path, e
+            )
+          });
+        }
+      }
+      Ok(None)
+    } else {
+      panic!("Cannot resolve from config file config without 'prop' field set")
+    }
+  }
+
+  fn resolve_from_config_aux(
+    config_values: &toml::Value,
+    prop_path: &str,
+  ) -> Result<T, String>
+  where
+    T: ArgumentFrom<toml::Value>,
+  {
+    let value = Self::get_prop(config_values, prop_path)
+      .ok_or(format!("Could not found prop '{}' in config file.", prop_path))?;
+    T::arg_from(value).map_err(|e| {
+      format!(
+        "Could not convert value of '{}' into desired type: {}",
+        prop_path, e
+      )
+    })
+  }
+
+  fn get_prop(mut value: &toml::Value, prop_path: &str) -> Option<toml::Value> {
+    // Doing this way because of issue #469 toml-rs
+    let props: Vec<_> = prop_path.split('.').collect();
+    for prop in props {
+      value = value.get(&prop)?;
+    }
+    Some(value.clone())
+  }
+}
+
+// Macros
+// ======
+
+macro_rules! resolve_cfg {
+  (env = $env:expr, prop = $prop:expr, default = $default:expr, val = $cli:expr, cfg = $cfg:expr $(,)*) => {
+    ConfigSettingsBuilder::default()
+      .env($env)
+      .prop($prop)
+      .default_value(|| Ok($default))
+      .build()
+      .unwrap()
+      .resolve($cli, $cfg)?
+  };
+  (env = $env:expr, prop = $prop:expr, no_default = $default:expr, val = $cli:expr, cfg = $cfg:expr $(,)*) => {
+    ConfigSettingsBuilder::default()
+      .env($env)
+      .prop($prop)
+      .default_value(|| Err($default))
+      .build()
+      .unwrap()
+      .resolve($cli, $cfg)?
+  };
 }
 
 // CLI main function
@@ -414,21 +487,19 @@ pub fn run_cli() -> Result<(), String> {
   };
 
   // get possible config path and content
-  let config_path = ConfigValueOption {
-    value: parsed.config,
+  let config_path = ConfigSettings {
     env: Some("KINDELIA_CONFIG"),
-    config: ConfigFileOptions::none(),
-    default: default_config_path,
+    prop: None,
+    default_value: default_config_path,
   }
-  .get_config_value()?;
+  .resolve(parsed.config, None)?;
 
-  let api_url = ConfigValueOption {
-    value: parsed.api,
+  let api_url = ConfigSettings {
     env: Some("KINDELIA_API_URL"),
-    config: ConfigFileOptions::none(),
-    default: || Ok("http://localhost:8000".to_string()),
+    prop: None,
+    default_value: || Ok("http://localhost:8000".to_string()),
   }
-  .get_config_value()?;
+  .resolve(parsed.api, None)?;
 
   match parsed.command {
     CliCommand::Test { file, sudo } => {
@@ -476,7 +547,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        parse_code(&code)?
+        hvm::parse_code(&code)?
       };
       let results = run_on_remote(&api_url, stmts, f)?;
       for result in results {
@@ -489,7 +560,7 @@ pub fn run_cli() -> Result<(), String> {
       let stmts = if encoded {
         statements_from_hex_seq(&code)?
       } else {
-        parse_code(&code)?
+        hvm::parse_code(&code)?
       };
       publish_code(&api_url, stmts)
     }
@@ -508,15 +579,15 @@ pub fn run_cli() -> Result<(), String> {
       Ok(())
     }
     CliCommand::Node { command, data_dir } => {
-      let config = Some(handle_config_file(&config_path)?);
+      let config = handle_config_file(&config_path)?;
+      let config = Some(&config);
 
-      let data_path = ConfigValueOption {
-        value: data_dir,
+      let data_path = ConfigSettings {
         env: Some("KINDELIA_NODE_DATA_DIR"),
-        config: ConfigFileOptions::new(&config, "node.data.dir"),
-        default: default_kindelia_path,
+        prop: Some("node.data.dir"),
+        default_value: default_kindelia_path,
       }
-      .get_config_value()?;
+      .resolve(data_dir, config)?;
 
       match command {
         NodeCommand::Clean => {
@@ -542,77 +613,98 @@ pub fn run_cli() -> Result<(), String> {
           }
           Ok(())
         }
-        NodeCommand::Start { initial_peers, network_id, mine } => {
+        NodeCommand::Start { initial_peers, network_id, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
 
-          let initial_peers = ConfigValueOption {
-            value: initial_peers,
-            env: Some("KINDELIA_INITIAL_PEERS"),
-            config: ConfigFileOptions::new(
-              &config,
-              "node.network.initial_peers",
-            ),
-            default: || Ok(Vec::new()),
-          }
-          .get_config_value()?;
+          let network_id = resolve_cfg!(
+            env = "KINDELIA_NETWORK_ID",
+            prop = "node.network.network_id",
+            no_default = "Missing `network_id` paramenter.".to_string(),
+            val = network_id,
+            cfg = config,
+          );
 
-          let network_id = ConfigValueOption {
-            value: network_id,
-            env: Some("KINDELIA_NETWORK_ID"),
-            config: ConfigFileOptions::new(&config, "node.network.network_id"),
-            default: || Err("Missing `network_id` paramenter.".to_string()),
-          }
-          .get_config_value()?;
+          let initial_peers = resolve_cfg!(
+            env = "KINDELIA_NODE_INITIAL_PEERS",
+            prop = "node.network.initial_peers",
+            default = vec![],
+            val = initial_peers,
+            cfg = config,
+          );
 
-          let mine = ConfigValueOption {
-            value: Some(mine), // TODO: fix boolean resolution
-            env: Some("KINDELIA_MINE"),
-            config: ConfigFileOptions::new(&config, "node.data.mine"),
-            default: || Ok(false),
-          }
-          .get_config_value()?;
+          let mine = resolve_cfg!(
+            env = "KINDELIA_MINE",
+            prop = "node.mining.enable",
+            default = false,
+            val = flag_to_option(mine),
+            cfg = config,
+          );
+
+          let slow_mining = ConfigSettingsBuilder::default()
+            .env("KINDELIA_SLOW_MINING")
+            .prop("node.debug.slow_mining")
+            .default_value(|| Ok(0))
+            .build()
+            .unwrap()
+            .resolve_from_file_opt(config)?;
+
+          let api_config = ConfigSettingsBuilder::default()
+            .prop("node.api")
+            .default_value(|| Ok(config::ApiConfig::default()))
+            .build()
+            .unwrap()
+            .resolve_from_file_only(config)?;
 
           // Start
-          let comm = init_socket().expect("Could not open a UDP socket");
+          let node_comm = init_socket().expect("Could not open a UDP socket");
           let initial_peers = initial_peers
             .iter()
-            .map(|x| net::read_address(x))
+            .map(|x| net::parse_address(x))
             .collect::<Vec<_>>();
-          let initial_peers =
-            if !initial_peers.is_empty() { Some(initial_peers) } else { None };
-          node::start(data_path, network_id, comm, &initial_peers, mine, true);
-          // start(data_path, initial_peers, mine);
+
+          let node_cfg = config::NodeConfig {
+            network_id,
+            data_path,
+            mining: config::MineConfig { enabled: mine, slow_mining },
+            ui: Some(config::UiConfig {
+              json,
+              tags: vec![events::NodeEventDiscriminant::Heartbeat],
+            }),
+            api: Some(api_config),
+            ws: None, // TODO: load from config file
+          };
+
+          node::start(node_cfg, node_comm, initial_peers);
 
           Ok(())
         }
       }
     }
-    CliCommand::Util { command } => {
-      match command {
-        UtilCommand::DecodeName { file } => {
-          let txt = file.read_to_string()?;
-          let data: Result<Vec<Vec<u8>>, _> = txt
-            .trim()
-            .split(|c: char| c.is_whitespace())
-            .map(hex::decode)
-            .collect();
-          let data = data.map_err(|err| format!("Invalid hex string: {}", err))?;
-          let nums = data.iter().map(|v| bytes_to_u128(v));
-          for num in nums {
-            if let Some(num) = num {
-              if let Ok(name) = Name::try_from(num) {
-                println!("{}", name);
-                continue;
-              }
+    CliCommand::Util { command } => match command {
+      UtilCommand::DecodeName { file } => {
+        let txt = file.read_to_string()?;
+        let data: Result<Vec<Vec<u8>>, _> = txt
+          .trim()
+          .split(|c: char| c.is_whitespace())
+          .map(hex::decode)
+          .collect();
+        let data =
+          data.map_err(|err| format!("Invalid hex string: {}", err))?;
+        let nums = data.iter().map(|v| bytes_to_u128(v));
+        for num in nums {
+          if let Some(num) = num {
+            if let Ok(name) = Name::try_from(num) {
+              println!("{}", name);
+              continue;
             }
-            println!();
           }
-          Ok(())
+          println!();
         }
+        Ok(())
       }
-    }
+    },
     CliCommand::Completion { .. } => todo!(),
   }
 }
@@ -666,7 +758,7 @@ pub async fn get_info(
             name,
             args: vec![Name::NONE],
             func,
-            init: hvm::Term::var(Name::NONE),
+            init: Some(hvm::Term::var(Name::NONE)), // to show that we are actually not returning the initial state
             sign: None,
           };
           println!("{}", statement);
@@ -806,8 +898,25 @@ fn init_socket() -> Option<UdpSocket> {
   None
 }
 
-// Auxiliar
-// ========
+// Utils
+// =====
+
+pub fn flag_to_option(flag: bool) -> Option<bool> {
+  if flag {
+    Some(true)
+  } else {
+    None
+  }
+}
+
+pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
+  let mut num: u128 = 0;
+  for byte in bytes {
+    num = num.checked_shl(8)?;
+    num += *byte as u128;
+  }
+  Some(num)
+}
 
 // Async
 // -----
@@ -822,27 +931,6 @@ where
 
 // Config
 // ------
-
-#[derive(Debug, Clone)]
-struct ConfigFileOptions<'a> {
-  toml: Option<&'a toml::Value>,
-  prop: Option<String>,
-}
-
-impl<'a> ConfigFileOptions<'a> {
-  pub fn new(toml: &'a Option<toml::Value>, prop: &str) -> Self {
-    match toml {
-      Some(_) => {
-        ConfigFileOptions { toml: toml.as_ref(), prop: Some(prop.into()) }
-      }
-      None => Self::none(),
-    }
-  }
-
-  pub fn none() -> Self {
-    ConfigFileOptions { toml: None, prop: None }
-  }
-}
 
 fn handle_config_file(path: &Path) -> Result<toml::Value, String> {
   if !path.exists() {
@@ -883,21 +971,7 @@ fn handle_code(code: &str, encoded: bool) -> Result<Vec<Statement>, String> {
   if encoded {
     statements_from_hex_seq(code)
   } else {
-    parse_code(code)
-  }
-}
-
-fn parse_code(code: &str) -> Result<Vec<hvm::Statement>, String> {
-  let statements = hvm::read_statements(code);
-  match statements {
-    Ok((code, statements)) => {
-      if code.is_empty() {
-        Ok(statements)
-      } else {
-        Err(format!("Your code was not parsed entirely: {}", code))
-      }
-    }
-    Err(hvm::ParseErr { erro, .. }) => Err(erro),
+    hvm::parse_code(code)
   }
 }
 
@@ -936,18 +1010,6 @@ fn arg_from_file_or_stdin<T: ArgumentFrom<String>>(
       }
     }
   }
-}
-
-// Util
-// ====
-
-pub fn bytes_to_u128(bytes: &[u8]) -> Option<u128> {
-  let mut num: u128 = 0;
-  for byte in bytes {
-    num = num.checked_shl(8)?;
-    num += *byte as u128;
-  }
-  Some(num)
 }
 
 // Auxiliar traits and types
@@ -1029,9 +1091,30 @@ impl ArgumentFrom<String> for String {
   }
 }
 
+impl ArgumentFrom<String> for u32 {
+  fn arg_from(t: String) -> Result<Self, String> {
+    t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  }
+}
+
 impl ArgumentFrom<String> for u64 {
   fn arg_from(t: String) -> Result<Self, String> {
     t.parse().map_err(|e| format!("Invalid integer: `{}`", e))
+  }
+}
+
+impl ArgumentFrom<toml::Value> for u32 {
+  fn arg_from(value: toml::Value) -> Result<Self, String> {
+    match value {
+      toml::Value::Integer(i) => Ok(i as Self),
+      toml::Value::String(s) => {
+        let s = s.trim_start_matches("0x");
+        let num = u32::from_str_radix(s, 16)
+          .map_err(|e| format!("Invalid hexadecimal '{}': {}", s, e))?;
+        Ok(num)
+      }
+      _ => Err(format!("Invalid integer '{}'", value)),
+    }
   }
 }
 
@@ -1103,5 +1186,11 @@ impl ArgumentFrom<toml::Value> for Vec<String> {
 impl ArgumentFrom<toml::Value> for bool {
   fn arg_from(t: toml::Value) -> Result<Self, String> {
     t.as_bool().ok_or(format!("Invalid boolean value: {}", t))
+  }
+}
+
+impl ArgumentFrom<toml::Value> for config::ApiConfig {
+  fn arg_from(t: toml::Value) -> Result<Self, String> {
+    t.try_into().map_err(|_| "Could not convert value into array".to_string())
   }
 }

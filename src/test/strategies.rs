@@ -2,12 +2,13 @@ use std::{collections::HashMap, fmt::Debug, ops::Range, sync::Arc};
 
 use crate::{
   crypto,
-  common::Name,
+  common::{Name, U120},
   hvm::{
-    init_map, Arits, CompFunc, CompRule, Func, Funcs,
-    Heap, Map, Nodes, Oper, Ownrs, Rollback, Rule, Runtime,
-    SerializedHeap, Statement, Store, Term, Var, U120,
+    init_u128_map, init_name_map, init_u120_map, init_loc_map, Arits, CompFunc, CompRule, Func, Funcs, Hashs,
+    Heap, Nodes, Oper, Ownrs, Rollback, Rule, Runtime, Loc, RawCell,
+    Statement, Store, Term, Var, Indxs,
   },
+  util::{U128Map, NameMap, U120Map, LocMap},
   net::Address,
   node::{hash_bytes, Block, Body, Message, Peer, Transaction},
 };
@@ -34,6 +35,14 @@ pub fn name() -> impl Strategy<Value = Name> {
 
 pub fn u120() -> impl Strategy<Value = U120> {
   (0_u128..*(U120::MAX) + 1).prop_map(|n| n.try_into().unwrap())
+}
+
+pub fn loc() -> impl Strategy<Value = Loc> {
+  (0_u64..Loc::_MAX+1).prop_map(|n| Loc::new(n).unwrap())
+}
+
+pub fn rawcell() -> impl Strategy<Value = RawCell> {
+  (any::<u128>()).prop_map(|n| RawCell::new_unchecked(n))
 }
 
 pub fn small_name() -> impl Strategy<Value = Name> {
@@ -117,7 +126,7 @@ pub fn statement() -> impl Strategy<Value = Statement> {
   prop_oneof![
     (small_name(), vec(name(), 0..10), func(), term(), option::of(sign()))
       .prop_map(|(name, args, func, init, sign)| {
-        Statement::Fun { name, args, func, init, sign }
+        Statement::Fun { name, args, func, init: Some(init), sign }
       }),
     (small_name(), vec(name(), 0..10), option::of(sign()))
       .prop_map(|(name, args, sign)| { Statement::Ctr { name, args, sign } }),
@@ -127,16 +136,55 @@ pub fn statement() -> impl Strategy<Value = Statement> {
       .prop_map(|(name, ownr, sign)| { Statement::Reg { name, ownr, sign } }),
   ]
 }
+pub fn hash() -> impl Strategy<Value = crypto::Hash> {
+  (vec(any::<u8>(), 32)).prop_map(|h| crypto::Hash(h.try_into().unwrap()))
+}
 
 pub fn nodes() -> impl Strategy<Value = Nodes> {
-  (map(any::<u128>())).prop_map(|m| Nodes { nodes: m })
+  (loc_map(rawcell())).prop_map(|m| Nodes { nodes: m })
 }
 
 pub fn map<A: std::fmt::Debug>(
   s: impl Strategy<Value = A>,
-) -> impl Strategy<Value = Map<A>> {
+) -> impl Strategy<Value = U128Map<A>> {
   vec((any::<u128>(), s), 0..10).prop_map(|v| {
-    let mut m = init_map();
+    let mut m = init_u128_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
+pub fn name_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = NameMap<A>> {
+  vec((name(), s), 0..10).prop_map(|v| {
+    let mut m = init_name_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
+pub fn u120_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = U120Map<A>> {
+  vec((u120(), s), 0..10).prop_map(|v| {
+    let mut m = init_u120_map();
+    for (k, v) in v {
+      m.insert(k, v);
+    }
+    m
+  })
+}
+
+pub fn loc_map<A: std::fmt::Debug>(
+  s: impl Strategy<Value = A>,
+) -> impl Strategy<Value = LocMap<A>> {
+  vec((loc(), s), 0..10).prop_map(|v| {
+    let mut m = init_loc_map();
     for (k, v) in v {
       m.insert(k, v);
     }
@@ -145,44 +193,56 @@ pub fn map<A: std::fmt::Debug>(
 }
 
 pub fn store() -> impl Strategy<Value = Store> {
-  map(any::<u128>()).prop_map(|m| Store { links: m })
+  u120_map(rawcell()).prop_map(|m| Store { links: m })
 }
 
 pub fn arits() -> impl Strategy<Value = Arits> {
-  map(any::<u128>()).prop_map(|m| Arits { arits: m })
+  name_map(any::<u64>()).prop_map(|m| Arits { arits: m })
 }
 
 pub fn ownrs() -> impl Strategy<Value = Ownrs> {
-  map(any::<u128>()).prop_map(|m| Ownrs { ownrs: m })
+  name_map(u120()).prop_map(|m| Ownrs { ownrs: m })
+}
+pub fn indxs() -> impl Strategy<Value = Indxs> {
+  name_map(any::<u128>()).prop_map(|m| Indxs { indxs: m })
+}
+
+pub fn hashs() -> impl Strategy<Value = Hashs> {
+  map(hash()).prop_map(|m| Hashs { stmt_hashes: m })
 }
 
 pub fn var() -> impl Strategy<Value = Var> {
-  (name(), any::<u128>(), option::of(any::<u128>()), any::<bool>())
+  (name(), any::<u64>(), option::of(any::<u64>()), any::<bool>())
     .prop_map(|(n, p, f, e)| Var { name: n, param: p, field: f, erase: e })
 }
 
 pub fn comp_rule() -> impl Strategy<Value = CompRule> {
   (
-    vec(any::<u128>(), 0..32),
+    vec(rawcell(), 0..32),
     vec(var(), 0..32),
-    vec((any::<u128>(), any::<u128>()), 0..32),
+    vec((any::<u64>(), any::<u64>()), 0..32),
     term(),
   )
     .prop_map(|(c, v, e, b)| CompRule { cond: c, vars: v, eras: e, body: b })
 }
 
 pub fn comp_func() -> impl Strategy<Value = CompFunc> {
-  (func(), any::<u128>(), vec(any::<u128>(), 0..32), vec(comp_rule(), 0..32))
+  (func(), any::<u64>(), vec(any::<u64>(), 0..32), vec(comp_rule(), 0..32))
     .prop_map(|(f, a, r, s)| CompFunc { func: f, arity: a, redux: r, rules: s })
 }
 
 pub fn funcs() -> impl Strategy<Value = Funcs> {
-  map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
+  name_map(comp_func().prop_map(|cf| Arc::new(cf))).prop_map(|m| Funcs { funcs: m })
 }
 
 pub fn heap() -> impl Strategy<Value = Heap> {
-  let tuple_strategy = (
-    any::<u128>(),
+  let u64_tuple_strategy = (
+    any::<u64>(),
+    any::<u64>(),
+    any::<u64>(),
+    any::<u64>(),
+  );
+  let u128_tuple_strategy = (
     any::<u128>(),
     any::<u128>(),
     any::<u128>(),
@@ -191,31 +251,37 @@ pub fn heap() -> impl Strategy<Value = Heap> {
   );
 
   (
-    tuple_strategy,
-    tuple_strategy,
-    any::<i128>(),
+    u64_tuple_strategy,
+    u64_tuple_strategy,
+    u128_tuple_strategy,
     nodes(),
     store(),
     arits(),
     ownrs(),
     funcs(),
+    indxs(),
+    hashs(),
   )
     .prop_map(
       |(
-        (uuid, mcap, tick, funs, dups, rwts),
-        (mana, next, meta, hax1, hax0, time),
-        size,
+        (mcap, tick, funs, dups),
+        (mana, next, size, rwts),
+        (uuid, meta, hax1, hax0, time),
         memo,
         disk,
         arit,
         ownr,
         file,
+        indx,
+        hash
       )| Heap {
         mcap,
         disk,
         arit,
         ownr,
-        file: Funcs { funcs: init_map() }, // TODO, fix?
+        hash,
+        indx,
+        file: Funcs { funcs: init_name_map() }, // TODO, fix?
         uuid,
         memo,
         tick,
@@ -243,7 +309,7 @@ pub fn body() -> impl Strategy<Value = Body> {
 
 pub fn block() -> impl Strategy<Value = Block> {
   (any::<u128>(), any::<u128>(), u256(), body())
-    .prop_map(|(t, m, p, b)| crate::node::new_block(p, m, t, b))
+    .prop_map(|(t, m, p, b)| crate::node::Block::new(p, m, t, b))
 }
 
 pub fn address() -> impl Strategy<Value = Address> {
@@ -269,11 +335,11 @@ pub fn transaction() -> impl Strategy<Value = Transaction> {
 
 pub fn message() -> impl Strategy<Value = Message<Address>> {
   prop_oneof![
-    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10), any::<u64>()).prop_map(
+    (any::<bool>(), vec(block(), 0..10), vec(peer(), 0..10), any::<u32>()).prop_map(
       |(g, b, p, m)| Message::NoticeTheseBlocks { gossip: g, blocks: b, peers: p, magic: m },
     ),
-    (u256(), any::<u64>()).prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
-    (transaction(), any::<u64>())
-      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { trans: t, magic: m })
+    (u256(), any::<u32>()).prop_map(|(h, m)| Message::GiveMeThatBlock { bhash: h, magic: m }),
+    (transaction(), any::<u32>())
+      .prop_map(|(t, m)| Message::PleaseMineThisTransaction { tx: t, magic: m })
   ]
 }

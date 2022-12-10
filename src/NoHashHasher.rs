@@ -62,7 +62,7 @@ pub type IntSet<T> = std::collections::HashSet<T, BuildNoHashHasher<T>>;
 ///
 /// See also [`IntMap`] and [`IntSet`] for some easier usage examples.
 ///
-/// ```
+/// ```text
 /// use nohash_hasher::BuildNoHashHasher;
 /// use std::collections::HashMap;
 ///
@@ -95,7 +95,7 @@ pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;
 /// See also [`BuildNoHashHasher`], [`IntMap`] and [`IntSet`] for some easier
 /// usage examples. See [`IsEnabled`] for use with custom types.
 ///
-/// ```
+/// ```text
 /// use nohash_hasher::NoHashHasher;
 /// use std::{collections::HashMap, hash::BuildHasherDefault};
 ///
@@ -176,7 +176,7 @@ impl<T> Copy for NoHashHasher<T> {}
 ///
 /// # Example
 ///
-/// ```
+/// ```text
 /// #[derive(PartialEq, Eq)]
 /// struct SomeType(u32);
 ///

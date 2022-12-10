@@ -1,23 +1,30 @@
+use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use rstest::fixture;
 use tokio::runtime;
 
-use crate::common::Name;
+use crate::constants;
+use crate::common::{Name, U120};
 use crate::hvm::{
-  self, init_runtime, read_term, show_term, Rollback, Runtime, Statement,
-  StatementInfo, Term, U128_NONE, U120,
+  self, read_term, show_term, Rollback, Runtime, Statement, StatementInfo,
+  Term, U128_NONE, U64_NONE,
 };
-use std::{
-  collections::{hash_map::DefaultHasher, HashMap},
-  hash::{Hash, Hasher},
-  path::PathBuf,
-  sync::Arc,
-};
+use crate::node;
+
+pub fn init_runtime(path: &PathBuf) -> hvm::Runtime {
+  let genesis_stmts =
+    hvm::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+  hvm::init_runtime(path.clone(), &genesis_stmts)
+}
 
 // ===========================================================
 // Aux types
 
 pub type Validator =
-  (&'static str, fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool);
+  (&'static str, fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool);
 
 // ===========================================================
 // Aux functions
@@ -38,7 +45,7 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
   fn view_rollback_ticks_go(
     rt: &Runtime,
     back: &Arc<Rollback>,
-  ) -> Vec<Option<u128>> {
+  ) -> Vec<Option<u64>> {
     match &**back {
       Rollback::Nil => return Vec::new(),
       Rollback::Cons { keep, head, tail, life } => {
@@ -57,7 +64,7 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
     .rev()
     .map(|x| {
       if let Some(x) = x {
-        format!("{}", if *x != U128_NONE { *x } else { 0 })
+        format!("{}", if *x != U64_NONE { *x } else { 0 })
       } else {
         "___________".to_string()
       }
@@ -74,8 +81,8 @@ pub fn view_rollback_ticks(rt: &Runtime) -> String {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct RuntimeStateTest {
   checksum: u64,
-  mana: u128,
-  size: i128,
+  mana: u64,
+  size: u64,
 }
 impl RuntimeStateTest {
   pub fn new(fn_names: &[&str], rt: &mut Runtime) -> RuntimeStateTest {
@@ -89,10 +96,8 @@ impl RuntimeStateTest {
 
 // Generate a checksum for a runtime state (for testing)
 pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
-  let fn_ids = fn_names
-    .iter()
-    .map(|x| Name::from_str(x).unwrap())
-    .collect::<Vec<Name>>();
+  let fn_ids =
+    fn_names.iter().map(|x| Name::from_str(x).unwrap()).collect::<Vec<Name>>();
   let mut hasher = DefaultHasher::new();
   for fn_id in fn_ids {
     let term_lnk = rt.read_disk(fn_id.into());
@@ -112,7 +117,7 @@ pub fn test_heap_checksum(fn_names: &[&str], rt: &mut Runtime) -> u64 {
 // RUNTIME ROLLBACK
 pub fn rollback(
   rt: &mut Runtime,
-  tick: u128,
+  tick: u64,
   pre_code: Option<&str>,
   code: Option<&str>,
   validators: &[Validator],
@@ -136,7 +141,7 @@ pub fn rollback(
 
 pub fn advance(
   rt: &mut Runtime,
-  tick: u128,
+  tick: u64,
   code: Option<&str>,
   validators: &[Validator],
 ) {
@@ -151,7 +156,7 @@ pub fn advance(
   }
 }
 
-/// Tests the rollback of states in the kindelia runtime
+/// Tests the rollback of states in the Kindelia runtime
 ///
 /// # Arguments
 ///
@@ -166,11 +171,11 @@ pub fn rollback_simple(
   code: &str,
   fn_names: &[&str],
   total_tick: u128,
-  rollback_tick: u128,
+  rollback_tick: u64,
   validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
-  let mut rt = init_runtime(dir_path.clone());
+  let mut rt = init_runtime(dir_path);
 
   // Calculate all total_tick states and saves old checksum
   let mut old_state = RuntimeStateTest::new(fn_names, &mut rt);
@@ -202,16 +207,16 @@ pub fn rollback_simple(
 }
 
 // Does basically the same of rollback_simple, but with a path
-// This path tells kindelia where to go
+// This path tells Kindelia where to go
 pub fn rollback_path(
   pre_code: &str,
   code: &str,
   fn_names: &[&str],
-  path: &[u128],
+  path: &[u64],
   validators: &[Validator],
   dir_path: &PathBuf,
 ) -> bool {
-  let mut states_store: HashMap<u128, Vec<RuntimeStateTest>> = HashMap::new();
+  let mut states_store: HashMap<u64, Vec<RuntimeStateTest>> = HashMap::new();
   let mut insert_state = |rt: &mut Runtime| {
     let state = RuntimeStateTest::new(fn_names, rt);
     let vec = states_store.get_mut(&rt.get_tick());
@@ -222,7 +227,7 @@ pub fn rollback_path(
     }
   };
 
-  let mut rt = init_runtime(dir_path.clone());
+  let mut rt = init_runtime(dir_path);
   rt.run_statements_from_code(pre_code, true, true);
 
   for tick in path {
@@ -245,14 +250,14 @@ where
   A: Fn(&Term),
 {
   let temp_dir = temp_dir();
-  let mut rt = init_runtime(temp_dir.path.clone());
+  let mut rt = init_runtime(&temp_dir.path);
 
   let term = Term::Fun {
     name: "Done".try_into().unwrap(),
     args: [term.clone()].to_vec(),
   };
   let stmt = Statement::Run { expr: term, sign: None };
-  let result = rt.run_statement(&stmt, false, true).unwrap();
+  let result = rt.run_statement(&stmt, false, true, None).unwrap();
 
   if let StatementInfo::Run { done_term, .. } = result {
     action(&done_term)
@@ -270,7 +275,7 @@ where
 // ===========
 // validations
 
-fn validate<P: Fn(u128, &hvm::Term, &mut hvm::Runtime) -> bool>(
+fn validate<P: Fn(u64, &hvm::Term, &mut hvm::Runtime) -> bool>(
   rt: &mut Runtime,
   name: &str,
   predicate: P,

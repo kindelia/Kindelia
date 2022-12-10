@@ -5,6 +5,7 @@ use std::sync::mpsc::SyncSender;
 use bit_vec::BitVec;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde_json::json;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::body;
@@ -14,10 +15,11 @@ use warp::reply::{self, Reply};
 use warp::{path, post, Filter};
 use warp::{reject, Rejection};
 
-use super::u256_to_hex;
 use super::NodeRequest;
+use super::u256_to_hex;
 use crate::api::{HexStatement, ReqAnsRecv};
 use crate::bits::ProtoSerialize;
+use crate::config::{ApiConfig};
 use crate::common::Name;
 use crate::hvm::{self, StatementErr, StatementInfo};
 use crate::net::ProtoComm;
@@ -47,6 +49,11 @@ where
 {
   // let json_body = json!({ "status": "ok", "data": data });
   warp::reply::json(&data)
+}
+
+fn err_json(message: &str) -> warp::reply::Json {
+  let json_body = json!({ "message": message });
+  warp::reply::json(&json_body)
 }
 
 fn json_body<T>() -> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone
@@ -82,6 +89,19 @@ fn bitvec_to_hex(bits: &BitVec) -> String {
 // ======
 
 #[derive(Debug)]
+pub struct NotFound {
+  message: String,
+}
+
+impl From<String> for NotFound {
+  fn from(message: String) -> Self {
+    Self { message }
+  }
+}
+
+impl warp::reject::Reject for NotFound {}
+
+#[derive(Debug)]
 struct InvalidParameter {
   name: Option<String>,
   message: String,
@@ -89,54 +109,63 @@ struct InvalidParameter {
 
 impl From<String> for InvalidParameter {
   fn from(message: String) -> Self {
-    InvalidParameter { name: None, message }
+    Self { name: None, message }
   }
 }
 
 impl reject::Reject for InvalidParameter {}
 
-// API
-// ===
-
 #[derive(Debug)]
-pub enum Error {
-  NotFound,
+struct TermTooBig {
+  message: String,
 }
 
-impl warp::reject::Reject for Error {}
+impl From<String> for TermTooBig {
+  fn from(message: String) -> Self {
+    Self { message }
+  }
+}
+
+impl reject::Reject for TermTooBig {}
+
+// API
+// ===
 
 async fn handle_rejection(
   err: Rejection,
 ) -> Result<impl Reply, std::convert::Infallible> {
   if err.is_not_found() {
-    Ok(reply::with_status("NOT_FOUND".into(), StatusCode::NOT_FOUND))
-  } else if let Some(e) = err.find::<Error>() {
-    match e {
-      // On rejection we force this custom branch, not err.is_not_foun()
-      Error::NotFound => {
-        Ok(reply::with_status("NOT_FOUND".into(), StatusCode::NOT_FOUND))
-      }
-    }
+    Ok(reply::with_status(err_json("NOT_FOUND"), StatusCode::NOT_FOUND))
+  } else if let Some(e) = err.find::<NotFound>() {
+    Ok(reply::with_status(err_json(&e.message), StatusCode::NOT_FOUND))
+  } else if let Some(e) = err.find::<TermTooBig>() {
+    Ok(reply::with_status(err_json(&e.message), StatusCode::IM_A_TEAPOT))
   } else if let Some(e) = err.find::<InvalidParameter>() {
     let name = e.name.as_ref().map(|n| format!(" '{}'", n)).unwrap_or_default();
-    let msg = format!("parameter {} is invalid: {}", name, e.message);
-    Ok(reply::with_status(msg, StatusCode::BAD_REQUEST))
+    let msg = format!("Parameter{} is invalid: {}", name, e.message);
+    Ok(reply::with_status(err_json(&msg), StatusCode::BAD_REQUEST))
   } else {
     eprintln!("HTTP API: unhandled rejection: {:?}", err);
-    let err = format!("INTERNAL_SERVER_ERROR: {:?}", err);
-    Ok(reply::with_status(err, StatusCode::INTERNAL_SERVER_ERROR))
+    let msg = format!("INTERNAL_SERVER_ERROR: {:?}", err);
+    Ok(reply::with_status(err_json(&msg), StatusCode::INTERNAL_SERVER_ERROR))
   }
 }
 
-pub fn http_api_loop<C: ProtoComm + 'static>(node_query_sender: SyncSender<NodeRequest<C>>) {
+pub fn http_api_loop<C: ProtoComm + 'static>(
+  node_query_sender: SyncSender<NodeRequest<C>>,
+  api_config: ApiConfig,
+) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    api_serve::<C>(node_query_sender).await;
+    api_serve::<C>(node_query_sender, api_config).await;
   });
 }
 
-async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<NodeRequest<C>>) {
+async fn api_serve<'a, C: ProtoComm + 'static>(
+  node_query_sender: SyncSender<NodeRequest<C>>,
+  api_config: ApiConfig,
+) {
   async fn ask<T, C: ProtoComm>(
     node_query_tx: SyncSender<NodeRequest<C>>,
     req: (NodeRequest<C>, ReqAnsRecv<T>),
@@ -179,12 +208,18 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
         match hex_to_u256(hash_hex) {
           Ok(hash) => {
             let block = ask(query_tx, NodeRequest::get_block(hash)).await;
-            Ok(block)
+            match block {
+              Some(block) => Ok(block),
+              None => {
+                let message = format!("Block '{}' not found", hash_hex);
+                Err(warp::reject::custom(NotFound::from(message)))
+              }
+            }
           }
-          Err(err) => Err(reject::custom(InvalidParameter::from(format!(
-            "Invalid block hash: '{}'",
-            err
-          )))),
+          Err(err) => {
+            let msg = format!("Invalid block hash: {}", err);
+            Err(reject::custom(InvalidParameter::from(msg)))
+          }
         }
       }
     })
@@ -196,7 +231,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
     async move {
       let block_hash = ask(query_tx, NodeRequest::get_block_hash(index)).await;
       match block_hash {
-        None => Err(Rejection::from(Error::NotFound)),
+        None => {
+          let message = format!("Block with index {} not found", index);
+          Err(Rejection::from(NotFound::from(message)))
+        }
         Some(block_hash) => Ok(ok_json(u256_to_hex(&block_hash))),
       }
     }
@@ -243,7 +281,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
         if let Some(function) = function {
           Ok(ok_json(function))
         } else {
-          Err(Rejection::from(Error::NotFound))
+          let message = format!("Function '{}' not found", name);
+          Err(Rejection::from(NotFound::from(message)))
         }
       }
     });
@@ -270,7 +309,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
             Ok(ok_json(state))
           }
         } else {
-          Err(Rejection::from(Error::NotFound))
+          // TODO: better error handling when reading state
+          let message =
+            format!("State for function '{}' is too big or is missing.", name);
+          Err(Rejection::from(TermTooBig::from(message)))
         }
       }
     });
@@ -302,7 +344,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
         if let Some(ctr) = ctr {
           Ok(ok_json(ctr))
         } else {
-          Err(Rejection::from(Error::NotFound))
+          let msg = format!("Constructor '{}' not found", name);
+          Err(Rejection::from(NotFound::from(msg)))
         }
       }
     });
@@ -311,30 +354,31 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
 
   // == Interact ==
 
-  let interact_base = path!("code" / ..);
+  let interact_code_base = path!("code" / ..);
 
   let query_tx = node_query_sender.clone();
-  let interact_test =
-    post().and(interact_base).and(path!("run")).and(body::bytes()).and_then(
-      move |code: warp::hyper::body::Bytes| {
-        let query_tx = query_tx.clone();
-        async move {
-          let code = String::from_utf8(code.to_vec());
-          if let Ok(code) = code {
-            let res = ask(query_tx, NodeRequest::test_code(code)).await;
-            Ok(ok_json(res))
-          } else {
-            Err(reject::custom(InvalidParameter::from(
-              "Invalid code".to_string(),
-            )))
-          }
+  let interact_code_run = post()
+    .and(interact_code_base)
+    .and(path!("run"))
+    .and(body::bytes())
+    .and_then(move |code: warp::hyper::body::Bytes| {
+      let query_tx = query_tx.clone();
+      async move {
+        let code = String::from_utf8(code.to_vec());
+        if let Ok(code) = code {
+          let res = ask(query_tx, NodeRequest::test_code(code)).await;
+          Ok(ok_json(res))
+        } else {
+          Err(reject::custom(InvalidParameter::from(
+            "Invalid code".to_string(),
+          )))
         }
-      },
-    );
+      }
+    });
 
   let query_tx = node_query_sender.clone();
-  let interact_send = post()
-    .and(interact_base)
+  let interact_code_publish = post()
+    .and(interact_code_base)
     .and(path!("publish"))
     .and(body::bytes())
     .and_then(move |code: warp::hyper::body::Bytes| {
@@ -391,8 +435,10 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
     },
   );
 
-  let interact_router =
-    interact_test.or(interact_send).or(interact_run).or(interact_publish);
+  let interact_router = interact_code_run
+    .or(interact_code_publish)
+    .or(interact_run)
+    .or(interact_publish);
 
   // == Reg ==
 
@@ -415,7 +461,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
       if let Some(reg) = reg {
         Ok(ok_json(reg))
       } else {
-        Err(Rejection::from(Error::NotFound))
+        let msg = format!("Register for name '{}' not found", name);
+        Err(Rejection::from(NotFound::from(msg)))
       }
     }
   });
@@ -462,7 +509,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(node_query_sender: SyncSender<Nod
     warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*")
   });
 
-  let listener_v4 = TcpListener::bind("0.0.0.0:8000").await.unwrap();
+  let listener_v4 =
+    TcpListener::bind(format!("0.0.0.0:{}", api_config.port)).await.unwrap();
   // let listener_v6 = TcpListener::bind("[::]:8000").await.unwrap();
   let listener = TcpListenerStream::new(listener_v4)
     // .merge(TcpListenerStream::new(listener_v6))

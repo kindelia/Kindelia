@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::net::{Ipv4Addr, SocketAddrV4};
 pub use std::net::UdpSocket;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use bit_vec::BitVec;
 use serde;
@@ -25,7 +25,7 @@ where
     + Clone
     + PartialEq
     + Send
-    + serde::Serialize
+    + serde::Serialize,
 {
 }
 
@@ -48,15 +48,16 @@ where
 // UDP Implementation
 // ==================
 
-/// Default UDP port to listen to
+/// Default UDP port to listen to.
 pub const UDP_PORT: u16 = 42000;
 
+/// An UDP address representation.
 #[derive(
   Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
-/// An UDP address representation
 pub enum Address {
   IPv4 { val0: u8, val1: u8, val2: u8, val3: u8, port: u16 },
+  // TODO: IPv6
 }
 
 impl ProtoAddr for Address {}
@@ -71,8 +72,9 @@ impl std::fmt::Display for Address {
   }
 }
 
-/// Converts a string to an UDP Address
-pub fn read_address(code: &str) -> Address {
+/// Converts a string to an UDP Address.
+/// TODO: UNSAFE.
+pub fn parse_address(code: &str) -> Address {
   let strs = code.split(':').collect::<Vec<&str>>();
   let vals =
     strs[0].split('.').map(|o| o.parse::<u8>().unwrap()).collect::<Vec<u8>>();

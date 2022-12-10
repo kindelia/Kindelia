@@ -6,11 +6,11 @@
 //
 // Kindelia-HVM's memory model
 // ---------------------------
-// 
+//
 // The runtime memory consists of just a vector of u128 pointers. That is:
 //
 //   Mem ::= Vec<Ptr>
-// 
+//
 // A pointer has 3 parts:
 //
 //   Ptr ::= TT AAAAAAAAAAAAAAAAAA BBBBBBBBBBBB
@@ -23,7 +23,7 @@
 //
 // There are 12 possible tags:
 //
-//   Tag | Val | Meaning  
+//   Tag | Val | Meaning
 //   ----| --- | -------------------------------
 //   DP0 |   0 | a variable, bound to the 1st argument of a duplication
 //   DP1 |   1 | a variable, bound to the 2nd argument of a duplication
@@ -66,13 +66,13 @@
 //
 //   Duplication Node:
 //   - [0] => either an ERA or an ARG pointing to the 1st variable location
-//   - [1] => either an ERA or an ARG pointing to the 2nd variable location
+//   - [1] => either an ERA or an ARG pointing to the 2nd variable location.
 //   - [2] => pointer to the duplicated expression
 //
 //   Lambda Node:
 //   - [0] => either and ERA or an ERA pointing to the variable location
 //   - [1] => pointer to the lambda's body
-//   
+//
 //   Application Node:
 //   - [0] => pointer to the lambda
 //   - [1] => pointer to the argument
@@ -245,6 +245,7 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::PathBuf;
+use std::fs::File;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -252,31 +253,27 @@ use serde::{Serialize, Deserialize};
 use serde_with::{serde_as, DisplayFromStr};
 
 use crate::bits::ProtoSerialize;
+use crate::constants;
 use crate::crypto;
-use crate::util::{U128_SIZE, mask};
-use crate::util;
+use crate::util::{self, U128_SIZE, mask};
+use crate::util::{LocMap, NameMap, U128Map, U120Map};
+use crate::NoHashHasher::NoHashHasher;
 
-use crate::common::Name;
+use crate::common::{Name, U120};
+use crate::persistence::DiskSer;
 
-// Types
-// -----
+/// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
+/// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
+/// later on. Below is a description of each variant:
+/// - Var: variable. It stores up to 12 6-bit letters.
+/// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
+/// - Lam: an affine lambda. Written as: `@var body`.
+/// - App: a lambda application. Written as: `(!f x)`.
+/// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
+/// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
+/// - Num: an unsigned integer.
+/// - Op2: a numeric operation.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(into = "String", try_from = "&str")]
-pub struct U120(u128);
-
-// This is the HVM's term type. It is used to represent an expression. It is not used in rewrite
-// rules. Instead, it is stored on HVM's heap using its memory model, which will be elaborated
-// later on. Below is a description of each variant:
-// - Var: variable. Note an u128 is used instead of a string. It stores up to 12 6-bit letters.
-// - Dup: a lazy duplication of any other term. Written as: `dup a b = term; body`
-// - Lam: an affine lambda. Written as: `λvar body`.
-// - App: a lambda application. Written as: `(f x)`.
-// - Ctr: a constructor. Written as: `{Ctr val0 val1 ...}`
-// - Fun: a function call. Written as: `(Fun arg0 arg1 ...)`
-// - Num: an unsigned integer. Note that an u128 is used, but it is actually 120 bits long.
-// - Op2: a numeric operation.
-/// A native HVM term
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Term {
   Var { name: Name },
@@ -289,23 +286,24 @@ pub enum Term {
   Op2 { oper: Oper, val0: Box<Term>, val1: Box<Term> },  // FIXME: refactor `oper` u128 to enum
 }
 
-// A native HVM 120-bit machine integer operation
-// - Add: addition
-// - Sub: subtraction
-// - Mul: multiplication
-// - Div: division
-// - Mod: modulo
-// - And: bitwise and
-// - Or : bitwise or
-// - Xor: bitwise xor
-// - Shl: shift left
-// - Shr: shift right
-// - Ltn: less than
-// - Lte: less than or equal
-// - Eql: equal
-// - Gte: greater than or equal
-// - Gtn: greater than
-// - Neq: not equal
+/// A native HVM 120-bit machine integer operation.
+/// - Add: addition
+/// - Sub: subtraction
+/// - Mul: multiplication
+/// - Div: division
+/// - Mod: modulo
+/// - And: bitwise and
+/// - Or : bitwise or
+/// - Xor: bitwise xor
+/// - Shl: shift left
+/// - Shr: shift right
+/// - Ltn: less than
+/// - Lte: less than or equal
+/// - Eql: equal
+/// - Gte: greater than or equal
+/// - Gtn: greater than
+/// - Neq: not equal
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Oper {
   Add, Sub, Mul, Div,
@@ -313,9 +311,6 @@ pub enum Oper {
   Shl, Shr, Ltn, Lte,
   Eql, Gte, Gtn, Neq,
 }
-
-// A u64 HashMap
-pub type Map<T> = util::U128Map<T>;
 
 /// A rewrite rule, or equation, in the shape of `left_hand_side = right_hand_side`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -337,17 +332,17 @@ pub struct Func {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Var {
   pub name : Name,         // this variable's name
-  pub param: u128,         // in what parameter is this variable located?
-  pub field: Option<u128>, // in what field is this variable located? (if any)
+  pub param: u64,         // in what parameter is this variable located?
+  pub field: Option<u64>, // in what field is this variable located? (if any)
   pub erase: bool,         // should this variable be collected (because it is unused)?
 }
 
 // Compiled information about a rewrite rule.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompRule {
-  pub cond: Vec<Ptr>,          // left-hand side matching conditions
+  pub cond: Vec<RawCell>,          // left-hand side matching conditions
   pub vars: Vec<Var>,          // left-hand side variable locations
-  pub eras: Vec<(u128, u128)>, // must-clear locations (argument number and arity)
+  pub eras: Vec<(u64, u64)>, // must-clear locations (argument number and arity)
   pub body: Term,              // right-hand side body of rule
 }
 
@@ -355,8 +350,8 @@ pub struct CompRule {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CompFunc {
   pub func: Func,           // the original function
-  pub arity: u128,          // number of arguments
-  pub redux: Vec<u128>,     // index of strict arguments
+  pub arity: u64,          // number of arguments
+  pub redux: Vec<u64>,     // index of strict arguments
   pub rules: Vec<CompRule>, // vector of rules
 }
 
@@ -364,87 +359,163 @@ pub struct CompFunc {
 
 // A file, which is just a map of `FuncID -> CompFunc`
 // It is used to find a function when it is called, in order to apply its rewrite rules.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Funcs {
-  pub funcs: Map<Arc<CompFunc>>,
+  pub funcs: NameMap<Arc<CompFunc>>,
 }
 
 // TODO: arity with no u128
 
 // A map of `FuncID -> Arity`
 // It is used in many places to find the arity (argument count) of functions and constructors.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Arits {
-  pub arits: Map<u128>,
+  pub arits: NameMap<u64>,
 }
 
 // A map of `FuncID -> FuncID
 // Stores the owner of the 'FuncID' a namespace.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ownrs {
-  pub ownrs: Map<u128>,
+  pub ownrs: NameMap<U120>,
 }
 
-// A map of `FuncID -> Ptr`
+#[derive(Clone, Debug, PartialEq)]
+pub struct Indxs {
+  pub indxs: NameMap<u128>
+}
+
+
+// A map of `FuncID -> RawCell`
 // It links a function id to its state on the runtime memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Store {
-  pub links: Map<Ptr>,
+  pub links: U120Map<RawCell>,
 }
 
 /// A global statement that alters the state of the blockchain
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
-  Fun { name: Name, args: Vec<Name>, func: Func, init: Term, sign: Option<crypto::Signature> },
+  Fun { name: Name, args: Vec<Name>, func: Func, init: Option<Term>, sign: Option<crypto::Signature> },
   Ctr { name: Name, args: Vec<Name>, sign: Option<crypto::Signature> },
   Run { expr: Term, sign: Option<crypto::Signature> },
   Reg { name: Name, ownr: U120, sign: Option<crypto::Signature> },
 }
 
-// An HVM pointer. It can point to an HVM node, a variable, or store an unboxed u120.
-pub type Ptr = u128;
+/// RawCell
+/// =======
 
-// A mergeable vector of u128 values
-#[derive(Debug, Clone)]
+/// An HVM memory cell/word.
+/// It can point to an HVM node, a variable ocurrence, or store an unboxed U120.
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
+#[repr(transparent)]
+pub struct RawCell(u128);
+
+impl std::ops::Deref for RawCell {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl RawCell {
+  pub const fn new(value: u128) -> Option<Self> {
+    // TODO: CellTag
+    // let tag = num >> (EXT_SIZE + VAL_SIZE);
+    // if matches!(tag, CellTag) {
+    //   Some(RawCell(num))
+    // } else {
+    //   None
+    // }
+    Some(RawCell(value))
+  }
+  /// For testing purposes only. TODO: remove.
+  pub const fn new_unchecked(value: u128) -> Self {
+    RawCell(value)
+  }
+}
+
+// Loc
+// ===
+
+/// A HVM memory location, or "pointer".
+
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
+#[repr(transparent)]
+pub struct Loc(u64);
+
+impl crate::NoHashHasher::IsEnabled for crate::hvm::Loc {}
+
+impl Loc {
+  pub const _MAX: u64 = (1 << VAL_SIZE) - 1;
+  pub const MAX: Loc = Loc(Loc::_MAX);
+
+  pub fn new(num: u64) -> Option<Self> {
+    if num >> VAL_SIZE == 0 {
+      Some(Loc(num))
+    } else {
+      None
+    }
+  }
+}
+
+impl std::ops::Deref for Loc {
+  type Target = u64;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl std::ops::Add<u64> for Loc {
+  type Output = Self;
+  fn add(self, other: u64) -> Self::Output {
+    Loc(self.0 + other)
+  }
+}
+
+impl std::ops::Add for Loc {
+  type Output = Self;
+  fn add(self, other: Self) -> Self::Output {
+    Loc(self.0 + other.0)
+  }
+}
+
+
+// A mergeable vector of RawCells
+#[derive(Debug, Clone, PartialEq)]
 pub struct Nodes {
-  pub nodes: Map<u128>,
+  pub nodes: LocMap<RawCell>,
+}
+
+#[derive(Debug, Clone, PartialEq)] 
+pub struct Hashs {
+  pub stmt_hashes: U128Map<crypto::Hash>,
 }
 
 // HVM's memory state (nodes, functions, metadata, statistics)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Heap {
   pub uuid: u128,  // unique identifier
   pub memo: Nodes, // memory block holding HVM nodes
   pub disk: Store, // points to stored function states
   pub file: Funcs, // function codes
   pub arit: Arits, // function arities
+  pub indx: Indxs, // function name to position in heap
+  pub hash: Hashs,
   pub ownr: Ownrs, // namespace owners
-  pub tick: u128,  // tick counter
+  pub tick: u64,  // tick counter
   pub time: u128,  // block timestamp
   pub meta: u128,  // block metadata
   pub hax0: u128,  // block hash, part 0
   pub hax1: u128,  // block hash, part 1
-  pub funs: u128,  // total function count
-  pub dups: u128,  // total dups count
-  pub rwts: u128,  // total graph rewrites
-  pub mana: u128,  // total mana cost
-  pub size: i128,  // total used memory (in 64-bit words)
-  pub mcap: u128,  // memory capacity (in 64-bit words)
-  pub next: u128,  // memory index that *may* be empty
+  pub funs: u64,  // total function count
+  pub dups: u64,  // total dups count
+  pub rwts: u64,  // total graph rewrites
+  pub mana: u64,  // total mana cost
+  pub size: u64,  // total used memory (in 64-bit words)
+  pub mcap: u64,  // memory capacity (in 64-bit words)
+  pub next: u64,  // memory index that *may* be empty
   // TODO: store run results (Num). (block_idx, stmt_idx) [as u128] -> U120
-}
-
-#[derive(Debug, Clone)]
-// A serialized Heap
-pub struct SerializedHeap {
-  pub uuid: u128,
-  pub memo: Vec<u128>,
-  pub disk: Vec<u128>,
-  pub file: Vec<u128>,
-  pub arit: Vec<u128>,
-  pub ownr: Vec<u128>,
-  pub nums: Vec<u128>,
-  pub stat: Vec<u128>,
 }
 
 // A list of past heap states, for block-reorg rollback
@@ -475,20 +546,37 @@ pub enum RuntimeError {
   NotEnoughMana,
   NotEnoughSpace,
   DivisionByZero,
+  TermIsInvalidNumber { term: RawCell},
   CtrOrFunNotDefined { name: Name },
+  StmtDoesntExist { stmt_index: u128},
   ArityMismatch { name: Name, expected: usize, got: usize },
   UnboundVar { name: Name },
+  NameTooBig { numb: u128 },
+  TermIsNotLinear { term: Term, var: Name },
+  TermExceedsMaxDepth,
   EffectFailure(EffectFailure),
+  DefinitionError(DefinitionError)
 }
-
+#[derive(Debug, Clone)]
+pub enum DefinitionError {
+  FunctionHasNoRules,
+  LHSIsNotAFunction, // TODO: check at compile time
+  LHSArityMismatch { rule_index: usize, expected: usize, got: usize }, // TODO: check at compile time
+  LHSNotConstructor { rule_index: usize }, // TODO: check at compile time
+  VarIsUsedTwiceInDefinition { name : Name, rule_index: usize },
+  VarIsNotLinearInBody { name : Name, rule_index: usize },
+  VarIsNotUsed { name : Name, rule_index: usize },
+  NestedMatch { rule_index: usize },
+  UnsupportedMatch { rule_index: usize },
+  
+}
 
 #[derive(Debug, Clone)]
 pub enum EffectFailure {
   NoSuchState { state: U120 },
-  StateIsZero { state: U120 },
-  InvalidCallArg {caller: U120, callee: U120, arg: Ptr},
+  InvalidCallArg {caller: U120, callee: U120, arg: RawCell},
   InvalidIOCtr { name: Name },
-  InvalidIONonCtr { ptr: Ptr },
+  InvalidIONonCtr { ptr: RawCell },
 }
 
 //pub fn heaps_invariant(rt: &Runtime) -> (bool, Vec<u8>, Vec<u64>) {
@@ -526,13 +614,13 @@ pub enum StatementInfo {
   Run {
     done_term: Term,
     #[serde_as(as = "DisplayFromStr")]
-    used_mana: u128,
+    used_mana: u64,
     #[serde_as(as = "DisplayFromStr")]
-    size_diff: i128,
+    size_diff: i64,
     #[serde_as(as = "DisplayFromStr")]
-    end_size: u128,
+    end_size: u64,
   },
-  Reg { name: Name, ownr: u128 },
+  Reg { name: Name, ownr: U120 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -566,13 +654,13 @@ const MAX_ROLLBACK: u64 = MAX_HEAPS - 2;
 
 pub const MAX_TERM_DEPTH: u128 = 256; // maximum depth of a LHS or RHS term
 
-// Size of each Ptr field in bits
+// Size of each RawCell field in bits
 pub const VAL_SIZE: usize = 48;
 pub const EXT_SIZE: usize = 72;
 pub const TAG_SIZE: usize = 8;
 pub const NUM_SIZE: usize = EXT_SIZE + VAL_SIZE;
 
-// Position of each Ptr field
+// Position of each RawCell field
 pub const VAL_POS: usize = 0;
 pub const EXT_POS: usize = VAL_POS + VAL_SIZE;
 pub const TAG_POS: usize = EXT_POS + EXT_SIZE;
@@ -590,7 +678,7 @@ pub const EXT_MASK: u128 = mask(EXT_SIZE, EXT_POS);
 pub const TAG_MASK: u128 = mask(TAG_SIZE, TAG_POS);
 pub const NUM_MASK: u128 = mask(NUM_SIZE, NUM_POS);
 
-// TODO: refactor to enums with u128 repr
+// TODO: refactor to enums with u8 / u128 repr
 
 pub const DP0: u128 = 0x0;
 pub const DP1: u128 = 0x1;
@@ -625,6 +713,7 @@ pub const NEQ : u128 = 0xF;
 
 pub const U128_NONE : u128 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
 pub const I128_NONE : i128 = -0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+pub const U64_NONE: u64 = u64::MAX; //TODO: rewrite as FFF's?if think it is easier to read like this.
 
 // TODO: r -> U120
 // (IO r:Type) : Type
@@ -648,14 +737,17 @@ const IO_TIME : u128 = 0x7935cf; // name_to_u128("TIME")
 const IO_META : u128 = 0x5cf78b; // name_to_u128("META")
 const IO_HAX0 : u128 = 0x48b881; // name_to_u128("HAX0")
 const IO_HAX1 : u128 = 0x48b882; // name_to_u128("HAX1")
+const IO_GIDX : u128 = 0x4533a2; // name_to_u128("GIDX")
+const IO_STH0 : u128 = 0x75e481; // name_to_u128("STH0")
+const IO_STH1 : u128 = 0x75e482; // name_to_u128("STH1")
 // TODO: STH0 & STH1 -> get hash of statement (by (block_idx, stmt_idx))
 // TODO: GRUN -> get run result
 
 // Maximum mana that can be spent in a block
-pub const BLOCK_MANA_LIMIT : u128 = 4_000_000;
+pub const BLOCK_MANA_LIMIT : u64 = 4_000_000;
 
 // Maximum state growth per block, in bits
-pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per year
+pub const BLOCK_BITS_LIMIT : u64 = 2048; // 1024 bits per sec = about 8 GB per year
 
 // Mana Table
 // ----------
@@ -681,55 +773,55 @@ pub const BLOCK_BITS_LIMIT : i128 = 2048; // 1024 bits per sec = about 8 GB per 
 // |-----------------------------------------------------|
 
 
-fn AppLamMana() -> u128 {
+fn AppLamMana() -> u64 {
   return 2;
 }
 
-fn AppSupMana() -> u128 {
+fn AppSupMana() -> u64 {
   return 4;
 }
 
-fn Op2NumMana() -> u128 {
+fn Op2NumMana() -> u64 {
   return 2;
 }
 
-fn Op2SupMana() -> u128 {
+fn Op2SupMana() -> u64 {
   return 4;
 }
 
-fn FunCtrMana(body: &Term) -> u128 {
+fn FunCtrMana(body: &Term) -> u64 {
   return 2 + count_allocs(body);
 }
 
-fn FunSupMana(arity: u128) -> u128 {
+fn FunSupMana(arity: u64) -> u64 {
   return 2 + arity;
 }
 
-fn DupLamMana() -> u128 {
+fn DupLamMana() -> u64 {
   return 4;
 }
 
-fn DupNumMana() -> u128 {
+fn DupNumMana() -> u64 {
   return 2;
 }
 
-fn DupCtrMana(arity: u128) -> u128 {
+fn DupCtrMana(arity: u64) -> u64 {
   return 2 + arity;
 }
 
-fn DupDupMana() -> u128 {
+fn DupDupMana() -> u64 {
   return 4;
 }
 
-fn DupSupMana() -> u128 {
+fn DupSupMana() -> u64 {
   return 2;
 }
 
-fn DupEraMana() -> u128 {
+fn DupEraMana() -> u64 {
   return 2;
 }
 
-fn count_allocs(body: &Term) -> u128 {
+fn count_allocs(body: &Term) -> u64 {
   match body {
     Term::Var { name } => {
       0
@@ -749,7 +841,7 @@ fn count_allocs(body: &Term) -> u128 {
       2 + func + argm
     }
     Term::Fun { name, args } => {
-      let size = args.len() as u128;
+      let size = args.len() as u64;
       let mut count = 0;
       for (i, arg) in args.iter().enumerate() {
         count += count_allocs(arg);
@@ -757,7 +849,7 @@ fn count_allocs(body: &Term) -> u128 {
       size + count
     }
     Term::Ctr { name, args } => {
-      let size = args.len() as u128;
+      let size = args.len() as u64;
       let mut count = 0;
       for (i, arg) in args.iter().enumerate() {
         count += count_allocs(arg);
@@ -775,12 +867,24 @@ fn count_allocs(body: &Term) -> u128 {
   }
 }
 
-const GENESIS_CODE: &str = include_str!("../genesis.kdl");
-
 // Utils
 // -----
 
-pub fn init_map<A>() -> Map<A> {
+// TODO: is this necessary? could it be genetic at least..?
+
+pub fn init_name_map<A>() -> NameMap<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+pub fn init_u128_map<A>() -> U128Map<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+pub fn init_u120_map<A>() -> U120Map<A> {
+  HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+pub fn init_loc_map<A>() -> LocMap<A> {
   HashMap::with_hasher(BuildHasherDefault::default())
 }
 
@@ -797,122 +901,6 @@ fn show_addr(addr: U120) -> String {
   addr.to_hex_literal()
 }
 
-// U120
-// ====
-
-impl U120 {
-  pub const ZERO: U120 = U120(0);
-  pub const MAX: U120 = U120(2_u128.pow(120) - 1);
-
-  pub fn wrapping_add(self, other:U120) -> U120 {
-    let res = self.0 + other.0;
-    U120(res & U120::MAX.0)
-  }
-
-  pub fn wrapping_sub(self, other: U120) -> U120 {
-    let other_complement = U120::wrapping_add(U120(other.0 ^ U120::MAX.0), U120(1));
-    U120::wrapping_add(self, other_complement)
-  }
-
-  // based off of this answer https://stackoverflow.com/a/1815371
-  // maybe this is too much work for an easy function?
-  // idk, maybe there's a better way to do this
-  pub fn wrapping_mul(self, other: U120) -> U120 {
-    const LO_MASK : u128  =  (1 << 60) - 1;
-    let a = self.0;
-    let b = other.0;
-    let a_lo = a & LO_MASK;
-    let a_hi = a >> 60;
-    let b_lo = b & LO_MASK;
-    let b_hi = b >> 60;
-    let s0 = a_lo * b_lo;
-    let s1 = ((a_hi * b_lo) & LO_MASK) << 60;
-    let s2 = ((b_hi * a_lo) & LO_MASK) << 60;
-    U120(s0).wrapping_add(U120(s1)).wrapping_add(U120(s2))
-  }
-
-  // Wrapping div is just normal division, since
-  // self / other is always smaller than self.
-  // warning: this will panic when other is 0.
-  pub fn wrapping_div(self, other: U120) -> U120 {
-    U120(self.0 / other.0)
-  }
-
-  // Wrapping remainder is just normal remainder
-  // given that self % other is always smaller than other
-  // by definition of the modulo operation.
-  pub fn wrapping_rem(self, other: U120) -> U120 {
-    U120(self.0 % other.0)
-  }
-
-  // Wrapping shift left is only defined for
-  // values `other` between 0 and 120. For values bigger than
-  // that, it will wrap the value module 120 before doing the shift.
-  // Ex: (1u120 << 120) === (1u120 << 0) === 1u120 
-  pub fn wrapping_shl(self, other: U120) -> U120 {
-    U120((self.0 << (other.0 % 120)) & U120::MAX.0)
-  }
-
-  pub fn wrapping_shr(self, other: U120) -> U120 {
-    U120(self.0 >> (other.0 % 120))
-  }
-
-  pub fn to_hex_literal(&self) -> String {
-    format!("#x{:x}", self.0)
-  }
-}
-
-impl std::ops::Deref for U120 {
-  type Target = u128;
-  fn deref(&self) -> &Self::Target {
-    &self.0
-  }
-}
-
-impl TryFrom<u128> for U120 {
-  type Error = String;
-  fn try_from(numb: u128) -> Result<Self, Self::Error> {
-    if numb >> 120 != 0 {
-      Err(format!("Number {} does not fit in 120-bits.", numb))
-    } else {
-      Ok(U120(numb))
-    }
-  }
-}
-
-impl From<Name> for U120 {
-  fn from(num: Name) -> Self {
-    U120(*num)
-  }
-}
-
-impl fmt::Display for U120 {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-      write!(f, "{}", self.0)
-  }
-}
-
-impl From<U120> for String {
-  fn from(num: U120) -> Self {
-      num.to_string()
-  }
-}
-
-
-impl TryFrom<&str> for U120 {
-  type Error = String;
-  fn try_from(numb: &str) -> Result<Self, Self::Error> {
-    fn err_msg<E: fmt::Debug>(e: E) -> String {
-      format!("Invalid number string '{:?}'", e)
-    }
-    let (rest, result) = read_numb(numb).map_err(err_msg)?;
-    if !rest.is_empty() {
-      Err(err_msg(numb))
-    } else {
-      Ok(result)
-    }
-  }
-}
 
 // Oper
 // ====
@@ -1103,22 +1091,22 @@ fn absorb_u128(a: u128, b: u128, overwrite: bool) -> u128 {
   if b == U128_NONE { a } else if overwrite || a == U128_NONE { b } else { a }
 }
 
-fn absorb_i128(a: i128, b: i128, overwrite: bool) -> i128 {
-  if b == I128_NONE { a } else if overwrite || a == I128_NONE { b } else { a }
+fn absorb_u64(a: u64, b: u64, overwrite: bool) -> u64 {
+  if b == U64_NONE { a } else if overwrite || a == U64_NONE { b } else { a }
 }
 
 impl Heap {
-  fn write(&mut self, idx: u128, val: u128) {
+  fn write(&mut self, idx: Loc, val: RawCell) {
     return self.memo.write(idx, val);
   }
-  fn read(&self, idx: u128) -> u128 {
+  fn read(&self, idx: Loc) -> RawCell {
     return self.memo.read(idx);
   }
-  fn write_disk(&mut self, name: U120, val: Ptr) {
-    return self.disk.write(*name, val);
+  fn write_disk(&mut self, name: U120, val: RawCell) {
+    return self.disk.write(name, val);
   }
-  fn read_disk(&self, name: U120) -> Option<Ptr> {
-    return self.disk.read(*name);
+  fn read_disk(&self, name: U120) -> Option<RawCell> {
+    return self.disk.read(name);
   }
   fn write_file(&mut self, name: Name, fun: Arc<CompFunc>) {
     return self.file.write(name, fun);
@@ -1126,22 +1114,34 @@ impl Heap {
   fn read_file(&self, name: &Name) -> Option<Arc<CompFunc>> {
     return self.file.read(name);
   }
-  fn write_arit(&mut self, name: Name, val: u128) {
+  fn write_arit(&mut self, name: Name, val: u64) {
     return self.arit.write(name, val);
   }
-  fn read_arit(&self, name: &Name) -> Option<u128> {
+  fn read_arit(&self, name: &Name) -> Option<u64> {
     return self.arit.read(name);
   }
-  fn write_ownr(&mut self, name: Name, val: u128) {
+  fn write_ownr(&mut self, name: Name, val: U120) {
     return self.ownr.write(name, val);
   }
-  fn read_ownr(&self, name: &Name) -> Option<u128> {
+  fn read_ownr(&self, name: &Name) -> Option<U120> {
     return self.ownr.read(name);
   }
-  fn set_tick(&mut self, tick: u128) {
+  fn write_indx(&mut self, name: Name, pos: u128) {
+    return self.indx.write(name, pos);
+  }
+  fn read_indx(&self, name: &Name) -> Option<u128> {
+    return self.indx.read(name);
+  }
+  fn write_stmt_hash(&mut self, pos: u128, hash: crypto::Hash) {
+    return self.hash.write(pos, hash);
+  }
+  fn read_stmt_hash(&self, pos: &u128) -> Option<&crypto::Hash> {
+    return self.hash.read(pos);
+  }
+  fn set_tick(&mut self, tick: u64) {
     self.tick = tick;
   }
-  fn get_tick(&self) -> u128 {
+  fn get_tick(&self) -> u64 {
     return self.tick;
   }
   fn set_time(&mut self, time: u128) {
@@ -1168,46 +1168,47 @@ impl Heap {
   fn get_hax1(&self) -> u128 {
     return self.hax1;
   }
-  fn set_funs(&mut self, funs: u128) {
+  fn set_funs(&mut self, funs: u64) {
     self.funs = funs;
   }
-  fn get_funs(&self) -> u128 {
+  fn get_funs(&self) -> u64 {
     return self.funs;
   }
-  fn set_dups(&mut self, dups: u128) {
+  fn set_dups(&mut self, dups: u64) {
     self.dups = dups;
   }
-  fn get_dups(&self) -> u128 {
+  fn get_dups(&self) -> u64 {
     return self.dups;
   }
-  fn set_rwts(&mut self, rwts: u128) {
+  fn set_rwts(&mut self, rwts: u64) {
     self.rwts = rwts;
   }
-  fn get_rwts(&self) -> u128 {
+  fn get_rwts(&self) -> u64 {
     return self.rwts;
   }
-  fn set_mana(&mut self, mana: u128) { // TODO: do these counters need to be u128? would u64 suffice?
+  // NOTE: u64 for mana suffices
+  fn set_mana(&mut self, mana: u64) { 
     self.mana = mana;
   }
-  fn get_mana(&self) -> u128 {
+  fn get_mana(&self) -> u64 {
     return self.mana;
   }
-  fn set_size(&mut self, size: i128) {
+  fn set_size(&mut self, size: u64) {
     self.size = size;
   }
-  fn get_size(&self) -> i128 {
+  fn get_size(&self) -> u64 {
     return self.size;
   }
-  fn set_mcap(&mut self, mcap: u128) {
+  fn set_mcap(&mut self, mcap: u64) {
     self.mcap = mcap;
   }
-  fn get_mcap(&self) -> u128 {
+  fn get_mcap(&self) -> u64 {
     return self.mcap;
   }
-  fn set_next(&mut self, next: u128) {
+  fn set_next(&mut self, next: u64) {
     self.next = next;
   }
-  fn get_next(&self) -> u128 {
+  fn get_next(&self) -> u64 {
     return self.next;
   }
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
@@ -1215,18 +1216,18 @@ impl Heap {
     self.disk.absorb(&mut other.disk, overwrite);
     self.file.absorb(&mut other.file, overwrite);
     self.arit.absorb(&mut other.arit, overwrite);
-    self.tick = absorb_u128(self.tick, other.tick, overwrite);
+    self.tick = absorb_u64(self.tick, other.tick, overwrite);
     self.time = absorb_u128(self.time, other.time, overwrite);
     self.meta = absorb_u128(self.meta, other.meta, overwrite);
     self.hax0 = absorb_u128(self.hax0, other.hax0, overwrite);
     self.hax1 = absorb_u128(self.hax1, other.hax1, overwrite);
-    self.funs = absorb_u128(self.funs, other.funs, overwrite);
-    self.dups = absorb_u128(self.dups, other.dups, overwrite);
-    self.rwts = absorb_u128(self.rwts, other.rwts, overwrite);
-    self.mana = absorb_u128(self.mana, other.mana, overwrite);
-    self.size = absorb_i128(self.size, other.size, overwrite);
-    self.mcap = absorb_u128(self.mcap, other.mcap, overwrite);
-    self.next = absorb_u128(self.next, other.next, overwrite);
+    self.funs = absorb_u64(self.funs, other.funs, overwrite);
+    self.dups = absorb_u64(self.dups, other.dups, overwrite);
+    self.rwts = absorb_u64(self.rwts, other.rwts, overwrite);
+    self.mana = absorb_u64(self.mana, other.mana, overwrite);
+    self.size = absorb_u64(self.size, other.size, overwrite);
+    self.mcap = absorb_u64(self.mcap, other.mcap, overwrite);
+    self.next = absorb_u64(self.next, other.next, overwrite);
   }
   fn clear(&mut self) {
     self.uuid = fastrand::u128(..);
@@ -1234,188 +1235,101 @@ impl Heap {
     self.disk.clear();
     self.file.clear();
     self.arit.clear();
-    self.tick = U128_NONE;
+    self.tick = U64_NONE;
     self.time = U128_NONE;
     self.meta = U128_NONE;
     self.hax0 = U128_NONE;
     self.hax1 = U128_NONE;
-    self.funs = U128_NONE;
-    self.dups = U128_NONE;
-    self.rwts = U128_NONE;
-    self.mana = U128_NONE;
-    self.size = I128_NONE;
-    self.mcap = U128_NONE;
-    self.next = U128_NONE;
+    self.funs = U64_NONE;
+    self.dups = U64_NONE;
+    self.rwts = U64_NONE;
+    self.mana = U64_NONE;
+    self.size = U64_NONE;
+    self.mcap = U64_NONE;
+    self.next = U64_NONE;
   }
-  pub fn serialize(&self) -> SerializedHeap {
-    // Serializes stat and size
-    let size = self.size as u128;
-    let stat = vec![self.tick, self.time, self.meta, self.hax0, self.hax1, self.funs, self.dups, self.rwts, self.mana, size, self.mcap, self.next];
-    // Serializes Nodes
-    let mut memo_buff : Vec<u128> = vec![];
-    for (idx, val) in &self.memo.nodes {
-      memo_buff.push(*idx as u128);
-      memo_buff.push(*val as u128);
+  pub fn serialize(self: &Heap, path: &PathBuf, append: bool) -> std::io::Result<()> {
+    fn open_writer(heap: &Heap, path: &PathBuf, buffer_name: &str, append: bool) -> std::io::Result<File> {
+      let file_path = Heap::buffer_file_path(heap.uuid, buffer_name, path);
+      std::fs::OpenOptions::new()
+        .write(true)
+        .append(append)
+        .create(true)
+        .open(file_path)
     }
-    // Serializes Store
-    let mut disk_buff : Vec<u128> = vec![];
-    for (fnid, lnk) in &self.disk.links {
-      disk_buff.push(*fnid as u128);
-      disk_buff.push(*lnk as u128);
-    }
-    // Serializes Funcs
-    let mut file_buff : Vec<u128> = vec![];
-    for (fnid, func) in &self.file.funcs {
-      let mut func_buff = util::u8s_to_u128s(&mut func.func.proto_serialized().to_bytes());
-      file_buff.push(*fnid as u128);
-      file_buff.push(func_buff.len() as u128);
-      file_buff.append(&mut func_buff);
-    }
-    // Serializes Arits
-    let mut arit_buff : Vec<u128> = vec![];
-    for (fnid, arit) in &self.arit.arits {
-      arit_buff.push(*fnid as u128);
-      arit_buff.push(*arit);
-    }
-    // Serializes Ownrs
-    let mut ownr_buff : Vec<u128> = vec![];
-    for (fnid, ownr) in &self.ownr.ownrs {
-      ownr_buff.push(*fnid as u128);
-      ownr_buff.push(*ownr);
-    }
-    // Serializes Nums
-    let nums_buff : Vec<u128> = vec![
-      self.tick,
-      self.time,
-      self.meta,
-      self.hax0,
-      self.hax1,
-      self.funs,
-      self.dups,
-      self.rwts,
-      self.mana,
-      self.size as u128,
-      self.mcap,
-      self.next
-    ];
-    // Returns the serialized heap
-    return SerializedHeap {
-      uuid: self.uuid,
-      memo: memo_buff,
-      disk: disk_buff,
-      file: file_buff,
-      arit: arit_buff,
-      ownr: ownr_buff,
-      nums: nums_buff,
-      stat,
-    };
+    self.memo.nodes.disk_serialize(&mut open_writer(self, path, "memo", append)?)?;
+    self.disk.links.disk_serialize(&mut open_writer(self, path, "disk", append)?)?;
+    self.file.funcs.disk_serialize(&mut open_writer(self, path, "file", append)?)?;
+    self.arit.arits.disk_serialize(&mut open_writer(self, path, "arit", append)?)?;
+    self.indx.indxs.disk_serialize(&mut open_writer(self, path, "indx", append)?)?;
+    self.hash.stmt_hashes.disk_serialize(&mut open_writer(self, path, "stmt_hashes", append)?)?;
+    self.ownr.ownrs.disk_serialize(&mut open_writer(self, path, "ownr", append)?)?;
+    let mut stat = open_writer(self, path, "stat", false)?;
+    self.tick.disk_serialize(&mut stat)?;
+    self.time.disk_serialize(&mut stat)?;
+    self.meta.disk_serialize(&mut stat)?;
+    self.hax0.disk_serialize(&mut stat)?;
+    self.hax1.disk_serialize(&mut stat)?;
+    self.funs.disk_serialize(&mut stat)?;
+    self.dups.disk_serialize(&mut stat)?;
+    self.rwts.disk_serialize(&mut stat)?;
+    self.mana.disk_serialize(&mut stat)?;
+    self.size.disk_serialize(&mut stat)?;
+    self.mcap.disk_serialize(&mut stat)?;
+    self.next.disk_serialize(&mut stat)?;
+    Ok(())
   }
-  pub fn deserialize(&mut self, serial: &SerializedHeap) {
-    // Deserializes stat and size
-    self.tick = serial.nums[0];
-    self.time = serial.nums[1];
-    self.meta = serial.nums[2];
-    self.hax0 = serial.nums[3];
-    self.hax1 = serial.nums[4];
-    self.funs = serial.nums[5];
-    self.dups = serial.nums[6];
-    self.rwts = serial.nums[7];
-    self.mana = serial.nums[8];
-    self.size = serial.nums[9] as i128;
-    self.mcap = serial.nums[10];
-    self.next = serial.nums[11];
+  pub fn deserialize(uuid: u128, path: &PathBuf) -> std::io::Result<Heap> {
+    fn open_reader(uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<File> {
+      let file_path = Heap::buffer_file_path(uuid, buffer_name, path);
+      std::fs::OpenOptions::new()
+        .read(true)
+        .open(file_path)
+    }
+    fn read_hash_map_from_file<K: DiskSer + Eq + std::hash::Hash + crate::NoHashHasher::IsEnabled, V: DiskSer>
+      (uuid: u128, path: &PathBuf, buffer_name: &str) -> std::io::Result<HashMap<K, V, std::hash::BuildHasherDefault<NoHashHasher<K>>>> {
+      HashMap::disk_deserialize(&mut open_reader(uuid, path, buffer_name)?)?
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+    }
+    fn read_num<T: DiskSer>(file: &mut File) -> std::io::Result<T>{
+      T::disk_deserialize(file)?.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+    }
+    let memo = Nodes { nodes: read_hash_map_from_file(uuid, path, "memo")? };
+    let disk = Store { links: read_hash_map_from_file(uuid, path, "disk")? };
+    let file = Funcs { funcs: read_hash_map_from_file(uuid, path, "file")? };
+    let arit = Arits { arits: read_hash_map_from_file(uuid, path, "arit")? };
+    let indx = Indxs { indxs: read_hash_map_from_file(uuid, path, "indx")? };
+    let hash = Hashs { stmt_hashes: read_hash_map_from_file(uuid, path, "stmt_hashes")? };    
+    let ownr = Ownrs { ownrs: read_hash_map_from_file(uuid, path, "ownr")? };
+    let mut stat = open_reader(uuid, path, "stat")?;
+    let tick = read_num(&mut stat)?;
+    let time = read_num(&mut stat)?;
+    let meta = read_num(&mut stat)?;
+    let hax0 = read_num(&mut stat)?;
+    let hax1 = read_num(&mut stat)?;
+    let funs = read_num(&mut stat)?;
+    let dups = read_num(&mut stat)?;
+    let rwts = read_num(&mut stat)?;
+    let mana = read_num(&mut stat)?;
+    let size = read_num(&mut stat)?;
+    let mcap = read_num(&mut stat)?;
+    let next = read_num(&mut stat)?;
+    Ok( Heap { uuid, memo, disk, file, arit, indx, hash, ownr, tick, time, meta, hax0, hax1, funs, dups, rwts,  mana, size, mcap, next })
+  }
 
-    // Deserializes Nodes
-    let mut i = 0;
-    while i < serial.memo.len() {
-      let idx = serial.memo[i + 0];
-      let val = serial.memo[i + 1];
-      self.write(idx, val);
-      i += 2;
-    }
-    // Deserializes Store
-    let mut i = 0;
-    while i < serial.disk.len() {
-      let fnid = serial.disk[i + 0];
-      let lnk  = serial.disk[i + 1];
-      self.write_disk(U120(fnid), lnk);
-      i += 2;
-    }
-    // Deserializes Funcs
-    let mut i = 0;
-    while i < serial.file.len() {
-      let fnid = serial.file[i + 0];
-      let size = serial.file[i + 1];
-      let buff = &serial.file[i + 2 .. i + 2 + size as usize];
-      let func = &Func::proto_deserialized(&bit_vec::BitVec::from_bytes(&util::u128s_to_u8s(&buff))).unwrap();
-      let func = compile_func(func, false).unwrap();
-      self.write_file(Name::new_unsafe(fnid), Arc::new(func));
-      i = i + 2 + size as usize;
-    }
-    // Deserializes Arits
-    for i in 0 .. serial.arit.len() / 2 {
-      let fnid = serial.arit[i * 2 + 0];
-      let arit = serial.arit[i * 2 + 1];
-      self.write_arit(Name::new_unsafe(fnid), arit);
-    }
-    // Deserializes Ownrs
-    for i in 0 .. serial.ownr.len() / 2 {
-      let fnid = serial.ownr[i * 2 + 0];
-      let ownr = serial.ownr[i * 2 + 1];
-      self.write_ownr(Name::new_unsafe(fnid), ownr);
-    }
-  }
-  fn buffer_file_path(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
+  fn buffer_file_path(uuid: u128, buffer_name: &str, path: &PathBuf) -> PathBuf {
     path.join(format!("{:0>32x}.{}.bin", uuid, buffer_name))
   }
-  fn write_buffer(&self, uuid: u128, buffer_name: &str, buffer: &[u128], append: bool, path: &PathBuf) -> std::io::Result<()> {
-    use std::io::Write;
-    std::fs::OpenOptions::new()
-      .write(true)
-      .append(append)
-      .create(true)
-      .open(self.buffer_file_path(self.uuid, buffer_name, path))?
-      .write_all(&util::u128s_to_u8s(buffer))?;
-    return Ok(());
-  }
-  fn read_buffer(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> std::io::Result<Vec<u128>> {
-    std::fs::read(self.buffer_file_path(uuid, buffer_name, path)).map(|x| util::u8s_to_u128s(&x))
-  }
   fn delete_buffer(&self, uuid: u128, buffer_name: &str, path: &PathBuf) -> std::io::Result<()> {
-    std::fs::remove_file(self.buffer_file_path(uuid, buffer_name, path))
-  }
-  pub fn save_buffers(&self, path: &PathBuf) -> std::io::Result<()> {
-    self.append_buffers(self.uuid, path)
-  }
-  fn append_buffers(&self, uuid: u128, path: &PathBuf) -> std::io::Result<()> {
-    let serial = self.serialize();
-    self.write_buffer(serial.uuid, "memo", &serial.memo, true, path)?;
-    self.write_buffer(serial.uuid, "disk", &serial.disk, true, path)?;
-    self.write_buffer(serial.uuid, "file", &serial.file, true, path)?;
-    self.write_buffer(serial.uuid, "arit", &serial.arit, true, path)?;
-    self.write_buffer(serial.uuid, "ownr", &serial.ownr, true, path)?;
-    self.write_buffer(serial.uuid, "nums", &serial.nums, true, path)?;
-    self.write_buffer(serial.uuid, "stat", &serial.stat, false, path)?;
-    return Ok(());
-  }
-  pub fn load_buffers(&mut self, uuid: u128, path: &PathBuf) -> std::io::Result<()> {
-    let memo = self.read_buffer(uuid, "memo", path)?;
-    let disk = self.read_buffer(uuid, "disk", path)?;
-    let file = self.read_buffer(uuid, "file", path)?;
-    let arit = self.read_buffer(uuid, "arit", path)?;
-    let ownr = self.read_buffer(uuid, "ownr", path)?;
-    let nums = self.read_buffer(uuid, "nums", path)?;
-    let stat = self.read_buffer(uuid, "stat", path)?;
-    self.deserialize(&SerializedHeap { uuid, memo, disk, file, arit, ownr, nums, stat });
-    return Ok(());
+    std::fs::remove_file(Heap::buffer_file_path(uuid, buffer_name, path))
   }
   fn delete_buffers(&mut self, path: &PathBuf) -> std::io::Result<()> {
     self.delete_buffer(self.uuid, "memo", path)?;
     self.delete_buffer(self.uuid, "disk", path)?;
     self.delete_buffer(self.uuid, "file", path)?;
     self.delete_buffer(self.uuid, "arit", path)?;
+    self.delete_buffer(self.uuid, "indx", path)?;
     self.delete_buffer(self.uuid, "ownr", path)?;
-    self.delete_buffer(self.uuid, "nums", path)?;
     self.delete_buffer(self.uuid, "stat", path)?;
     return Ok(());
   }
@@ -1433,32 +1347,34 @@ impl Heap {
 pub fn init_heap() -> Heap {
   Heap {
     uuid: fastrand::u128(..),
-    memo: Nodes { nodes: init_map() },
-    disk: Store { links: init_map() },
-    file: Funcs { funcs: init_map() },
-    arit: Arits { arits: init_map() },
-    ownr: Ownrs { ownrs: init_map() },
-    tick: U128_NONE,
+    memo: Nodes { nodes: init_loc_map() },
+    disk: Store { links: init_u120_map() },
+    file: Funcs { funcs: init_name_map() },
+    arit: Arits { arits: init_name_map() },
+    ownr: Ownrs { ownrs: init_name_map() },
+    indx: Indxs { indxs: init_name_map() },
+    hash: Hashs { stmt_hashes: init_u128_map() },
+    tick: U64_NONE,
     time: U128_NONE,
     meta: U128_NONE,
     hax0: U128_NONE,
     hax1: U128_NONE,
-    funs: U128_NONE,
-    dups: U128_NONE,
-    rwts: U128_NONE,
-    mana: U128_NONE,
-    size: I128_NONE,
-    mcap: U128_NONE,
-    next: U128_NONE,
+    funs: U64_NONE,
+    dups: U64_NONE,
+    rwts: U64_NONE,
+    mana: U64_NONE,
+    size: U64_NONE,
+    mcap: U64_NONE,
+    next: U64_NONE,
   }
 }
 
 impl Nodes {
-  fn write(&mut self, idx: u128, val: u128) {
+  fn write(&mut self, idx: Loc, val: RawCell) {
     self.nodes.insert(idx, val);
   }
-  fn read(&self, idx: u128) -> u128 {
-    return self.nodes.get(&idx).map(|x| *x).unwrap_or(U128_NONE);
+  fn read(&self, idx: Loc) -> RawCell {
+    return self.nodes.get(&idx).map(|x| *x).unwrap_or(RawCell(U128_NONE));
   }
   fn clear(&mut self) {
     self.nodes.clear();
@@ -1474,10 +1390,10 @@ impl Nodes {
 }
 
 impl Store {
-  fn write(&mut self, fid: u128, val: Ptr) {
+  fn write(&mut self, fid: U120, val: RawCell) {
     self.links.insert(fid, val);
   }
-  fn read(&self, fid: u128) -> Option<Ptr> {
+  fn read(&self, fid: U120) -> Option<RawCell> {
     self.links.get(&fid).map(|x| *x)
   }
   fn clear(&mut self) {
@@ -1486,7 +1402,7 @@ impl Store {
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.links.drain() {
       if overwrite || !self.links.contains_key(&fid) {
-        self.write(fid as u128, func);
+        self.write(fid, func);
       }
     }
   }
@@ -1494,7 +1410,7 @@ impl Store {
 
 impl Funcs {
   fn write(&mut self, name: Name, val: Arc<CompFunc>) {
-    self.funcs.entry(*name).or_insert(val);
+    self.funcs.entry(name).or_insert(val);
   }
   fn read(&self, name: &Name) -> Option<Arc<CompFunc>> {
     return self.funcs.get(name).map(|x| x.clone());
@@ -1505,17 +1421,17 @@ impl Funcs {
   fn absorb(&mut self, other: &mut Self, overwrite: bool) {
     for (fid, func) in other.funcs.drain() {
       if overwrite || !self.funcs.contains_key(&fid) {
-        self.write(Name::new_unsafe(fid), func.clone());
+        self.write(fid, func.clone());
       }
     }
   }
 }
 
 impl Arits {
-  fn write(&mut self, name: Name, val: u128) {
-    self.arits.entry(*name).or_insert(val);
+  fn write(&mut self, name: Name, val: u64) {
+    self.arits.entry(name).or_insert(val);
   }
-  fn read(&self, name: &Name) -> Option<u128> {
+  fn read(&self, name: &Name) -> Option<u64> {
     return self.arits.get(name).map(|x| *x);
   }
   fn clear(&mut self) {
@@ -1531,10 +1447,10 @@ impl Arits {
 }
 
 impl Ownrs {
-  fn write(&mut self, name: Name, val: u128) {
-    self.ownrs.entry(*name).or_insert(val);
+  fn write(&mut self, name: Name, val: U120) {
+    self.ownrs.entry(name).or_insert(val);
   }
-  fn read(&self, name: &Name) -> Option<u128> {
+  fn read(&self, name: &Name) -> Option<U120> {
     return self.ownrs.get(name).map(|x| *x);
   }
   fn clear(&mut self) {
@@ -1549,7 +1465,46 @@ impl Ownrs {
   }
 }
 
-pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
+impl Indxs {
+  fn write(&mut self, name: Name, pos: u128) {
+    self.indxs.insert(name, pos);
+  }
+  fn read(&self, name: &Name) -> Option<u128> {
+    return self.indxs.get(name).map(|x| *x);
+  }
+  fn clear(&mut self) {
+    self.indxs.clear();
+  }
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    for (name, pos) in other.indxs.drain() {
+      if overwrite || !self.indxs.contains_key(&name) {
+        self.indxs.insert(name, pos);
+      }
+    }
+  }
+}
+
+impl Hashs {
+  fn write(&mut self, pos: u128, hash: crypto::Hash) {
+    self.stmt_hashes.insert(pos, hash);
+  }
+  fn read(&self, pos: &u128) -> Option<&crypto::Hash> {
+    return self.stmt_hashes.get(pos);
+  }
+  fn clear(&mut self) {
+    self.stmt_hashes.clear();
+  }
+  fn absorb(&mut self, other: &mut Self, overwrite: bool) {
+    for (indx, hash) in other.stmt_hashes.drain() {
+      if overwrite || !self.stmt_hashes.contains_key(&indx) {
+        self.stmt_hashes.insert(indx, hash);
+      }
+    }
+  }
+}
+
+
+pub fn init_runtime(heaps_path: PathBuf, init_stmts: &[Statement]) -> Runtime {
   // Default runtime store path
   std::fs::create_dir_all(&heaps_path).unwrap(); // TODO: handle unwrap
   let mut heap = Vec::new();
@@ -1565,9 +1520,7 @@ pub fn init_runtime(heaps_path: PathBuf) -> Runtime {
     path: heaps_path,
   };
 
-  // TODO: extract to Node
-  // TODO: add Genesis statements to actual block 0
-  rt.run_statements_from_code(GENESIS_CODE, true, false);
+  rt.run_statements(init_stmts, true, false);
   rt.commit();
 
   rt
@@ -1578,52 +1531,68 @@ impl Runtime {
   // API
   // ---
 
-  pub fn define_function(&mut self, name: Name, func: CompFunc) {
+  pub fn clear(&mut self) {
+    self.clear_heap(self.draw);
+  }
+
+  pub fn define_function(&mut self, name: Name, func: CompFunc, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, func.arity);
     self.get_heap_mut(self.draw).write_file(name, Arc::new(func));
+    self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  pub fn define_constructor(&mut self, name: Name, arity: u128) {
+  pub fn define_constructor(&mut self, name: Name, arity: u64, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
+    self.save_stmt_name(name, stmt_index, stmt_hash);
   }
 
-  // pub fn define_function_from_code(&mut self, name: &str, code: &str) {
-  //   self.define_function(name_to_u128(name), read_func(code).1);
-  // }
+ 
+  pub fn define_register(&mut self, name: Name, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
+    self.save_stmt_name(name, stmt_index, stmt_hash);
+  }
 
-  pub fn create_term(&mut self, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
+  pub fn save_stmt_name(&mut self, name: Name, stmt_index: Option<usize>, stmt_hash: crypto::Hash) {
+    if let Some(idx) = stmt_index {
+      let tick = self.get_tick() as u128;
+      let pos = tick.wrapping_shl(60) | (idx as u128); //TODO: refactor to use less bits
+      self.get_heap_mut(self.draw).write_indx(name, pos);
+      self.get_heap_mut(self.draw).write_stmt_hash(pos, stmt_hash);
+    }
+  }
+
+  pub fn create_term(&mut self, term: &Term, loc: Loc, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<RawCell, RuntimeError> {
     return create_term(self, term, loc, vars_data);
   }
 
-  pub fn alloc_term(&mut self, term: &Term) -> Result<u128, RuntimeError> {
+  pub fn alloc_term(&mut self, term: &Term) -> Result<Loc, RuntimeError> {
     let loc = alloc(self, 1);
-    let ptr = create_term(self, term, loc, &mut init_map())?;
+    let ptr = create_term(self, term, loc, &mut init_name_map())?;
     self.write(loc, ptr);
     Ok(loc)
   }
 
-  pub fn collect(&mut self, term: Ptr) {
+  pub fn collect(&mut self, term: RawCell) {
     collect(self, term)
   }
 
-  pub fn collect_at(&mut self, loc: u128) {
+  pub fn collect_at(&mut self, loc: Loc) {
     collect(self, self.read(loc))
   }
 
-  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<Ptr> {
+  //fn run_io_term(&mut self, subject: u128, caller: u128, term: &Term) -> Option<RawCell> {
     //let main = self.alloc_term(term);
     //let done = self.run_io(subject, caller, main);
     //return done;
   //}
 
-  //fn run_io_from_code(&mut self, code: &str) -> Option<Ptr> {
+  //fn run_io_from_code(&mut self, code: &str) -> Option<RawCell> {
     //return self.run_io_term(0, 0, &read_term(code).1);
   //}
 
   pub fn run_statements(&mut self, statements: &[Statement], silent: bool, debug: bool) -> Vec<StatementResult> {
-    statements.iter().map(
-      |s| { 
-        let res = self.run_statement(s, silent, debug);
+    statements.iter().enumerate().map(
+      |(i, s)| {
+        let res = self.run_statement(s, silent, debug, Some(i));
         if let Ok(..) = res {
           self.draw();
         }
@@ -1645,7 +1614,7 @@ impl Runtime {
   pub fn test_statements(&mut self, statements: &[Statement]) -> Vec<StatementResult> {
     let mut results = vec![];
     for (idx, statement) in statements.iter().enumerate() {
-      let res = self.run_statement(statement, true, false);
+      let res = self.run_statement(statement, true, false, Some(idx));
       match res {
         Ok(..) => {
           results.push(res);
@@ -1670,22 +1639,22 @@ impl Runtime {
     }
   }
 
-  pub fn compute_at(&mut self, loc: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn compute_at(&mut self, loc: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
     compute_at(self, loc, mana)
   }
 
-  pub fn compute(&mut self, lnk: Ptr, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn compute(&mut self, lnk: RawCell, mana: u64) -> Result<RawCell, RuntimeError> {
     let host = alloc_lnk(self, lnk);
     let done = self.compute_at(host, mana)?;
     clear(self, host, 1);
     return Ok(done);
   }
 
-  pub fn show_term(&self, lnk: Ptr) -> String {
+  pub fn show_term(&self, lnk: RawCell) -> String {
     return show_term(self, lnk, None);
   }
 
-  pub fn show_term_at(&self, loc: u128) -> String {
+  pub fn show_term_at(&self, loc: Loc) -> String {
     return show_term(self, self.read(loc), None);
   }
 
@@ -1727,7 +1696,7 @@ impl Runtime {
   // IO
   // --
 
-  pub fn run_io(&mut self, subject: U120, caller: U120, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+  pub fn run_io(&mut self, subject: U120, caller: U120, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
     // eprintln!("-- {}", show_term(self, host, None));
     let term = reduce(self, host, mana)?;
     // eprintln!("-- {}", show_term(self, term, None));
@@ -1745,8 +1714,8 @@ impl Runtime {
             //println!("- IO_TAKE subject is {} {}", u128_to_name(subject), subject);
             let cont = ask_arg(self, term, 0);
             if let Some(state) = self.read_disk(subject) {
-              if state != 0 {
-                self.write_disk(subject, 0);
+              if state != RawCell(U128_NONE) {
+                self.write_disk(subject, RawCell(U128_NONE));
                 let cont = alloc_app(self, cont, state);
                 let done = self.run_io(subject, subject, cont, mana);
                 clear(self, host, 1);
@@ -1754,7 +1723,7 @@ impl Runtime {
                 return done;
               } else {
                 return Err(RuntimeError::EffectFailure(
-                  EffectFailure::StateIsZero { state: subject },
+                  EffectFailure::NoSuchState { state: subject },
                 ));
               }
             }
@@ -1778,19 +1747,18 @@ impl Runtime {
             let fnid = ask_arg(self, term, 0);
             let argm = ask_arg(self, term, 1);
             let cont = ask_arg(self, term, 2);
-            let fnid = get_num(fnid);
-
-            // Builds the argument vector
-            let name = Name::new_unsafe(get_ext(argm));
-            let arit = self
-              .get_arity(&name)
-              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let fnid = self.check_num(fnid, mana)?;
+            
+            let arg_name = Name::new(get_ext(argm)).ok_or_else(|| RuntimeError::NameTooBig { numb: *argm })?;
+            let arg_arit = self
+              .get_arity(&arg_name)
+              .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: arg_name })?;
             // Checks if the argument is a constructor with numeric fields. This is needed since
             // Kindelia's language is untyped, yet contracts can call each other freely. That would
             // allow a contract to pass an argument with an unexpected type to another, corrupting
             // its state. To avoid that, we only allow contracts to communicate by passing flat
             // constructors of numbers, like `{Send 'Alice' #123}` or `{Inc}`.
-            for i in 0 .. arit {
+            for i in 0 .. arg_arit {
               let argm = reduce(self, get_loc(argm, 0), mana)?;
               if get_tag(argm) != NUM {
                 let f = EffectFailure::InvalidCallArg { caller: subject, callee: fnid, arg: argm };
@@ -1799,7 +1767,8 @@ impl Runtime {
             }
             // Calls called function IO, changing the subject
             // TODO: this should not alloc a Fun as it's limited to 72-bit names
-            let ioxp = alloc_fun(self, *fnid, &[argm]);
+            let name = Name::new(*fnid).ok_or_else(|| RuntimeError::NameTooBig { numb: *fnid })?;
+            let ioxp = alloc_fun(self, name, &[argm]);
             let retr = self.run_io(fnid, subject, ioxp, mana)?;
             // Calls the continuation with the value returned
             let cont = alloc_app(self, cont, retr);
@@ -1808,6 +1777,39 @@ impl Runtime {
             clear(self, host, 1);
             //clear(self, get_loc(argm, 0), arit);
             clear(self, get_loc(term, 0), 3);
+            return done;
+          }
+          IO_GIDX => {
+            let fnid = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let name = self.check_name(fnid, mana)?;
+            let indx = self.get_index(&name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name })?;
+            let cont = alloc_app(self, cont, Num(indx));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
+            return done;
+          }
+          IO_STH0 => {
+            let indx = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let indx = self.check_num(indx, mana)?;
+            let stmt_hash = self.get_sth0(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
+            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
+            return done;
+          }
+          IO_STH1 => {
+            let indx = ask_arg(self, term, 0);
+            let cont = ask_arg(self, term, 1);
+            let indx = self.check_num(indx, mana)?;
+            let stmt_hash = self.get_sth1(*indx).ok_or_else(|| RuntimeError::StmtDoesntExist { stmt_index: *indx })?;
+            let cont = alloc_app(self, cont, Num(stmt_hash));
+            let done = self.run_io(subject, caller, cont, mana);
+            clear(self, host, 1);
+            clear(self, get_loc(term, 0), 2);
             return done;
           }
           IO_SUBJ => {
@@ -1820,7 +1822,7 @@ impl Runtime {
           }
           IO_FROM => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(*subject));
+            let cont = alloc_app(self, cont, Num(*caller));
             let done = self.run_io(subject, caller, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
@@ -1828,7 +1830,7 @@ impl Runtime {
           }
           IO_TICK => {
             let cont = ask_arg(self, term, 0);
-            let cont = alloc_app(self, cont, Num(self.get_tick()));
+            let cont = alloc_app(self, cont, Num(self.get_tick() as u128));
             let done = self.run_io(subject, subject, cont, mana);
             clear(self, host, 1);
             clear(self, get_loc(term, 0), 1);
@@ -1882,16 +1884,37 @@ impl Runtime {
     }
   }
 
-  // Gets the subject of a signature
-  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: crypto::Hash) -> u128 {
+  /// Gets the subject of a signature.
+  ///
+  /// - If there is no signature, returns `0`.
+  /// - If there is a signature, but subject cannot be retrieved correctly,
+  ///   returns `1`.
+  /// - Else, returns the subject.
+  pub fn get_subject(&mut self, sign: &Option<crypto::Signature>, hash: &crypto::Hash) -> U120 {
     match sign {
-      None       => 0,
-      Some(sign) => sign.signer_name(&hash).map(|x| *x).unwrap_or(1),
+      None       => U120::from_u128_unchecked(0),
+      Some(sign) => sign.signer_name(hash).map(|x| U120::from_u128_unchecked(*x)).unwrap_or_else(|| U120::from_u128_unchecked(1)),
+    }
+  }
+
+  pub fn check_num(&mut self, ptr: RawCell, mana: u64) -> Result<U120, RuntimeError> {
+    let num = self.compute(ptr, mana)?;
+    match get_tag(num) {
+      NUM => Ok(get_num(num)),
+      _ => Err(RuntimeError::TermIsInvalidNumber { term: num })
+    }
+  }
+
+  pub fn check_name(&mut self, ptr: RawCell, mana: u64) -> Result<Name, RuntimeError> {
+    let num = self.check_num(ptr, mana)?;
+    match Name::new(*num) {
+      None => Err(RuntimeError::NameTooBig { numb: *num }),
+      Some(name) => Ok(name),
     }
   }
 
   // Can this subject deploy this name?
-  pub fn can_deploy(&mut self, subj: u128, name: &Name) -> bool {
+  pub fn can_deploy(&mut self, subj: U120, name: &Name) -> bool {
     if name.is_empty() {
       // No one can deploy the empty name
       false
@@ -1910,7 +1933,7 @@ impl Runtime {
   }
 
   // Can this subject register this namespace?
-  pub fn can_register(&mut self, subj: u128, name: &Name) -> bool {
+  pub fn can_register(&mut self, subj: U120, name: &Name) -> bool {
     if name.is_empty() {
       // Anyone can register the empty namespace (should happen on Genesis Block)
       true
@@ -1925,7 +1948,7 @@ impl Runtime {
   ///
   /// It doesn't alter `curr` heap.
   #[allow(clippy::useless_format)]
-  pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool) -> StatementResult {
+  pub fn run_statement(&mut self, statement: &Statement, silent: bool, sudo: bool, stmt_index: Option<usize>) -> StatementResult {
     fn error(rt: &mut Runtime, tag: &str, err: String) -> StatementResult {
       rt.undo(); // TODO: don't undo inside here. too much coupling
       println!("{:03$} [{}] ERROR: {}", rt.get_tick(), tag, err, 10);
@@ -1945,54 +1968,52 @@ impl Runtime {
         if self.exists(name) {
           return error(self, "fun", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(&sign, hash);
+        let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
-          return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
+          return error(self, "fun", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", *subj, name));
         }
-        if !self.check_func(&func) {
-          return error(self, "fun", format!("Invalid function '{}'.", name));
-        }
+        handle_runtime_err(self, "fun", check_func(&func))?;
         let func = compile_func(func, true);
-        if func.is_none() {
-          return error(self, "fun", format!("Invalid function {}.", name));
+        let func = handle_runtime_err(self, "fun", func)?;
+        let name = *name;
+        self.set_arity(name, args.len() as u64);
+        self.define_function(name, func, stmt_index, hash);
+        if let Some(state) = init {
+          let state = self.create_term(state, Loc(0), &mut init_name_map());
+          let state = handle_runtime_err(self, "fun", state)?;
+          let state = self.compute(state, self.get_mana_limit());
+          let state = handle_runtime_err(self, "fun", state)?;
+          self.write_disk(U120::from(name), state);
         }
-        let func = func.unwrap();
-        self.set_arity(*name, args.len() as u128);
-        self.define_function(*name, func);
-        let state = self.create_term(init, 0, &mut init_map());
-        let state = handle_runtime_err(self, "fun", state)?;
-        self.write_disk(U120::from(*name), state);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
-        StatementInfo::Fun { name: *name, args }
+        StatementInfo::Fun { name, args }
       }
       Statement::Ctr { name, args, sign } => {
         if self.exists(name) {
           return error(self, "ctr", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(&sign, hash);
+        let subj = self.get_subject(&sign, &hash);
         if !(self.can_deploy(subj, name) || sudo) {
-          return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", subj, name));
+          return error(self, "ctr", format!("Subject '#x{:0>30x}' not allowed to deploy '{}'.", *subj, name));
         }
         if args.len() > 16 {
           return error(self, "ctr", format!("Can't define contructor with arity larger than 16."));
         }
         let name = *name;
-        self.set_arity(name, args.len() as u128);
+        self.define_constructor(name, args.len() as u64, stmt_index, hash);
         let args = args.iter().map(|x| *x).collect::<Vec<_>>();
         StatementInfo::Ctr { name, args }
       }
       Statement::Run { expr, sign } => {
         let mana_ini = self.get_mana();
-        let mana_lim = self.get_mana_limit();
+        let mana_lim = if !sudo { self.get_mana_limit() } else { u64::MAX }; // ugly
         let size_ini = self.get_size();
         let size_lim = self.get_size_limit();
-        if !self.check_term(expr) {
-          return error(self, "run", format!("Invalid term."));
-        }
-        let subj = self.get_subject(&sign, hash);
+        handle_runtime_err(self, "run", check_term(&expr))?; 
+        let subj = self.get_subject(&sign, &hash);
         let host = self.alloc_term(expr);
         let host = handle_runtime_err(self, "run", host)?;
-        let done = self.run_io(U120(subj), U120(0), host, mana_lim);
+        let done = self.run_io(subj, U120::from_u128_unchecked(0), host, mana_lim);
         if let Err(err) = done {
           return error(self, "run", show_runtime_error(err));
         }
@@ -2002,22 +2023,22 @@ impl Runtime {
           return error(self, "run", show_runtime_error(err));
         }
         let done = done.unwrap();
+        // TODO:
         // The term return by Done is only read and stored in debug mode for
         // testing purpouses. In the future, the Done return value will be
         // limited to `Term::Num`s and the U120s will be stored as part of the
         // protocol. Also, a `Log` primitive should be added.
         let done_term =
           // if debug {
-          if let Some(term) = readback_term(self, done, Some(2 << 16)) {
-            // TODO: limit readback computational resources
-            term // unwrap!!!
+          if let Some(term) = readback_term(self, done, Some(1 << 16)) {
+            term
            } else {
             Term::num(U120::ZERO)
           };
         self.collect(done);
-        let size_end = self.get_size();
+        let size_end = self.get_size() as u64;
         let mana_dif = self.get_mana() - mana_ini;
-        let size_dif = size_end - size_ini;
+        let size_dif = (size_end as i64) - (size_ini as i64);
         if size_end > size_lim && !sudo {
           return error(self, "run", format!("Not enough space."));
         }
@@ -2025,20 +2046,22 @@ impl Runtime {
           done_term,
           used_mana: mana_dif,
           size_diff: size_dif,
-          end_size: size_end as u128, // TODO: rename to done_size for consistency?
+          end_size: size_end, // TODO: rename to done_size for consistency?
         }
+        // TODO: save run to statement array?
       }
       Statement::Reg { name, ownr, sign } => {
-        let ownr = **ownr;
+        let ownr = *ownr;
 
         if self.exists(name) {
           return error(self, "run", format!("Can't redefine '{}'.", name));
         }
-        let subj = self.get_subject(sign, hash);
+        let subj = self.get_subject(sign, &hash);
         if !(self.can_register(subj, name) || sudo) {
-          return error(self, "run", format!("Subject '#x{:0>30x}' not allowed to register '{}'.", subj, name));
+          return error(self, "run", format!("Subject '{}' not allowed to register '{}'.", subj, name));
         }
         let name = *name;
+        self.define_register(name, stmt_index, hash);
         self.set_owner(name, ownr);
         StatementInfo::Reg { name, ownr }
       }
@@ -2049,77 +2072,14 @@ impl Runtime {
     Ok(res)
   }
 
-  pub fn check_term(&self, term: &Term) -> bool {
-    return self.check_term_depth(term, 0) && is_linear(term); // && self.check_term_arities(term)
-  }
-
-  pub fn check_func(&self, func: &Func) -> bool {
-    for rule in &func.rules {
-      if !self.check_term(&rule.lhs) || !self.check_term(&rule.rhs) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  pub fn check_term_depth(&self, term: &Term, depth: u128) -> bool {
-    if depth > MAX_TERM_DEPTH {
-      return false;
-    } else {
-      match term {
-        Term::Var { name } => {
-          return true;
-        },
-        Term::Dup { nam0, nam1, expr, body } => {
-          let expr_check = self.check_term_depth(expr, depth + 1);
-          let body_check = self.check_term_depth(body, depth + 1);
-          return expr_check && body_check;
-        }
-        Term::Lam { name, body } => {
-          let body_check = self.check_term_depth(body, depth + 1);
-          return body_check;
-        }
-        Term::App { func, argm } => {
-          let func_check = self.check_term_depth(func, depth + 1);
-          let argm_check = self.check_term_depth(argm, depth + 1);
-          return func_check && argm_check;
-        }
-        Term::Ctr { name, args } => {
-          for arg in args {
-            if !self.check_term_depth(arg, depth + 1) {
-              return false;
-            }
-          }
-          return true;
-        }
-        Term::Fun { name, args } => {
-          for arg in args {
-            if !self.check_term_depth(arg, depth + 1) {
-              return false;
-            }
-          }
-          return true;
-        }
-        Term::Num { numb } => {
-          return true;
-        }
-        Term::Op2 { oper, val0, val1 } => {
-          let val0_check = self.check_term_depth(val0, depth + 1);
-          let val1_check = self.check_term_depth(val1, depth + 1);
-          return val0_check && val1_check;
-        }
-      }
-    }
-  }
-
   // Maximum mana = 42m * block_number
-  pub fn get_mana_limit(&self) -> u128 {
+  pub fn get_mana_limit(&self) -> u64 {
     (self.get_tick() + 1) * BLOCK_MANA_LIMIT
   }
 
   // Maximum size = 2048 * block_number
-  pub fn get_size_limit(&self) -> i128 {
-    (self.get_tick() as i128 + 1) * (BLOCK_BITS_LIMIT / 128)
+  pub fn get_size_limit(&self) -> u64 {
+    (self.get_tick() as u64 + 1) * (BLOCK_BITS_LIMIT / 128)
   }
 
   // Rollback
@@ -2150,13 +2110,13 @@ impl Runtime {
     if included {
       self.save_state_metadata().expect("Error saving state metadata.");
       let path = &self.get_dir_path();
-      self.heap[self.curr as usize].save_buffers(path).expect("Error saving buffers."); // TODO: persistence-WIP
+      // let _ = &self.heap[self.curr as usize].serialize(path, true).expect("Error saving buffers."); // heap persistence disabled
       if let Some(deleted) = deleted {
         if let Some(absorber) = absorber {
           self.absorb_heap(absorber, deleted, false);
-          self.heap[absorber as usize].append_buffers(self.heap[deleted as usize].uuid, path).expect("Couldn't append buffers."); // TODO: persistence-WIP
+          // let _ = self.heap[absorber as usize].serialize(path, false).expect("Couldn't append buffers."); // heap persistence disabled
         }
-        self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers.");
+        // self.heap[deleted as usize].delete_buffers(path).expect("Couldn't delete buffers."); // heap persistence disabled
         self.clear_heap(deleted);
         self.curr = deleted;
       } else if let Some(empty) = self.nuls.pop() {
@@ -2169,7 +2129,7 @@ impl Runtime {
   }
 
   // Rolls back to the earliest state before or equal `tick`
-  pub fn rollback(&mut self, tick: u128) {
+  pub fn rollback(&mut self, tick: u64) {
     // If target tick is older than current tick
     if tick < self.get_tick() {
       eprintln!("- rolling back from {} to {}", self.get_tick(), tick);
@@ -2180,7 +2140,7 @@ impl Runtime {
       // Removes heaps until the runtime's tick is larger than, or equal to, the target tick
       while tick < self.get_tick() {
         if let Rollback::Cons { keep, life, head, tail } = &*self.back.clone() {
-          self.heap[*head as usize].delete_buffers(&path).expect("Couldn't delete buffers.");
+          // self.heap[*head as usize].delete_buffers(&path).expect("Couldn't delete buffers."); // heap persistence disabled
           self.clear_heap(*head);
           self.nuls.push(*head);
           self.back = tail.clone();
@@ -2250,7 +2210,7 @@ impl Runtime {
           match next {
             Some(next) => {
               let path = rt.get_dir_path();
-              rt.heap[index as usize].load_buffers(uuid, &path)?;
+              rt.heap[index as usize] = Heap::deserialize(uuid, &path)?;
               rt.curr = index;
               return load_heaps(rt, keeps, lifes, uuids, next, Arc::new(Rollback::Cons { keep: keep as u64, life: life as u64, head: index, tail: back }));
             }
@@ -2348,49 +2308,77 @@ impl Runtime {
     }
   }
 
-  pub fn write(&mut self, idx: u128, val: u128) {
+  pub fn write(&mut self, idx: Loc, val: RawCell) {
     return self.get_heap_mut(self.draw).write(idx, val);
   }
 
-  pub fn read(&self, idx: u128) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.read(idx));
+  pub fn read(&self, idx: Loc) -> RawCell {
+    return self.get_with(RawCell(0), RawCell(U128_NONE), |heap| heap.read(idx));
   }
 
-  pub fn write_disk(&mut self, name: U120, val: Ptr) {
+  pub fn write_disk(&mut self, name: U120, val: RawCell) {
     return self.get_heap_mut(self.draw).write_disk(name, val);
   }
 
-  pub fn read_disk(&self, name: U120) -> Option<Ptr> {
+  pub fn read_disk(&self, name: U120) -> Option<RawCell> {
     return self.get_with(None, None, |heap| heap.read_disk(name));
   }
 
   pub fn read_disk_as_term(&mut self, name: U120, limit: Option<usize>) -> Option<Term> {
     let host = self.read_disk(name)?;
-    let term = readback_term(self, host, limit);
-    term
+    readback_term(self, host, limit)
   }
 
   pub fn read_file(&self, name: &Name) -> Option<CompFunc> {
     self.get_with(None, None, |heap| heap.read_file(name)).map(|func| (*func).clone())
   }
 
-  // TODO: return Option
-  pub fn get_arity(&self, name: &Name) -> Option<u128> {
+  pub fn get_arity(&self, name: &Name) -> Option<u64> {
     self.get_with(None, None, |heap| heap.read_arit(name))
   }
 
-  pub fn set_arity(&mut self, name: Name, arity: u128) {
+  pub fn set_arity(&mut self, name: Name, arity: u64) {
     self.get_heap_mut(self.draw).write_arit(name, arity);
   }
 
-  pub fn get_owner(&self, name: &Name) -> Option<u128> {
+  pub fn get_owner(&self, name: &Name) -> Option<U120> {
     self.get_with(None, None, |heap| heap.read_ownr(name))
   }
 
-  pub fn set_owner(&mut self, name: Name, owner: u128) {
+  pub fn set_owner(&mut self, name: Name, owner: U120) {
     self.get_heap_mut(self.draw).write_ownr(name, owner);
   }
 
+  pub fn get_index(&mut self, name: &Name) -> Option<u128> {
+    self.get_with(None, None, |heap| heap.read_indx(name))
+  }
+
+
+  pub fn get_sth0(&mut self, pos: u128) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(&pos).map(|h| h.clone()));
+    if let Some(stmt_hash) = stmt_hash { // is cloning here really necessary?
+      let mut bytes: [u8; 16] = [0; 16];
+      bytes.copy_from_slice(&stmt_hash.0[0..16]);
+      Some(u128::from_le_bytes(bytes) & *U120::MAX)
+    }
+    else {
+      None
+    }
+  }
+
+  pub fn get_sth1(&mut self, pos: u128) -> Option<u128> {
+    let stmt_hash = self.get_with(None, None, |heap| heap.read_stmt_hash(&pos).map(|h| h.clone()));
+    if let Some(stmt_hash) = stmt_hash {
+      let mut bytes: [u8; 16] = [0; 16];
+      bytes.copy_from_slice(&stmt_hash.0[15..31]); //read from 15 to 31st byte and throw the last one away.
+      Some(u128::from_le_bytes(bytes) & *U120::MAX)
+    }
+    else {
+      None
+    }
+  }
+
+  
   pub fn exists(&self, name: &Name) -> bool {
     // there is a function or a constructor with this name
     if let Some(_) = self.get_with(None, None, |heap| heap.read_arit(name)) {
@@ -2404,32 +2392,32 @@ impl Runtime {
     }
   }
 
-  pub fn get_dups(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.get_dups());
+  pub fn get_dups(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.get_dups());
   }
 
-  pub fn set_rwts(&mut self, rwts: u128) {
+  pub fn set_rwts(&mut self, rwts: u64) {
     self.get_heap_mut(self.draw).set_rwts(rwts);
   }
 
-  pub fn get_rwts(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.rwts);
+  pub fn get_rwts(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.rwts);
   }
 
-  pub fn set_mana(&mut self, mana: u128) {
+  pub fn set_mana(&mut self, mana: u64) {
     self.get_heap_mut(self.draw).set_mana(mana);
   }
 
-  pub fn get_mana(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.mana);
+  pub fn get_mana(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.mana);
   }
 
-  pub fn set_tick(&mut self, tick: u128) {
+  pub fn set_tick(&mut self, tick: u64) {
     self.get_heap_mut(self.draw).set_tick(tick);
   }
 
-  pub fn get_tick(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.tick);
+  pub fn get_tick(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.tick);
   }
 
   pub fn set_time(&mut self, time: u128) {
@@ -2464,31 +2452,31 @@ impl Runtime {
     return self.get_with(0, U128_NONE, |heap| heap.hax1);
   }
 
-  pub fn set_size(&mut self, size: i128) {
+  pub fn set_size(&mut self, size: u64) {
     self.get_heap_mut(self.draw).size = size;
   }
 
-  pub fn get_size(&self) -> i128 {
-    return self.get_with(0, I128_NONE, |heap| heap.size);
+  pub fn get_size(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.size);
   }
 
-  pub fn set_mcap(&mut self, mcap: u128) {
+  pub fn set_mcap(&mut self, mcap: u64) {
     self.get_heap_mut(self.draw).mcap = mcap;
   }
 
-  pub fn get_mcap(&self) -> u128 {
-    return self.get_with(32, U128_NONE, |heap| heap.mcap);
+  pub fn get_mcap(&self) -> u64 {
+    return self.get_with(32, U64_NONE, |heap| heap.mcap);
   }
 
-  pub fn set_next(&mut self, next: u128) {
+  pub fn set_next(&mut self, next: u64) {
     self.get_heap_mut(self.draw).next = next;
   }
 
-  pub fn get_next(&self) -> u128 {
-    return self.get_with(0, U128_NONE, |heap| heap.next);
+  pub fn get_next(&self) -> u64 {
+    return self.get_with(0, U64_NONE, |heap| heap.next);
   }
 
-  pub fn fresh_dups(&mut self) -> u128 {
+  pub fn fresh_dups(&mut self) -> u64 {
     let dups = self.get_dups();
     self.get_heap_mut(self.draw).set_dups(dups + 1);
     return dups & 0x3FFFFFFF;
@@ -2500,7 +2488,7 @@ impl Runtime {
       let mut heap_funcs: Vec<Name> = 
         heap.file.funcs
           .keys()
-          .map(|f| Name::from_u128_unchecked(*f))
+          .map(|f| *f)
           .collect();
       acc.append(&mut heap_funcs);
     });
@@ -2518,7 +2506,7 @@ impl Runtime {
         heap.arit.arits
           .keys()
           .filter(|s| !heap_funs.contains(s))
-          .map(|c| Name::from_u128_unchecked(*c))
+          .map(|c| *c)
           .collect();
       acc.append(&mut heap_ctrs);
     });
@@ -2531,7 +2519,7 @@ impl Runtime {
       let mut heap_ns: Vec<Name> = 
         heap.ownr.ownrs
           .keys()
-          .map(|n| Name::from_u128_unchecked(*n))
+          .map(|n| *n)
           .collect();
       acc.append(&mut heap_ns);
     });
@@ -2590,108 +2578,106 @@ pub fn view_rollback(back: &Arc<Rollback>) -> String {
 // Constructors
 // ------------
 
-pub fn Var(pos: u128) -> Ptr {
-  (VAR * TAG_SHL) | pos
+pub fn Var(pos: Loc) -> RawCell {
+  RawCell((VAR * TAG_SHL) | *pos as u128)
 }
 
-pub fn Dp0(col: u128, pos: u128) -> Ptr {
-  (DP0 * TAG_SHL) | (col * EXT_SHL) | pos
+pub fn Dp0(col: u128, pos: Loc) -> RawCell {
+  RawCell((DP0 * TAG_SHL) | (col * EXT_SHL) | *pos as u128)
 }
 
-pub fn Dp1(col: u128, pos: u128) -> Ptr {
-  (DP1 * TAG_SHL) | (col * EXT_SHL) | pos
+pub fn Dp1(col: u128, pos: Loc) -> RawCell {
+  RawCell((DP1 * TAG_SHL) | (col * EXT_SHL) | *pos as u128)
 }
 
-pub fn Arg(pos: u128) -> Ptr {
-  (ARG * TAG_SHL) | pos
+pub fn Arg(pos: Loc) -> RawCell {
+  RawCell((ARG * TAG_SHL) | *pos as u128)
 }
 
-pub fn Era() -> Ptr {
-  ERA * TAG_SHL
+pub fn Era() -> RawCell {
+  RawCell(ERA * TAG_SHL)
 }
 
-pub fn Lam(pos: u128) -> Ptr {
-  (LAM * TAG_SHL) | pos
+pub fn Lam(pos: Loc) -> RawCell {
+  RawCell((LAM * TAG_SHL) | *pos as u128)
 }
 
-pub fn App(pos: u128) -> Ptr {
-  (APP * TAG_SHL) | pos
+pub fn App(pos: Loc) -> RawCell {
+  RawCell((APP * TAG_SHL) | *pos as u128)
 }
 
-pub fn Par(col: u128, pos: u128) -> Ptr {
-  (SUP * TAG_SHL) | (col * EXT_SHL) | pos
+pub fn Par(col: u128, pos: Loc) -> RawCell {
+  RawCell((SUP * TAG_SHL) | (col * EXT_SHL) | *pos as u128)
 }
 
-pub fn Op2(ope: u128, pos: u128) -> Ptr {
-  (OP2 * TAG_SHL) | (ope * EXT_SHL) | pos
+pub fn Op2(ope: u128, pos: Loc) -> RawCell {
+  RawCell((OP2 * TAG_SHL) | (ope * EXT_SHL) | *pos as u128)
 }
 
-pub fn Num(val: u128) -> Ptr {
+pub fn Num(val: u128) -> RawCell {
   debug_assert!((!NUM_MASK & val) == 0, "Num overflow: `{}`.", val);
-  (NUM * TAG_SHL) | (val & NUM_MASK)
+  RawCell((NUM * TAG_SHL) | (val & NUM_MASK))
 }
 
-pub fn Ctr(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling constructor with too long name: `{}`.", Name::new_unsafe(fun));
-  (CTR * TAG_SHL) | (fun * EXT_SHL) | pos
+pub fn Ctr(fun: Name, pos: Loc) -> RawCell {
+  RawCell((CTR * TAG_SHL) | (*fun * EXT_SHL) | *pos as u128)
 }
 
-pub fn Fun(fun: u128, pos: u128) -> Ptr {
-  debug_assert!(fun < 1 << 72, "Directly calling function with too long name: `{}`.", Name::new_unsafe(fun));
-  (FUN * TAG_SHL) | (fun * EXT_SHL) | pos
+pub fn Fun(fun: Name, pos: Loc) -> RawCell {
+  RawCell((FUN * TAG_SHL) | (*fun * EXT_SHL) | *pos as u128)
 }
 
 // Getters
 // -------
 
-pub fn get_tag(lnk: Ptr) -> u128 {
-  lnk / TAG_SHL
+pub fn get_tag(lnk: RawCell) -> u128 {
+  *lnk / TAG_SHL
 }
 
-pub fn get_ext(lnk: Ptr) -> u128 {
-  (lnk / EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
+pub fn get_ext(lnk: RawCell) -> u128 {
+  (*lnk / EXT_SHL) & 0xFF_FFFF_FFFF_FFFF_FFFF
 }
 
-pub fn get_val(lnk: Ptr) -> u128 {
-  lnk & 0xFFFF_FFFF_FFFF
+pub fn get_val(lnk: RawCell) -> u64 {
+  (*lnk & 0xFFFF_FFFF_FFFF) as u64
 }
 
-pub fn get_num(lnk: Ptr) -> U120 {
-  U120(lnk & NUM_MASK)
+pub fn get_num(lnk: RawCell) -> U120 {
+  U120::from_u128_unchecked(*lnk & NUM_MASK)
 }
 
-//pub fn get_ari(lnk: Ptr) -> u128 {
+//pub fn get_ari(lnk: RawCell) -> u128 {
   //(lnk / ARI) & 0xF
 //}
 
-pub fn get_loc(lnk: Ptr, arg: u128) -> u128 {
-  get_val(lnk) + arg
+pub fn get_loc(lnk: RawCell, arg: u64) -> Loc {
+  Loc(get_val(lnk) + arg)
 }
 
 // Memory
 // ------
 
-pub fn ask_lnk(rt: &Runtime, loc: u128) -> Ptr {
+pub fn ask_lnk(rt: &Runtime, loc: Loc) -> RawCell {
   rt.read(loc)
   //unsafe { *rt.heap.get_unchecked(loc as usize) }
 }
 
-pub fn ask_arg(rt: &Runtime, term: Ptr, arg: u128) -> Ptr {
+pub fn ask_arg(rt: &Runtime, term: RawCell, arg: u64) -> RawCell {
   ask_lnk(rt, get_loc(term, arg))
 }
 
-pub fn link(rt: &mut Runtime, loc: u128, lnk: Ptr) -> Ptr {
+pub fn link(rt: &mut Runtime, loc: Loc, lnk: RawCell) -> RawCell {
   rt.write(loc, lnk);
   if get_tag(lnk) <= VAR {
-    let pos = get_loc(lnk, get_tag(lnk) & 0x01);
+    let pos = get_loc(lnk, (get_tag(lnk) & 0x01) as u64);
     rt.write(pos, Arg(loc));
   }
   lnk
 }
 
-pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
+pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
   if arity == 0 {
-    return 0;
+    return Loc(0);
   } else {
     loop {
       // Attempts to allocate enough space, starting from the last index
@@ -2699,9 +2685,10 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
       let mcap = rt.get_mcap();
       let index = rt.get_next();
       if index <= mcap - arity {
+        let index = Loc(index);
         let mut has_space = true;
         for i in 0 .. arity {
-          if rt.read(index + i) != 0 {
+          if *rt.read(index + i) != 0 {
             has_space = false;
             break;
           }
@@ -2709,10 +2696,10 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
         // If we managed to find enough free space somewhere, return that index
         if has_space {
           rt.set_next(rt.get_next() + arity);
-          rt.set_size(rt.get_size() + arity as i128);
+          rt.set_size(rt.get_size() + arity);
           //println!("{}", show_memo(rt));
           for i in 0 .. arity {
-            rt.write(index + i, NIL); // millions perished for forgetting this line
+            rt.write(index + i, RawCell(NIL * TAG_SHL)); // millions perished for forgetting this line
           }
           return index;
         }
@@ -2720,8 +2707,8 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
       // If we couldn't allocate space...
       // - If less than 50% of the memory is used, jump to a random index and try again
       // - If more than 50% of the memory is used, double the maximum cap and try again
-      if rt.get_size() * 2 < (mcap as i128) {
-        rt.set_next((fastrand::u64(..) % mcap as u64) as u128);
+      if rt.get_size() * 2 < mcap {
+        rt.set_next(fastrand::u64(..) % mcap as u64);
       } else {
         rt.set_mcap(mcap * 2);
       }
@@ -2729,21 +2716,21 @@ pub fn alloc(rt: &mut Runtime, arity: u128) -> u128 {
   }
 }
 
-pub fn clear(rt: &mut Runtime, loc: u128, size: u128) {
+pub fn clear(rt: &mut Runtime, loc: Loc, size: u64) {
   for i in 0 .. size {
-    if rt.read(loc + i) == 0 {
-      panic!("Cleared twice: {}", loc);
+    if rt.read(loc + i) == RawCell(0) {
+      panic!("Cleared twice: {}", *loc);
     }
-    rt.write(loc + i, 0);
+    rt.write(loc + i, RawCell(0));
   }
-  rt.set_size(rt.get_size() - size as i128);
+  rt.set_size(rt.get_size() - size);
   //rt.free[size as usize].push(loc);
 }
 
-pub fn collect(rt: &mut Runtime, term: Ptr) {
-  let mut stack : Vec<Ptr> = Vec::new();
+pub fn collect(rt: &mut Runtime, term: RawCell) {
+  let mut stack : Vec<RawCell> = Vec::new();
   let mut next = term;
-  let mut dups : Vec<u128> = Vec::new();
+  let mut dups : Vec<RawCell> = Vec::new();
   loop {
     let term = next;
     match get_tag(term) {
@@ -2822,6 +2809,22 @@ pub fn collect(rt: &mut Runtime, term: Ptr) {
 // Term
 // ----
 
+pub fn check_term(term: &Term) -> Result<(), RuntimeError> {
+  check_linear(term)?;
+  check_term_depth(term, 0)?;
+  Ok(())
+}
+
+
+pub fn check_func(func: &Func) -> Result<(), RuntimeError> {
+  for rule in &func.rules {
+    check_term(&rule.lhs)?;
+    check_term(&rule.rhs)?;
+  }
+  Ok(())
+}
+
+
 // Counts how many times the free variable 'name' appears inside Term
 fn count_uses(term: &Term, name: Name) -> u128 {
   match term {
@@ -2869,53 +2872,55 @@ fn count_uses(term: &Term, name: Name) -> u128 {
 // Checks if:
 // - Every non-erased variable is used exactly once
 // - Every erased variable is never used
-pub fn is_linear(term: &Term) -> bool {
+pub fn check_linear(term: &Term) -> Result<(), RuntimeError> {
   // println!("{}", view_term(term));
   let res = match term {
     Term::Var { name: var_name } => {
       // TODO: check unbound variables
-      true
+      Ok(())
     }
     Term::Dup { nam0, nam1, expr, body } => {
-      let expr_linear = is_linear(expr);
-      let body_linear
-        =  (*nam0 == Name::NONE || count_uses(body, *nam0) == 1)
-        && (*nam1 == Name::NONE || count_uses(body, *nam1) == 1)
-        && is_linear(body);
-      expr_linear && body_linear
+      check_linear(expr)?;
+      check_linear(body)?;
+      if !(*nam0 == Name::NONE || count_uses(body, *nam0) == 1) {
+        return Err(RuntimeError::TermIsNotLinear { term: term.clone(), var: *nam0 });
+      }
+      if !(*nam1 == Name::NONE || count_uses(body, *nam1) == 1) {
+        return Err(RuntimeError::TermIsNotLinear {term : term.clone(), var: *nam0 });
+      }
+      Ok(())
     }
     Term::Lam { name, body } => {
-      let body_linear
-        =  (*name == Name::NONE || count_uses(body, *name) == 1)
-        && is_linear(body);
-      body_linear
+      check_linear(body)?;
+      if !(*name == Name::NONE || count_uses(body, *name) == 1) {
+        return Err(RuntimeError::TermIsNotLinear {term : term.clone(), var: *name });
+      }
+      Ok(())
     }
     Term::App { func, argm } => {
-      let func_linear = is_linear(func);
-      let argm_linear = is_linear(argm);
-      func_linear && argm_linear
+      check_linear(func)?;
+      check_linear(argm)?;
+      Ok(())
     }
     Term::Ctr { name: ctr_name, args } => {
-      let mut linear = true;
       for arg in args {
-        linear = linear && is_linear(arg);
+        check_linear(arg)?;
       }
-      linear
+      Ok(())
     }
     Term::Fun { name: fun_name, args } => {
-      let mut linear = true;
       for arg in args {
-        linear = linear && is_linear(arg);
+        check_linear(arg)?;
       }
-      linear
+      Ok(())
     }
     Term::Num { numb } => {
-      true
+      Ok(())
     }
     Term::Op2 { oper, val0, val1 } => {
-      let val0_linear = is_linear(val0);
-      let val1_linear = is_linear(val1);
-      val0_linear && val1_linear
+      check_linear(val0)?;
+      check_linear(val1)?;
+      Ok(())
     }
   };
 
@@ -2923,17 +2928,65 @@ pub fn is_linear(term: &Term) -> bool {
   res
 }
 
+pub fn check_term_depth(term: &Term, depth: u128) -> Result<(), RuntimeError> {
+  if depth > MAX_TERM_DEPTH {
+    return Err(RuntimeError::TermExceedsMaxDepth);
+    // this is the stupidest clone of all time, it is a huge waste
+    // but receivin a borrow in an enum is boring
+  } else {
+    match term {
+      Term::Var { name } => {
+        return Ok(());
+      },
+      Term::Dup { nam0, nam1, expr, body } => {
+        check_term_depth(expr, depth + 1)?;
+        check_term_depth(body, depth + 1)?;
+        return Ok(());
+      }
+      Term::Lam { name, body } => {
+        check_term_depth(body, depth + 1)?;
+        return Ok(());
+      }
+      Term::App { func, argm } => {
+        check_term_depth(func, depth + 1)?;
+        check_term_depth(argm, depth + 1)?;
+        return Ok(());
+      }
+      Term::Ctr { name, args } => {
+        for arg in args {
+          check_term_depth(arg, depth + 1)?;
+        }
+        return Ok(());
+      }
+      Term::Fun { name, args } => {
+        for arg in args {
+          check_term_depth(arg, depth + 1)?;
+        }
+        return Ok(());
+      }
+      Term::Num { numb } => {
+        return Ok(());
+      }
+      Term::Op2 { oper, val0, val1 } => {
+        check_term_depth(val0, depth + 1)?;
+        check_term_depth(val1, depth + 1)?;
+        return Ok(());
+      }
+    }
+  }
+}
+
 // Writes a Term represented as a Rust enum on the Runtime's rt.
-pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map<Vec<u128>>) -> Result<Ptr, RuntimeError> {
-  fn consume(rt: &mut Runtime, loc: u128, name: u128, vars_data: &mut Map<Vec<u128>>) -> Option<Ptr> {
+pub fn create_term(rt: &mut Runtime, term: &Term, loc: Loc, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<RawCell, RuntimeError> {
+  fn consume(rt: &mut Runtime, loc: Loc, name: Name, vars_data: &mut NameMap<Vec<RawCell>>) -> Option<RawCell> {
     let got = vars_data.get_mut(&name)?;
     let got = got.pop()?;
     Some(got)
   }
 
-  fn bind(rt: &mut Runtime, loc: u128, name: u128, lnk: Ptr, vars_data: &mut Map<Vec<u128>>) {
+  fn bind(rt: &mut Runtime, loc: Loc, name: Name, lnk: RawCell, vars_data: &mut NameMap<Vec<RawCell>>) {
     // println!("~~ bind {} {}", u128_to_name(name), show_ptr(lnk));
-    if name == Name::_NONE {
+    if name == Name::NONE {
       link(rt, loc, Era());
     } else {
       let got = vars_data.entry(name).or_insert(Vec::new());
@@ -2945,7 +2998,7 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
   match term {
     Term::Var { name } => {
       //println!("~~ var {} {}", name, vars_data.len());
-      consume(rt, loc, **name, vars_data).ok_or_else(||
+      consume(rt, loc, *name, vars_data).ok_or_else(||
         RuntimeError::UnboundVar { name: *name })
     }
     Term::Dup { nam0, nam1, expr, body } => {
@@ -2956,14 +3009,14 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       // allowing: `dup x y = x`
       let expr = create_term(rt, expr, node + 2, vars_data)?;
       link(rt, node + 2, expr);
-      bind(rt, node + 0, **nam0, Dp0(dupk, node), vars_data);
-      bind(rt, node + 1, **nam1, Dp1(dupk, node), vars_data);
+      bind(rt, node + 0, *nam0, Dp0(dupk as u128, node), vars_data);
+      bind(rt, node + 1, *nam1, Dp1(dupk as u128, node), vars_data); // TODO: shouldnt these be labels? why are they u64?
       let body = create_term(rt, body, loc, vars_data);
       body
     }
     Term::Lam { name, body } => {
       let node = alloc(rt, 2);
-      bind(rt, node + 0, **name, Var(node), vars_data);
+      bind(rt, node + 0, *name, Var(node), vars_data);
       let body = create_term(rt, body, node + 1, vars_data)?;
       link(rt, node + 1, body);
       Ok(Lam(node))
@@ -2977,31 +3030,35 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
       Ok(App(node))
     }
     Term::Fun { name, args } => {
-      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
+      let expected = rt.get_arity(name)
+        .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })?
+        as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
-        let size = args.len() as u128;
+        let size = args.len() as u64;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
-          link(rt, node + i as u128, arg_lnk);
+          let arg_lnk = create_term(rt, arg, node + i as u64, vars_data)?;
+          link(rt, node + i as u64, arg_lnk);
         }
-        Ok(Fun(**name, node))
+        Ok(Fun(*name, node))
       }
     }
     Term::Ctr { name, args } => {
-      let expected = rt.get_arity(name).ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })? as usize;
+      let expected = rt.get_arity(name)
+        .ok_or_else(|| RuntimeError::CtrOrFunNotDefined { name: *name })?
+        as usize;
       if args.len() != expected {
         Err(RuntimeError::ArityMismatch { name: *name, expected, got: args.len() })
       } else {
-        let size = args.len() as u128;
+        let size = args.len() as u64;
         let node = alloc(rt, size);
         for (i, arg) in args.iter().enumerate() {
-          let arg_lnk = create_term(rt, arg, node + i as u128, vars_data)?;
-          link(rt, node + i as u128, arg_lnk);
+          let arg_lnk = create_term(rt, arg, node + i as u64, vars_data)?;
+          link(rt, node + i as u64, arg_lnk);
         }
-        Ok(Ctr(**name, node))
+        Ok(Ctr(*name, node))
       }
     }
     Term::Num { numb } => {
@@ -3019,26 +3076,21 @@ pub fn create_term(rt: &mut Runtime, term: &Term, loc: u128, vars_data: &mut Map
 }
 
 /// Given a Func (a vector of rules, lhs/rhs pairs), builds the CompFunc object
-pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
+pub fn compile_func(func: &Func, debug: bool) -> Result<CompFunc, RuntimeError> {
   let rules = &func.rules;
 
   // If there are no rules, return none
   if rules.len() == 0 {
-    if debug {
-      println!("  - failed to build function: no rules");
-    }
-    return None;
+    return Err(RuntimeError::DefinitionError(DefinitionError::FunctionHasNoRules));
   }
 
   // Find the function arity
   let arity;
   if let Term::Fun { args, .. } = &rules[0].lhs {
-    arity = args.len() as u128;
+    arity = args.len() as u64;
   } else {
-    if debug {
-      println!("  - failed to build function: left-hand side must be !(Fun ...)");
-    }
-    return None;
+    return Err(RuntimeError::DefinitionError(DefinitionError::LHSIsNotAFunction));
+    // TODO: remove this error, should be checked at compile time
   }
 
   // The resulting vector
@@ -3054,15 +3106,20 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     // Validates that:
     // - the same lhs variable names aren't defined twice or more
     // - lhs variables are used linearly on the rhs
-    let mut seen : HashSet<u128> = HashSet::new();
-    fn check_var(name: u128, body: &Term, seen: &mut HashSet<u128>) -> bool {
+    let mut seen : HashSet<Name> = HashSet::new();
+    fn check_var(name: Name, body: &Term, seen: &mut HashSet<Name>, rule_index: usize) -> Result<(), RuntimeError> {
       if seen.contains(&name) {
-        return false;
-      } else if name == Name::_NONE {
-        return true;
+        return Err(RuntimeError::DefinitionError(DefinitionError::VarIsUsedTwiceInDefinition { name, rule_index}));
+      } else if name == Name::NONE {
+        return Ok(());
       } else {
         seen.insert(name);
-        return count_uses(body, Name::new_unsafe(name)) == 1;
+        let uses = count_uses(body, name);
+        match uses {
+          0 => Err(RuntimeError::DefinitionError(DefinitionError::VarIsNotUsed { name, rule_index })),
+          1 => Ok(()),
+          _ => Err(RuntimeError::DefinitionError(DefinitionError::VarIsNotLinearInBody { name, rule_index }))
+        }
       }
     }
 
@@ -3074,40 +3131,29 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
     if let Term::Fun { ref name, ref args } = rule.lhs {
 
       // If there is an arity mismatch, return None
-      if args.len() as u128 != arity {
-        if debug {
-          println!("  - failed to build function: arity mismatch on rule {}", rule_index);
-        }
-        return None;
+      if args.len() as u64 != arity {
+        return Err(RuntimeError::DefinitionError(DefinitionError::LHSArityMismatch { rule_index, expected: arity as usize, got: args.len() }));
+        // TODO: should check at compile time, remove this error
       }
 
       // For each lhs argument
-      for i in 0 .. args.len() as u128 {
+      for i in 0 .. args.len() as u64 {
 
         match &args[i as usize] {
           // If it is a constructor...
           Term::Ctr { name: arg_name, args: arg_args } => {
             strict[i as usize] = true;
-            cond.push(Ctr(**arg_name, 0)); // adds its matching condition
-            eras.push((i, arg_args.len() as u128)); // marks its index and arity for freeing
+            cond.push(Ctr(*arg_name, Loc(0))); // adds its matching condition
+            eras.push((i, arg_args.len() as u64)); // marks its index and arity for freeing
             // For each of its fields...
-            for j in 0 .. arg_args.len() as u128 {
+            for j in 0 .. arg_args.len() as u64 {
               // If it is a variable...
               if let Term::Var { name } = arg_args[j as usize] {
-                if !check_var(*name, &rule.rhs, &mut seen) {
-                  if debug {
-                    println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                  }
-                  return None;
-                } else {
-                  vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
-                }
+                check_var(name, &rule.rhs, &mut seen, rule_index)?;
+                vars.push(Var { name, param: i, field: Some(j), erase: name == Name::NONE }); // add its location
               // Otherwise..
               } else {
-                if debug {
-                  println!("  - failed to build function: nested match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-                }
-                return None; // return none, because we don't allow nested matches
+                return Err(RuntimeError::DefinitionError(DefinitionError::NestedMatch { rule_index })); // return none, because we don't allow nested matches
               }
             }
           }
@@ -3118,31 +3164,19 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
           }
           // If it is a variable...
           Term::Var { name: arg_name } => {
-            if !check_var(**arg_name, &rule.rhs, &mut seen) {
-              if debug {
-                println!("  - failed to build function: non-linear variable '{}', on rule {}, argument {}:\n    {} = {}", arg_name, rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-              }
-              return None;
-            } else {
-              vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
-              cond.push(Var(0)); // it has no matching condition
-            }
+            check_var(*arg_name, &rule.rhs, &mut seen, rule_index)?;
+            vars.push(Var { name: *arg_name, param: i, field: None, erase: *arg_name == Name::NONE }); // add its location
+            cond.push(Var(Loc(0))); // it has no matching condition
           }
           _ => {
-            if debug {
-              println!("  - failed to build function: unsupported match on rule {}, argument {}:\n    {} = {}", rule_index, i, view_term(&rule.lhs), view_term(&rule.rhs));
-            }
-            return None;
+            return Err(RuntimeError::DefinitionError(DefinitionError::UnsupportedMatch { rule_index } ));
           }
         }
       }
 
     // If lhs isn't a Ctr, return None
     } else {
-      if debug {
-        println!("  - failed to build function: left-hand side isn't a constructor, on rule {}:\n    {} = {}", rule_index, view_term(&rule.lhs), view_term(&rule.rhs));
-      }
-      return None;
+      return Err(RuntimeError::DefinitionError(DefinitionError::LHSNotConstructor { rule_index }))
     }
 
     // Creates the rhs body
@@ -3156,11 +3190,11 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
   let mut redux = Vec::new();
   for i in 0 .. strict.len() {
     if strict[i] {
-      redux.push(i as u128);
+      redux.push(i as u64);
     }
   }
 
-  return Some(CompFunc {
+  return Ok(CompFunc {
     func: func.clone(),
     arity,
     redux,
@@ -3168,33 +3202,33 @@ pub fn compile_func(func: &Func, debug: bool) -> Option<CompFunc> {
   });
 }
 
-pub fn create_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> Ptr {
+pub fn create_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> RawCell {
   let node = alloc(rt, 2);
   link(rt, node + 0, func);
   link(rt, node + 1, argm);
   App(node)
 }
 
-pub fn create_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> Ptr {
-  let node = alloc(rt, args.len() as u128);
+pub fn create_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> RawCell {
+  let node = alloc(rt, args.len() as u64);
   for i in 0 .. args.len() {
-    link(rt, node + i as u128, args[i]);
+    link(rt, node + (i as u64), args[i]);
   }
   Fun(fun, node)
 }
 
-pub fn alloc_lnk(rt: &mut Runtime, term: Ptr) -> u128 {
+pub fn alloc_lnk(rt: &mut Runtime, term: RawCell) -> Loc {
   let loc = alloc(rt, 1);
   link(rt, loc, term);
   return loc;
 }
 
-pub fn alloc_app(rt: &mut Runtime, func: Ptr, argm: Ptr) -> u128 {
+pub fn alloc_app(rt: &mut Runtime, func: RawCell, argm: RawCell) -> Loc {
   let app = create_app(rt, func, argm);
   return alloc_lnk(rt, app);
 }
 
-pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
+pub fn alloc_fun(rt: &mut Runtime, fun: Name, args: &[RawCell]) -> Loc {
   let fun = create_fun(rt, fun, args);
   return alloc_lnk(rt, fun);
 }
@@ -3202,7 +3236,7 @@ pub fn alloc_fun(rt: &mut Runtime, fun: u128, args: &[Ptr]) -> u128 {
 // Reduction
 // ---------
 
-pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
+pub fn subst(rt: &mut Runtime, lnk: RawCell, val: RawCell) {
   if get_tag(lnk) != ERA {
     link(rt, get_loc(lnk, 0), val);
   } else {
@@ -3211,10 +3245,10 @@ pub fn subst(rt: &mut Runtime, lnk: Ptr, val: Ptr) {
 }
 
 // TODO: document
-pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeError> {
-  let mut vars_data: Map<Vec<u128>> = init_map();
+pub fn reduce(rt: &mut Runtime, root: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
+  let mut vars_data: NameMap<Vec<RawCell>> = init_name_map();
 
-  let mut stack: Vec<u128> = Vec::new();
+  let mut stack: Vec<Loc> = Vec::new();
 
   // TODO: document `init` / refactor to tuple/struct if no performance impact
   let mut init = 1;
@@ -3250,7 +3284,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
         }
         OP2 => {
           stack.push(host);
-          stack.push(get_loc(term, 1) | 0x1_0000_0000_0000);
+          stack.push(Loc(*(get_loc(term, 0) + 1) | 0x1_0000_0000_0000)); //this is so ugly
           host = get_loc(term, 0);
           continue;
         }
@@ -3265,7 +3299,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                 stack.push(host);
                 for (i, redux) in func.redux.iter().enumerate() {
                   if i < func.redux.len() - 1 {
-                    stack.push(get_loc(term, *redux) | 0x1_0000_0000_0000);
+                    let loc = get_loc(term, *redux);
+                    stack.push(Loc(*loc | 0x1_0000_0000_0000));
                   } else {
                     host = get_loc(term, *redux);
                   }
@@ -3424,10 +3459,10 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             rt.set_mana(rt.get_mana() + DupCtrMana(arit));
             rt.set_rwts(rt.get_rwts() + 1);
             if arit == 0 {
-              subst(rt, ask_arg(rt, term, 0), Ctr(func, 0));
-              subst(rt, ask_arg(rt, term, 1), Ctr(func, 0));
+              subst(rt, ask_arg(rt, term, 0), Ctr(name, Loc(0)));
+              subst(rt, ask_arg(rt, term, 1), Ctr(name, Loc(0)));
               clear(rt, get_loc(term, 0), 3);
-              let _done = link(rt, host, Ctr(func, 0));
+              let _done = link(rt, host, Ctr(name, Loc(0)));
             } else {
               let ctr0 = get_loc(arg0, 0);
               let ctr1 = alloc(rt, arit);
@@ -3440,12 +3475,12 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               let leti = get_loc(term, 0);
               link(rt, leti + 2, ask_arg(rt, arg0, arit - 1));
               let term_arg_0 = ask_arg(rt, term, 0);
-              link(rt, ctr0 + arit - 1, Dp0(get_ext(term), leti));
-              subst(rt, term_arg_0, Ctr(func, ctr0));
+              link(rt, ctr0 + (arit - 1), Dp0(get_ext(term), leti));
+              subst(rt, term_arg_0, Ctr(name, ctr0));
               let term_arg_1 = ask_arg(rt, term, 1);
-              link(rt, ctr1 + arit - 1, Dp1(get_ext(term), leti));
-              subst(rt, term_arg_1, Ctr(func, ctr1));
-              let done = Ctr(func, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
+              link(rt, ctr1 + (arit - 1), Dp1(get_ext(term), leti));
+              subst(rt, term_arg_1, Ctr(name, ctr1));
+              let done = Ctr(name, if get_tag(term) == DP0 { ctr0 } else { ctr1 });
               link(rt, host, done);
             }
           // dup x y = *
@@ -3480,13 +3515,13 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
             }
             rt.set_mana(rt.get_mana() + Op2NumMana());
             let res = match op {
-              Oper::Add => a_u.wrapping_add(b_u).0,
-              Oper::Sub => a_u.wrapping_sub(b_u).0,
-              Oper::Mul => a_u.wrapping_mul(b_u).0,
-              Oper::Div => a_u.wrapping_div(b_u).0,
-              Oper::Mod => a_u.wrapping_rem(b_u).0,
-              Oper::Shl => a_u.wrapping_shl(b_u).0,
-              Oper::Shr => a_u.wrapping_shr(b_u).0,
+              Oper::Add => *a_u.wrapping_add(b_u),
+              Oper::Sub => *a_u.wrapping_sub(b_u),
+              Oper::Mul => *a_u.wrapping_mul(b_u),
+              Oper::Div => *a_u.wrapping_div(b_u),
+              Oper::Mod => *a_u.wrapping_rem(b_u),
+              Oper::Shl => *a_u.wrapping_shl(b_u),
+              Oper::Shr => *a_u.wrapping_shr(b_u),
               Oper::And => *a_u & *b_u,
               Oper::Or  => *a_u | *b_u,
               Oper::Xor => *a_u ^ *b_u,
@@ -3546,7 +3581,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
         }
         FUN => {
 
-          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: u128, term: Ptr, mana: u128, vars_data: &mut Map<Vec<u128>>) -> Result<bool, RuntimeError> {
+          fn call_function(rt: &mut Runtime, func: Arc<CompFunc>, host: Loc, term: RawCell, mana: u64, vars_data: &mut NameMap<Vec<RawCell>>) -> Result<bool, RuntimeError> {
             // For each argument, if it is a redex and a SUP, apply the cal_par rule
             for idx in &func.redux {
               // (F {a0 a1} b c ...)
@@ -3578,8 +3613,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                     link(rt, fun1 + i, ask_arg(rt, argn, 1));
                   }
                 }
-                link(rt, par0 + 0, Fun(funx, fun0));
-                link(rt, par0 + 1, Fun(funx, fun1));
+                link(rt, par0 + 0, Fun(name, fun0));
+                link(rt, par0 + 1, Fun(name, fun1));
                 let done = Par(get_ext(argn), par0);
                 link(rt, host, done);
                 return Ok(true);
@@ -3591,7 +3626,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
               let mut matched = true;
               //println!("- matching rule");
               // Tests each rule condition (ex: `get_tag(args[0]) == SUCC`)
-              for i in 0 .. rule.cond.len() as u128 {
+              for i in 0 .. rule.cond.len() as u64 {
                 let cond = rule.cond[i as usize];
                 match get_tag(cond) {
                   NUM => {
@@ -3635,7 +3670,7 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
                   }
                   //eprintln!("~~ set {} {}", u128_to_name(rule_var.name), show_ptr(var));
                   if !rule_var.erase {
-                    let arr = vars_data.entry(*rule_var.name).or_insert(Vec::new());
+                    let arr = vars_data.entry(rule_var.name).or_insert(Vec::new());
                     arr.push(var);
                   } else {
                     // Collects unused argument
@@ -3683,8 +3718,8 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 
     // When we don't need to reduce the head
     if let Some(item) = stack.pop() {
-      init = item >> 48;
-      host = item & 0x0_FFFF_FFFF_FFFF;
+      init = *item >> 48;
+      host = Loc(*item & 0x0_FFFF_FFFF_FFFF);
       continue;
     }
 
@@ -3701,10 +3736,10 @@ pub fn reduce(rt: &mut Runtime, root: u128, mana: u128) -> Result<Ptr, RuntimeEr
 /// otherwise, chunks would grow indefinitely due to lazy evaluation. It does not reduce the term to
 /// normal form, though, since it stops on WHNFs. If it did, then storing a state wouldn't be O(1),
 /// since it would require passing over the entire state.
-pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, RuntimeError> {
+pub fn compute_at(rt: &mut Runtime, host: Loc, mana: u64) -> Result<RawCell, RuntimeError> {
   enum StackItem {
-    LinkResolver(u128),
-    Host(u128, u128)
+    LinkResolver(Loc),
+    Host(Loc, u64)
   }
   let mut stack = vec![StackItem::Host(host, mana)];
   let mut output = vec![];
@@ -3783,8 +3818,8 @@ pub fn compute_at(rt: &mut Runtime, host: u128, mana: u128) -> Result<Ptr, Runti
 // Debug
 // -----
 
-pub fn show_ptr(x: Ptr) -> String {
-  if x == 0 {
+pub fn show_ptr(x: RawCell) -> String {
+  if x == RawCell(0) {
     String::from("~")
   } else {
     let tag = get_tag(x);
@@ -3815,7 +3850,7 @@ pub fn show_rt(rt: &Runtime) -> String {
   for i in 0..32 {
     // pushes to the string
     write!(s, "{:x} | ", i).unwrap();
-    s.push_str(&show_ptr(rt.read(i)));
+    s.push_str(&show_ptr(rt.read(Loc(i))));
     s.push('\n');
   }
   s
@@ -3824,26 +3859,26 @@ pub fn show_rt(rt: &Runtime) -> String {
 fn show_memo(rt: &Runtime) -> String {
   let mut txt = String::new();
   for i in 0 .. rt.get_mcap() {
-    txt.push(if rt.read(i) == 0 { '_' } else { 'X' });
+    txt.push(if rt.read(Loc(i)) == RawCell(0) { '_' } else { 'X' });
   }
   return txt;
 }
 
 // TODO: this should be replaced by readback + view_term
-pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
+pub fn show_term(rt: &Runtime, term: RawCell, focus: Option<RawCell>) -> String {
   enum StackItem {
-    Term(Ptr),
+    Term(RawCell),
     Str(String),
   }
-  let mut names: HashMap<u128, String> = HashMap::new();
+  let mut names: HashMap<Loc, String> = HashMap::new();
   fn find_lets(
     rt: &Runtime,
-    term: Ptr,
-    names: &mut HashMap<u128, String>,
-    focus: Option<u128>
+    term: RawCell,
+    names: &mut HashMap<Loc, String>,
+    focus: Option<RawCell>
   ) -> String {
-    let mut lets: HashMap<u128, u128> = HashMap::new();
-    let mut kinds: HashMap<u128, u128> = HashMap::new();
+    let mut lets: HashMap<Loc, Loc> = HashMap::new();
+    let mut kinds: HashMap<Loc, u128> = HashMap::new();
     let mut count: u128 = 0;
     let mut stack = vec![term];
     let mut text = String::new();
@@ -3910,7 +3945,7 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
     text
   }
 
-  fn go(rt: &Runtime, term: Ptr, names: &HashMap<u128, String>, focus: Option<u128>) -> String {
+  fn go(rt: &Runtime, term: RawCell, names: &HashMap<Loc, String>, focus: Option<RawCell>) -> String {
     let mut stack = vec![StackItem::Term(term)];
     let mut output = Vec::new();
     while !stack.is_empty() {
@@ -4042,30 +4077,47 @@ pub fn show_term(rt: &Runtime, term: Ptr, focus: Option<u128>) -> String {
   text
 }
 
+
 fn show_runtime_error(err: RuntimeError) -> String {
   match err {
     RuntimeError::NotEnoughMana => "Not enough mana".to_string(),
     RuntimeError::NotEnoughSpace => "Not enough space".to_string(),
     RuntimeError::DivisionByZero => "Tried to divide by zero".to_string(),
-    RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'", name),
+    RuntimeError::TermExceedsMaxDepth => "Term exceeds maximum depth.".to_string(),
+    RuntimeError::UnboundVar { name } => format!("Unbound variable '{}'.", name),
+    RuntimeError::TermIsInvalidNumber { term } => format!("'{}' is not a number.", show_ptr(term)),
     RuntimeError::CtrOrFunNotDefined { name } => format!("'{}' is not defined.", name),
-    RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}", name, expected, got),
+    RuntimeError::StmtDoesntExist { stmt_index } => format!("Statement with index '{}' does not exist.", stmt_index),
+    RuntimeError::ArityMismatch { name, expected, got } => format!("Arity mismatch for '{}': expected {} args, got {}.", name, expected, got),
+    RuntimeError::NameTooBig { numb } => format!("Cannot fit '{}' into a function name.", numb),
+    RuntimeError::TermIsNotLinear { term, var } => format!("'{}' is not linear: '{}' is used more than once.", view_term(&term), var),
     RuntimeError::EffectFailure(effect_failure) =>
       match effect_failure {
-        EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist", show_addr(addr)),
-        EffectFailure::StateIsZero { state: addr } => format!("Tried to read state that was taken '{}'", show_addr(addr)),
+        EffectFailure::NoSuchState { state: addr } => format!("Tried to read state of '{}' but did not exist.", show_addr(addr)),
         EffectFailure::InvalidCallArg { caller, callee, arg } => {
           let pos = get_val(arg);
-          format!("'{}' tried to call '{}' with invalid argument '{}'", show_addr(caller), show_addr(callee), show_ptr(arg))
+          format!("'{}' tried to call '{}' with invalid argument '{}'.", show_addr(caller), show_addr(callee), show_ptr(arg))
         },
-        EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor", name),
-        EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term", show_ptr(ptr)),
+        EffectFailure::InvalidIOCtr { name } => format!("'{}' is not an IO constructor.", name),
+        EffectFailure::InvalidIONonCtr { ptr } => format!("'{}' is not an IO term.", show_ptr(ptr)),
     }
+  RuntimeError::DefinitionError(def_error) =>
+      match def_error {
+        DefinitionError::FunctionHasNoRules => "Function has no rules.".to_string(),
+        DefinitionError::LHSIsNotAFunction => "Left hand side of function definition is not a function".to_string(),
+        DefinitionError::LHSArityMismatch { rule_index, expected, got } => format!("Arity mismatch at left-hand side of rule {}: expected {} arguments but got {}.", rule_index, expected, got),
+        DefinitionError::LHSNotConstructor { rule_index } => format!("Left-hand side of rule {} is not a constructor.", rule_index),
+        DefinitionError::VarIsUsedTwiceInDefinition { name, rule_index } => format!("'{}' is used twice in left-hand side of rule.", name),
+        DefinitionError::VarIsNotLinearInBody { name, rule_index } => format!("'{}' is not used linearly in body, in rule '{}'", name, rule_index),
+        DefinitionError::VarIsNotUsed { name, rule_index } => format!("'{}' is not used in rule {}.", name, rule_index),
+        DefinitionError::NestedMatch { rule_index } => format!("Nested pattern matching is not supported (at rule {}).", rule_index),
+        DefinitionError::UnsupportedMatch { rule_index } => format!("Unsupported match in rule {}. Only constructor, variable and number pattern matching are supported.", rule_index),
+      }
   }
 }
 
-pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Term> {
-  fn find_names(rt: &Runtime, term: Ptr, names: &mut HashMap<Ptr, String>) {
+pub fn readback_term(rt: &Runtime, term: RawCell, limit:Option<usize>) -> Option<Term> {
+  fn find_names(rt: &Runtime, term: RawCell, names: &mut LocMap<String>) {
     let mut stack = vec![term];
     while !stack.is_empty() {
       let term = stack.pop().unwrap();
@@ -4118,21 +4170,21 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
  }
 
   struct DupStore {
-    stacks: HashMap<Ptr, Vec<bool>>,
+    stacks: HashMap<u128, Vec<bool>>, // ext -> bool
   }
 
   impl DupStore {
     fn new() -> DupStore {
       DupStore { stacks: HashMap::new() }
     }
-    fn get(&self, col: Ptr) -> Option<&Vec<bool>> {
+    fn get(&self, col: u128) -> Option<&Vec<bool>> {
       self.stacks.get(&col)
     }
-    fn pop(&mut self, col: Ptr) -> bool {
+    fn pop(&mut self, col: u128) -> bool {
       let stack = self.stacks.entry(col).or_insert_with(Vec::new);
       stack.pop().unwrap_or(false)
     }
-    fn push(&mut self, col: Ptr, val: bool) {
+    fn push(&mut self, col: u128, val: bool) {
       let stack = self.stacks.entry(col).or_insert_with(Vec::new);
       stack.push(val);
     }
@@ -4140,17 +4192,17 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
 
   fn readback(
     rt: &Runtime,
-    term: Ptr,
-    names: &mut HashMap<Ptr, String>,
-    seen: &mut HashSet<Ptr>,
+    term: RawCell,
+    names: &mut LocMap<String>,
+    seen: &mut HashSet<RawCell>,
     dup_store: &mut DupStore,
     limit: Option<usize>
   ) -> Option<Term> {
     enum StackItem {
-      Term(Ptr),
-      Resolver(Ptr),
-      SUPResolverSome(Ptr, bool), // auxiliar case when in SUP does not have a DUP to evaluate
-      SUPResolverNone(Ptr), // auxiliar case when in SUP does not have a DUP to evaluate
+      Term(RawCell),
+      Resolver(RawCell),
+      SUPResolverSome(RawCell, bool), // auxiliar case when in SUP does not have a DUP to evaluate
+      SUPResolverNone(RawCell), // auxiliar case when in SUP does not have a DUP to evaluate
     }
 
     let mut output = Vec::new();
@@ -4168,7 +4220,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
         if i == 0 {
           println!("{} {}", prefix, show_term(rt, *term, None));
         } else {
-          println!("{} {}", prefix, term);
+          println!("{} {}", prefix, **term);
         }
       }
     };
@@ -4192,7 +4244,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
       }
       match item {
         StackItem::Term(term) => {
-          debug_assert!(term != 0);
+          debug_assert!(term != RawCell(0));
           match get_tag(term) {
             DP0 | DP1 => {
               if !seen.contains(&term) { // this avoids looping when term doesnt exist
@@ -4213,7 +4265,7 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
               let empty = &Vec::new();
               let dup_stack = dup_store.get(col).unwrap_or(empty);
               if let Some(val) = dup_stack.last() {
-                let arg_idx = *val as u128;
+                let arg_idx = *val as u64;
                 let val = ask_arg(rt, term, arg_idx);
                 let old = dup_store.pop(col);
                 stack.push(StackItem::SUPResolverSome(term, old));
@@ -4328,8 +4380,8 @@ pub fn readback_term(rt: &Runtime, term: Ptr, limit:Option<usize>) -> Option<Ter
     }
   }
 
-  let mut names: HashMap<Ptr, String> = HashMap::new();
-  let mut seen: HashSet<Ptr> = HashSet::new();
+  let mut names: LocMap<String> = init_loc_map();
+  let mut seen: HashSet<RawCell> = HashSet::new();
   let mut dup_store = DupStore::new();
   find_names(rt, term, &mut names);
   readback(rt, term, &mut names, &mut seen, &mut dup_store, limit)
@@ -4698,13 +4750,13 @@ pub fn read_rules(code: &str) -> ParseResult<Vec<Rule>> {
 pub fn read_func(code: &str) -> ParseResult<CompFunc> {
   let (code, rules) = read_until(code, '\0', read_rule)?;
   let func = Func { rules };
-  if let Some(func) = compile_func(&func, false) {
-    return Ok((code, func));
-  } else {
-    return Err(ParseErr { 
-      code: code.to_string(), 
-      erro: "Couldn't parse function".to_string()
-    });
+  let comp_func = compile_func(&func, false);
+  match comp_func {
+    Ok(func) => Ok((code, func)),
+    Err(def_err) => Err(ParseErr {
+      code: code.to_string(),
+      erro: show_runtime_error(def_err)
+    })
   }
 }
 
@@ -4743,9 +4795,9 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
         let (code, unit) = read_char(code, '{')?;
         let (code, init) = read_term(code)?;
         let (code, unit) = read_char(code, '}')?;
-        (code, init)
+        (code, Some(init))
       } else {
-        (code, Term::num(U120::ZERO))
+        (code, None)
       };
       let (code, sign) = read_sign(code)?;
       let func = Func { rules: ruls };
@@ -4804,6 +4856,20 @@ pub fn read_statement(code: &str) -> ParseResult<Statement> {
 
 pub fn read_statements(code: &str) -> ParseResult<Vec<Statement>> {
   read_until(code, '\0', read_statement)
+}
+
+pub fn parse_code(code: &str) -> Result<Vec<Statement>, String> {
+  let statements = read_statements(code);
+  match statements {
+    Ok((code, statements)) => {
+      if code.is_empty() {
+        Ok(statements)
+      } else {
+        Err(format!("Your code was not parsed entirely: {}", code))
+      }
+    }
+    Err(ParseErr { erro, .. }) => Err(erro),
+  }
 }
 
 // View
@@ -4954,8 +5020,12 @@ pub fn view_statement(statement: &Statement) -> String {
       let func = func.rules.iter().map(|x| format!("\n  {} = {}", view_term(&x.lhs), view_term(&x.rhs)));
       let func = func.collect::<Vec<String>>().join("");
       let args = args.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(" ");
-      let init = view_term(init);
-      let init = format!(" with {{\n  {}\n}}", init);
+      let init = if let Some(init) = init {
+        let init = view_term(init);
+        format!(" with {{\n  {}\n}}", init)
+      } else {
+        "\n".to_string()
+      };
       let sign = view_sign(sign);
       return format!("fun ({} {}) {{{}\n}}{}{}", name, args, func, init, sign);
     }
@@ -5005,11 +5075,11 @@ impl fmt::Display for Statement {
 // -------
 
 pub fn hash_term(term: &Term) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&term.proto_serialized()))
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&term.proto_serialized()))
 }
 
 pub fn hash_statement(statement: &Statement) -> crypto::Hash {
-  crypto::keccak256(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
+  crypto::Hash::keccak256_from_bytes(&util::bitvec_to_bytes(&remove_sign(&statement).proto_serialized()))
 }
 
 // Tests
@@ -5040,9 +5110,10 @@ pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
   println!("=====");
   println!();
 
-  // TODO: code below does not need heaps_path at all
+  // TODO: code below does not need heaps_path at all. extract heap persistence out of Runtime.
   let heaps_path = dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps");
-  let mut rt = init_runtime(heaps_path);
+  let genesis_smts = parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
+  let mut rt = init_runtime(heaps_path, &genesis_smts);
   let init = Instant::now();
   rt.run_statements(&statements, false, debug);
   println!();
@@ -5068,3 +5139,19 @@ pub fn test_statements_from_code(code: &str, debug: bool) {
 pub fn test_statements_from_file(file: &str, debug: bool) {
   test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"), debug);
 }
+
+// Term Drop implementation
+// ========================
+
+// This implementation is necessary as Rust is unable do dealloc deeply nested
+// structures without it.
+//
+// References:
+// - https://rust-unofficial.github.io/too-many-lists/first-drop.html
+// - https://doc.rust-lang.org/nomicon/destructors.html
+
+// impl Drop for Term {
+//     fn drop(&mut self) {
+//         todo!()
+//     }
+// }

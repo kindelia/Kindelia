@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
+use crate::test::strategies::{
+  message, name, statement, u256 as u256_strategy,
+};
 use crate::{
   bits::{
-    deserialize_fixlen, deserialize_list, deserialize_varlen, serialize_fixlen,
+    deserialize_fixlen_big, deserialize_list, deserialize_varlen, serialize_fixlen_big,
     serialize_list, serialize_varlen, ProtoSerialize,
   },
+  common,
   hvm::{view_statements, Term},
   net,
   node::Message,
-  test::strategies::{message, statement, u256 as u256_strategy},
   util::u256,
 };
 use bit_vec::BitVec;
@@ -30,6 +33,13 @@ proptest! {
     let message2: Message<net::Address> = Message::proto_deserialized(&bits).unwrap();
     assert_eq!(format!("{:?}", message), format!("{:?}", message2));
   }
+
+  #[test]
+  fn serialize_deserialize_name(name in name()) {
+    let bits = name.proto_serialized();
+    let name2 = common::Name::proto_deserialized(&bits).unwrap();
+    assert_eq!(format!("{:?}", name), format!("{:?}", name2));
+  }
 }
 
 #[test]
@@ -37,12 +47,11 @@ pub fn test_serializer_0() {
   let mut bits = BitVec::new();
   let a = u256(123);
   let b = u256(777);
-  let mut names = HashMap::new();
-  serialize_fixlen(10, &a, &mut bits, &mut names);
-  serialize_fixlen(16, &b, &mut bits, &mut names);
+  serialize_fixlen_big(10, &a, &mut bits);
+  serialize_fixlen_big(16, &b, &mut bits);
   let mut index = 0;
-  let x0 = deserialize_fixlen(10, &bits, &mut index, &mut names).unwrap();
-  let x1 = deserialize_fixlen(16, &bits, &mut index, &mut names).unwrap();
+  let x0 = deserialize_fixlen_big(10, &bits, &mut index).unwrap();
+  let x1 = deserialize_fixlen_big(16, &bits, &mut index).unwrap();
   assert_eq!(a, x0);
   assert_eq!(b, x1);
 }
@@ -50,14 +59,13 @@ pub fn test_serializer_0() {
 #[test]
 pub fn test_serializer_1() {
   let mut bits = BitVec::new();
-  let a = u256(123);
-  let b = u256(777);
-  let mut names = HashMap::new();
-  serialize_varlen(&a, &mut bits, &mut names);
-  serialize_varlen(&b, &mut bits, &mut names);
+  let a = 123;
+  let b = 777;
+  serialize_varlen(a, &mut bits);
+  serialize_varlen(b, &mut bits);
   let mut index = 0;
-  let x0 = deserialize_varlen(&bits, &mut index, &mut names).unwrap();
-  let x1 = deserialize_varlen(&bits, &mut index, &mut names).unwrap();
+  let x0 = deserialize_varlen(&bits, &mut index).unwrap();
+  let x1 = deserialize_varlen(&bits, &mut index).unwrap();
   assert_eq!(a, x0);
   assert_eq!(b, x1);
 }

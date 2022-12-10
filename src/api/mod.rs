@@ -52,6 +52,9 @@ pub fn u256_to_hex(value: &U256) -> String {
 // Basic
 // =====
 
+// Config
+// ------
+
 // Hash
 // ----
 
@@ -119,7 +122,7 @@ impl std::ops::Deref for HexStatement {
 
 impl From<HexStatement> for hvm::Statement {
   fn from(hex_statement: HexStatement) -> Self {
-    hex_statement.0 
+    hex_statement.0
   }
 }
 
@@ -142,8 +145,9 @@ impl TryFrom<&str> for HexStatement {
   fn try_from(value: &str) -> Result<Self, Self::Error> {
     let bytes = hex::decode(&value).map_err(|e| e.to_string())?;
     let bits = util::bytes_to_bitvec(&bytes);
-    let stmt = hvm::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())
-      .ok_or_else(|| format!("invalid Statement serialization: {}", value))?;
+    let stmt =
+      hvm::Statement::proto_deserialize(&bits, &mut 0, &mut HashMap::new())
+        .ok_or_else(|| format!("invalid Statement serialization: {}", value))?;
     Ok(HexStatement(stmt))
   }
 }
@@ -175,7 +179,7 @@ pub struct Stats {
 
 impl From<&node::Transaction> for String {
   fn from(transaction: &node::Transaction) -> Self {
-    hex::encode(&transaction.data)
+    hex::encode(&**transaction)
   }
 }
 
@@ -273,13 +277,13 @@ pub struct FuncInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CtrInfo {
-  pub arit: u64
+  pub arit: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegInfo {
   pub ownr: Name,
-  pub stmt: Vec<Name>
+  pub stmt: Vec<Name>,
 }
 
 // Node Internal API
@@ -288,7 +292,9 @@ pub struct RegInfo {
 pub type ReqAnsSend<T> = oneshot::Sender<T>;
 pub type ReqAnsRecv<T> = oneshot::Receiver<T>;
 
-pub enum NodeRequest <C: ProtoComm> {
+type PublishResults = Vec<Result<(), ()>>;
+
+pub enum NodeRequest<C: ProtoComm> {
   GetStats {
     tx: ReqAnsSend<Stats>,
   },
@@ -328,14 +334,14 @@ pub enum NodeRequest <C: ProtoComm> {
     tx: ReqAnsSend<Option<RegInfo>>,
   },
   /// DEPRECATED
-  TestCode {
+  RunCode {
     code: String,
     tx: ReqAnsSend<Vec<hvm::StatementResult>>,
   },
   /// DEPRECATED
-  PostCode {
+  PublishCode {
     code: String,
-    tx: ReqAnsSend<Result<(), String>>,
+    tx: ReqAnsSend<Result<PublishResults, String>>,
   },
   Run {
     code: Vec<hvm::Statement>,
@@ -343,11 +349,11 @@ pub enum NodeRequest <C: ProtoComm> {
   },
   Publish {
     code: Vec<hvm::Statement>,
-    tx: ReqAnsSend<Vec<Result<(),()>>>,
+    tx: ReqAnsSend<PublishResults>,
   },
 }
 
-impl <C: ProtoComm> NodeRequest<C> {
+impl<C: ProtoComm> NodeRequest<C> {
   pub fn get_stats() -> (Self, ReqAnsRecv<Stats>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetStats { tx }, rx)
@@ -376,7 +382,9 @@ impl <C: ProtoComm> NodeRequest<C> {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetState { name, tx }, rx)
   }
-  pub fn get_peers(all: bool) -> (Self, ReqAnsRecv<Vec<node::Peer<C::Address>>>) {
+  pub fn get_peers(
+    all: bool,
+  ) -> (Self, ReqAnsRecv<Vec<node::Peer<C::Address>>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetPeers { all, tx }, rx)
   }
@@ -388,19 +396,27 @@ impl <C: ProtoComm> NodeRequest<C> {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::GetReg { name, tx }, rx)
   }
-  pub fn test_code(code: String) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+  pub fn test_code(
+    code: String,
+  ) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
     let (tx, rx) = oneshot::channel();
-    (NodeRequest::TestCode { code, tx }, rx)
+    (NodeRequest::RunCode { code, tx }, rx)
   }
-  pub fn post_code(code: String) -> (Self, ReqAnsRecv<Result<(), String>>) {
+  pub fn post_code(
+    code: String,
+  ) -> (Self, ReqAnsRecv<Result<PublishResults, String>>) {
     let (tx, rx) = oneshot::channel();
-    (NodeRequest::PostCode { code, tx }, rx)
+    (NodeRequest::PublishCode { code, tx }, rx)
   }
-  pub fn run(code: Vec<hvm::Statement>) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
+  pub fn run(
+    code: Vec<hvm::Statement>,
+  ) -> (Self, ReqAnsRecv<Vec<hvm::StatementResult>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Run { code, tx }, rx)
   }
-  pub fn publish(code: Vec<hvm::Statement>) -> (Self, ReqAnsRecv<Vec<Result<(),()>>>) {
+  pub fn publish(
+    code: Vec<hvm::Statement>,
+  ) -> (Self, ReqAnsRecv<Vec<Result<(), ()>>>) {
     let (tx, rx) = oneshot::channel();
     (NodeRequest::Publish { code, tx }, rx)
   }
