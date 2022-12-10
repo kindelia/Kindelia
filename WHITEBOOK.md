@@ -1,4 +1,4 @@
-Kindelia: a peer-to-peer functional computer
+K-Chan: a peer-to-peer functional computer
 ============================================
 
 Turing-complete blockchains, such as Ethereum, allow users to deploy
@@ -6,12 +6,12 @@ decentralized applications (DApps), but recurrent security exploits undermine
 their proposals. Formal verification techniques can be used to ensure a DApp is
 exploit-free, but Ethereum's underlying processor, the EVM, make these too
 expensive to be viable. By leveraging a functional virtual machine, the
-[HVM](https://github.com/kindelia/hvm), Kindelia is able to run formally
+[HVM](https://github.com/kindelia/hvm), K-Chan is able to run formally
 verified DApps cheaply and efficiently, making it the most secure peer-to-peer
 computer in existence. Moreover, by storing the global state as reversible
 runtime heaps, it can run highly dynamic applications with massively reduced
 costs, making layer 1 virtual worlds economically viable.  Finally, there is no
-built-in token, and, thus, **it isn't a cryptocurrency**.  Instead, Kindelia is
+built-in token, and, thus, **it isn't a cryptocurrency**.  Instead, K-Chan is
 merely a peer-to-peer functional computer capable of efficiently hosting
 hack-proof programs that can't ever be turned off.
 
@@ -42,7 +42,7 @@ Table of Contents
   * [Negligible compilation times](#1-it-has-negligible-compilation-times)
   * [Measurable computation costs](#2-computation-costs-are-measurable-including-space-and-time)
   * [How is that possible?](how-is-that-possible)
-  * [Is Kindelia a consequence of the HVM?](is-kindelia-a-consequence-of-the-hvm)
+  * [Is K-Chan a consequence of the HVM?](is-k-chan-a-consequence-of-the-hvm)
 * [Comparisons to Ethereum](#comparisons-to-ethereum)
   * [Functional opcodes, formally verified apps](#hvm-makes-functional-and-formally-verified-dapps-much-cheaper)
   * [Zero-cost SSTOREs, highly dynamic apps](#reversible-heaps-make-dynamic-dapps-much-cheaper)
@@ -88,13 +88,13 @@ their occurrences daily [citation].
   since they can't be patched or reversed, but the EVM makes these prohibitively
   expensive [citation].
 
-Kindelia is a complete redesign of Ethereum's base layer. It replaces the EVM by
+K-Chan is a complete redesign of Ethereum's base layer. It replaces the EVM by
 the [HVM](https://github.com/kindelia/hvm), a fast functional virtual machine
 that greatly decreases the cost of ultra-safe formally verified contracts and
 highly-dynamic apps such as virtual RPG worlds, and a wide range of
 optimizations and polishments make it the most stable, efficient and secure
-layer 1 computer in existence. In a way, Kindelia can be seen as a decentralized
-REPL that interprets statements in a programming language, with Kindelia blocks
+layer 1 computer in existence. In a way, K-Chan can be seen as a decentralized
+REPL that interprets statements in a programming language, with K-Chan blocks
 being like files in such language, which are propagated and settled via proof of
 work. It is as if a type theorist plugged a Python interpreter into a blockchain,
 and ended up making a massively multiplayer [GHCi](https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/ghci.html).
@@ -103,14 +103,14 @@ This is an extensive paper with a lot of information.
 - If you'd like to see some example blocks, go to [Examples](#examples).
 - If you'd rather read a long list of tech specs, head on to the [Technical Overview](#technical-overview).
 - To learn about the optimal functional runtime we use, see [The High-order Virtual Machine](#the-high-order-virtual-machine-hvm).
-- To learn how Kindelia compares to other p2p computers, move on to [Comparisons](#comparisons-to-ethereum).
-- To learn the why's behind Kindelia's existence and design choices, go to [Whys](#whys).
+- To learn how K-Chan compares to other p2p computers, move on to [Comparisons](#comparisons-to-ethereum).
+- To learn the why's behind K-Chan's existence and design choices, go to [Whys](#whys).
 
 Examples
 ========
 
 Below are some example blocks. Keep in mind that the code shown, while
-high-level looking, is just a **textual representation Kindelia's low-level
+high-level looking, is just a **textual representation K-Chan's low-level
 machine language**; i.e., it is equivalent to EVM's assembly, and **is not the
 language developers are meant to use**. Instead, they should compile higher
 level functional languages such as Haskell or, if they care about formal
@@ -144,10 +144,10 @@ run {
 }
 ```
 
-You can run it offline by installing Kindelia and entering the command below:
+You can run it offline by installing K-Chan and entering the command below:
 
 ```bash
-# runs a kindelia block, displaying:
+# runs a k-chan block, displaying:
 # - a list of each deployed ctr/fun
 # - the result of each run{} block
 # - total used mana and size
@@ -163,10 +163,10 @@ This will output the following execution log:
 [run] #10 [26 mana | 0 size]
 ```
 
-When a Kindelia node runs that block, the constructors `Leaf` and `Branch`, as
+When a K-Chan node runs that block, the constructors `Leaf` and `Branch`, as
 well as the global function `Sum`, will be defined forever inside the network.
 Note how it follows a functional style, closely resembling Haskell's equational
-notation. Kindelia functions aren't compiled to fit stack machines: they run
+notation. K-Chan functions aren't compiled to fit stack machines: they run
 natively as is, because beta reduction and pattern matching are primitive, O(1)
 opcodes on the HVM.
 
@@ -177,7 +177,7 @@ other functions, save and load a persistent state. Note that the `run{}`
 statement shown on this example is not very useful, since it just performs a
 pure computation and returns, without saving any state.
 
-Kindelia's term language is lazy and linear, which means it works very similarly
+K-Chan's term language is lazy and linear, which means it works very similarly
 to Haskell's runtime, except variables can't be used more than once, which is
 essential to keep computations optimal and measurable. In order to make that
 practical, there is a lazy duplication operation, written as `dup a b = x`,
@@ -189,7 +189,7 @@ how the HVM works.
 Block #2: defining stateful functions
 -------------------------------------
 
-Actual contracts must hold a state. In Kindelia, every function holds an
+Actual contracts must hold a state. In K-Chan, every function holds an
 internal state, which is just any native HVM structure. That state can be loaded
 and saved using `load` and `save`. With just that, we are able to create
 smart-contracts by using stateful functions.
@@ -256,7 +256,7 @@ Finally, `load` and `save` themselves have no cost! But blocks must still repeat
 the heap growth and accumulated computation limits. So, for example, updating a
 coin balance requires paying the cost of some `Map.updade` operation (which,
 usually, is pretty cheap), but `save` itself has no cost, unlike `SSTORE`, which
-is very expensive. This allows Kindelia to host highly dynamic applications such
+is very expensive. This allows K-Chan to host highly dynamic applications such
 as games and exchanges on its layer 1.
 
 Block #3: signing statements
@@ -299,7 +299,7 @@ kindelia sign block_file.kdl key_file
 Block #4: registering namespaces
 --------------------------------
  
-Kindelia also has a simple, optional namespace system, which allows users to
+K-Chan also has a simple, optional namespace system, which allows users to
 reserve blocks of names for themselves. That system is based on a name hierarchy
 that uses the special dot character (`.`). Names that have no dots aren't
 affected by this system, and can be deployed by anyone. Names that have one or
@@ -382,7 +382,7 @@ Technical Overview
 Blocks
 ------
 
-A block is just a list of statements. A Kindelia node is just a process that
+A block is just a list of statements. A K-Chan node is just a process that
 broadcasts timestamped blocks to a peer-to-peer network, using Nakamoto
 Consensus (Proof of Work) to give these blocks a canonical ordering. The
 statements in these blocks are then evaluated in order, causing each node to
@@ -391,7 +391,7 @@ compute the same canonical state.
 Statements
 ----------
 
-Kindelia statements alter the network's state. They can be one of 4 variants:
+K-Chan statements alter the network's state. They can be one of 4 variants:
 
 ### `CTR`: defines a new constructor
 
@@ -505,7 +505,7 @@ reg Name {
 Expressions
 -----------
 
-A Kindelia expression is a term in a pure, side-effect free, affine functional
+A K-Chan expression is a term in a pure, side-effect free, affine functional
 language with 8 variants. Its grammar is described below:
 
 ```c
@@ -570,17 +570,17 @@ For example,
 
 Denotes a function that receives two values, `x`, and `y`, and returns a pair
 with `x` plus `42` and `F` applied to `y`. In Python, this could be written
-as: `lambda x: lambda y: (x + 42, F(y))`. Also, since Kindelia's language is
+as: `lambda x: lambda y: (x + 42, F(y))`. Also, since K-Chan's language is
 affine, variables must occur, at most, once. To duplicate values, the clone
 operator, `dup`, must be used.
 
 While this syntax may look high-level, don't confuse it with a user-facing
 language such as Solidity. It is just a direct textual representation of the
-actual terms that run inside Kindelia's HVM. It should be seen as Kindelia's
+actual terms that run inside K-Chan's HVM. It should be seen as K-Chan's
 low-level assembly, and developers should use higher-level languages (such as
 Kind, Haskell, Idris, Agda, Coq and Lean) that compile to it.
 
-Native numbers are 120-bit. The reason is that Kindelia's HVM uses 128-bit
+Native numbers are 120-bit. The reason is that K-Chan's HVM uses 128-bit
 pointers with a 8-bit tag. This allows storing numbers unboxed, as long as they
 aren't larger than 120 bits. Any other size would be less efficient: less than 120
 bits would waste space, and more would require a pointer indirection. Numbers
@@ -596,13 +596,13 @@ quotes, containing a list of 6-bit letters, as follows:
     3 | l | m | n | o | p | q | r | s | t | u | v | w | x | y | z | _ |
 
 So, for example, `'Bar'` denotes the number `(0x0C << 12) | (0x25 << 6) | 0x36`.
-That naming convention can be used to give Kindelia-hosted applications
+That naming convention can be used to give K-Chan-hosted applications
 human-readable source codes.
 
 Effects
 -------
 
-Finally, Kindelia has side-effective operations that allow functions to save
+Finally, K-Chan has side-effective operations that allow functions to save
 states, request information from the network. These operations are performed
 using a pure description type that work similarly to Haskell's IO. In Haskellish
 pseudocode, it would look like:
@@ -618,7 +618,7 @@ data IO s a
 ```
 
 
-Note that, since Kindelia's language is pure, these side-effects are only
+Note that, since K-Chan's language is pure, these side-effects are only
 performed when placed directly inside top-level `run{}` statements, otherwise
 they are treated as pure expressions, exactly like Haskell's IO. To receive
 values from the external environment, a continuation (`@r ...`) is used. The
@@ -635,7 +635,7 @@ exactly like `IO.take`, except it will clone the state.
 Normalization
 -------------
 
-Kindelia expressions are evaluated by the HVM, a functional virtual machine.
+K-Chan expressions are evaluated by the HVM, a functional virtual machine.
 The primitive operations in that machine are called rewrite rules, and they
 include beta reduction (lambda application), pattern-matching, numeric
 operators, and primitives for cloning and erasing data. All these operations are
@@ -646,7 +646,7 @@ Note: in addition to the 8 term variants, the HVM also has some internal
 constructs, such as superpositions and erasure nodes, which can't be submitted
 by an user, but can appear as a byproduct of its lazy-cloning operation.
 
-Kindelia's computation rules are:
+K-Chan's computation rules are:
 
 ### Lambda Application
 
@@ -822,7 +822,7 @@ global pattern-matching rewrite rule.
 Table of Costs
 --------------
 
-Since Kindelia's built-in language is Turing complete, it must have a way to
+Since K-Chan's built-in language is Turing complete, it must have a way to
 account for, and limit, performed computations; otherwise, anyone could freeze
 the entire network by deploying infinite loops, or expensive computations. Like
 Ethereum, it has a cost table linking primitive operations to a number, which is
@@ -850,7 +850,7 @@ transactions, but with the block as a whole.
     '---------------------------------------------------'
 
 
-Kindelia's elegant runtime is reflected by the simplicity of this table. In
+K-Chan's elegant runtime is reflected by the simplicity of this table. In
 order to limit computations, nodes impose a hard ceiling on the amount of
 computation performed, as a function of the block number:
 
@@ -861,7 +861,7 @@ mana_limit = 4000000 * (block_number + 1)
 If a block passes that limit, it is rejected by nodes. Note that this limit
 accumulates: if a block doesn't fully use it, the next block can use it, and so
 on. In effect, that causes times of low usage to "lend" computation to times of
-high usage, making Kindelia somewhat resistant to performance losses due to
+high usage, making K-Chan somewhat resistant to performance losses due to
 high-traffic applications or periods, while still keeping the maximum
 synchronization computation in check.
 
@@ -872,7 +872,7 @@ must spend 1 second catching up, if single threaded. While that isn't a huge
 margin, blocks could be processed in a parallel fashion, and future improvements
 on the HVM and processors will improve this margin.
 
-Kindelia also has a hard ceiling on the state size, i.e., the size of its heap:
+K-Chan also has a hard ceiling on the state size, i.e., the size of its heap:
 
 ```
 bits_limit = 2048 * (block_number + 1)
@@ -887,9 +887,9 @@ the 4th block will be able to let the blockchain size grow up to 8192 bits.
 ### About miner fees
 
 An attentive reader may have noticed that there is no miner fee mechanism
-included on this implementation. That is by design. Kindelia restricts how much
+included on this implementation. That is by design. K-Chan restricts how much
 computation and space the network may use in total as a function of its age, but
-it says nothing about individual transactions. Kindelia relies on the principle
+it says nothing about individual transactions. K-Chan relies on the principle
 that, during the early ages of the network, users will be mining their own
 blocks directly. After all, with 1 second per block, there are 86400 blocks per
 day. Until there are thousands of active users, mining a block won't be an issue
@@ -903,7 +903,7 @@ Memory Model
 HVM's memory model is documented on `src/hvm.rs`, and transcribed below:
 
 ```
-Kindelia-HVM's memory model
+K-Chan-HVM's memory model
 ---------------------------
 
 The runtime memory consists of just a vector of u128 pointers. That is:
@@ -1077,11 +1077,11 @@ HVM's runtime is essentially a lazy graph traversal machine that finds redexes
 (expressions subject to computation rules) and rewrites them until there is no
 more work to do. It does so while automatically allocating and freeing memory of
 expressions that go out of scope. When a term's reduction is complete, HVM's
-memory will be fully emptied, leaving no leaks, which is what allows Kindelia to
+memory will be fully emptied, leaving no leaks, which is what allows K-Chan to
 replace state trees by heap snapshots. The only exception is when an app
 explicitly asks to preserve an expression by using the `IO.save` operation,
 which will simply store a pointer to the app's state, and keep it in memory.
-That is why Kindelia's "SSTORE" has zero-cost: the operation itself is very
+That is why K-Chan's "SSTORE" has zero-cost: the operation itself is very
 cheap as it just saves a pointer. We only have to "charge" an app when it uses
 more of the available heap space.
 
@@ -1089,7 +1089,7 @@ more of the available heap space.
 Serialization
 -------------
 
-Kindelia blocks are serialized to binary following the procedures below:
+K-Chan blocks are serialized to binary following the procedures below:
 
 ### Fixlen
 
@@ -1189,7 +1189,7 @@ Since all names are smaller than 64 characters, using `serialize_list` is more
 efficient than encoding the length of the name, followed by the character.
 
 Note this encoding starts with a `0` bit. That is a
-compressed-name flag. Names are the most data-hungry part of Kindelia's
+compressed-name flag. Names are the most data-hungry part of K-Chan's
 serialization, yet, there are many instances where names can be compressed
 considerably. For example, variable names can be compressed using De Bruijn
 indices, and constructor/function names can be compressed by local name aliases
@@ -1278,7 +1278,7 @@ Bruijn indices.
 
 ### Statement
 
-The Statement encoding serializes a top-level statement in a Kindelia block.
+The Statement encoding serializes a top-level statement in a K-Chan block.
 
 ```
 serialize_rule((lhs,rhs))
@@ -1323,9 +1323,9 @@ serialize_block(statements) = serialize_list(serialize_statement, statements)
 Genesis Block
 -------------
 
-Kindelia starts the network by running a single block before the first mined
+K-Chan starts the network by running a single block before the first mined
 block. This is called the genesis block. That block installs some utilities on
-the network. It may vary across different forks. Kindelia's mainnet uses the
+the network. It may vary across different forks. K-Chan's mainnet uses the
 following genesis block:
 
 ```c
@@ -1439,7 +1439,7 @@ reg {
 }
 ```
 
-It is important to note that, on Kindelia's mainnet, the genesis block will
+It is important to note that, on K-Chan's mainnet, the genesis block will
 register the empty namespace to the Kindelia Foundation. This gives us the power
 to distribute top-level names, which we intend to do responsibly. This may be
 seen as a point of centralization, which we argue is minor and healthy. It
@@ -1452,7 +1452,7 @@ premined native tokens which, once distributed, can't ever be forked away.
 The High-order Virtual Machine (HVM)
 ====================================
 
-As stated, one of the most profound differences between Kindelia and other
+As stated, one of the most profound differences between K-Chan and other
 computation networks is the High-order Virtual Machine (HVM). It is a massively
 parallel runtime capable of evaluating functional programs optimally, a
 remarkable property that no other compiler in the market enjoys. Even though it
@@ -1477,7 +1477,7 @@ improvements on the performance of functional programs, specially taking in
 account the rise of parallel processors, and the discovery of new data
 structures and algorithms that take advantage of beta-optimality.
 
-When it comes to Kindelia, though, its main role is to make functional programs
+When it comes to K-Chan, though, its main role is to make functional programs
 and algorithms run natively, which directly reduces costs by ~434x compared to
 emulating them on stack machines such as the EVM. Other than raw performance,
 there are two additional characteristics that make it the ideal virtual machine
@@ -1531,17 +1531,17 @@ Interaction Net, which shares the best aspects of the Turing Machines and the
 Lambda Calculus, in a manner that looks truly fundamental, and is the main
 reason the HVM works so well.
 
-### Is Kindelia a consequence of the HVM?
+### Is K-Chan a consequence of the HVM?
 
-Yes. The main motivation behind the creation of Kindelia is to spread awareness
+Yes. The main motivation behind the creation of K-Chan is to spread awareness
 of the HVM, and all the amazing possibilities that Interaction Nets bring - and
 we're very open about that. Once the world realizes the potential of the HVM
-through Kindelia, it won't be hard to foresee a future where massively parallel
+through K-Chan, it won't be hard to foresee a future where massively parallel
 interaction-net processors will replace the old Von Neumann architecture, taking
 humanity to a whole new level of technological maturity. As the authors of
-Kindelia, we intend to lead this revolution.
+K-Chan, we intend to lead this revolution.
 
-This, by itself, is a fair reason to believe on Kindelia's future; after all, we
+This, by itself, is a fair reason to believe on K-Chan's future; after all, we
 are, ironically, doing this for the technology, and have no interest on
 profiting from the network. That is why we made an extra effort to make it as
 simple and stable as possible, decreasing the need for a highly active core
@@ -1550,8 +1550,8 @@ that philosophy by not adding a native currency that is massively pre-mined by
 the creators, as most projects do.
 
 Note we do intend to launch a token for our foundation as a contract *inside*
-Kindelia, but it will not be *part* of the network, nor coupled to Kindelia's
-protocol in any way, as things should be. Since Kindelia shouldn't require
+K-Chan, but it will not be *part* of the network, nor coupled to K-Chan's
+protocol in any way, as things should be. Since K-Chan shouldn't require
 high maintenance costs, that asset will be used mostly to fund the
 development of the HVM, its next-gen parallel compilers and processors.
 
@@ -1566,7 +1566,7 @@ reversed, but Ethereum's virtual machine is too inefficient for functional
 programs [citation], making it unpractical: devs must either verify the
 generated bytecode, which is extremely hard and laborious, or compile a proof
 language such as Idris, which results in expensive EVM contracts. Thanks to the
-HVM, Kindelia is able to perform beta reduction and pattern-matching natively,
+HVM, K-Chan is able to perform beta reduction and pattern-matching natively,
 making functional programs much cheaper, which, in turn, makes formally verified
 contracts economically viable.
 
@@ -1575,7 +1575,7 @@ contracts economically viable.
 One of the most expensive operations on Ethereum is SSTORE, which saves a U256
 number permanently. It costs 20000 gas for a new write, and 5000 gas for a
 rewrite. That cost is high for two reasons: first, to limit the state growth;
-second, because it uses expensive Merkle Patricia Tree insertions. Kindelia
+second, because it uses expensive Merkle Patricia Tree insertions. K-Chan
 treats state completely differently: it just saves reversible snapshots of HVM's
 heap! Because of that, a reused SSTORE has 0 cost. This makes programming much
 more convenient, since contracts can store arbitrary HVM structures like trees
@@ -1584,7 +1584,7 @@ layer-1 DApps significantly cheaper.
 
 ### Optimizations and simplifications everywhere
 
-Kindelia's block structure is refreshingly simple. There are no merkle roots,
+K-Chan's block structure is refreshingly simple. There are no merkle roots,
 bloom filters, logs, receipts. Just a timestamp, the previous hash, the miner
 id, and a list of "statements" that alter the network's state, in a way that
 resembles a p2p REPL. The entire block is less than *1500 bytes* long, and fits
@@ -1594,7 +1594,7 @@ unsigned, greatly reducing the size and cost of several types of transactions,
 including app deployment. Contracts aren't compiled to monolithic assembly
 codes, but are, instead, broken into pure functions that are deployed separately
 and modularly, enabling massive code reuse. Finally, there is no native
-currency, making Kindelia not a cryptocurrency while also allowing users to pay miners
+currency, making K-Chan not a cryptocurrency while also allowing users to pay miners
 with any on-chain asset, rather than the network's "built-in token".
 
 ### Comparison tables
@@ -1604,7 +1604,7 @@ The tables below compares some attributes of each network.
 #### Network parameters
 
 ```
-Parameter          | Ethereum           | Kindelia
+Parameter          | Ethereum           | K-Chan
 ------------------ | ------------------ | ----------------
 Avg. Block Time    |         13 seconds |         1 second
 Avg. Block Size    |     95,441 bytes   |     1,280 bytes
@@ -1615,7 +1615,7 @@ Computation Limit  | 21,000,000 gas     | 4,000,000 mana
 #### Transaction sizes
 
 ```
-Transaction             | Ethereum  | Kindelia | ratio
+Transaction             | Ethereum  | K-Chan | ratio
 ----------------------- | --------- | -------- | -----
 Deploy a small contract | 550 bytes | 66 bytes |  12 %
 Call a simple method    | 113 bytes | 32 bytes |  28 %
@@ -1628,7 +1628,7 @@ on both networks.
 #### Operations per Second
 
 ```
-Operation              |      Ethereum |       Kindelia |       ratio
+Operation              |      Ethereum |       K-Chan |       ratio
 ---------------------- | ------------- | -------------- | -----------
 Numeric addition       |  769,230 op/s | 2,000,000 op/s |       260 %
 Numeric multiplication |  461,538 op/s | 2,000,000 op/s |       432 %
@@ -1642,33 +1642,33 @@ Uint store             |      461 op/s | 2,000,000 op/s |    86,760 %
 The costs in this table were defined based on HVM benchmarks, using modern
 mid-end processors.
 
-Kindelia's block time is shorter, because its compressed blocks fit in a single
+K-Chan's block time is shorter, because its compressed blocks fit in a single
 UDP packet. Due to block size limits, Ethereum can handle slightly more signed
-transactions per second, including monetary transfers, but Kindelia handles
+transactions per second, including monetary transfers, but K-Chan handles
 considerably more unsigned transactions per second, including contract
 deployment and other interactions that don't require authentication. Note that,
-since Kindelia's signed transactions can group multiple calls in a single
+since K-Chan's signed transactions can group multiple calls in a single
 statement, the actual throughput can be much higher, and it achieves that with a
 fraction of Ethereum's maximum blockchain growth.
 
-Kindelia's layer-1 throughput is up to 867x higher, due to the HVM and stateful
-heaps respectively. Kindelia's functional opcodes allow it to host programs
+K-Chan's layer-1 throughput is up to 867x higher, due to the HVM and stateful
+heaps respectively. K-Chan's functional opcodes allow it to host programs
 compiled from secure languages like Haskell, Idris, Agda and Kind, which is
-simply not economically viable on Ethereum. Kindelia's zero-cost reused SSTORE
+simply not economically viable on Ethereum. K-Chan's zero-cost reused SSTORE
 enables highly dynamic applications like layer-1 MMORPGs, which is also not
 viable on Ethereum. See the complete [Table of Costs](#table-of-costs) below.
 
 ### In short
 
-Kindelia is just a layer-1 decentralized computer that resembles Ethereum,
+K-Chan is just a layer-1 decentralized computer that resembles Ethereum,
 except without a native currency, with a VM that makes functional programs much
 cheaper, and with a state manager that makes dynamic apps much cheaper. 
 
-Finally, note that we do not claim that Kindelia is *better* than Ethereum. It
-is just different, with different goals. Kindelia is minimalist, Ethereum is
-complex. Ethereum has features that some may miss on Kindelia. For example,
+Finally, note that we do not claim that K-Chan is *better* than Ethereum. It
+is just different, with different goals. K-Chan is minimalist, Ethereum is
+complex. Ethereum has features that some may miss on K-Chan. For example,
 Ethereum's Merkle Patricia Trees are terrible for SSTORE performance, but they
-allow light clients, which Kindelia lacks. Kindelia doesn't store logs, bloom
+allow light clients, which K-Chan lacks. K-Chan doesn't store logs, bloom
 filters, there is no GHOST protocol, and consensus is just old and simple proof
 of work, rather than complex proof of stake schemes. Whether that's better or
 worse, it depends on the use case.
@@ -1688,7 +1688,7 @@ feature formal proofs natively. That means users can not write a contract and
 prove theorems in the same language: they need to compile them to *something
 else*, and then prove theorems about the *compiled output*. This is much more
 expensive than developing and proving in the same language, and isn't much
-better than Ethereum's situation. In Kindelia, users write and verify contracts
+better than Ethereum's situation. In K-Chan, users write and verify contracts
 in Kind, Idris or other proof assistant, and run them directly on the HVM. It is
 simple, cheap, secure and works.
 
@@ -1701,7 +1701,7 @@ using it would raise complications, such as high compilation times, and how to
 measure execution costs. Because of that, contracts are compiled to an
 intermediate language, Plutus, and interpreted on-chain. This is much less
 efficient than compiling, and ultimately means that Cardano fees can't be much
-cheaper than Ethereum's under the same load. Kindelia's HVM is as efficient as
+cheaper than Ethereum's under the same load. K-Chan's HVM is as efficient as
 GHC, while having negligible compilation times, and measurable execution costs,
 letting users run Haskell-like languages with GHC-like efficiency.
 
@@ -1714,7 +1714,7 @@ efficiency, which is dubious at least, since, ultimately, efficiency is still
 dictated by total memory, disk and computation usage. The way programs are
 triggered is irrelevant for that analysis. There is no clarity on how much of
 these resources Cardano would use under high load, and what its opcode costs and
-limits are. Kindelia has no UTXO; it is just a functional runtime with a global
+limits are. K-Chan has no UTXO; it is just a functional runtime with a global
 state which runs/deploys transactions that alter it, and clear costs and limits for
 every defined operation.
 
@@ -1722,15 +1722,15 @@ every defined operation.
 
 In short, Cardano's goals are aligned to ours, but the execution differs
 drastically. Instead of fancy ideas that sound more like academic show-off than
-practical utilities, Kindelia is just the result of wrapping a functional
+practical utilities, K-Chan is just the result of wrapping a functional
 runtime, the HVM, in a currency-less blockchain, which is just the right recipe
 to make the ultra-secure, worldwide functional computer that Cardano envisioned,
 but couldn't deliver. Finally, instead of a massive, VC-funded company building
-a highly complex system, Kindelia is just a minimal open-source standard - our
+a highly complex system, K-Chan is just a minimal open-source standard - our
 entire implementation is under 10k lines of code! - promoting node diversity and
 making it inherently independent from its original creators.
 
-Finally, note that we do not claim that Kindelia is *better* than Cardano. It is
+Finally, note that we do not claim that K-Chan is *better* than Cardano. It is
 impossible to innovate without trying new things, and it is okay if some ideas
 don't work so well. Cardano has great minds, and has everything it takes to
 build a great decentralized computer.
@@ -1743,10 +1743,10 @@ Whys
 
 *“Your scientists were so preoccupied with whether they could, they didn't stop to think if they should.”*
 
-This is a hard question to answer because, well, Kindelia is **not** a
+This is a hard question to answer because, well, K-Chan is **not** a
 cryptocurrency. Yes, it uses a blockchain, and yes, you can create currencies on
 it, but you can also create currencies on your computer, and you don't call it
-an "electrocurrency". Kindelia is less like a currency a more like an operating
+an "electrocurrency". K-Chan is less like a currency a more like an operating
 system, except it is virtual and synchronized worldwide. I get the question,
 though. It often comes from people frustrated with the state of the field, ICOs,
 NFTs, pyramids, scams and idiocratic claims everywhere. It is true that most
@@ -1771,7 +1771,7 @@ safeguard in the case things go terribly wrong in the world; even if they
 probably won't. Ethereum is such a place, but what is the point of an eternal
 application if it only lasts until a bug is found? Formal verification is the
 act of mathematically proving that given software has zero bugs, and that goes
-really well with the idea of eternal apps. That is why Kindelia is valuable. It
+really well with the idea of eternal apps. That is why K-Chan is valuable. It
 solves the problem of deploying general-purpose software in a computer that will
 run these programs with the same well-defined rules and a never-ending, 100%
 uptime, independent of any human action. Perhaps that problem isn't interesting
@@ -1780,16 +1780,16 @@ to most people, but it is still valid problem to solve.
 For example, the notion of virtual worlds that can't ever be turned off is
 pretty attractive to a gaming nerd like me. I can't leave a Black Qiraji (mount) 
 from World of Warcraft to my grandchildren. After all, who knows if Blizzard will 
-even exist by then? But I surely can do so on a virtual world hosted on Kindelia.
+even exist by then? But I surely can do so on a virtual world hosted on K-Chan.
 The fact that an item will never cease to exist makes it even more valuable today, which 
 results in a market where digital assets are viewed with as much value as physical assets, 
-which is really cool. Kindelia's cheap states lets these virtual worlds exist without 
+which is really cool. K-Chan's cheap states lets these virtual worlds exist without 
 complicated layer 2 indirections.
 
-In short, Kindelia is a functional, worldwide computer, capable of hosting
+In short, K-Chan is a functional, worldwide computer, capable of hosting
 eternal applications that can't ever be altered or turned off; not by their
 owners, not by governments. And, with formal verification, these applications
-can remain bug-free during their endless lifespans. Kindelia and Ethereum are
+can remain bug-free during their endless lifespans. KChan and Ethereum are
 distributed, but that is meant to maximize uptime and security, not performance.
 They aren't meant to beat cloud servers in raw throughput, and anyone who thinks
 that simply doesn't get the point. But only these can grant, to their hosted
@@ -1880,7 +1880,7 @@ to include it in order to collect the Kold coins, in the exact same way they're
 incentivized by Ether fees, except replacing the native, hardcoded token, by any
 user-submitted assets.
 
-If Kindelia doesn't need a native token to exist, then it won't have a native
+If K-Chan doesn't need a native token to exist, then it won't have a native
 token, because that's how our ethics work - simple as that. But then, how do we
 raise funds? That is a separate question, which, we believe, must have a
 separate answer. Ethereum, for example, minted and sold, out of thin air, more
@@ -1892,7 +1892,7 @@ allowed Ethereum to exist, and that is a great thing. But, on the long term,
 that aggressively centralized distribution isn't aligned with the decentralized
 vision it sells, and, as such, I intend to make it differently.
 
-Kindelia Foundation, the non-profit entity, will launch a token on Kindelia,
+Kindelia Foundation, the non-profit entity, will launch a token on K-Chan,
 which will be used to fund its future developments, including the maintenance of
 the network, ecosystem apps, as well as next-gen HVM compilers and processors.
 But that token will be launched as a normal app, under the same conditions as
@@ -1900,11 +1900,11 @@ every other, with no privileged position on the network's code. If the token
 fails, then we'll not be able to keep working, but the network will still exist,
 independent of its creators, as long, of course, as other developers, miners and
 users decide to keep it alive. That being said, we believe we're doing a superb job,
-and hope Kindelia doesn't fire us! :)
+and hope K-Chan doesn't fire us! :)
 
 ## Why Nakamoto Consensus (Proof of Work)?
 
-One of the main design goals of Kindelia is to have a simple, small reference
+One of the main design goals of K-Chan is to have a simple, small reference
 implementation, promoting client diversity and decreasing our roles as
 figureheads. Blockchain projects spend too much effort trying to achieve
 technical decentralization, but not enough of them care about political
@@ -1913,7 +1913,7 @@ theory - after all, having the option, why would anyone choose to waste energy? 
 compared to proof of work, very hard to implement. Maintaining a PoS core would
 greatly increase the network's complexity, decrease client diversity, increase
 attack vectors, and require more core developers, increasing their power. All
-these things go against the very philosophy of Kindelia, as it aims to be the
+these things go against the very philosophy of K-Chan, as it aims to be the
 most stable, robust, decentralized computer conceivable.
 
 Furthermore, despite the greatly increased complexity, every PoS algorithm
@@ -1926,18 +1926,18 @@ sentiment, and I believe, and hope, that humanity will never find itself in a
 situation where two sides of the world go completely out of communication for
 weeks due to some catastrophic event. But if that does happen, I believe we
 should have at least one ultra-resilient digital economy capable of recovering.
-Kindelia fills that role, being the back-up plan, meteor-proof computer that,
+K-Chan fills that role, being the back-up plan, meteor-proof computer that,
 along Bitcoin, will still be there in case everything goes wrong.
 
 Finally, there is a common misconception that proof of stake increases a
 network's layer 1 scalability, efficiency and throughput. That is simply not
 true. These factors are capped on how efficiently the client uses the
-computation, memory, disk and bandwidth that a node has available. Kindelia
+computation, memory, disk and bandwidth that a node has available. K-Chan
 addresses all these concerns directly, with a fast virtual machine, cheap memory
 writes and reads, a limit on disk growth, and blocks that fit in a single UDP
 packet. The main benefit of proof of stake is decreasing energy consumption
 which, with sadness in our hearts, we do not know how to address right now. But
-Kindelia should absolutely migrate to proof of stake one day, if an algorithm is
+K-Chan should absolutely migrate to proof of stake one day, if an algorithm is
 proven to be secure and simple enough not to impact the network's robustness.
 
 ## Why not become a layer 2 Ethereum rollup?
@@ -1972,7 +1972,7 @@ Moving apps or computations in and out is an unavoidable overhead. If an app
 could operate efficiently on the layer 1, it would never resort to layer 2. A
 faster layer 1 increases the set of apps that don't need to be moved out.
 Dynamic MMORPGs and formally verified Idris2 apps that would require a layer 2
-can have the option of living natively on Kindelia's layer 1, and having an
+can have the option of living natively on K-Chan's layer 1, and having an
 option is never a bad thing.
 
 ### On optimistic rollups
@@ -1998,11 +1998,11 @@ on [ethereum.org](ethereum.org), optimistic rollups are claimed to provide
 10-100x improvements in scalability. In our [comparison
 table](#comparison-table), though, we claim HVM apps offer 10-434x improvements
 over EVM apps, natively on layer 1, without any kind of rollups! In other words,
-due to the sheer performance of the HVM, Kindelia apps are as scalable as layer
+due to the sheer performance of the HVM, K-Chan apps are as scalable as layer
 2 Ethereum apps in that case, without the dangerous compromise of someone having
-full write access over app states. And a layer 2 on top of Kindelia would
+full write access over app states. And a layer 2 on top of K-Chan would
 possibly increase that 10-100x further. It seems like Ethereum spent an lot of
-effort thinking in ways to avoid the EVM, because it is very slow. Kindelia cuts
+effort thinking in ways to avoid the EVM, because it is very slow. K-Chan cuts
 all the trouble by just replacing it with something much faster to begin with.
 It is depressing to think humanity could live forever with a terribly inefficient
 virtual machine as the backbone of its worldwide economy, just because it is too
@@ -2023,7 +2023,7 @@ HVM. There is no free lunch, though. This idea has its own complications.
 First, zero knowledge proofs are new, unstandardized, complex cryptographic
 primitives. If any vulnerability is found in them, the network will be doomed.
 Moreover, their sheer complexity make the protocol much harder to implement and
-understand. Kindelia's reference node has less than 10k lines of code, and its
+understand. K-Chan's reference node has less than 10k lines of code, and its
 computation rules are all 5-20 lines long. This makes it easy to understand, and
 promotes client diversity, allowing independent parties to implement their own
 nodes, decreasing our roles as lead developers and figureheads. Decentralized
@@ -2062,5 +2062,5 @@ Optimistic rollups require complex dispute mechanisms with terrible worst-case
 scenarios, zero knowledge proofs relies on unproven cryptography, decrease
 transparency and client diversity, and don't address the other half of the
 scalability bottleneck, which is not computation, but state growth. There is
-value in an efficient, secure, simple layer 1 computation network. Kindelia aims
+value in an efficient, secure, simple layer 1 computation network. K-Chan aims
 to maximize all these aspects, as far as theory allows.
