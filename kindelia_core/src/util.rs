@@ -10,6 +10,7 @@ use bit_vec::BitVec;
 
 use kindelia_common::nohash_hasher::NoHashHasher;
 use kindelia_common::{Name, U120, U256};
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use crate::runtime::Loc;
 use std::path::PathBuf;
@@ -22,7 +23,6 @@ pub type U128Map<T> = HashMap<u128, T, std::hash::BuildHasherDefault<NoHashHashe
 pub type U256Map<T> = HashMap<U256, T, std::hash::BuildHasherDefault<NoHashHasher<U256>>>;
 pub type NameMap<T> = HashMap<Name, T, std::hash::BuildHasherDefault<NoHashHasher<Name>>>;
 pub type LocMap <T> = HashMap<Loc , T, std::hash::BuildHasherDefault<NoHashHasher<Loc >>>;
-
 
 pub type Hash = U256;
 
@@ -108,14 +108,16 @@ pub fn u128s_to_u8s(u128s: &[u128]) -> Vec<u8> {
   u8s
 }
 
-pub fn u8s_to_u128s(u8s: &[u8]) -> Vec<u128> {
+pub fn u8s_to_u128s(
+  u8s: &[u8],
+) -> Result<Vec<u128>, std::array::TryFromSliceError> {
   let mut u8s = u8s.to_vec();
   u8s.resize((u8s.len() + 15) / 16 * 16, 0);
   let mut u128s: Vec<u128> = vec![];
   for i in 0..u8s.len() / 16 {
-    u128s.push(u128::from_le_bytes(u8s[i * 16..i * 16 + 16].try_into().unwrap()));
+    u128s.push(u128::from_le_bytes(u8s[i * 16..i * 16 + 16].try_into()?));
   }
-  u128s
+  Ok(u128s)
 }
 
 // Maps
@@ -161,30 +163,65 @@ pub fn u256map_from<T, const N: usize>(a: [(U256, T); N]) -> U256Map<T> {
 // ======
 
 /// Gets current timestamp in milliseconds
-pub fn get_time() -> u128 {
-  std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap()
+///
+/// note: panics if system time is before unix epoch
+///
+/// deprecated: use try_get_time_micro instead when possible.
+pub(crate) fn get_time() -> u128 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("system time should be later than unix epoch")
     .as_millis() as u128
 }
 
-pub fn get_time_micro() -> u128 {
+/// Gets current timestamp in microseconds
+///
+/// note: panics if system time is before unix epoch
+///
+/// deprecated: use try_get_time_micro instead when possible.
+pub(crate) fn get_time_micro() -> u128 {
   std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap()
+    .duration_since(UNIX_EPOCH)
+    .expect("system time should be later than unix epoch")
     .as_micros() as u128
 }
 
-#[macro_export]
-macro_rules! print_with_timestamp {
-  () => {
-    print!("{} ~~", get_time_micro());
-  };
-  ($($arg:tt)*) => {
-    println!("{} ~~ {}", get_time_micro(), format!($($arg)*));
-  };
+/// Indicates that the system's time is before the unix epoch
+/// which is not allowed because we represent times as u128
+/// since epoch.
+#[derive(Error, Debug)]
+#[error("SystemTime precedes the unix epoch. {now:?} < {epoch:?}")]
+pub(crate) struct EpochError {
+  pub now: SystemTime,
+  pub epoch: SystemTime,
+  pub source: SystemTimeError,
 }
 
+/// Gets current timestamp in milliseconds
+///
+pub(crate) fn try_get_time() -> Result<u128, EpochError> {
+  let now = SystemTime::now();
+  let epoch = UNIX_EPOCH;
+
+  Ok(
+    now
+      .duration_since(epoch)
+      .map_err(|source| EpochError { now, epoch, source })?
+      .as_millis() as u128,
+  )
+}
+
+pub(crate) fn try_get_time_micro() -> Result<u128, EpochError> {
+  let now = SystemTime::now();
+  let epoch = UNIX_EPOCH;
+
+  Ok(
+    now
+      .duration_since(epoch)
+      .map_err(|source| EpochError { now, epoch, source })?
+      .as_micros() as u128,
+  )
+}
 
 // Errors
 // ======
