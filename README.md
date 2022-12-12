@@ -1,7 +1,7 @@
-Kindelia: a minimal peer-to-peer computer that isn't a cryptocurrency
+K-Chan: a minimal peer-to-peer computer that isn't a cryptocurrency
 ---------------------------------------------------------------------
 
-Kindelia is a peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a minimalist redesign of Ethereum's idea, built upon type theoretic foundations. Differences include:
+K-Chan is a peer-to-peer functional computer capable of hosting decentralized apps that stay up forever. Essentially, it is a minimalist redesign of Ethereum's idea, built upon type theoretic foundations. Differences include:
 
 - There is **no native coin**. It is not a cryptocurrency. It is a cryptocomputer.
 
