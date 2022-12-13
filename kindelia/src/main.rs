@@ -291,6 +291,7 @@ pub fn run_cli() -> anyhow::Result<()> {
             .build()?
             .resolve_from_file_only(config)?;
 
+          // TODO: nest on `node.api`
           let ws_config = ConfigSettingsBuilder::default()
             .prop("node.ws".to_string())
             .default_value(|| Ok(WsConfig::default()))
@@ -848,10 +849,19 @@ pub fn start_node<C: ProtoComm + 'static>(
     Some(event_tx),
   );
 
+  // WebSocket API router
+  let ws_router = kindelia_ws::ws_router::<
+    events::NodeEventType,
+    events::NodeEventDiscriminant,
+  >(ws_tx);
+
   // Spawns the API thread
   if let Some(api_config) = api_config {
     let api_thread = std::thread::spawn(move || {
-      kindelia_server::http_api_loop(node_query_sender, api_config, ws_tx);
+      let http_api_task =
+        kindelia_server::api_serve(node_query_sender, api_config, ws_router);
+      let runtime = tokio::runtime::Runtime::new().unwrap();
+      runtime.block_on(http_api_task);
     });
     threads.push(api_thread);
   }

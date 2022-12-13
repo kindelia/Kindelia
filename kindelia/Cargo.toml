@@ -22,13 +22,12 @@ bench = false
 kindelia_common = { path = "../kindelia_common" }
 kindelia_lang = { path = "../kindelia_lang" }
 kindelia_core = { path = "../kindelia_core" }
-kindelia_ws = { path = "../kindelia_ws" }
-kindelia_server = { path = "../kindelia_server" }
 kindelia_client = { path = "../kindelia_client" }
-
-fastrand = "1.7.0"
+kindelia_server = { path = "../kindelia_server" }
+kindelia_ws = { path = "../kindelia_ws" }
 
 # Util
+anyhow = { version = "1.0.66", features = ["backtrace"] }
 dirs = "4.0.0"
 hex = "0.4"
 derive_builder = "0.11.2"
@@ -44,12 +43,14 @@ toml = "0.5.9"
 # API
 serde = { version = "1.0.137" }
 serde_json = "1.0"
+warp = "0.3"
 
 # Events API
 tokio = { version = "1.19.1", features = ["sync"] }
-anyhow = { version = "1.0.66", features = ["backtrace"] }
+
 
 [dev-dependencies]
 assert_cmd = "1.0.1"
+fastrand = "1.7.0"
 httpmock = "0.6.6"
 rstest = "0.15.0"

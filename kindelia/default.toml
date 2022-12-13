@@ -18,4 +18,3 @@ port = 8000
 
 [node.ws]
 buffer_size = 2048
-

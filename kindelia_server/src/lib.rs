@@ -2,12 +2,10 @@ use std::str::FromStr;
 use std::sync::mpsc::SyncSender;
 
 use bit_vec::BitVec;
-use kindelia_core::events;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::body;
 use warp::hyper::StatusCode;
@@ -151,22 +149,14 @@ async fn handle_rejection(
   }
 }
 
-pub fn http_api_loop<C: ProtoComm + 'static>(
+pub async fn api_serve<'a, C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
   api_config: ApiConfig,
-  ws_tx: broadcast::Sender<events::NodeEventType>,
-) {
-  let runtime = tokio::runtime::Runtime::new().unwrap();
-
-  runtime.block_on(async move {
-    api_serve::<C>(node_query_sender, api_config, ws_tx).await;
-  });
-}
-
-async fn api_serve<'a, C: ProtoComm + 'static>(
-  node_query_sender: SyncSender<NodeRequest<C>>,
-  api_config: ApiConfig,
-  ws_tx: broadcast::Sender<events::NodeEventType>,
+  ws_router: impl warp::Filter<Extract = (impl Reply,), Error = Rejection>
+    + Clone
+    + Send
+    + Sync
+    + 'static,
 ) {
   async fn ask<T, C: ProtoComm>(
     node_query_tx: SyncSender<NodeRequest<C>>,
@@ -501,19 +491,17 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   let peers_router = get_peers.or(get_all_peers);
 
-
   // == Favicon ==
 
   let no_favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
     warp::reply::with_status(reply, warp::http::StatusCode::NO_CONTENT)
   });
 
-  // ==
+  // == Events ==
 
-  let ws_router = kindelia_ws::ws_router::<
-    events::NodeEventType,
-    events::NodeEventDiscriminant,
-  >(ws_tx);
+  let events_router = path!("events").and(ws_router);
+
+  // == Server ==
 
   let app = root
     .or(no_favicon)
@@ -524,7 +512,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     .or(peers_router)
     .or(constructor_router)
     .or(reg_router)
-    .or(ws_router);
+    .or(events_router);
 
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
