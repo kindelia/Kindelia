@@ -23,7 +23,9 @@ use kindelia_client::ApiClient;
 use kindelia_common::{crypto, Name};
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::config::{ApiConfig, MineConfig, NodeConfig, UiConfig};
+use kindelia_core::config::{
+  ApiConfig, MineConfig, NodeConfig, UiConfig, WsConfig,
+};
 use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
@@ -255,13 +257,7 @@ pub fn run_cli() -> anyhow::Result<()> {
         NodeCommand::Clean { command } => {
           clean(&data_path, command).context("Could not clean kindelia's data")
         }
-        NodeCommand::Start {
-          initial_peers,
-          mine,
-          json,
-          ws_certificate,
-          ws_key,
-        } => {
+        NodeCommand::Start { initial_peers, mine, json } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
@@ -295,6 +291,14 @@ pub fn run_cli() -> anyhow::Result<()> {
             .build()?
             .resolve_from_file_only(config)?;
 
+          let ws_config = ConfigSettingsBuilder::default()
+            .prop("node.ws".to_string())
+            .default_value(|| Ok(WsConfig::default()))
+            .build()?
+            .resolve_from_file_only(config)?;
+
+          eprintln!("WsConfig {:?}", ws_config);
+
           // Start
           let node_comm =
             init_socket().context("Could not open a UDP socket")?;
@@ -311,7 +315,7 @@ pub fn run_cli() -> anyhow::Result<()> {
               json,
               tags: vec![events::NodeEventDiscriminant::Heartbeat],
             }),
-            ws: None, // TODO: load from config file
+            ws: Some(ws_config),
           };
 
           let api_config = Some(api_config);
@@ -749,7 +753,7 @@ fn clean(data_path: &Path, command: NodeCleanCommand) -> anyhow::Result<()> {
 // Node main thread
 // ================
 
-// event threads
+// TODO: refactor return value
 #[allow(clippy::type_complexity)]
 pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
   ws_config: kindelia_core::config::WsConfig,
@@ -757,21 +761,14 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
   addr: A,
 ) -> anyhow::Result<(
   std::sync::mpsc::Sender<(events::NodeEventType, u128)>,
+  tokio::sync::broadcast::Sender<events::NodeEventType>,
   Vec<std::thread::JoinHandle<()>>,
 )> {
   let (event_tx, event_rx) =
     std::sync::mpsc::channel::<(events::NodeEventType, u128)>();
   let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel(ws_config.buffer_size);
 
-  eprintln!("Events WS on port: {}", ws_config.port);
   let ws_tx1 = ws_tx.clone();
-  let thread_1 =
-    std::thread::spawn(move || {
-      kindelia_ws::ws_loop::<
-        events::NodeEventType,
-        events::NodeEventDiscriminant,
-      >(ws_config.port, ws_tx1, ws_config.certificate, ws_config.key);
-    });
 
   let ws_tx2 = ws_tx;
   let thread_2 = std::thread::spawn(move || {
@@ -799,7 +796,7 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
     }
   });
 
-  Ok((event_tx, vec![thread_1, thread_2]))
+  Ok((event_tx, ws_tx1, vec![thread_2]))
 }
 
 // TODO: I don't know why 'static is needed here or why it works
@@ -820,14 +817,14 @@ pub fn start_node<C: ProtoComm + 'static>(
 
   // Events
   #[cfg(feature = "events")]
-  let event_tx = {
-    let (event_tx, event_thrds) = spawn_event_handlers(
+  let (event_tx, ws_tx) = {
+    let (event_tx, ws_tx, event_thrds) = spawn_event_handlers(
       node_config.ws.unwrap_or_default(),
       node_config.ui,
       addr,
     )?;
     threads.extend(event_thrds);
-    event_tx
+    (event_tx, ws_tx)
   };
 
   // Mining
@@ -854,7 +851,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   // Spawns the API thread
   if let Some(api_config) = api_config {
     let api_thread = std::thread::spawn(move || {
-      kindelia_server::http_api_loop(node_query_sender, api_config);
+      kindelia_server::http_api_loop(node_query_sender, api_config, ws_tx);
     });
     threads.push(api_thread);
   }

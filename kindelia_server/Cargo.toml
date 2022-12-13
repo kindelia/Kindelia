@@ -9,6 +9,7 @@ edition = "2021"
 kindelia_common = { path = "../kindelia_common" }
 kindelia_lang = { path = "../kindelia_lang" }
 kindelia_core = { path = "../kindelia_core" }
+kindelia_ws = { path = "../kindelia_ws" }
 
 bit-vec = "0.6.3"
 hex = "0.4"

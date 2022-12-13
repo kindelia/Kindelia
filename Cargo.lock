@@ -1579,6 +1579,7 @@ dependencies = [
  "kindelia_common",
  "kindelia_core",
  "kindelia_lang",
+ "kindelia_ws",
  "serde",
  "serde_json",
  "tokio",

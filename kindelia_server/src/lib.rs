@@ -2,10 +2,12 @@ use std::str::FromStr;
 use std::sync::mpsc::SyncSender;
 
 use bit_vec::BitVec;
+use kindelia_core::events;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::body;
 use warp::hyper::StatusCode;
@@ -20,8 +22,8 @@ use kindelia_core::api::{
 };
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::ApiConfig;
-use kindelia_core::runtime::{StatementErr, StatementInfo};
 use kindelia_core::net::ProtoComm;
+use kindelia_core::runtime::{StatementErr, StatementInfo};
 use kindelia_lang::ast;
 
 // Util
@@ -152,17 +154,19 @@ async fn handle_rejection(
 pub fn http_api_loop<C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
   api_config: ApiConfig,
+  ws_tx: broadcast::Sender<events::NodeEventType>,
 ) {
   let runtime = tokio::runtime::Runtime::new().unwrap();
 
   runtime.block_on(async move {
-    api_serve::<C>(node_query_sender, api_config).await;
+    api_serve::<C>(node_query_sender, api_config, ws_tx).await;
   });
 }
 
 async fn api_serve<'a, C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
   api_config: ApiConfig,
+  ws_tx: broadcast::Sender<events::NodeEventType>,
 ) {
   async fn ask<T, C: ProtoComm>(
     node_query_tx: SyncSender<NodeRequest<C>>,
@@ -500,13 +504,19 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   // == Favicon ==
 
-  let favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
+  let no_favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
     warp::reply::with_status(reply, warp::http::StatusCode::NO_CONTENT)
   });
 
   // ==
 
+  let ws_router = kindelia_ws::ws_router::<
+    events::NodeEventType,
+    events::NodeEventDiscriminant,
+  >(ws_tx);
+
   let app = root
+    .or(no_favicon)
     .or(get_stats)
     .or(blocks_router)
     .or(functions_router)
@@ -514,7 +524,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     .or(peers_router)
     .or(constructor_router)
     .or(reg_router)
-    .or(favicon);
+    .or(ws_router);
 
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
