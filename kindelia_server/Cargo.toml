@@ -2,8 +2,9 @@
 name = "kindelia_server"
 version = "0.1.7"
 edition = "2021"
-
-# Docs: https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "An efficient, secure cryptocomputer."
+license = "MIT"
+repository = "https://github.com/Kindelia/Kindelia"
 
 
 [dependencies]
