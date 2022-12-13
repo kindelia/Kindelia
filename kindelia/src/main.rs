@@ -298,8 +298,6 @@ pub fn run_cli() -> anyhow::Result<()> {
             .build()?
             .resolve_from_file_only(config)?;
 
-          eprintln!("WsConfig {:?}", ws_config);
-
           // Start
           let node_comm =
             init_socket().context("Could not open a UDP socket")?;

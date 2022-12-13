@@ -51,7 +51,7 @@ where
   warp::any().map(move || ws_tx.clone())
 }
 
-pub async fn ws_handler<T, D>(
+async fn ws_handler<T, D>(
   ws: warp::ws::Ws,
   ws_tx: broadcast::Sender<T>,
   query: Query,
