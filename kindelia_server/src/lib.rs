@@ -497,6 +497,13 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   let peers_router = get_peers.or(get_all_peers);
 
+
+  // == Favicon ==
+
+  let favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
+    warp::reply::with_status(reply, warp::http::StatusCode::NO_CONTENT)
+  });
+
   // ==
 
   let app = root
@@ -506,7 +513,8 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     .or(interact_router)
     .or(peers_router)
     .or(constructor_router)
-    .or(reg_router);
+    .or(reg_router)
+    .or(favicon);
 
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {
