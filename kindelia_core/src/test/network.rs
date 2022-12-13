@@ -53,8 +53,12 @@ fn network() {
         temp_dir().path.join(".kindelia").join(format!(".test-{}", addr));
 
       #[cfg(feature = "events")]
-      let ws_config =
-        config::WsConfig { port: 30000 + (addr as u16), buffer_size: 1024 * 2 };
+      let ws_config = config::WsConfig {
+        port: 30000 + (addr as u16),
+        buffer_size: 1024 * 2,
+        certificate: None,
+        key: None,
+      };
 
       let mine_cfg = config::MineConfigBuilder::default()
         .enabled(true)

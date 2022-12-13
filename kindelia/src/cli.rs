@@ -238,6 +238,10 @@ pub enum NodeCommand {
     /// Log events as JSON
     #[clap(long, short)]
     json: bool,
+    #[clap(long, requires("ws_key"))]
+    ws_certificate: Option<PathBuf>,
+    #[clap(long, requires("ws_certificate"))]
+    ws_key: Option<PathBuf>,
   },
 }
 

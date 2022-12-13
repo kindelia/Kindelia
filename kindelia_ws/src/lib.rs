@@ -5,6 +5,7 @@ use warp::ws::{Message, WebSocket};
 use warp::{Filter, Rejection, Reply};
 
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 #[derive(serde::Deserialize)]
@@ -26,19 +27,27 @@ struct Query {
 /// order to be serde::Serializable, so the json encoding can be performed
 /// and in order to have `Discriminant` type, that is used to specify filtrable
 /// string tags for the clients.
-pub fn ws_loop<T, D>(port: u16, ws_tx: broadcast::Sender<T>)
-where
+pub fn ws_loop<T, D>(
+  port: u16,
+  ws_tx: broadcast::Sender<T>,
+  ws_certificate: Option<PathBuf>,
+  ws_key: Option<PathBuf>,
+) where
   T: Send + Clone + Serialize + 'static,
   D: Send + From<T> + FromStr<Err = String> + Eq + 'static,
 {
   let runtime = tokio::runtime::Runtime::new().unwrap();
   runtime.block_on(async move {
-    ws_server::<T, D>(port, ws_tx).await;
+    ws_server::<T, D>(port, ws_tx, ws_certificate, ws_key).await;
   });
 }
 
-async fn ws_server<T, D>(port: u16, ws_tx: broadcast::Sender<T>)
-where
+async fn ws_server<T, D>(
+  port: u16,
+  ws_tx: broadcast::Sender<T>,
+  ws_certificate: Option<PathBuf>,
+  ws_key: Option<PathBuf>,
+) where
   T: Send + Clone + Serialize + 'static,
   D: Send + From<T> + FromStr<Err = String> + Eq + 'static,
 {
@@ -46,7 +55,19 @@ where
     .and(with_rx(ws_tx.clone()))
     .and(warp::query::<QueryParams>().map(parse_query))
     .and_then(ws_handler::<T, D>);
-  warp::serve(ws_route).run(([0, 0, 0, 0], port)).await;
+
+  if let (Some(ws_certificate), Some(ws_key)) = (ws_certificate, ws_key) {
+    // run wss:// server
+    warp::serve(ws_route)
+      .tls()
+      .cert_path(ws_certificate)
+      .key_path(ws_key)
+      .run(([0, 0, 0, 0], port))
+      .await;
+  } else {
+    // run ws:// server
+    warp::serve(ws_route).run(([0, 0, 0, 0], port)).await;
+  }
 }
 
 fn parse_query(query: QueryParams) -> Query {
@@ -88,6 +109,7 @@ async fn client_connection<T, D>(
   T: Send + Clone + Serialize + 'static,
   D: Send + From<T> + FromStr<Err = String> + Eq,
 {
+  println!("VASCOOOOOO");
   let (mut client_ws_sender, _) = ws.split();
   let mut ws_rx = ws_tx.subscribe();
   let mut count = 0;

@@ -65,10 +65,12 @@ impl Default for ApiConfig {
 pub struct WsConfig {
   pub port: u16,
   pub buffer_size: usize,
+  pub certificate: Option<PathBuf>,
+  pub key: Option<PathBuf>,
 }
 
 impl Default for WsConfig {
   fn default() -> Self {
-    WsConfig { port: 3000, buffer_size: 1024 * 2 }
+    WsConfig { port: 3000, buffer_size: 1024 * 2, certificate: None, key: None }
   }
 }

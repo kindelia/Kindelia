@@ -255,7 +255,13 @@ pub fn run_cli() -> anyhow::Result<()> {
         NodeCommand::Clean { command } => {
           clean(&data_path, command).context("Could not clean kindelia's data")
         }
-        NodeCommand::Start { initial_peers, mine, json } => {
+        NodeCommand::Start {
+          initial_peers,
+          mine,
+          json,
+          ws_certificate,
+          ws_key,
+        } => {
           // TODO: refactor config resolution out of command handling (how?)
 
           // Get arguments from cli, env or config
@@ -759,12 +765,13 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
 
   eprintln!("Events WS on port: {}", ws_config.port);
   let ws_tx1 = ws_tx.clone();
-  let thread_1 = std::thread::spawn(move || {
-    kindelia_ws::ws_loop::<events::NodeEventType, events::NodeEventDiscriminant>(
-      ws_config.port,
-      ws_tx1,
-    );
-  });
+  let thread_1 =
+    std::thread::spawn(move || {
+      kindelia_ws::ws_loop::<
+        events::NodeEventType,
+        events::NodeEventDiscriminant,
+      >(ws_config.port, ws_tx1, ws_config.certificate, ws_config.key);
+    });
 
   let ws_tx2 = ws_tx;
   let thread_2 = std::thread::spawn(move || {
