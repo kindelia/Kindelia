@@ -12,41 +12,26 @@ struct QueryParams {
   tags: Option<String>,
 }
 
-struct Query {
+pub struct Query {
   tags: Vec<String>,
 }
 
-/// Main function of the lib. This will spawn a tokio runtime and
-/// block in a task that contains a websocket server.
+/// As the main function of this crate, this will define a Warp filter that
+/// handles all the connections to the WebSocket events API.
 ///
-/// This websocket server is responsible to share with all of
-/// its clients (broadcast) the enum item sended by the channel `ws_tx`.
-///
-/// This enum item must implement `SerializableWithDiscriminant` in
-/// order to be serde::Serializable, so the json encoding can be performed
-/// and in order to have `Discriminant` type, that is used to specify filtrable
-/// string tags for the clients.
-pub fn ws_loop<T, D>(port: u16, ws_tx: broadcast::Sender<T>)
+/// This websocket endpoint will share with all of its clients (broadcast) the
+/// items comming from the `ws_tx` channel.
+pub fn ws_router<T, D>(
+  ws_tx: broadcast::Sender<T>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Sized
 where
   T: Send + Clone + Serialize + 'static,
   D: Send + From<T> + FromStr<Err = String> + Eq + 'static,
 {
-  let runtime = tokio::runtime::Runtime::new().unwrap();
-  runtime.block_on(async move {
-    ws_server::<T, D>(port, ws_tx).await;
-  });
-}
-
-async fn ws_server<T, D>(port: u16, ws_tx: broadcast::Sender<T>)
-where
-  T: Send + Clone + Serialize + 'static,
-  D: Send + From<T> + FromStr<Err = String> + Eq + 'static,
-{
-  let ws_route = warp::ws()
-    .and(with_rx(ws_tx.clone()))
+    warp::ws()
+    .and(with_rx(ws_tx))
     .and(warp::query::<QueryParams>().map(parse_query))
-    .and_then(ws_handler::<T, D>);
-  warp::serve(ws_route).run(([0, 0, 0, 0], port)).await;
+    .and_then(ws_handler::<T, D>)
 }
 
 fn parse_query(query: QueryParams) -> Query {

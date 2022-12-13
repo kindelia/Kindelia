@@ -246,7 +246,13 @@ impl ArgumentFrom<toml::Value> for bool {
 
 impl ArgumentFrom<toml::Value> for kindelia_core::config::ApiConfig {
   fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
-    t.try_into().context("Could not convert value into array")
+    t.try_into().context("Could not convert value into ApiConfig")
+  }
+}
+
+impl ArgumentFrom<toml::Value> for kindelia_core::config::WsConfig {
+  fn arg_from(t: toml::Value) -> anyhow::Result<Self> {
+    t.try_into().context("Could not convert value into WsConfig")
   }
 }
 

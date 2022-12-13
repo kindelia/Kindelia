@@ -20,8 +20,8 @@ use kindelia_core::api::{
 };
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::ApiConfig;
-use kindelia_core::runtime::{StatementErr, StatementInfo};
 use kindelia_core::net::ProtoComm;
+use kindelia_core::runtime::{StatementErr, StatementInfo};
 use kindelia_lang::ast;
 
 // Util
@@ -149,20 +149,14 @@ async fn handle_rejection(
   }
 }
 
-pub fn http_api_loop<C: ProtoComm + 'static>(
+pub async fn api_serve<'a, C: ProtoComm + 'static>(
   node_query_sender: SyncSender<NodeRequest<C>>,
   api_config: ApiConfig,
-) {
-  let runtime = tokio::runtime::Runtime::new().unwrap();
-
-  runtime.block_on(async move {
-    api_serve::<C>(node_query_sender, api_config).await;
-  });
-}
-
-async fn api_serve<'a, C: ProtoComm + 'static>(
-  node_query_sender: SyncSender<NodeRequest<C>>,
-  api_config: ApiConfig,
+  ws_router: impl warp::Filter<Extract = (impl Reply,), Error = Rejection>
+    + Clone
+    + Send
+    + Sync
+    + 'static,
 ) {
   async fn ask<T, C: ProtoComm>(
     node_query_tx: SyncSender<NodeRequest<C>>,
@@ -497,16 +491,20 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
 
   let peers_router = get_peers.or(get_all_peers);
 
-
   // == Favicon ==
 
-  let favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
+  let no_favicon = path!("favicon.ico").map(warp::reply).map(|reply| {
     warp::reply::with_status(reply, warp::http::StatusCode::NO_CONTENT)
   });
 
-  // ==
+  // == Events ==
+
+  let events_router = path!("events").and(ws_router);
+
+  // == Server ==
 
   let app = root
+    .or(no_favicon)
     .or(get_stats)
     .or(blocks_router)
     .or(functions_router)
@@ -514,7 +512,7 @@ async fn api_serve<'a, C: ProtoComm + 'static>(
     .or(peers_router)
     .or(constructor_router)
     .or(reg_router)
-    .or(favicon);
+    .or(events_router);
 
   let app = app.recover(handle_rejection);
   let app = app.map(|reply| {

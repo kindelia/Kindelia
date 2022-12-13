@@ -63,12 +63,11 @@ impl Default for ApiConfig {
 #[derive(Debug, Clone, Builder, Serialize, Deserialize)]
 #[builder(setter(strip_option))]
 pub struct WsConfig {
-  pub port: u16,
   pub buffer_size: usize,
 }
 
 impl Default for WsConfig {
   fn default() -> Self {
-    WsConfig { port: 3000, buffer_size: 1024 * 2 }
+    WsConfig { buffer_size: 1024 * 2 }
   }
 }
