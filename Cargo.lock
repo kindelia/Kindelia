@@ -1483,7 +1483,7 @@ checksum = "f9b7d56ba4a8344d6be9729995e6b06f928af29998cdf79fe390cbf6b1fee838"
 
 [[package]]
 name = "kindelia"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_client"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "kindelia_core",
  "kindelia_lang",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_common"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bit-vec",
  "hex",
@@ -1533,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_core"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bit-vec",
  "chrono",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_lang"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "hex",
  "kindelia_common",
@@ -1573,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_server"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "bit-vec",
  "hex",
@@ -1589,7 +1589,7 @@ dependencies = [
 
 [[package]]
 name = "kindelia_ws"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "futures-util",
  "serde",

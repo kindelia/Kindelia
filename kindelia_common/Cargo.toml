@@ -1,13 +1,16 @@
 [package]
 name = "kindelia_common"
-version = "0.1.5"
+version = "0.1.7"
 edition = "2021"
 description = "An efficient, secure cryptocomputer."
 license = "MIT"
 repository = "https://github.com/Kindelia/Kindelia"
 
+# Docs: https://doc.rust-lang.org/cargo/reference/manifest.html
+
 
 [dependencies]
+
 # nohash-hasher = "0.2.0" # inlined, because we need u128
 serde = { version = "1.0.137", features = ["derive"] }
 

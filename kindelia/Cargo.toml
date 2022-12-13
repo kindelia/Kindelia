@@ -1,6 +1,6 @@
 [package]
 name = "kindelia"
-version = "0.1.5"
+version = "0.1.7"
 edition = "2021"
 description = "An efficient, secure cryptocomputer."
 license = "MIT"
@@ -19,12 +19,12 @@ bench = false
 
 
 [dependencies]
-kindelia_common = { path = "../kindelia_common" }
-kindelia_lang = { path = "../kindelia_lang" }
-kindelia_core = { path = "../kindelia_core" }
-kindelia_client = { path = "../kindelia_client" }
-kindelia_server = { path = "../kindelia_server" }
-kindelia_ws = { path = "../kindelia_ws" }
+kindelia_common = { path = "../kindelia_common", version = "0.1.7" }
+kindelia_lang = { path = "../kindelia_lang", version = "0.1.7" }
+kindelia_core = { path = "../kindelia_core", version = "0.1.7" }
+kindelia_client = { path = "../kindelia_client", version = "0.1.7" }
+kindelia_server = { path = "../kindelia_server", version = "0.1.7" }
+kindelia_ws = { path = "../kindelia_ws", version = "0.1.7" }
 
 # Util
 anyhow = { version = "1.0.66", features = ["backtrace"] }

@@ -1,6 +1,6 @@
 [package]
 name = "kindelia_core"
-version = "0.1.5"
+version = "0.1.7"
 edition = "2021"
 description = "An efficient, secure cryptocomputer."
 license = "MIT"
@@ -21,8 +21,9 @@ harness = false
 
 
 [dependencies]
-kindelia_common = { path = "../kindelia_common" }
-kindelia_lang = { path = "../kindelia_lang" }
+
+kindelia_common = { path = "../kindelia_common", version = "0.1.7" }
+kindelia_lang = { path = "../kindelia_lang", version = "0.1.7" }
 
 fastrand = "1.7.0"
 rand = "0.8.5"
