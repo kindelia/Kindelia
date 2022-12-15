@@ -1592,6 +1592,7 @@ name = "kindelia_ws"
 version = "0.1.7"
 dependencies = [
  "futures-util",
+ "kindelia_core",
  "serde",
  "serde_json",
  "tokio",

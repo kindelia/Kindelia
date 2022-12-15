@@ -8,6 +8,7 @@ repository = "https://github.com/Kindelia/Kindelia"
 
 
 [dependencies]
+kindelia_core = { path = "../kindelia_core" }
 
 futures-util = { version = "0.3.21" }
 serde = { version = "1.0.137", features = ["derive"] }

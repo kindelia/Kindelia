@@ -848,10 +848,7 @@ pub fn start_node<C: ProtoComm + 'static>(
   );
 
   // WebSocket API router
-  let ws_router = kindelia_ws::ws_router::<
-    events::NodeEventType,
-    events::NodeEventDiscriminant,
-  >(ws_tx);
+  let ws_router = kindelia_ws::ws_router(ws_tx);
 
   // Spawns the API thread
   if let Some(api_config) = api_config {
