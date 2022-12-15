@@ -95,9 +95,7 @@ macro_rules! discriminant {
   };
 }
 
-// Clap CLI definitions
-// ====================
-
+/// Clap CLI definitions
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
@@ -314,6 +312,7 @@ pub enum GetKind {
     #[clap(subcommand)]
     stat_kind: Option<GetStatsKind>,
   },
+  /// Get node peers
   Peers {
     /// Get all seen peers, including inactive ones
     #[clap(long)]

@@ -24,8 +24,9 @@ use kindelia_lang::ast::{self, Name};
 // Util
 // ====
 
-// Hexadecimal string to U256
-pub fn hex_to_u256(hex: &str) -> Result<U256, String> {
+/// TODO: remove this
+/// Hexadecimal string to U256
+fn hex_to_u256(hex: &str) -> Result<U256, String> {
   let bytes = hex::decode(hex);
   let bytes = match bytes {
     Ok(bytes) => bytes,
@@ -84,7 +85,7 @@ fn bitvec_to_hex(bits: &BitVec) -> String {
 // ======
 
 #[derive(Debug)]
-pub struct NotFound {
+struct NotFound {
   message: String,
 }
 
