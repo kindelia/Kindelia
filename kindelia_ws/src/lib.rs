@@ -12,7 +12,7 @@ struct QueryParams {
   tags: Option<String>,
 }
 
-pub struct Query {
+struct Query {
   tags: Vec<String>,
 }
 
@@ -28,7 +28,7 @@ where
   T: Send + Clone + Serialize + 'static,
   D: Send + From<T> + FromStr<Err = String> + Eq + 'static,
 {
-    warp::ws()
+  warp::ws()
     .and(with_rx(ws_tx))
     .and(warp::query::<QueryParams>().map(parse_query))
     .and_then(ws_handler::<T, D>)

@@ -3,22 +3,19 @@ pub mod nohash_hasher;
 
 pub use primitive_types::U256;
 
-use std::fmt;
 use std::str::FromStr;
 use std::string::ToString;
+use std::{fmt, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 
 // U120
 // ====
 
-/// A unsigned 120 bit integer: the native unboxed integer type
-/// of the Kindelia's HVM.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(into = "String", try_from = "&str")]
 #[repr(transparent)]
-pub struct U120(pub u128);
+pub struct U120(u128);
 
 impl U120 {
   pub const ZERO: U120 = U120(0);
@@ -245,11 +242,23 @@ impl Name {
     Name(numb)
   }
 
-  /// Converts a name string to a Name. Same as `from_str`, but panics when name
-  /// length > 12 or on invalid letter. It also does not handle `~` (NONE)
-  /// syntax. **DEPRECATED**.
+  #[allow(clippy::should_implement_trait)]
+  pub fn from_str(name_txt: &str) -> Result<Self, String> {
+    if name_txt.len() > Self::MAX_CHARS {
+      Err(format!("Name '{}' exceeds {} letters.", name_txt, Self::MAX_CHARS))
+    } else {
+      let mut num: u128 = 0;
+      for chr in name_txt.chars() {
+        num = (num << 6) + char_to_code(chr)?;
+      }
+      Ok(Name(num))
+    }
+  }
+
+  /// Converts a name string to a Name. Same as `from_str`, but panics
+  /// when name length > 12 or on invalid letter. **DEPRECATED**.
   // TODO: This should be removed.
-  pub fn from_str_unsafe(name_txt: &str) -> Name {
+  pub fn from_str_unsafe(name_txt: &str) -> Self {
     let mut num: u128 = 0;
     for (i, chr) in name_txt.chars().enumerate() {
       debug_assert!(i < Self::MAX_CHARS, "Name too big: `{}`.", name_txt);
@@ -260,13 +269,6 @@ impl Name {
 
   pub fn show_hex(&self) -> String {
     format!("#x{:0>30x}", **self)
-  }
-}
-
-impl std::ops::Deref for Name {
-  type Target = u128;
-  fn deref(&self) -> &Self::Target {
-    &self.0
   }
 }
 
@@ -293,6 +295,13 @@ impl fmt::Display for Name {
       name.chars().rev().collect()
     };
     f.write_str(&name)
+  }
+}
+
+impl Deref for Name {
+  type Target = u128;
+  fn deref(&self) -> &Self::Target {
+    &self.0
   }
 }
 

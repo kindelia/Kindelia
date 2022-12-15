@@ -1,23 +1,19 @@
 #![allow(clippy::style)]
 
-use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 
-use bit_vec::BitVec;
 use primitive_types::U256;
 use priority_queue::PriorityQueue;
-use rand::seq::IteratorRandom;
-use serde::{Deserialize, Serialize};
 use sha3::Digest;
-use thiserror::Error;
 
-use kindelia_common::crypto::{self, Hashed, Keccakable};
+use kindelia_common::crypto::Keccakable;
 use kindelia_common::Name;
 use kindelia_lang::ast::Statement;
 use kindelia_lang::parser;
+use thiserror::Error;
 
 use crate::api::{self, CtrInfo, RegInfo};
 use crate::api::{BlockInfo, FuncInfo, NodeRequest};
@@ -31,9 +27,9 @@ use crate::runtime::*;
 use crate::util::*;
 
 use crate::events::{NodeEventEmittedInfo, NodeEventType};
-use crate::heartbeat;
+use crate::heartbeat_gen;
 
-macro_rules! emit_event {
+macro_rules! event {
   ($tx: expr, $event: expr) => {
     #[cfg(feature = "events")]
     if let Some(ref tx) = $tx {
@@ -42,20 +38,7 @@ macro_rules! emit_event {
       }
     }
   };
-
-  ($tx: expr, $event: expr, tags = $($tag:ident),+) => {
-    #[cfg(feature = "events")]
-    // #[cfg(any(all, $($tag),+))]
-    if let Some(ref tx) = $tx {
-      if let Err(_) = tx.send(($event, get_time_micro())) {
-        eprintln!("Could not send event");
-      }
-    }
-  };
 }
-
-// Block
-// =====
 
 // Kindelia's block format is agnostic to HVM. A Transaction is just a vector of
 // bytes. A Body groups transactions in a single combined vector of bytes, using
@@ -66,382 +49,624 @@ macro_rules! emit_event {
 // TX_COUNT is a single byte storing the number of transactions in this block.
 // The length of each transaction is stored using 2 bytes, called LEN.
 
-// Transaction
-// -----------
+pub use transaction::{Transaction, TransactionError};
+/// Transaction
+mod transaction {
+  use std::ops::Deref;
 
-/// Represents transaction inside a block. It's a list of bytes with non-zero
-/// multiple-of-5 number of bytes.
-#[derive(Debug, Clone, Eq)]
-pub struct Transaction {
-  data: Vec<u8>,
-  pub hash: U256,
-}
+  use bit_vec::BitVec;
+  use kindelia_lang::ast::Statement;
+  use primitive_types::U256;
+  use serde::{Deserialize, Serialize};
+  use thiserror::Error;
 
-/// Transaction's error handling
-#[derive(Debug, Error, Serialize, Deserialize)]
-pub enum TransactionError {
-  #[error(
-    "Transaction size ({len}) is greater than max transaction size ({})",
-    MAX_TRANSACTION_SIZE
-  )]
-  Oversize { len: usize },
-}
+  use crate::bits::ProtoSerialize;
 
-impl Transaction {
-  pub fn new(mut data: Vec<u8>) -> Result<Self, TransactionError> {
-    // Transaction length is always a non-zero multiple of 5
-    while data.len() == 0 || data.len() % 5 != 0 {
-      data.push(0);
+  use super::{
+    hash_bytes, MAX_BODY_SIZE, MAX_TRANSACTION_SIZE,
+    TRANSACTION_LENGTH_ENCODE_SIZE,
+  };
+
+  /// Represents transaction inside a block. It's a list of bytes with non-zero
+  /// multiple-of-5 number of bytes.
+  #[derive(Debug, Clone, Eq)]
+  pub struct Transaction {
+    data: Vec<u8>,
+    pub hash: U256,
+  }
+
+  /// Transaction's error handling
+  #[derive(Debug, Error, Serialize, Deserialize)]
+  pub enum TransactionError {
+    #[error(
+      "Transaction size ({len}) is greater than max transaction size ({})",
+      MAX_TRANSACTION_SIZE
+    )]
+    Oversize { len: usize },
+  }
+
+  impl Transaction {
+    pub fn new(mut data: Vec<u8>) -> Result<Self, TransactionError> {
+      // Transaction length is always a non-zero multiple of 5
+      while data.len() == 0 || data.len() % 5 != 0 {
+        data.push(0);
+      }
+      if data.len() > MAX_TRANSACTION_SIZE {
+        return Err(TransactionError::Oversize { len: data.len() });
+      }
+      let hash = hash_bytes(&data);
+      Ok(Transaction { data, hash })
     }
-    if data.len() > MAX_TRANSACTION_SIZE {
-      return Err(TransactionError::Oversize { len: data.len() });
+
+    // Encodes a transaction length as a pair of 2 bytes
+    pub fn encode_length(&self) -> (u8, u8) {
+      let len = self.data.len() as u16;
+      let num = (len as u16).reverse_bits();
+      (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
     }
-    let hash = hash_bytes(&data);
-    Ok(Transaction { data, hash })
-  }
 
-  // Encodes a transaction length as a pair of 2 bytes
-  pub fn encode_length(&self) -> (u8, u8) {
-    let len = self.data.len() as u16;
-    let num = (len as u16).reverse_bits();
-    (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
-  }
-
-  // Decodes an encoded transaction length
-  fn decode_length(pair: (u8, u8)) -> usize {
-    (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
-  }
-
-  pub fn to_statement(&self) -> Option<Statement> {
-    Statement::proto_deserialized(&BitVec::from_bytes(&self.data))
-  }
-}
-
-impl Deref for Transaction {
-  type Target = [u8];
-  fn deref(&self) -> &[u8] {
-    &self.data
-  }
-}
-
-impl TryFrom<&Statement> for Transaction {
-  type Error = TransactionError;
-  fn try_from(stmt: &Statement) -> Result<Self, Self::Error> {
-    Transaction::new(stmt.proto_serialized().to_bytes())
-  }
-}
-
-impl PartialEq for Transaction {
-  fn eq(&self, other: &Self) -> bool {
-    self.hash == other.hash
-  }
-}
-
-impl std::hash::Hash for Transaction {
-  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-    self.hash.hash(state);
-  }
-}
-
-// Block body
-// ----------
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Body {
-  pub data: Vec<u8>,
-}
-
-impl Body {
-  /// Fills block body with first transactions from iterator that fit.
-  pub fn fill_from<I, T>(transactions: I) -> Body
-  where
-    I: IntoIterator<Item = T>,
-    T: Into<Transaction>,
-  {
-    let mut body_vec = vec![0];
-    let mut tx_count = 0;
-    for transaction in transactions.into_iter() {
-      let transaction = transaction.into();
-      let tx_len = transaction.data.len();
-      if tx_len == 0 {
-        continue;
-      }
-      if tx_count + 1 > 255 {
-        break;
-      }
-      if add_transaction_to_body_vec(&mut body_vec, &transaction).is_err() {
-        break;
-      }
-      tx_count += 1;
+    // Decodes an encoded transaction length
+    pub fn decode_length(pair: (u8, u8)) -> usize {
+      (((pair.0 as u16) << 8) | (pair.1 as u16)).reverse_bits() as usize
     }
-    body_vec[0] = (tx_count as u8).reverse_bits();
-    Body { data: body_vec }
-  }
 
-  /// Build a body from a sequence of transactions.
-  /// Fails if they can't fit in a block body.
-  pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
-  where
-    I: IntoIterator<Item = T>,
-    T: TryInto<Transaction>,
-  {
-    // Reserve a byte in the beginning for the number of transactions
-    let mut data = vec![0];
-    let mut tx_count = 0;
-    for transaction in transactions.into_iter() {
-      let transaction = transaction.try_into().map_err(|_| ())?;
-      // Ignore transaction if it's empty
-      let tx_len = transaction.data.len();
-      if tx_len == 0 {
-        continue;
-      }
-      // Fails if there's no space left for the transaction
-      if data.len() + 2 + tx_len > MAX_BODY_SIZE {
-        return Err(());
-      }
-      // Fails if tx count overflows 255, as we store it in a single byte.
-      if tx_count + 1 > 255 {
-        return Err(());
-      }
-      tx_count += 1;
-      // Pair of bytes we will store as the length
-      let len_bytes = transaction.encode_length();
-      data.push(len_bytes.0);
-      data.push(len_bytes.1);
-      data.extend_from_slice(&transaction.data);
+    pub fn to_statement(&self) -> Option<Statement> {
+      Statement::proto_deserialized(&BitVec::from_bytes(&self.data))
     }
-    // Finally stores resulting transaction count on the first byte
-    data[0] = (tx_count as u8).reverse_bits();
-    Ok(Body { data })
+
+    /// Puts transaction inside `body_vec` if space is suficient
+    pub fn add_to_body_vec(
+      &self,
+      body_vec: &mut Vec<u8>,
+    ) -> Result<(), String> {
+      let tx_len = self.data.len() + TRANSACTION_LENGTH_ENCODE_SIZE;
+      let len_info = self.encode_length();
+      if body_vec.len() + tx_len > MAX_BODY_SIZE {
+        return Err("No enough space in block".to_string());
+      }
+      body_vec.push(len_info.0);
+      body_vec.push(len_info.1);
+      body_vec.extend_from_slice(&self.data);
+      Ok(())
+    }
+
+    /// returns the transaction `data` length
+    pub fn len(&self) -> usize {
+      self.data.len()
+    }
+
+    pub fn data(&self) -> &Vec<u8> {
+      &self.data
+    }
+  }
+
+  impl Deref for Transaction {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+      &self.data
+    }
+  }
+
+  impl TryFrom<&Statement> for Transaction {
+    type Error = TransactionError;
+    fn try_from(stmt: &Statement) -> Result<Self, Self::Error> {
+      Transaction::new(stmt.proto_serialized().to_bytes())
+    }
+  }
+
+  impl PartialEq for Transaction {
+    fn eq(&self, other: &Self) -> bool {
+      self.hash == other.hash
+    }
+  }
+
+  impl std::hash::Hash for Transaction {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+      self.hash.hash(state);
+    }
+  }
+
+  // needed for serde::Deserialize
+  impl From<&Transaction> for String {
+    fn from(transaction: &Transaction) -> Self {
+      hex::encode(&**transaction)
+    }
   }
 }
 
-// The Block itself
-// ----------------
-
-pub type HashedBlock = Hashed<Block>;
-
-#[derive(Debug, Clone)]
-pub struct Block {
-  /// 32 bytes hash of previous block.
-  pub prev: U256,
-  /// Block timestamp.
-  pub time: u128,
-  /// Block metadata.
-  pub meta: u128,
-  /// Block contents. 1280 bytes max.
-  pub body: Body,
-}
-
-impl Block {
-  pub fn new(prev: U256, time: u128, meta: u128, body: Body) -> Block {
-    Block { prev, time, meta, body }
-  }
-}
-
-impl crypto::Keccakable for Block {
-  fn keccak256(&self) -> crypto::Hash {
-    let mut bytes: Vec<u8> = Vec::new();
-    bytes.extend_from_slice(&u256_to_bytes(self.prev));
-    bytes.extend_from_slice(&u128_to_bytes(self.time));
-    bytes.extend_from_slice(&u128_to_bytes(self.meta));
-    bytes.extend_from_slice(&self.body.data);
-    crypto::Hash::keccak256_from_bytes(&bytes)
-  }
-}
-
-// Node
-// ====
-
-/// Blocks have 4 states of inclusion:
+pub use block::{Block, Body, HashedBlock};
+/// This module stores the representation structure of
+/// a `Block` of a node and all the methods present in it,
+/// like conversions, transactions extractions, etc.
 ///
-///   has wait_list? | is on .pending? | is on .block? | meaning
-///   -------------- | --------------- | ------------- | ------------------------------------------------------
-///   no             | no              | no            | UNSEEN   : never seen, may not exist
-///   yes            | no              | no            | MISSING  : some block cited it, but it wasn't downloaded
-///   yes            | yes             | no            | PENDING  : downloaded, but waiting ancestors for inclusion
-///   no             | no              | yes           | INCLUDED : fully included, as well as all its ancestors
-#[derive(Debug, Clone, PartialEq)]
-pub enum InclusionState {
-  UNSEEN,
-  MISSING,
-  PENDING,
-  INCLUDED,
-}
+/// In addition to the block itself, the `Body` structure
+/// is also stored here.
+mod block {
+  use primitive_types::U256;
 
-// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
-#[rustfmt::skip]
-pub struct Node<C: ProtoComm, S: BlockStorage> {
-  pub network_id : u32,                               // Network ID / magic number
-  pub comm       : C,                                 // UDP socket
-  pub addr       : C::Address,                        // UDP port
-  pub storage    : S,                                 // A `BlockStorage` implementation
-  pub runtime    : Runtime,                           // Kindelia's runtime
-  pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
-  pub pool         : PriorityQueue<Transaction, u64>,   // transactions to be mined
-  pub peers        : PeersStore<C::Address>,            // peers store and state control
-  pub genesis_hash : U256,
-  pub tip        : U256,                           // current tip
-  pub block      : U256Map<HashedBlock>,           // block hash -> block
-  pub pending    : U256Map<HashedBlock>,           // block hash -> downloaded block, waiting for ancestors
-  pub ancestor   : U256Map<U256>,                  // block hash -> hash of its most recent missing ancestor (shortcut jump table)
-  pub wait_list  : U256Map<Vec<U256>>,             // block hash -> hashes of blocks that are waiting for this one
-  pub children   : U256Map<Vec<U256>>,             // block hash -> hashes of this block's children
-  pub work       : U256Map<U256>,                  // block hash -> accumulated work
-  pub target     : U256Map<U256>,                  // block hash -> this block's target
-  pub height     : U256Map<u128>,                  // block hash -> cached height
-  pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
+  use kindelia_common::crypto::{self, Hashed};
 
-  #[cfg(feature = "events")]
-  pub event_emitter : Option<mpsc::Sender<NodeEventEmittedInfo>>,
-  pub miner_comm    : Option<MinerCommunication>,
-}
+  use crate::util::{u128_to_bytes, u256_to_bytes};
 
-/// Pool's error handling
-#[derive(Debug, Error, Serialize, Deserialize)]
-pub enum PoolError {
-  #[error("Transaction {hash} already included on pool")]
-  AlreadyIncluded { hash: api::Hash },
-}
+  use super::{Transaction, MAX_BODY_SIZE};
 
-// Peers
-// -----
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub struct Peer<A: ProtoAddr> {
-  pub seen_at: u128,
-  pub address: A,
-}
-
-pub struct PeersStore<A: ProtoAddr> {
-  seen: HashMap<A, Peer<A>>,
-  active: HashMap<A, Peer<A>>,
-}
-
-impl<A: ProtoAddr> PeersStore<A> {
-  pub fn new() -> PeersStore<A> {
-    PeersStore { seen: HashMap::new(), active: HashMap::new() }
+  /// Block body
+  #[derive(Debug, Clone, PartialEq)]
+  pub struct Body {
+    pub data: Vec<u8>,
   }
 
-  /// This function checks and puts a peer as active on `PeerStore`.
-  pub fn activate(&mut self, addr: &A, peer: Peer<A>) {
-    let now = get_time();
-    // Only activate if its `seen_at` is newer than `now - TIMEOUT`
-    if peer.seen_at >= now - PEER_TIMEOUT {
-      self.active.insert(*addr, peer);
+  impl Body {
+    /// Fills block body with first transactions from iterator that fit.
+    pub fn fill_from<I, T>(transactions: I) -> Body
+    where
+      I: IntoIterator<Item = T>,
+      T: Into<Transaction>,
+    {
+      let mut body_vec = vec![0];
+      let mut tx_count = 0;
+      for transaction in transactions.into_iter() {
+        let transaction = transaction.into();
+        let tx_len = transaction.len();
+        if tx_len == 0 {
+          continue;
+        }
+        if tx_count + 1 > 255 {
+          break;
+        }
+        if transaction.add_to_body_vec(&mut body_vec).is_err() {
+          break;
+        }
+        tx_count += 1;
+      }
+      body_vec[0] = (tx_count as u8).reverse_bits();
+      Body { data: body_vec }
+    }
+
+    /// Build a body from a sequence of transactions.
+    /// Fails if they can't fit in a block body.
+    pub fn from_transactions_iter<I, T>(transactions: I) -> Result<Body, ()>
+    where
+      I: IntoIterator<Item = T>,
+      T: TryInto<Transaction>,
+    {
+      // Reserve a byte in the beginning for the number of transactions
+      let mut data = vec![0];
+      let mut tx_count = 0;
+      for transaction in transactions.into_iter() {
+        let transaction = transaction.try_into().map_err(|_| ())?;
+        // Ignore transaction if it's empty
+        let tx_len = transaction.len();
+        if tx_len == 0 {
+          continue;
+        }
+        // Fails if there's no space left for the transaction
+        if data.len() + 2 + tx_len > MAX_BODY_SIZE {
+          return Err(());
+        }
+        // Fails if tx count overflows 255, as we store it in a single byte.
+        if tx_count + 1 > 255 {
+          return Err(());
+        }
+        tx_count += 1;
+        // Pair of bytes we will store as the length
+        let (fst_len, snd_len) = transaction.encode_length();
+        data.push(fst_len);
+        data.push(snd_len);
+        data.extend_from_slice(transaction.data());
+      }
+      // Finally stores resulting transaction count on the first byte
+      data[0] = (tx_count as u8).reverse_bits();
+      Ok(Body { data })
+    }
+
+    /// Converts a block body to a vector of transactions.
+    pub fn extract_transactions(&self) -> Vec<Transaction> {
+      let mut transactions = Vec::new();
+      let mut index = 1;
+      let tx_count = self.data[0].reverse_bits();
+      for _ in 0..tx_count {
+        if index >= self.data.len() {
+          break;
+        }
+        let tx_len =
+          Transaction::decode_length((self.data[index], self.data[index + 1]));
+        index += 2;
+        if index + tx_len > self.data.len() {
+          break;
+        }
+        let transaction_body = self.data[index..index + tx_len].to_vec();
+        match Transaction::new(transaction_body) {
+          Ok(transaction) => transactions.push(transaction),
+          Err(err) => eprintln!(
+            "A transaction bigger than block was created from a block{}",
+            err
+          ), // in theory this can never happen
+        };
+        index += tx_len;
+      }
+      transactions
     }
   }
 
-  pub fn see_peer(
-    &mut self,
-    peer: Peer<A>,
-    #[cfg(feature = "events")] event_emitter: Option<
-      mpsc::Sender<NodeEventEmittedInfo>,
-    >,
-  ) {
-    let addr = peer.address;
-    match self.seen.get(&addr) {
-      // New peer, not seen before
-      None => {
-        self.seen.insert(addr, peer);
-        emit_event!(
-          event_emitter,
-          NodeEventType::see_peer_not_seen(&peer),
-          tags = peers,
-          see_peer
-        );
-        self.activate(&addr, peer);
+  pub type HashedBlock = Hashed<Block>;
+
+  /// The Block itself
+  #[derive(Debug, Clone)]
+  pub struct Block {
+    /// 32 bytes hash of previous block.
+    pub prev: U256,
+    /// Block timestamp.
+    pub time: u128,
+    /// Block metadata.
+    pub meta: u128,
+    /// Block contents. 1280 bytes max.
+    pub body: Body,
+  }
+
+  impl Block {
+    pub fn new(prev: U256, time: u128, meta: u128, body: Body) -> Block {
+      Block { prev, time, meta, body }
+    }
+
+    pub fn extract_transactions(&self) -> Vec<Transaction> {
+      self.body.extract_transactions()
+    }
+  }
+
+  impl crypto::Keccakable for Block {
+    fn keccak256(&self) -> crypto::Hash {
+      let mut bytes: Vec<u8> = Vec::new();
+      bytes.extend_from_slice(&u256_to_bytes(self.prev));
+      bytes.extend_from_slice(&u128_to_bytes(self.time));
+      bytes.extend_from_slice(&u128_to_bytes(self.meta));
+      bytes.extend_from_slice(&self.body.data);
+      crypto::Hash::keccak256_from_bytes(&bytes)
+    }
+  }
+}
+
+pub use pool::{MemPool, PoolError};
+/// Pool
+mod pool {
+  use priority_queue::PriorityQueue;
+  use serde::{Deserialize, Serialize};
+  use thiserror::Error;
+
+  use crate::api;
+
+  use super::Transaction;
+
+  /// Pool's error handling
+  #[derive(Debug, Error, Serialize, Deserialize)]
+  pub enum PoolError {
+    #[error("Transaction {hash} already included on pool")]
+    AlreadyIncluded { hash: api::Hash },
+  }
+
+  pub type MemPool = PriorityQueue<Transaction, u64>;
+}
+
+pub use peer::{Peer, PeersStore};
+/// Peers
+mod peer {
+  use std::collections::HashMap;
+  use std::sync::mpsc;
+
+  use rand::seq::IteratorRandom;
+
+  use crate::events::{NodeEventEmittedInfo, NodeEventType};
+  use crate::net::ProtoAddr;
+  use crate::util::{get_time, get_time_micro};
+
+  use super::PEER_TIMEOUT;
+
+  #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
+  pub struct Peer<A: ProtoAddr> {
+    pub seen_at: u128,
+    pub address: A,
+  }
+
+  pub struct PeersStore<A: ProtoAddr> {
+    seen: HashMap<A, Peer<A>>,
+    active: HashMap<A, Peer<A>>,
+  }
+
+  impl<A: ProtoAddr> PeersStore<A> {
+    pub fn new() -> PeersStore<A> {
+      PeersStore { seen: HashMap::new(), active: HashMap::new() }
+    }
+
+    /// This function checks and puts a peer as active on `PeerStore`.
+    pub fn activate(&mut self, addr: &A, peer: Peer<A>) {
+      let now = get_time();
+      // Only activate if its `seen_at` is newer than `now - TIMEOUT`
+      if peer.seen_at >= now - PEER_TIMEOUT {
+        self.active.insert(*addr, peer);
       }
-      // Peer seen before, but maybe not active
-      Some(_) => {
-        let old_peer = self.active.get_mut(&addr);
-        match old_peer {
-          // Peer not active, so activate it
-          None => {
-            emit_event!(
-              event_emitter,
-              NodeEventType::see_peer_activated(&peer),
-              tags = peers,
-              see_peer
-            );
-            self.activate(&addr, peer);
-          }
-          // Peer already active, so update it
-          Some(old_peer) => {
-            let new_seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
-            emit_event!(
-              event_emitter,
-              NodeEventType::see_peer_already_active(&old_peer, new_seen_at),
-              tags = peers,
-              see_peer
-            );
-            old_peer.seen_at = new_seen_at;
+    }
+
+    pub fn see_peer(
+      &mut self,
+      peer: Peer<A>,
+      #[cfg(feature = "events")] event_emitter: Option<
+        mpsc::Sender<NodeEventEmittedInfo>,
+      >,
+    ) {
+      let addr = peer.address;
+      match self.seen.get(&addr) {
+        // New peer, not seen before
+        None => {
+          self.seen.insert(addr, peer);
+          event!(event_emitter, NodeEventType::see_peer_not_seen(&peer));
+          self.activate(&addr, peer);
+        }
+        // Peer seen before, but maybe not active
+        Some(_) => {
+          let old_peer = self.active.get_mut(&addr);
+          match old_peer {
+            // Peer not active, so activate it
+            None => {
+              event!(event_emitter, NodeEventType::see_peer_activated(&peer));
+              self.activate(&addr, peer);
+            }
+            // Peer already active, so update it
+            Some(old_peer) => {
+              let new_seen_at = std::cmp::max(peer.seen_at, old_peer.seen_at);
+              event!(
+                event_emitter,
+                NodeEventType::see_peer_already_active(&old_peer, new_seen_at)
+              );
+              old_peer.seen_at = new_seen_at;
+            }
           }
         }
       }
     }
+
+    pub fn timeout(
+      &mut self,
+      #[cfg(feature = "events")] event_emitter: Option<
+        mpsc::Sender<NodeEventEmittedInfo>,
+      >,
+    ) {
+      let mut forget = Vec::new();
+      for (_, peer) in &self.active {
+        if peer.seen_at < get_time() - PEER_TIMEOUT {
+          event!(event_emitter, NodeEventType::timeout(&peer));
+          forget.push(peer.address);
+        }
+      }
+      for addr in forget {
+        self.inactivate_peer(&addr);
+      }
+    }
+
+    pub fn inactivate_peer(&mut self, addr: &A) {
+      self.active.remove(addr);
+    }
+
+    pub fn get_all_active(&self) -> Vec<Peer<A>> {
+      self.active.values().cloned().collect()
+    }
+
+    pub fn get_all(&self) -> Vec<Peer<A>> {
+      self.seen.values().cloned().collect()
+    }
+
+    pub fn get_random_active(&self, amount: u128) -> Vec<Peer<A>> {
+      let amount = amount as usize;
+      let mut rng = rand::thread_rng();
+      let peers =
+        self.active.values().cloned().choose_multiple(&mut rng, amount);
+      peers
+    }
+  }
+}
+
+pub use miner::{miner_loop, MinerCommunication, MinerMessage};
+/// Miner
+mod miner {
+  // Communication with miner thread
+  // -------------------------------
+  use std::sync::{mpsc, Arc, Mutex};
+
+  use primitive_types::U256;
+
+  use kindelia_common::crypto::Keccakable;
+
+  use crate::events::NodeEventEmittedInfo;
+  use crate::events::NodeEventType;
+  use crate::util::get_time;
+  use crate::util::get_time_micro;
+
+  use super::{Block, Body, HashedBlock, MINE_ATTEMPTS};
+
+  #[derive(Debug, Clone)]
+  pub enum MinerMessage {
+    Request { prev: U256, body: Body, targ: U256 },
+    Answer { block: HashedBlock },
+    Stop,
   }
 
-  fn timeout(
-    &mut self,
+  #[derive(Debug, Clone)]
+  pub struct MinerCommunication {
+    message: Arc<Mutex<MinerMessage>>,
+  }
+
+  // Mining
+  // ------
+
+  // Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
+  fn try_mine(
+    prev: U256,
+    body: Body,
+    targ: U256,
+    max_attempts: u128,
+  ) -> Option<HashedBlock> {
+    let rand = rand::random::<u128>();
+    let time = get_time();
+    let mut block = Block::new(prev, time, rand, body);
+    for _i in 0..max_attempts {
+      block = {
+        let hashed = block.hashed();
+        let hash_n = U256::from(hashed.get_hash());
+        if hash_n >= targ {
+          return Some(hashed);
+        }
+        let mut block = hashed.take();
+        block.meta = block.meta.wrapping_add(1);
+        block
+      }
+    }
+    None
+  }
+
+  impl MinerCommunication {
+    // Creates a shared MinerCommunication object
+    pub fn new() -> Self {
+      MinerCommunication { message: Arc::new(Mutex::new(MinerMessage::Stop)) }
+    }
+
+    // Writes the shared MinerCommunication object
+    pub fn write(&mut self, new_message: MinerMessage) {
+      let mut value = self.message.lock().unwrap();
+      *value = new_message;
+    }
+
+    pub fn read(&self) -> MinerMessage {
+      return (*self.message.lock().unwrap()).clone();
+    }
+  }
+
+  // Main miner loop: if asked, attempts to mine a block
+  pub fn miner_loop(
+    mut miner_comm: MinerCommunication,
+    slow_mining: Option<u64>,
     #[cfg(feature = "events")] event_emitter: Option<
       mpsc::Sender<NodeEventEmittedInfo>,
     >,
   ) {
-    let mut forget = Vec::new();
-    for (_, peer) in &self.active {
-      if peer.seen_at < get_time() - PEER_TIMEOUT {
-        emit_event!(
-          event_emitter,
-          NodeEventType::timeout(&peer),
-          tags = peers,
-          timeout
-        );
-        forget.push(peer.address);
+    loop {
+      if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
+        let before = std::time::Instant::now();
+        let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
+        // Slow down mining, for debugging pourposes, if enabled
+        if let Some(slow_ratio) = slow_mining {
+          let elapsed = before.elapsed();
+          let sleep_time = elapsed.saturating_mul(slow_ratio as u32);
+          std::thread::sleep(sleep_time);
+        }
+        if let Some(block) = mined {
+          event!(
+            event_emitter,
+            NodeEventType::mined(block.get_hash().into(), targ)
+          );
+          miner_comm.write(MinerMessage::Answer { block });
+        } else {
+          event!(event_emitter, NodeEventType::failed_mined(targ));
+        }
       }
     }
-    for addr in forget {
-      self.inactivate_peer(&addr);
+  }
+}
+
+pub use target::Target;
+/// Target
+mod target {
+  use std::ops::Deref;
+
+  use primitive_types::U256;
+
+  use crate::util::u256;
+
+  use super::INITIAL_DIFFICULTY;
+
+  /// Target is a U256 number. A hash larger than or equal to that number hits the target.
+  pub struct Target {
+    value: U256,
+  }
+
+  /// Difficulty is an estimation of how many hashes it takes to hit a given target.
+  pub struct Difficulty {
+    value: U256,
+  }
+
+  impl Target {
+    /// Initial target of 256 hashes per block.
+    pub fn initial() -> Target {
+      u256(INITIAL_DIFFICULTY).into()
+    }
+
+    pub fn to_difficulty(&self) -> Difficulty {
+      let p256 =
+        "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+      let p256 = U256::from(p256);
+      (p256 / (p256 - self.value)).into()
+    }
+
+    // Computes next target by scaling the current difficulty by a `scale` factor.
+    // Since the factor is an integer, it is divided by 2^32 to allow integer division.
+    // - next_target(t, 2n**32n / 2n): difficulty halves
+    // - next_target(t, 2n**32n * 1n): nothing changes
+    // - next_target(t, 2n**32n * 2n): difficulty doubles
+    pub fn next_target(&self, scale: U256) -> Target {
+      let p32 = U256::from("0x100000000");
+      let last_difficulty = self.to_difficulty();
+      let next_difficulty =
+        u256(1) + (*last_difficulty * scale - u256(1)) / p32;
+      return next_difficulty.into();
     }
   }
 
-  pub fn inactivate_peer(&mut self, addr: &A) {
-    self.active.remove(addr);
+  impl From<U256> for Target {
+    fn from(value: U256) -> Self {
+      Target { value }
+    }
   }
 
-  pub fn get_all_active(&self) -> Vec<Peer<A>> {
-    self.active.values().cloned().collect()
+  impl From<Difficulty> for Target {
+    fn from(value: Difficulty) -> Self {
+      value.to_target()
+    }
   }
 
-  pub fn get_all(&self) -> Vec<Peer<A>> {
-    self.seen.values().cloned().collect()
+  impl Deref for Target {
+    type Target = U256;
+    fn deref(&self) -> &Self::Target {
+      &self.value
+    }
   }
 
-  pub fn get_random_active(&self, amount: u128) -> Vec<Peer<A>> {
-    let amount = amount as usize;
-    let mut rng = rand::thread_rng();
-    let peers = self.active.values().cloned().choose_multiple(&mut rng, amount);
-    peers
+  impl Difficulty {
+    fn to_target(&self) -> Target {
+      let p256 =
+        "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+      let p256 = U256::from(p256);
+      (p256 - p256 / self.value).into()
+    }
+  }
+
+  impl From<U256> for Difficulty {
+    fn from(value: U256) -> Self {
+      Difficulty { value }
+    }
+  }
+
+  impl From<Target> for Difficulty {
+    fn from(value: Target) -> Self {
+      value.to_difficulty()
+    }
+  }
+
+  impl Deref for Difficulty {
+    type Target = U256;
+
+    fn deref(&self) -> &Self::Target {
+      &self.value
+    }
   }
 }
-
-// Communication with miner thread
-// -------------------------------
-
-#[derive(Debug, Clone)]
-pub enum MinerMessage {
-  Request { prev: U256, body: Body, targ: U256 },
-  Answer { block: HashedBlock },
-  Stop,
-}
-
-#[derive(Debug, Clone)]
-pub struct MinerCommunication {
-  message: Arc<Mutex<MinerMessage>>,
-}
-
-// Protocol
-// --------
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
@@ -559,46 +784,6 @@ pub const _HANDLE_MESSAGE_LIMIT: u128 = 5;
 // Algorithms
 // ==========
 
-// Target is a U256 number. A hash larger than or equal to that number hits the target.
-// Difficulty is an estimation of how many hashes it takes to hit a given target.
-
-/// Converts a target to a difficulty.
-pub fn target_to_difficulty(target: U256) -> U256 {
-  let p256 =
-    "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
-  let p256 = U256::from(p256);
-  return p256 / (p256 - target);
-}
-
-/// Converts a difficulty to a target.
-pub fn difficulty_to_target(difficulty: U256) -> U256 {
-  let p256 =
-    "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
-  let p256 = U256::from(p256);
-  return p256 - p256 / difficulty;
-}
-
-// Computes next target by scaling the current difficulty by a `scale` factor.
-// Since the factor is an integer, it is divided by 2^32 to allow integer division.
-// - compute_next_target(t, 2n**32n / 2n): difficulty halves
-// - compute_next_target(t, 2n**32n * 1n): nothing changes
-// - compute_next_target(t, 2n**32n * 2n): difficulty doubles
-pub fn compute_next_target(last_target: U256, scale: U256) -> U256 {
-  let p32 = U256::from("0x100000000");
-  let last_difficulty = target_to_difficulty(last_target);
-  let next_difficulty = u256(1) + (last_difficulty * scale - u256(1)) / p32;
-  return difficulty_to_target(next_difficulty);
-}
-
-// Estimates how many hashes were necessary to get this one.
-pub fn get_hash_work(hash: U256) -> U256 {
-  if hash == u256(0) {
-    return u256(0);
-  } else {
-    return target_to_difficulty(hash);
-  }
-}
-
 // Hashes a U256 value.
 pub fn hash_u256(value: U256) -> U256 {
   return hash_bytes(u256_to_bytes(value).as_slice());
@@ -610,55 +795,6 @@ pub fn hash_bytes(bytes: &[u8]) -> U256 {
   hasher.update(&bytes);
   let hash = hasher.finalize();
   return U256::from_little_endian(&hash);
-}
-
-/// Puts transaction inside `body_vec` if space is suficient
-pub fn add_transaction_to_body_vec(
-  body_vec: &mut Vec<u8>,
-  transaction: &Transaction,
-) -> Result<(), String> {
-  let tx_len = transaction.data.len() + TRANSACTION_LENGTH_ENCODE_SIZE;
-  let len_info = transaction.encode_length();
-  if body_vec.len() + tx_len > MAX_BODY_SIZE {
-    return Err("No enough space in block".to_string());
-  }
-  body_vec.push(len_info.0);
-  body_vec.push(len_info.1);
-  body_vec.extend_from_slice(&transaction.data);
-  Ok(())
-}
-
-/// Converts a block body to a vector of transactions.
-pub fn extract_transactions(body: &Body) -> Vec<Transaction> {
-  let mut transactions = Vec::new();
-  let mut index = 1;
-  let tx_count = body.data[0].reverse_bits();
-  for _ in 0..tx_count {
-    if index >= body.data.len() {
-      break;
-    }
-    let tx_len =
-      Transaction::decode_length((body.data[index], body.data[index + 1]));
-    index += 2;
-    if index + tx_len > body.data.len() {
-      break;
-    }
-    let transaction_body = body.data[index..index + tx_len].to_vec();
-    match Transaction::new(transaction_body) {
-      Ok(transaction) => transactions.push(transaction),
-      Err(err) => eprintln!(
-        "A transaction bigger than block was created from a block{}",
-        err
-      ), // in theory this can never happen
-    };
-    index += tx_len;
-  }
-  transactions
-}
-
-/// Initial target of 256 hashes per block.
-pub fn initial_target() -> U256 {
-  difficulty_to_target(u256(INITIAL_DIFFICULTY))
 }
 
 /// The hash of the genesis block's parent.
@@ -673,91 +809,52 @@ pub fn build_genesis_block(stmts: &[Statement]) -> Block {
   Block::new(zero_hash(), 0, 0, body)
 }
 
-// Mining
-// ------
-
-// Given a target, attempts to mine a block by changing its nonce up to `max_attempts` times
-pub fn try_mine(
-  prev: U256,
-  body: Body,
-  targ: U256,
-  max_attempts: u128,
-) -> Option<HashedBlock> {
-  let rand = rand::random::<u128>();
-  let time = get_time();
-  let mut block = Block::new(prev, time, rand, body);
-  for _i in 0..max_attempts {
-    block = {
-      let hashed = block.hashed();
-      let hash_n = U256::from(hashed.get_hash());
-      if hash_n >= targ {
-        return Some(hashed);
-      }
-      let mut block = hashed.take();
-      block.meta = block.meta.wrapping_add(1);
-      block
-    }
-  }
-  None
-}
-
-impl MinerCommunication {
-  // Creates a shared MinerCommunication object
-  pub fn new() -> Self {
-    MinerCommunication { message: Arc::new(Mutex::new(MinerMessage::Stop)) }
-  }
-
-  // Writes the shared MinerCommunication object
-  pub fn write(&mut self, new_message: MinerMessage) {
-    let mut value = self.message.lock().unwrap();
-    *value = new_message;
-  }
-
-  pub fn read(&self) -> MinerMessage {
-    return (*self.message.lock().unwrap()).clone();
-  }
-}
-
-// Main miner loop: if asked, attempts to mine a block
-pub fn miner_loop(
-  mut miner_comm: MinerCommunication,
-  slow_mining: Option<u64>,
-  #[cfg(feature = "events")] event_emitter: Option<
-    mpsc::Sender<NodeEventEmittedInfo>,
-  >,
-) {
-  loop {
-    if let MinerMessage::Request { prev, body, targ } = miner_comm.read() {
-      let before = std::time::Instant::now();
-      let mined = try_mine(prev, body, targ, MINE_ATTEMPTS);
-      // Slow down mining, for debugging pourposes, if enabled
-      if let Some(slow_ratio) = slow_mining {
-        let elapsed = before.elapsed();
-        let sleep_time = elapsed.saturating_mul(slow_ratio as u32);
-        std::thread::sleep(sleep_time);
-      }
-      if let Some(block) = mined {
-        emit_event!(
-          event_emitter,
-          NodeEventType::mined(block.get_hash().into(), targ),
-          tags = mining,
-          mined
-        );
-        miner_comm.write(MinerMessage::Answer { block });
-      } else {
-        emit_event!(
-          event_emitter,
-          NodeEventType::failed_mined(targ),
-          tags = mining,
-          failed_mined
-        );
-      }
-    }
-  }
-}
-
 // Node
-// ----
+// ====
+
+/// Blocks have 4 states of inclusion:
+///
+///   has wait_list? | is on .pending? | is on .block? | meaning
+///   -------------- | --------------- | ------------- | ------------------------------------------------------
+///   no             | no              | no            | UNSEEN   : never seen, may not exist
+///   yes            | no              | no            | MISSING  : some block cited it, but it wasn't downloaded
+///   yes            | yes             | no            | PENDING  : downloaded, but waiting ancestors for inclusion
+///   no             | no              | yes           | INCLUDED : fully included, as well as all its ancestors
+#[derive(Debug, Clone, PartialEq)]
+pub enum InclusionState {
+  UNSEEN,
+  MISSING,
+  PENDING,
+  INCLUDED,
+}
+
+// TODO: refactor .block as map to struct? Better safety, less unwraps. Why not?
+#[rustfmt::skip]
+pub struct Node<C: ProtoComm, S: BlockStorage> {
+  pub network_id : u32,                               // Network ID / magic number
+  pub comm       : C,                                 // UDP socket
+  pub addr       : C::Address,                        // UDP port
+  pub storage    : S,                                 // A `BlockStorage` implementation
+  pub runtime    : Runtime,                           // Kindelia's runtime
+  pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
+  pub pool         : MemPool,   // transactions to be mined
+  pub peers        : PeersStore<C::Address>,            // peers store and state control
+  pub genesis_hash : U256,
+  pub tip        : U256,                           // current tip
+  pub block      : U256Map<HashedBlock>,           // block hash -> block
+  pub pending    : U256Map<HashedBlock>,           // block hash -> downloaded block, waiting for ancestors
+  pub ancestor   : U256Map<U256>,                  // block hash -> hash of its most recent missing ancestor (shortcut jump table)
+  pub wait_list  : U256Map<Vec<U256>>,             // block hash -> hashes of blocks that are waiting for this one
+  pub children   : U256Map<Vec<U256>>,             // block hash -> hashes of this block's children
+  pub work       : U256Map<U256>,                  // block hash -> accumulated work
+  pub target     : U256Map<U256>,                  // block hash -> this block's target
+  pub height     : U256Map<u128>,                  // block hash -> cached height
+  pub results    : U256Map<Vec<StatementResult>>,  // block hash -> results of the statements in this block
+
+  #[cfg(feature = "events")]
+  pub event_emitter : Option<mpsc::Sender<NodeEventEmittedInfo>>,
+  pub miner_comm    : Option<MinerCommunication>,
+}
 
 /// Errors associated with Node.
 #[derive(Error, Debug)]
@@ -808,7 +905,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       children : u256map_from([(genesis_hash, vec![]          )]),
       work     : u256map_from([(genesis_hash, u256(0)         )]),
       height   : u256map_from([(genesis_hash, 0               )]),
-      target   : u256map_from([(genesis_hash, initial_target())]),
+      target   : u256map_from([(genesis_hash, *Target::initial())]),
       results  : u256map_from([(genesis_hash, vec![]          )]),
 
       #[cfg(feature = "events")]
@@ -839,7 +936,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     (query_sender, node)
   }
 
-  pub fn add_transaction(
+  fn add_transaction(
     &mut self,
     transaction: Transaction,
   ) -> Result<(), PoolError> {
@@ -853,18 +950,18 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  // Registers a block on the node's database. This performs several actions:
-  // - If this block is too far into the future, ignore it.
-  // - If this block's parent isn't available:
-  //   - Add this block to the parent's wait_list
-  //   - When the parent is available, register this block again
-  // - If this block's parent is available:
-  //   - Compute the block accumulated work, target, etc.
-  //   - If this block is the new tip:
-  //     - In case of a reorg, rollback to the block before it
-  //     - Run that block's code, updating the HVM state
-  //     - Updates the longest chain saved on disk
-  pub fn add_block(&mut self, block: &HashedBlock) {
+  /// Registers a block on the node's database. This performs several actions:
+  /// - If this block is too far into the future, ignore it.
+  /// - If this block's parent isn't available:
+  ///   - Add this block to the parent's wait_list
+  ///   - When the parent is available, register this block again
+  /// - If this block's parent is available:
+  ///   - Compute the block accumulated work, target, etc.
+  ///   - If this block is the new tip:
+  ///     - In case of a reorg, rollback to the block before it
+  ///     - Run that block's code, updating the HVM state
+  ///     - Updates the longest chain saved on disk
+  fn add_block(&mut self, block: &HashedBlock) {
     // Adding a block might trigger the addition of other blocks
     // that were waiting for it. Because of that, we loop here.
 
@@ -875,30 +972,24 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       let btime = block.time;
       // If block is too far into the future, ignore it
       if btime >= get_time() + DELAY_TOLERANCE {
-        emit_event!(
-          self.event_emitter,
-          NodeEventType::too_late(&block),
-          tags = add_block,
-          too_late
-        );
+        event!(self.event_emitter, NodeEventType::too_late(&block));
         continue;
       }
       let bhash = block.get_hash().into();
       // If we already registered this block, ignore it
       if let Some(block) = self.block.get(&bhash) {
         let height = self.height[&bhash];
-        emit_event!(
+        event!(
           self.event_emitter,
-          NodeEventType::already_included(block, height),
-          tags = add_block,
-          already_included
+          NodeEventType::already_included(block, height)
         );
         continue;
       }
       let phash = block.prev;
       // If previous block is available, add the block to the chain
       if self.block.get(&phash).is_some() {
-        let work = get_hash_work(bhash); // block work score
+        let target: Target = bhash.into();
+        let work = *target.to_difficulty(); // block work score
         self.block.insert(bhash, block.clone()); // inserts the block
         self.work.insert(bhash, u256(0)); // inits the work attr
         self.height.insert(bhash, 0); // inits the height attr
@@ -929,10 +1020,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
             // Computes how much time the last period took to complete
             let period_time = btime - self.block[&checkpoint_hash].time;
             // Computes the target of this period
-            let last_target = self.target[&phash];
+            let last_target: Target = self.target[&phash].into();
             let next_scaler = 2u128.pow(32) * TIME_PER_PERIOD / period_time;
-            let next_target =
-              compute_next_target(last_target, u256(next_scaler));
+            let next_target = *last_target.next_target(u256(next_scaler));
             // Sets the new target
             self.target.insert(bhash, next_target);
           // Otherwise, keep the old target
@@ -947,12 +1037,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
             // When the tip updates, stop mining the last built block, which is
             // based on the outdated tip
             self.send_to_miner(MinerMessage::Stop);
-            emit_event!(
-              self.event_emitter,
-              NodeEventType::stop_mining(),
-              tags = mining,
-              stopped
-            );
+            event!(self.event_emitter, NodeEventType::stop_mining());
             self.tip = bhash;
             if true {
               // TODO: re-add transactions of reversed blocks to mempool
@@ -986,7 +1071,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               }
 
               // 3. Saves overwritten blocks to disk and remove their
-              //    transactions from mempool. 
+              //    transactions from mempool.
               for bhash_comp in must_compute.iter().rev() {
                 let block_height = self.height[bhash_comp];
                 if let Err(e) = self
@@ -998,7 +1083,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
                 // Removes this block's transactions from mempool
                 let block_comp = &self.block[bhash_comp];
                 // TODO: refactor out redundant `extract_transactions`
-                for tx in extract_transactions(&block_comp.body) { 
+                for tx in block_comp.body.extract_transactions() {
                   self.pool.remove(&tx);
                 }
               }
@@ -1015,11 +1100,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
               let common = (&self.block[&old_bhash], self.height[&old_bhash]); // common ancestor
               let ticks =
                 (runtime_old_tick as u128, self.runtime.get_tick() as u128);
-              emit_event!(
+              event!(
                 self.event_emitter,
-                NodeEventType::reorg(old, new, common, ticks, work),
-                tags = add_block,
-                reorg
+                NodeEventType::reorg(old, new, common, ticks, work)
               );
 
               // 5. Finds the last block included on the reverted runtime state
@@ -1039,22 +1122,18 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
             }
           }
         } else {
-          emit_event!(
+          event!(
             self.event_emitter,
-            NodeEventType::not_enough_work(&self.block[&bhash]),
-            tags = add_block,
-            not_enough_work
+            NodeEventType::not_enough_work(&self.block[&bhash])
           );
         }
 
         let height = self.height.get(&bhash).copied();
         let siblings: Vec<_> =
           self.children[&block.prev].iter().copied().collect();
-        emit_event!(
+        event!(
           self.event_emitter,
-          NodeEventType::included(&block, height, &siblings, work),
-          tags = add_block,
-          block_included
+          NodeEventType::included(&block, height, &siblings, work)
         );
 
         // Registers this block as a child of its parent
@@ -1074,22 +1153,13 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       } else if self.pending.get(&bhash).is_none() {
         self.pending.insert(bhash, block.clone());
         self.wait_list.entry(phash).or_insert_with(|| Vec::new()).push(bhash);
-        emit_event!(
-          self.event_emitter,
-          NodeEventType::missing_parent(&block),
-          tags = add_block,
-          missing_parent
-        );
+        event!(self.event_emitter, NodeEventType::missing_parent(&block));
       }
     }
   }
 
-  pub fn compute_block(
-    &mut self,
-    block: &HashedBlock,
-    added_block: &HashedBlock,
-  ) {
-    let transactions = extract_transactions(&block.body);
+  fn compute_block(&mut self, block: &HashedBlock, added_block: &HashedBlock) {
+    let transactions = block.body.extract_transactions();
     let mut statements = Vec::new();
     for transaction in transactions {
       if let Some(statement) = transaction.to_statement() {
@@ -1104,26 +1174,24 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     self.runtime.open();
     let result = self.runtime.run_statements(&statements, false, false);
     // emitting computed blocks
-    emit_event!(
+    event!(
       self.event_emitter,
       NodeEventType::computed(
         (added_block, self.height[&self.tip]),
         (block, self.height[&bhash]),
         &result
-      ),
-      tags = add_block,
-      computed_block
+      )
     );
     self.results.insert(bhash, result);
     self.runtime.commit();
   }
 
-  // Get the current target
-  pub fn get_tip_target(&self) -> U256 {
+  /// Get the current target
+  fn get_tip_target(&self) -> U256 {
     self.target[&self.tip]
   }
 
-  pub fn get_longest_chain(&self, max: Option<usize>) -> Vec<U256> {
+  fn get_longest_chain(&self, max: Option<usize>) -> Vec<U256> {
     let mut longest = Vec::new();
     let mut bhash = self.tip;
     let mut count = 0;
@@ -1143,7 +1211,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     return longest;
   }
 
-  pub fn receive_message(&mut self) {
+  fn receive_message(&mut self) {
     let mut count = 0;
     for (addr, msg) in self.comm.proto_recv() {
       //if count < HANDLE_MESSAGE_LIMIT {  TODO: ???
@@ -1159,7 +1227,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  pub fn get_block_hash_by_index(&self, index: u64) -> Option<U256> {
+  fn get_block_hash_by_index(&self, index: u64) -> Option<U256> {
     let mut hsh = self.tip;
     let mut idx = self.height[&hsh] as u64;
     if index > idx {
@@ -1172,7 +1240,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     return Some(hsh);
   }
 
-  pub fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
+  fn get_block_info(&self, hash: &U256) -> Option<BlockInfo> {
     // TODO: cache
     let block = self.block.get(hash)?;
     let height = self.height.get(hash).expect("Missing block height.");
@@ -1187,12 +1255,13 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     Some(info)
   }
 
-  pub fn get_func_info(&self, name: &Name) -> Option<FuncInfo> {
+  fn get_func_info(&self, name: &Name) -> Option<FuncInfo> {
     let comp_func = self.runtime.read_file(name)?;
     let func = comp_func.func;
     Some(FuncInfo { func })
   }
-  pub fn get_ctr_info(&self, name: &Name) -> Option<CtrInfo> {
+
+  fn get_ctr_info(&self, name: &Name) -> Option<CtrInfo> {
     if let Some(arit) = self.runtime.get_arity(name) {
       Some(CtrInfo { arit: arit as u64 })
     } else {
@@ -1200,7 +1269,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  pub fn get_reg_info(&self, name: Name) -> Option<RegInfo> {
+  fn get_reg_info(&self, name: Name) -> Option<RegInfo> {
     let ownr = self.runtime.get_owner(&name)?;
     let ownr = Name::from(ownr);
     let pred = |c: &Name| c.to_string().starts_with(&format!("{}.", name));
@@ -1214,14 +1283,14 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     Some(RegInfo { ownr, stmt })
   }
 
-  pub fn handle_request(&mut self, request: NodeRequest<C>) {
+  fn handle_request(&mut self, request: NodeRequest<C>) {
     fn handle_ans_err<T>(req_txt: &str, res: Result<(), T>) {
       if let Err(_) = res {
         eprintln!("WARN: failed to send node request {} answer back", req_txt);
       }
     }
     // TODO: handle unwraps
-    // emit_event!(self.event_emitter, NodeEvent::handle_request(), tags = handle_request);
+    // event!(self.event_emitter, NodeEvent::handle_request());
     match request {
       NodeRequest::GetStats { tx } => {
         let tick = self.runtime.get_tick();
@@ -1277,7 +1346,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       }
       NodeRequest::GetBlockHash { index, tx } => {
         let info = self.get_block_hash_by_index(index);
-        handle_ans_err("GetBlockHash", tx.send(info));
+        let info = info.map(|numb| numb.into()); // transform in Option<api::Hash>
+        handle_ans_err("GetBlockHash", tx.send(info))
       }
       NodeRequest::GetFunctions { tx } => {
         let mut funcs: HashSet<u128> = HashSet::new();
@@ -1359,9 +1429,10 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  // Sends a block to a target address; also share some random peers
-  // FIXME: instead of sharing random peers, share recently active peers
-  pub fn send_blocks_to(
+  /// Sends a block to a target address; also share some random peers
+  ///
+  /// FIXME: instead of sharing random peers, share recently active peers
+  fn send_blocks_to(
     &mut self,
     addrs: Vec<C::Address>,
     gossip: bool,
@@ -1374,8 +1445,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     self.comm.proto_send(addrs, &msg);
   }
 
-  // Returns the block inclusion state
-  pub fn inclusion_state(&self, bhash: &U256) -> InclusionState {
+  /// Returns the block inclusion state
+  fn inclusion_state(&self, bhash: &U256) -> InclusionState {
     if self.block.contains_key(bhash) {
       return InclusionState::INCLUDED;
     }
@@ -1388,8 +1459,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     return InclusionState::UNSEEN;
   }
 
-  // Finds the most recent missing ancestor of a pending block
-  pub fn find_missing_ancestor(&mut self, bhash: &U256) -> Option<U256> {
+  /// Finds the most recent missing ancestor of a pending block
+  fn find_missing_ancestor(&mut self, bhash: &U256) -> Option<U256> {
     if self.inclusion_state(bhash) == InclusionState::PENDING {
       let ancestor = {
         let mut ancestor = bhash;
@@ -1412,8 +1483,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     return None;
   }
 
-  // Requests the most recent missing ancestor
-  pub fn request_missing_ancestor(&mut self, addr: C::Address, bhash: &U256) {
+  /// Requests the most recent missing ancestor
+  fn request_missing_ancestor(&mut self, addr: C::Address, bhash: &U256) {
     if let Some(missing_ancestor) = self.find_missing_ancestor(bhash) {
       let magic = self.network_id;
       let msg = &Message::GiveMeThatBlock { magic, bhash: missing_ancestor };
@@ -1421,11 +1492,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  pub fn handle_message(
-    &mut self,
-    addr: C::Address,
-    msg: &Message<C::Address>,
-  ) {
+  fn handle_message(&mut self, addr: C::Address, msg: &Message<C::Address>) {
     if addr != self.addr {
       match msg {
         Message::GiveMeThatBlock { magic, .. }
@@ -1446,11 +1513,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       match msg {
         // Someone asked a block
         Message::GiveMeThatBlock { magic, bhash } => {
-          emit_event!(
+          event!(
             self.event_emitter,
-            NodeEventType::give_me_block(*magic, *bhash),
-            tags = handle_message,
-            give_me_block
+            NodeEventType::give_me_block(*magic, *bhash)
           );
           // Sends the requested block, plus some of its ancestors
           let mut bhash = bhash;
@@ -1480,11 +1545,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         Message::NoticeTheseBlocks { magic, gossip, blocks, peers } => {
           let blocks: Vec<_> =
             blocks.iter().cloned().map(|block| block.hashed()).collect();
-          emit_event!(
+          event!(
             self.event_emitter,
-            NodeEventType::notice_blocks(*magic, *gossip, &blocks, peers),
-            tags = handle_message,
-            notice_blocks
+            NodeEventType::notice_blocks(*magic, *gossip, &blocks, peers)
           );
 
           // TODO: validate if blocks are sorted by age?
@@ -1511,11 +1574,9 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
         }
         // Someone sent us a transaction to mine
         Message::PleaseMineThisTransaction { magic, tx } => {
-          emit_event!(
+          event!(
             self.event_emitter,
-            NodeEventType::mine_trans(*magic, tx.hash),
-            tags = handle_message,
-            mine_trans
+            NodeEventType::mine_trans(*magic, tx.hash)
           );
           if self.pool.get(&tx).is_none() {
             self.pool.push(tx.clone(), tx.hash.low_u64());
@@ -1526,7 +1587,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
   }
 
-  pub fn gossip(&mut self, peer_count: u128, message: &Message<C::Address>) {
+  fn gossip(&mut self, peer_count: u128, message: &Message<C::Address>) {
     let addrs = self
       .peers
       .get_random_active(peer_count)
@@ -1571,12 +1632,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
 
   fn do_ask_mine(&mut self, body: Body) {
     let targ = self.get_tip_target();
-    emit_event!(
-      self.event_emitter,
-      NodeEventType::ask_mine(targ),
-      tags = mining,
-      ask_mine
-    );
+    event!(self.event_emitter, NodeEventType::ask_mine(targ));
     self.send_to_miner(MinerMessage::Request { prev: self.tip, body, targ });
   }
 
@@ -1591,7 +1647,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
 
   /// Builds the body to be mined.
   /// To convert back to a vector of transactions, use `extract_transactions()`.
-  pub fn build_body_from_pool(&self) -> Body {
+  fn build_body_from_pool(&self) -> Body {
     let txs = self.pool.iter().map(|(tx, _score)| tx.clone());
     Body::fill_from(txs)
   }
@@ -1601,8 +1657,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     let tip_height = *self.height.get(&tip).unwrap() as u64;
     let tip_work = *self.work.get(&tip).unwrap();
 
-    let tip_target = *self.target.get(&tip).unwrap();
-    let difficulty = target_to_difficulty(tip_target);
+    let tip_target: Target = (*self.target.get(&tip).unwrap()).into();
+    let difficulty = tip_target.to_difficulty();
 
     // Counts missing, pending and included blocks
     let included_count = self.block.keys().count();
@@ -1638,7 +1694,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     }
     tip_blocks.reverse();
 
-    let event = heartbeat! {
+    let event = heartbeat_gen! {
       peers: { num: peers_num },
       tip: {
         height: tip_height,
@@ -1665,7 +1721,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
       tip_blocks: tip_blocks
     };
 
-    emit_event!(self.event_emitter, event, tags = heartbeat);
+    event!(self.event_emitter, event);
   }
 
   pub fn main(mut self) -> ! {
@@ -1776,6 +1832,8 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   }
 }
 
+// TODO: move this to miner `mod`? 
+// TODO: check return type and objects
 pub fn spawn_miner(
   mine_config: MineConfig,
   #[cfg(feature = "events")] event_tx: Option<

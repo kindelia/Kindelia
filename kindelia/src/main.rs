@@ -30,6 +30,7 @@ use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
   spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
 };
+
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
@@ -630,7 +631,7 @@ pub fn publish_code(
     // spawn'd, the task should begin executing immediately.
     tasks.spawn_on(
       async move {
-        let results = match client.publish_code(stmts_hex.clone()).await {
+        let results = match client.publish_code(stmts_hex).await {
           Ok(r) => r,
           Err(e) => {
             println!("NOT PUBLISHED to {}. ({})", *client, e);

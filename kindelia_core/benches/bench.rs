@@ -119,7 +119,7 @@ fn block_with_txs_deserialize(c: &mut Criterion) {
     b.iter(|| {
       let de_bits = util::bytes_to_bitvec(black_box(&se_bytes));
       let block = node::Block::proto_deserialized(&de_bits).unwrap();
-      let transactions = node::extract_transactions(&block.body);
+      let transactions = block.extract_transactions();
       for transaction in transactions {
         let de_stmt = transaction.to_statement().unwrap();
         debug_assert_eq!(base_stmt, de_stmt);

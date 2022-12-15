@@ -7,12 +7,12 @@ use reqwest::{Client, IntoUrl, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 
 use kindelia_core::api::{
-  BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, Name, PublishError,
-  RegInfo, Stats,
+  BlockInfo, CtrInfo, FuncInfo, Hash, HexStatement, PublishError, RegInfo,
+  Stats,
 };
 use kindelia_core::net::ProtoComm;
-use kindelia_core::{runtime, node};
-use kindelia_lang::ast;
+use kindelia_core::{node, runtime};
+use kindelia_lang::ast::{self, Name};
 
 pub struct ApiClient {
   client: reqwest::Client,

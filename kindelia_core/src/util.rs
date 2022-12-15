@@ -87,10 +87,6 @@ pub fn u256_to_bytes(value: U256) -> Vec<u8> {
   bytes
 }
 
-pub fn u256_to_hex(value: U256) -> String {
-  hex::encode(u256_to_bytes(value))
-}
-
 pub fn bitvec_to_bytes(bits: &BitVec) -> Vec<u8> {
   bits.to_bytes()
 }

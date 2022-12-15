@@ -1,4 +1,3 @@
-// TODO: rename and organize structs and constructors
 use primitive_types::U256;
 use serde;
 
@@ -7,13 +6,387 @@ use crate::net::ProtoAddr;
 use crate::node::{HashedBlock, Peer};
 use crate::runtime::{StatementErr, StatementInfo};
 
-fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
-  match x {
-    None => "~".to_string(),
-    Some(x) => x.to_string(),
+use add_block::{AddBlockEvent, BlockInfo, RollbackInfo};
+mod add_block {
+  use primitive_types::U256;
+
+  use crate::{
+    api::Hash,
+    runtime::{StatementErr, StatementInfo},
+  };
+
+  #[allow(clippy::large_enum_variant)]
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub enum AddBlockEvent {
+    AlreadyIncluded,
+    NotEnoughWork,
+    Reorg {
+      old_tip: BlockInfo,             // old network's tip
+      common_block: BlockInfo,        // first common block in both timelines
+      rollback: Option<RollbackInfo>, // if ocurred a rollback, store its info
+      work: Hash,
+    },
+    Included {
+      siblings: Vec<Hash>,
+      work: Hash,
+    },
+    Computed {
+      block: BlockInfo,
+      results: Vec<Result<StatementInfo, StatementErr>>,
+    },
+    MissingParent {
+      parent: Hash,
+    },
+    TooLate,
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct BlockInfo {
+    pub hash: Hash,
+    parent: Hash,
+    pub height: Option<u128>,
+  }
+
+  impl BlockInfo {
+    pub fn new(hash: U256, parent: U256, height: Option<u128>) -> Self {
+      BlockInfo { hash: hash.into(), parent: parent.into(), height }
+    }
+  }
+
+  impl std::fmt::Display for BlockInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!("{}", self.hash))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct RollbackInfo {
+    runtime_tick: u128,
+    common_tick: u128,
+    rolled_to: u128,
+  }
+
+  impl RollbackInfo {
+    pub fn new(
+      common_tick: u128,
+      runtime_tick: u128,
+      rolled_to: u128,
+    ) -> Option<Self> {
+      if common_tick < runtime_tick {
+        Some(RollbackInfo { common_tick, runtime_tick, rolled_to })
+      } else {
+        None
+      }
+    }
+  }
+
+  impl std::fmt::Display for RollbackInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!(
+        "common_tick: {} | runtime_tick: {}",
+        self.common_tick, self.runtime_tick
+      ))
+    }
   }
 }
 
+use mining::MiningEvent;
+mod mining {
+  use crate::api::Hash;
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub enum MiningEvent {
+    Success { block: Hash, target: Hash },
+    Failure { target: Hash },
+    AskMine { target: Hash },
+    Stop,
+  }
+}
+
+use peers::{PeersEvent, SeePeerResult};
+mod peers {
+  #[derive(Debug, Clone, serde::Serialize)]
+  // The peers are represented as strings (addr display)
+  // to avoid type parameter
+  pub enum PeersEvent {
+    SeePeer { addr: String, seen_at: u128, result: SeePeerResult },
+    Timeout { addr: String, seen_at: u128 },
+  }
+
+  impl std::fmt::Display for PeersEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      let formatted = match self {
+        PeersEvent::SeePeer { addr, seen_at, result } => {
+          let formatted_result = match result {
+            SeePeerResult::NotSeenBefore => "[not_seen_before]".to_string(),
+            SeePeerResult::Activated => "[activated]".to_string(),
+            SeePeerResult::AlreadyActive { new_seen_at } => {
+              format!("[activated] new_seen_at: {}", new_seen_at)
+            }
+          };
+          format!(
+            "[see_peer] addr: {} | seen_at: {} | result: {}",
+            addr, seen_at, formatted_result
+          )
+        }
+        PeersEvent::Timeout { addr, seen_at } => {
+          format!("[timeout] addr: {} | seen_at: {}", addr, seen_at)
+        }
+      };
+      f.write_fmt(format_args!("{}", formatted))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub enum SeePeerResult {
+    NotSeenBefore,
+    Activated,
+    AlreadyActive { new_seen_at: u128 },
+  }
+}
+
+use handle_message::HandleMessageEvent;
+mod handle_message {
+  use crate::api::Hash;
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub enum HandleMessageEvent {
+    NoticeTheseBlocks {
+      magic: u32,
+      gossip: bool,
+      blocks: Vec<Hash>,
+      peers: Vec<String>, // peer not used to avoid type parameter
+    },
+    GiveMeThatBlock {
+      magic: u32,
+      bhash: Hash,
+    },
+    PleaseMineThisTransaction {
+      magic: u32,
+      trans: Hash, // shoul we guard the data of transaction too?
+    },
+  }
+
+  impl std::fmt::Display for HandleMessageEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      let message = match self {
+        HandleMessageEvent::NoticeTheseBlocks {
+          magic,
+          gossip,
+          blocks,
+          peers,
+        } => {
+          let blocks =
+            blocks.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(", ");
+          let peers = peers.join(", ");
+          format!(
+            "[notice_blocks] magic: {} | gossip: {} | blocks: {} | peers: {}",
+            magic, gossip, blocks, peers
+          )
+        }
+        HandleMessageEvent::GiveMeThatBlock { magic, bhash } => {
+          format!("[give_me_that_block] magic: {} | block: {}", magic, bhash)
+        }
+        HandleMessageEvent::PleaseMineThisTransaction { magic, trans } => {
+          format!("[mine_trans] magic: {} | trans: {}", magic, trans)
+        }
+      };
+      f.write_fmt(format_args!("{}", message))
+    }
+  }
+}
+
+pub use heartbeat::{
+  HeartbeatBlocks, HeartbeatPeers, HeartbeatRuntime, HeartbeatStatInfo,
+  HeartbeatTip,
+};
+mod heartbeat {
+  use crate::api::Hash;
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct HeartbeatPeers {
+    pub num: usize,
+  }
+
+  impl std::fmt::Display for HeartbeatPeers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!("peers: {}", self.num))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct HeartbeatTip {
+    pub height: u64,
+    pub difficulty: u64,
+    pub work: Hash,
+  }
+
+  impl std::fmt::Display for HeartbeatTip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!(
+        "tip: {{ height: {} | difficulty: {} }}",
+        self.height, self.difficulty
+      ))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct HeartbeatBlocks {
+    pub missing: u64,
+    pub pending: u64,
+    pub included: usize,
+  }
+
+  impl std::fmt::Display for HeartbeatBlocks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!(
+        "blocks: {{ included: {} | missing: {} | pending: {} }}",
+        self.included, self.missing, self.pending
+      ))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct HeartbeatRuntime {
+    pub mana: HeartbeatStatInfo,
+    pub size: HeartbeatStatInfo,
+  }
+
+  impl std::fmt::Display for HeartbeatRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      // Do not display mana stats right now as they are too verbose
+      f.write_fmt(format_args!("runtime: {{ size: {} }}", self.size))
+      // f.write_fmt(format_args!(
+      //   "[runtime] [mana] {} | [size] {}",
+      //   self.mana, self.size
+      // ))
+    }
+  }
+
+  #[derive(Debug, Clone, serde::Serialize)]
+  pub struct HeartbeatStatInfo {
+    pub current: i64,
+    pub limit: i64,
+    pub available: i64,
+  }
+
+  impl std::fmt::Display for HeartbeatStatInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_fmt(format_args!(
+        "current: {} | limit: {} | available: {}",
+        self.current, self.limit, self.available
+      ))
+    }
+  }
+
+  #[macro_export]
+  macro_rules! heartbeat_gen {
+    (
+    peers: { num: $peers_num:expr },
+    tip: {
+      height: $tip_height:expr,
+      difficulty: $difficulty:expr,
+      work: $work: expr,
+    },
+    blocks: {
+      missing: $missing_count:expr,
+      pending: $pending_count:expr,
+      included: $included_count:expr,
+    },
+    runtime: {
+      mana: {
+        current: $mana_cur:expr,
+        limit: $mana_lim:expr,
+        available: $mana_avail:expr,
+      },
+      size: {
+        current: $size_cur:expr,
+        limit: $size_lim:expr,
+        available: $size_avail:expr,
+      }
+    },
+    tip_blocks: $tip_blocks:expr
+  ) => {
+      NodeEventType::Heartbeat {
+        peers: $crate::events::HeartbeatPeers { num: $peers_num },
+        tip: $crate::events::HeartbeatTip {
+          height: $tip_height,
+          difficulty: $difficulty,
+          work: $work.into(),
+        },
+        blocks: $crate::events::HeartbeatBlocks {
+          missing: $missing_count,
+          pending: $pending_count,
+          included: $included_count,
+        },
+        runtime: $crate::events::HeartbeatRuntime {
+          mana: $crate::events::HeartbeatStatInfo {
+            current: $mana_cur,
+            limit: $mana_lim,
+            available: $mana_avail,
+          },
+          size: $crate::events::HeartbeatStatInfo {
+            current: $size_cur,
+            limit: $size_lim,
+            available: $size_avail,
+          },
+        },
+        tip_blocks: $tip_blocks.iter().map(|x: &U256| (*x).into()).collect(),
+      }
+    };
+  }
+}
+
+pub use discriminant::NodeEventDiscriminant;
+/// Event discriminant util (used to choose which event we want to listen)
+mod discriminant {
+  use super::NodeEventType;
+
+  #[derive(
+    PartialEq, Eq, Debug, Clone, serde::Serialize, serde::Deserialize,
+  )]
+  pub enum NodeEventDiscriminant {
+    AddBlock,
+    HandleMessage,
+    Heartbeat,
+    Mining,
+    Peers,
+  }
+
+  impl std::str::FromStr for NodeEventDiscriminant {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+      match s {
+        "add_block" => Ok(NodeEventDiscriminant::AddBlock),
+        "mining" => Ok(NodeEventDiscriminant::Mining),
+        "peers" => Ok(NodeEventDiscriminant::Peers),
+        "handle_message" => Ok(NodeEventDiscriminant::HandleMessage),
+        "heartbeat" => Ok(NodeEventDiscriminant::Heartbeat),
+        _ => Err(format!(
+          "Was not possible to convert from {} to an event discriminant",
+          s
+        )),
+      }
+    }
+  }
+
+  impl From<NodeEventType> for NodeEventDiscriminant {
+    fn from(event: NodeEventType) -> Self {
+      match event {
+        NodeEventType::AddBlock { .. } => NodeEventDiscriminant::AddBlock,
+        NodeEventType::Mining { .. } => NodeEventDiscriminant::Mining,
+        NodeEventType::Peers { .. } => NodeEventDiscriminant::Peers,
+        NodeEventType::HandleMessage { .. } => {
+          NodeEventDiscriminant::HandleMessage
+        }
+        NodeEventType::Heartbeat { .. } => NodeEventDiscriminant::Heartbeat,
+      }
+    }
+  }
+}
+
+/// An node event. It is formed by the timestamp, the node address
+/// and the type of the event.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct NodeEvent<A: ProtoAddr> {
   pub time: u128,
@@ -21,6 +394,22 @@ pub struct NodeEvent<A: ProtoAddr> {
   pub event: NodeEventType,
 }
 
+// "Pretty" print of the node event
+impl<A: ProtoAddr> std::fmt::Display for NodeEvent<A> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_fmt(format_args!("[node] {} [event] {}", self.addr, self.event))
+  }
+}
+
+/// This represents the emitted event
+/// by the node channel, in the form of:
+/// `(event_type, timestamp)`.
+///
+/// With this information the `NodeEvent` is formed on channel.recv
+/// in the function `spawn_event_handlers`.
+pub type NodeEventEmittedInfo = (NodeEventType, u128);
+
+/// The type of the event.
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum NodeEventType {
   AddBlock {
@@ -30,7 +419,6 @@ pub enum NodeEventType {
   Mining {
     event: MiningEvent,
   },
-  // HandleRequest,
   Peers {
     event: PeersEvent,
   },
@@ -46,286 +434,16 @@ pub enum NodeEventType {
   },
 }
 
-/// This represents the emitted event
-/// by the node channel, in the form of:
-/// `(event_type, timestamp)`.
-///
-/// With this information the `NodeEvent` is formed on channel.recv
-/// in the function `spawn_event_handlers`.
-pub type NodeEventEmittedInfo = (NodeEventType, u128);
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct BlockInfo {
-  hash: Hash,
-  parent: Hash,
-  height: Option<u128>,
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum AddBlockEvent {
-  AlreadyIncluded,
-  NotEnoughWork,
-  Reorg {
-    old_tip: BlockInfo,             // old network's tip
-    common_block: BlockInfo,        // first common block in both timelines
-    rollback: Option<RollbackInfo>, // if ocurred a rollback, store its info
-    work: Hash,
-  },
-  Included {
-    siblings: Vec<Hash>,
-    work: Hash,
-  },
-  Computed {
-    block: BlockInfo,
-    results: Vec<Result<StatementInfo, StatementErr>>,
-  },
-  MissingParent {
-    parent: Hash,
-  },
-  TooLate,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RollbackInfo {
-  runtime_tick: u128,
-  common_tick: u128,
-  rolled_to: u128,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum MiningEvent {
-  Success { block: Hash, target: Hash },
-  Failure { target: Hash },
-  AskMine { target: Hash },
-  Stop,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-// The peers are represented as strings (addr display)
-// to avoid type parameter
-pub enum PeersEvent {
-  SeePeer { addr: String, seen_at: u128, result: SeePeerResult },
-  Timeout { addr: String, seen_at: u128 },
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum SeePeerResult {
-  NotSeenBefore,
-  Activated,
-  AlreadyActive { new_seen_at: u128 },
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum HandleMessageEvent {
-  NoticeTheseBlocks {
-    magic: u32,
-    gossip: bool,
-    blocks: Vec<Hash>,
-    peers: Vec<String>, // peer not used to avoid type parameter
-  },
-  GiveMeThatBlock {
-    magic: u32,
-    bhash: Hash,
-  },
-  PleaseMineThisTransaction {
-    magic: u32,
-    trans: Hash, // shoul we guard the data of transaction too?
-  },
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct HeartbeatPeers {
-  pub num: usize,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct HeartbeatTip {
-  pub height: u64,
-  pub difficulty: u64,
-  pub work: Hash,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct HeartbeatBlocks {
-  pub missing: u64,
-  pub pending: u64,
-  pub included: usize,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct HeartbeatRuntime {
-  pub mana: HeartbeatStatInfo,
-  pub size: HeartbeatStatInfo,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct HeartbeatStatInfo {
-  pub current: i64,
-  pub limit: i64,
-  pub available: i64,
-}
-
-// ========================================================
-// Event discriminant util (used to choose which event we want to listen)
-// * Could be created automatically with a macro *
-
-#[derive(PartialEq, Eq, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum NodeEventDiscriminant {
-  AddBlock,
-  HandleMessage,
-  Heartbeat,
-  Mining,
-  Peers,
-}
-
-impl std::str::FromStr for NodeEventDiscriminant {
-  type Err = String;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "add_block" => Ok(NodeEventDiscriminant::AddBlock),
-      "mining" => Ok(NodeEventDiscriminant::Mining),
-      "peers" => Ok(NodeEventDiscriminant::Peers),
-      "handle_message" => Ok(NodeEventDiscriminant::HandleMessage),
-      "heartbeat" => Ok(NodeEventDiscriminant::Heartbeat),
-      _ => Err(format!(
-        "Was not possible to convert from {} to an event discriminant",
-        s
-      )),
-    }
-  }
-}
-
-impl From<NodeEventType> for NodeEventDiscriminant {
-  fn from(event: NodeEventType) -> Self {
-    match event {
-      NodeEventType::AddBlock { .. } => NodeEventDiscriminant::AddBlock,
-      NodeEventType::Mining { .. } => NodeEventDiscriminant::Mining,
-      NodeEventType::Peers { .. } => NodeEventDiscriminant::Peers,
-      NodeEventType::HandleMessage { .. } => {
-        NodeEventDiscriminant::HandleMessage
-      }
-      NodeEventType::Heartbeat { .. } => NodeEventDiscriminant::Heartbeat,
-    }
-  }
-}
-
-// ========================================================
-// Display
-
-impl std::fmt::Display for HeartbeatPeers {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!("peers: {}", self.num))
-  }
-}
-
-impl std::fmt::Display for HeartbeatTip {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!(
-      "tip: {{ height: {} | difficulty: {} }}",
-      self.height, self.difficulty
-    ))
-  }
-}
-
-impl std::fmt::Display for HeartbeatBlocks {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!(
-      "blocks: {{ included: {} | missing: {} | pending: {} }}",
-      self.included, self.missing, self.pending
-    ))
-  }
-}
-
-impl std::fmt::Display for HeartbeatRuntime {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    // Do not display mana stats right now as they are too verbose
-    f.write_fmt(format_args!("runtime: {{ size: {} }}", self.size))
-    // f.write_fmt(format_args!(
-    //   "[runtime] [mana] {} | [size] {}",
-    //   self.mana, self.size
-    // ))
-  }
-}
-
-impl std::fmt::Display for HeartbeatStatInfo {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!(
-      "current: {} | limit: {} | available: {}",
-      self.current, self.limit, self.available
-    ))
-  }
-}
-
-impl std::fmt::Display for HandleMessageEvent {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let message = match self {
-      HandleMessageEvent::NoticeTheseBlocks {
-        magic,
-        gossip,
-        blocks,
-        peers,
-      } => {
-        let blocks =
-          blocks.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(", ");
-        let peers = peers.join(", ");
-        format!(
-          "[notice_blocks] magic: {} | gossip: {} | blocks: {} | peers: {}",
-          magic, gossip, blocks, peers
-        )
-      }
-      HandleMessageEvent::GiveMeThatBlock { magic, bhash } => {
-        format!("[give_me_that_block] magic: {} | block: {}", magic, bhash)
-      }
-      HandleMessageEvent::PleaseMineThisTransaction { magic, trans } => {
-        format!("[mine_trans] magic: {} | trans: {}", magic, trans)
-      }
-    };
-    f.write_fmt(format_args!("{}", message))
-  }
-}
-
-impl std::fmt::Display for PeersEvent {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let formatted = match self {
-      PeersEvent::SeePeer { addr, seen_at, result } => {
-        let formatted_result = match result {
-          SeePeerResult::NotSeenBefore => "[not_seen_before]".to_string(),
-          SeePeerResult::Activated => "[activated]".to_string(),
-          SeePeerResult::AlreadyActive { new_seen_at } => {
-            format!("[activated] new_seen_at: {}", new_seen_at)
-          }
-        };
-        format!(
-          "[see_peer] addr: {} | seen_at: {} | result: {}",
-          addr, seen_at, formatted_result
-        )
-      }
-      PeersEvent::Timeout { addr, seen_at } => {
-        format!("[timeout] addr: {} | seen_at: {}", addr, seen_at)
-      }
-    };
-    f.write_fmt(format_args!("{}", formatted))
-  }
-}
-
-impl std::fmt::Display for RollbackInfo {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!(
-      "common_tick: {} | runtime_tick: {}",
-      self.common_tick, self.runtime_tick
-    ))
-  }
-}
-
-impl std::fmt::Display for BlockInfo {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!("{}", self.hash))
-  }
-}
-
+// This is only used for "pretty" print the event
 impl std::fmt::Display for NodeEventType {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn show_opt<T: std::fmt::Display>(x: Option<T>) -> String {
+      match x {
+        None => "~".to_string(),
+        Some(x) => x.to_string(),
+      }
+    }
+
     let str_res = match self {
       NodeEventType::AddBlock { block, event } => match &**event {
         AddBlockEvent::AlreadyIncluded => {
@@ -410,24 +528,12 @@ impl std::fmt::Display for NodeEventType {
   }
 }
 
-impl<A: ProtoAddr> std::fmt::Display for NodeEvent<A> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!("[node] {} [event] {}", self.addr, self.event))
-  }
-}
-
-// ========================================================
-// Constructors
-
+// Constructors for each event type and subtype.
 impl NodeEventType {
   pub fn not_enough_work(block: &HashedBlock) -> Self {
     let hash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: hash.into(),
-        parent: block.prev.into(),
-        height: None,
-      },
+      block: BlockInfo::new(hash, block.prev, None),
       event: Box::new(AddBlockEvent::NotEnoughWork),
     }
   }
@@ -440,7 +546,7 @@ impl NodeEventType {
     let hash = U256::from(block.get_hash());
     let siblings = siblings.iter().map(|h| (*h).into()).collect();
     NodeEventType::AddBlock {
-      block: BlockInfo { hash: hash.into(), parent: block.prev.into(), height },
+      block: BlockInfo::new(hash, block.prev, height),
       event: Box::new(AddBlockEvent::Included { siblings, work: work.into() }),
     }
   }
@@ -455,17 +561,9 @@ impl NodeEventType {
     let hash = U256::from(block.get_hash());
 
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: added_hash.into(),
-        parent: block.prev.into(),
-        height: Some(added_height),
-      },
+      block: BlockInfo::new(added_hash, added_block.prev, Some(added_height)),
       event: Box::new(AddBlockEvent::Computed {
-        block: BlockInfo {
-          hash: hash.into(),
-          parent: block.prev.into(),
-          height: Some(height),
-        },
+        block: BlockInfo::new(hash, block.prev, Some(height)),
         results: results.to_vec(),
       }),
     }
@@ -480,42 +578,25 @@ impl NodeEventType {
     let (old_block, old_height) = old;
     let (new_block, new_height) = new;
     let (common_block, common_height) = common;
-    let (old_runtime_tick, new_runtime_tick) = ticks;
+    let (runtime_tick, rolled_to) = ticks;
     let common_tick = common_height;
 
-    let rollback = {
-      if common_tick < old_runtime_tick {
-        Some(RollbackInfo {
-          common_tick,
-          runtime_tick: old_runtime_tick,
-          rolled_to: new_runtime_tick,
-        })
-      } else {
-        None
-      }
-    };
-
+    // TODO: remove these conversions
     let new_hash = U256::from(new_block.get_hash());
     let old_hash = U256::from(old_block.get_hash());
     let common_hash = U256::from(common_block.get_hash());
 
+    let rollback = RollbackInfo::new(common_tick, runtime_tick, rolled_to);
+
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: new_hash.into(),
-        parent: new_block.prev.into(),
-        height: Some(new_height),
-      },
+      block: BlockInfo::new(new_hash, new_block.prev, Some(new_height)),
       event: Box::new(AddBlockEvent::Reorg {
-        old_tip: BlockInfo {
-          hash: old_hash.into(),
-          parent: old_block.prev.into(),
-          height: Some(old_height),
-        },
-        common_block: BlockInfo {
-          hash: common_hash.into(),
-          parent: common_block.prev.into(),
-          height: Some(common_height),
-        },
+        old_tip: BlockInfo::new(old_hash, old_block.prev, Some(old_height)),
+        common_block: BlockInfo::new(
+          common_hash,
+          common_block.prev,
+          Some(common_height),
+        ),
         rollback,
         work: work.into(),
       }),
@@ -524,11 +605,7 @@ impl NodeEventType {
   pub fn already_included(block: &HashedBlock, height: u128) -> Self {
     let bhash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: bhash.into(),
-        parent: block.prev.into(),
-        height: Some(height),
-      },
+      block: BlockInfo::new(bhash, block.prev, Some(height)),
       event: Box::new(AddBlockEvent::AlreadyIncluded),
     }
   }
@@ -536,18 +613,14 @@ impl NodeEventType {
     let bhash = U256::from(block.get_hash());
     let parent: Hash = block.prev.into();
     NodeEventType::AddBlock {
-      block: BlockInfo { hash: bhash.into(), parent, height: None },
+      block: BlockInfo::new(bhash, block.prev, None),
       event: Box::new(AddBlockEvent::MissingParent { parent }),
     }
   }
   pub fn too_late(block: &HashedBlock) -> Self {
     let bhash = U256::from(block.get_hash());
     NodeEventType::AddBlock {
-      block: BlockInfo {
-        hash: bhash.into(),
-        parent: block.prev.into(),
-        height: None,
-      },
+      block: BlockInfo::new(bhash, block.prev, None),
       event: Box::new(AddBlockEvent::TooLate),
     }
   }
@@ -615,11 +688,6 @@ impl NodeEventType {
     }
   }
 
-  // HANDLE REQUEST
-  // pub fn handle_request() -> Self {
-  //   NodeEvent::HandleRequest
-  // }
-
   // HANDLE MESSAGE
   pub fn notice_blocks<A: ProtoAddr>(
     magic: u32,
@@ -647,61 +715,4 @@ impl NodeEventType {
     };
     NodeEventType::HandleMessage { event }
   }
-}
-
-#[macro_export]
-macro_rules! heartbeat {
-  (
-    peers: { num: $peers_num:expr },
-    tip: {
-      height: $tip_height:expr,
-      difficulty: $difficulty:expr,
-      work: $work: expr,
-    },
-    blocks: {
-      missing: $missing_count:expr,
-      pending: $pending_count:expr,
-      included: $included_count:expr,
-    },
-    runtime: {
-      mana: {
-        current: $mana_cur:expr,
-        limit: $mana_lim:expr,
-        available: $mana_avail:expr,
-      },
-      size: {
-        current: $size_cur:expr,
-        limit: $size_lim:expr,
-        available: $size_avail:expr,
-      }
-    },
-    tip_blocks: $tip_blocks:expr
-  ) => {
-    NodeEventType::Heartbeat {
-      peers: $crate::events::HeartbeatPeers { num: $peers_num },
-      tip: $crate::events::HeartbeatTip {
-        height: $tip_height,
-        difficulty: $difficulty,
-        work: $work.into(),
-      },
-      blocks: $crate::events::HeartbeatBlocks {
-        missing: $missing_count,
-        pending: $pending_count,
-        included: $included_count,
-      },
-      runtime: $crate::events::HeartbeatRuntime {
-        mana: $crate::events::HeartbeatStatInfo {
-          current: $mana_cur,
-          limit: $mana_lim,
-          available: $mana_avail,
-        },
-        size: $crate::events::HeartbeatStatInfo {
-          current: $size_cur,
-          limit: $size_lim,
-          available: $size_avail,
-        },
-      },
-      tip_blocks: $tip_blocks.iter().map(|x: &U256| (*x).into()).collect(),
-    }
-  };
 }

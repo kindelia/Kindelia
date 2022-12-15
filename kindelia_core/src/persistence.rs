@@ -266,7 +266,7 @@ impl DiskSer for U120 {
     &self,
     sink: &mut W,
   ) -> std::io::Result<usize> {
-    self.0.disk_serialize(sink)
+    (**self).disk_serialize(sink)
   }
   fn disk_deserialize<R: std::io::Read>(
     source: &mut R,
@@ -274,13 +274,9 @@ impl DiskSer for U120 {
     let num = u128::disk_deserialize(source)?;
     match num {
       None => Ok(None),
-      Some(num) => {
-        if num >> 120 == 0 {
-          Ok(Some(U120(num)))
-        } else {
-          Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-        }
-      }
+      Some(num) => U120::new(num)
+        .map(Some) // wraps the value in an Option
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData)), // if not Some returns an error
     }
   }
 }
