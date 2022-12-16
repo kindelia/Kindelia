@@ -16,7 +16,7 @@ use warp::{reject, Rejection};
 
 use kindelia_common::{Name, U256};
 use kindelia_core::api::{
-  u256_to_hex, HexStatement, NodeRequest, PublishError, ReqAnsRecv,
+  u256_to_hex, BlockRepr, HexStatement, NodeRequest, PublishError, ReqAnsRecv,
 };
 use kindelia_core::bits::ProtoSerialize;
 use kindelia_core::config::ApiConfig;
@@ -251,6 +251,12 @@ pub async fn api_serve<'a, C: ProtoComm + 'static>(
     }
   });
 
+  // TODO: remove this test method
+  let post_block = warp::post()
+    .and(warp::path("block"))
+    .and(json_body())
+    .then(move |body: BlockRepr| async { ok_json(body) });
+
   let get_function_base = path!("functions" / String / ..).and_then(
     move |name_txt: String| async move {
       match Name::from_str(&name_txt) {
@@ -310,7 +316,8 @@ pub async fn api_serve<'a, C: ProtoComm + 'static>(
 
   let functions_router = get_functions //
     .or(get_function) //
-    .or(get_function_state);
+    .or(get_function_state)
+    .or(post_block);
 
   // == Constructors ==
 

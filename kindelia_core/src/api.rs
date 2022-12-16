@@ -10,14 +10,13 @@ use std::fmt::{self, Display};
 
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
 use crate::bits::ProtoSerialize;
-use crate::runtime;
 use crate::net::ProtoComm;
 use crate::node::{self, PoolError, TransactionError};
+use crate::runtime;
 use crate::util;
 
 pub use kindelia_common::Name;
@@ -189,70 +188,17 @@ impl From<&node::Transaction> for String {
   }
 }
 
-#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockRepr {
-  #[serde(with = "u128_time_ser")]
-  pub time: u128, // block timestamp
-  #[serde_as(as = "DisplayFromStr")]
+  /// block timestamp
+  pub time: u128,
   // TODO: serialize as Hex / refactor to array
-  pub meta: u128, // block metadata
-  pub prev: Hash,        // previous block hash (32 bytes)
-  pub body: Vec<String>, // block contents (list of statements)
-}
-
-mod u128_time_ser {
-  use chrono::prelude::{DateTime, Utc};
-  use serde::{de, ser};
-  use serde::{Deserializer, Serializer};
-  use std::{fmt, time};
-  type T = u128;
-
-  struct TimeVisitor;
-
-  impl<'de> de::Visitor<'de> for TimeVisitor {
-    type Value = T;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-      f.write_str("a valid ISO 8601 timestamp string")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-      E: de::Error,
-    {
-      let dt = DateTime::parse_from_rfc3339(v);
-      let dt = dt.map_err(|e| {
-        de::Error::custom(format!("invalid timestamp '{}': {}", v, e))
-      })?;
-      let st: time::SystemTime = dt.into();
-      let epoc = st.duration_since(time::UNIX_EPOCH);
-      let epoc = epoc.map_err(|e| {
-        de::Error::custom(format!("invalid epoch '{}': {}", dt, e))
-      })?;
-      Ok(epoc.as_millis())
-    }
-  }
-
-  pub fn serialize<S>(v: &T, s: S) -> Result<S::Ok, S::Error>
-  where
-    S: Serializer,
-  {
-    let epoc = *v as u64;
-    let st = time::SystemTime::UNIX_EPOCH
-      .checked_add(time::Duration::from_micros(epoc));
-    let st = st.ok_or_else(|| {
-      ser::Error::custom(format!("invalid time value '{}': ", epoc,))
-    })?;
-    let dt: DateTime<Utc> = st.into();
-    s.serialize_str(&dt.format("%+").to_string())
-  }
-  pub fn deserialize<'de, D>(d: D) -> Result<T, D::Error>
-  where
-    D: Deserializer<'de>,
-  {
-    d.deserialize_str(TimeVisitor)
-  }
+  /// block metadata
+  pub meta: u128,
+  /// previous block hash (32 bytes)
+  pub prev: Hash,
+  /// block contents (list of statements)
+  pub body: Vec<String>,
 }
 
 impl From<&node::Block> for BlockRepr {

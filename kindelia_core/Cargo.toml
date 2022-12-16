@@ -49,9 +49,7 @@ priority-queue = "1.2.1"
 # num = "0.1.36"
 
 # API
-chrono = "0.4.22"
 serde = { version = "1.0.137", features = ["derive"] }
-serde_with = { version = "2.0.0", features = ["hex"] }
 tokio = { version = "1.19.1", features = ["sync"] }
 
 # ERROR HANDLING

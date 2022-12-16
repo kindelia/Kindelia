@@ -104,7 +104,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 
 use kindelia_common::nohash_hasher::NoHashHasher;
 use kindelia_common::{crypto, nohash_hasher, Name, U120};
@@ -263,19 +262,14 @@ pub enum EffectFailure {
 
 pub type StatementResult = Result<StatementInfo, StatementErr>;
 
-// TODO: refactor (de)serialization out or simplify
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StatementInfo {
   Ctr { name: Name, args: Vec<Name> },
   Fun { name: Name, args: Vec<Name> },
   Run {
     done_term: Term,
-    #[serde_as(as = "DisplayFromStr")]
     used_mana: u64,
-    #[serde_as(as = "DisplayFromStr")]
     size_diff: i64,
-    #[serde_as(as = "DisplayFromStr")]
     end_size: u64,
   },
   Reg { name: Name, ownr: U120 },
