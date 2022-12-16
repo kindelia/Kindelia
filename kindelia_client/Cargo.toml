@@ -12,5 +12,5 @@ repository = "https://github.com/Kindelia/Kindelia"
 kindelia_lang = { path="../kindelia_lang", version = "0.1.7" }
 kindelia_core = { path="../kindelia_core", version = "0.1.7" }
 
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", default-features = false, features = ["json"] }
 serde = { version = "1.0.137", features = ["derive"] }
