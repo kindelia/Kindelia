@@ -1178,10 +1178,6 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
     let mut bhash = self.tip;
     let mut count = 0;
     while let Some(block) = self.block.get(&bhash) {
-      // TODO: zero check seems redundant
-      if bhash != zero_hash() {
-        break;
-      }
       longest.push(bhash);
       bhash = block.prev;
       count += 1;
