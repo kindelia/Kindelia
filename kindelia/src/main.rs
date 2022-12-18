@@ -28,7 +28,7 @@ use kindelia_core::config::{
 };
 use kindelia_core::net::{Address, ProtoComm};
 use kindelia_core::node::{
-  spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
+  spawn_miner, NodeBuilder, Transaction, MAX_TRANSACTION_SIZE,
 };
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
@@ -835,18 +835,20 @@ pub fn start_node<C: ProtoComm + 'static>(
   let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
   // Node state object
-  let (node_query_sender, node) = Node::new(
-    node_config.data_path,
-    node_config.network_id,
-    addr,
-    initial_peers,
-    comm,
-    miner_comm,
-    file_writter,
-    #[cfg(feature = "events")]
-    Some(event_tx),
-  );
-
+  let genesis_code = include_str!("../../kindelia_core/genesis.kdl");
+  let (node_query_sender, node) = NodeBuilder::default()
+    .network_id(node_config.network_id)
+    .comm(comm)
+    .miner_comm(miner_comm)
+    .addr(addr)
+    .storage(file_writter)
+    .genesis_code(node_config.data_path, genesis_code)?
+    .build(
+      &initial_peers, 
+      #[cfg(feature = "events")]
+      Some(event_tx),
+    )?;
+  
   // WebSocket API router
   let ws_router = kindelia_ws::ws_router::<
     events::NodeEventType,
