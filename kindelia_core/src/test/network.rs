@@ -117,17 +117,21 @@ fn start_simulation<C: ProtoComm + 'static>(
 
   // Node
   let node_thread = {
-    let (node_query_sender, node) = node::Node::new(
-      node_config.data_path,
-      node_config.network_id,
-      addr,
-      initial_peers,
-      comm,
-      miner_comm,
-      storage,
-      #[cfg(feature = "events")]
-      Some(event_tx),
-    );
+    let genesis_code = include_str!("../../genesis.kdl");
+    let (node_query_sender, node) = node::NodeBuilder::default()
+      .network_id(node_config.network_id)
+      .comm(comm)
+      .miner_comm(miner_comm)
+      .addr(addr)
+      .storage(storage)
+      .genesis_code(node_config.data_path, genesis_code)
+      .unwrap()
+      .build(
+        &initial_peers,
+        #[cfg(feature = "events")]
+        Some(event_tx),
+      )
+      .unwrap();
 
     // Spawns the node thread
     std::thread::spawn(move || {
