@@ -335,7 +335,9 @@ where
     height: u128,
     block: HashedBlock,
   ) -> Result<(), BlockStorageError>;
-  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+  fn read_blocks<
+    F: FnMut((node::Block, PathBuf)) -> Result<(), BlockStorageError>,
+  >(
     &self,
     then: F,
   ) -> Result<(), BlockStorageError>;
@@ -423,9 +425,11 @@ impl BlockStorage for SimpleFileStorage {
     }
     Ok(())
   }
-  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+  fn read_blocks<
+    F: FnMut((node::Block, PathBuf)) -> Result<(), BlockStorageError>,
+  >(
     &self,
-    then: F,
+    mut then: F,
   ) -> Result<(), BlockStorageError> {
     let file_paths = get_ordered_blocks_path(&self.path)
       .map_err(|e| BlockStorageError::Read { source: Box::new(e) })?;
@@ -445,7 +449,9 @@ impl BlockStorage for SimpleFileStorage {
           .ok_or(BlockStorageError::Serialization { source: None })?;
       items.push((block, file_path));
     }
-    items.into_iter().for_each(then);
+    for item in items.into_iter() {
+      then(item)?
+    }
     Ok(())
   }
   fn disable(&mut self) {
@@ -525,7 +531,9 @@ pub struct EmptyStorage;
 impl BlockStorage for EmptyStorage {
   fn enable(&mut self) {}
   fn disable(&mut self) {}
-  fn read_blocks<F: FnMut((node::Block, PathBuf))>(
+  fn read_blocks<
+    F: FnMut((node::Block, PathBuf)) -> Result<(), BlockStorageError>,
+  >(
     &self,
     _: F,
   ) -> Result<(), BlockStorageError> {

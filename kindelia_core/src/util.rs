@@ -191,7 +191,7 @@ pub(crate) fn get_time_micro() -> u128 {
 /// since epoch.
 #[derive(Error, Debug)]
 #[error("SystemTime precedes the unix epoch. {now:?} < {epoch:?}")]
-pub(crate) struct EpochError {
+pub struct EpochError {
   pub now: SystemTime,
   pub epoch: SystemTime,
   pub source: SystemTimeError,
