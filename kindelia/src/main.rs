@@ -855,10 +855,10 @@ pub fn start_node<C: ProtoComm + 'static>(
 
   // Spawns the API thread
   if let Some(api_config) = api_config {
+    let runtime = tokio::runtime::Runtime::new()?;
     let api_thread = std::thread::spawn(move || {
       let http_api_task =
         kindelia_server::api_serve(node_query_sender, api_config, ws_router);
-      let runtime = tokio::runtime::Runtime::new().unwrap();
       runtime.block_on(http_api_task);
     });
     threads.push(api_thread);
