@@ -103,7 +103,7 @@ impl Transaction {
   // Encodes a transaction length as a pair of 2 bytes
   pub fn encode_length(&self) -> (u8, u8) {
     let len = self.data.len() as u16;
-    let num = (len as u16).reverse_bits();
+    let num = len.reverse_bits();
     (((num >> 8) & 0xFF) as u8, (num & 0xFF) as u8)
   }
 
@@ -1253,7 +1253,7 @@ impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
   }
   pub fn get_ctr_info(&self, name: &Name) -> Option<CtrInfo> {
     if let Some(arit) = self.runtime.get_arity(name) {
-      Some(CtrInfo { arit: arit as u64 })
+      Some(CtrInfo { arit })
     } else {
       None
     }

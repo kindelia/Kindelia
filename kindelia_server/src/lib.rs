@@ -245,7 +245,7 @@ pub async fn api_serve<'a, C: ProtoComm + 'static>(
     async move {
       let functions = ask(query_tx, NodeRequest::get_functions()).await;
       let functions: Vec<u128> =
-        functions.into_iter().map(|x| x as u128).collect();
+        functions.into_iter().collect();
       let functions = u128_names_to_strings(&functions);
       ok_json(functions)
     }

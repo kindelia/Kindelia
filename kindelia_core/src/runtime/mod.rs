@@ -1441,7 +1441,7 @@ impl Runtime {
             Term::num(U120::ZERO)
           };
         self.collect(done);
-        let size_end = self.get_size() as u64;
+        let size_end = self.get_size();
         let mana_dif = self.get_mana() - mana_ini;
         let size_dif = (size_end as i64) - (size_ini as i64);
         if size_end > size_lim && !sudo {
@@ -1484,7 +1484,7 @@ impl Runtime {
 
   // Maximum size = 2048 * block_number
   pub fn get_size_limit(&self) -> u64 {
-    (self.get_tick() as u64 + 1) * (BLOCK_BITS_LIMIT / 128)
+    (self.get_tick() + 1) * (BLOCK_BITS_LIMIT / 128)
   }
 
   // Rollback
@@ -2033,7 +2033,7 @@ pub fn alloc(rt: &mut Runtime, arity: u64) -> Loc {
       // - If less than 50% of the memory is used, jump to a random index and try again
       // - If more than 50% of the memory is used, double the maximum cap and try again
       if rt.get_size() * 2 < mcap {
-        rt.set_next(fastrand::u64(..) % mcap as u64);
+        rt.set_next(fastrand::u64(..) % mcap);
       } else {
         rt.set_mcap(mcap * 2);
       }

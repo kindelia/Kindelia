@@ -171,7 +171,7 @@ pub(crate) fn get_time() -> u128 {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .expect("system time should be later than unix epoch")
-    .as_millis() as u128
+    .as_millis()
 }
 
 /// Gets current timestamp in microseconds
@@ -183,7 +183,7 @@ pub(crate) fn get_time_micro() -> u128 {
   std::time::SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .expect("system time should be later than unix epoch")
-    .as_micros() as u128
+    .as_micros()
 }
 
 /// Indicates that the system's time is before the unix epoch
@@ -207,7 +207,7 @@ pub(crate) fn try_get_time() -> Result<u128, EpochError> {
     now
       .duration_since(epoch)
       .map_err(|source| EpochError { now, epoch, source })?
-      .as_millis() as u128,
+      .as_millis(),
   )
 }
 
@@ -219,7 +219,7 @@ pub(crate) fn try_get_time_micro() -> Result<u128, EpochError> {
     now
       .duration_since(epoch)
       .map_err(|source| EpochError { now, epoch, source })?
-      .as_micros() as u128,
+      .as_micros(),
   )
 }
 
