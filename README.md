@@ -53,3 +53,11 @@ kindelia test example/example.kdl
 ```sh
 kindelia post-udp --host 127.0.0.1:42000 example/post.kdl 
 ```
+
+
+----
+
+
+If you need support related to Kindelia, email [support@kindelia.org](mailto:support@kindelia.org)
+
+For Feedbacks, email [kindelia@kindelia.org](mailto:kindelia@kindelia.com)
