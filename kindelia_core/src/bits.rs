@@ -47,7 +47,7 @@ pub fn deserialize_fixlen(
     return None;
   }
   for i in 0..size {
-    let index = (*index + size - i - 1) as usize;
+    let index = *index + size - i - 1;
     result = (result << 1) + bits[index] as u64;
   }
   *index = *index + size;
@@ -64,7 +64,7 @@ pub fn deserialize_fixlen_big(
     return None;
   }
   for i in 0..size {
-    let index = (*index + size - i - 1) as usize;
+    let index = *index + size - i - 1;
     result = (result << 1) + U256::from(bits[index] as u8);
   }
   *index = *index + size;
@@ -86,8 +86,8 @@ pub fn serialize_varlen(value: u128, bits: &mut BitVec) {
 pub fn deserialize_varlen(bits: &BitVec, index: &mut usize) -> Option<u128> {
   let mut val: u128 = 0;
   let mut add: u128 = 1;
-  while bits.get(*index as usize)? {
-    val = val + if bits.get(*index as usize + 1)? { add } else { 0 };
+  while bits.get(*index)? {
+    val = val + if bits.get(*index + 1)? { add } else { 0 };
     add = add << 1;
     *index = *index + 2;
   }
@@ -127,8 +127,8 @@ pub fn deserialize_bits(
   names: &mut Names,
 ) -> Option<BitVec> {
   let mut result = BitVec::new();
-  while bits.get(*index as usize)? {
-    result.push(bits.get(*index as usize + 1)?);
+  while bits.get(*index)? {
+    result.push(bits.get(*index + 1)?);
     *index = *index + 2;
   }
   *index = *index + 1;
@@ -155,7 +155,7 @@ pub fn deserialize_list<T: ProtoSerialize>(
   names: &mut Names,
 ) -> Option<Vec<T>> {
   let mut result = Vec::new();
-  while bits.get(*index as usize)? {
+  while bits.get(*index)? {
     *index = *index + 1;
     result.push(T::proto_deserialize(bits, index, names)?);
   }
@@ -269,14 +269,14 @@ impl ProtoSerialize for Name {
   ) -> Option<Self> {
     let mut nam: u128 = 0;
     let mut add: u128 = 1;
-    let compressed = bits.get(*index as usize)?;
+    let compressed = bits.get(*index)?;
     *index += 1;
     if compressed {
       let id = deserialize_varlen(bits, index)?;
       let nm = *names.get(&id)?;
       Some(Name::from_u128_unchecked(nm))
     } else {
-      while bits.get(*index as usize)? {
+      while bits.get(*index)? {
         *index += 1;
         let got = deserialize_fixlen(6, bits, index)?;
         nam = nam + add * got as u128;
@@ -629,7 +629,7 @@ impl ProtoSerialize for net::Address {
     index: &mut usize,
     _names: &mut Names,
   ) -> Option<net::Address> {
-    if bits[*index as usize] as u128 == 0 {
+    if bits[*index] as u128 == 0 {
       *index = *index + 1;
       let val0 = deserialize_fixlen(8, bits, index)? as u8;
       let val1 = deserialize_fixlen(8, bits, index)? as u8;

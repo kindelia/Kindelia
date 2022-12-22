@@ -672,7 +672,7 @@ fn init_socket() -> Option<UdpSocket> {
   let try_ports =
     [net::UDP_PORT, net::UDP_PORT + 1, net::UDP_PORT + 2, net::UDP_PORT + 3];
   for port in try_ports {
-    if let Ok(socket) = UdpSocket::bind(&format!("0.0.0.0:{}", port)) {
+    if let Ok(socket) = UdpSocket::bind(format!("0.0.0.0:{}", port)) {
       socket.set_nonblocking(true).ok();
       return Some(socket);
     }

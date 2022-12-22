@@ -143,7 +143,7 @@ mod cli {
       .output()
       .unwrap();
     let output = get_stdout(&output);
-    std::fs::write(&temp_file, &output).unwrap();
+    std::fs::write(&temp_file, output).unwrap();
     let output =
       kindelia!().args(["test", temp_file.to_str().unwrap()]).output().unwrap();
     let output = get_stdout(&output);
