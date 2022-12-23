@@ -1,0 +1,150 @@
+// T types
+ctr {T0}
+ctr {T1 x0}
+ctr {T2 x0 x1}
+ctr {T3 x0 x1 x2}
+ctr {T4 x0 x1 x2 x3}
+ctr {T5 x0 x1 x2 x3 x4}
+ctr {T6 x0 x1 x2 x3 x4 x5}
+ctr {T7 x0 x1 x2 x3 x4 x5 x6}
+ctr {T8 x0 x1 x2 x3 x4 x5 x6 x7}
+ctr {T9 x0 x1 x2 x3 x4 x5 x6 x7 x8}
+ctr {TA x0 x1 x2 x3 x4 x5 x6 x7 x8 x9}
+ctr {TB x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10}
+ctr {TC x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11}
+ctr {TD x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12}
+ctr {TE x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13}
+ctr {TF x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14}
+ctr {TG x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15}
+
+// An if-then-else statement
+fun (If cond t f) {
+  (If #0 ~ f) = f
+  (If  ~ t ~) = t
+}
+
+// Used to pretty-print names
+ctr {Name name}
+
+// Below, we declare the built-in IO operations
+
+// DONE returns from an IO operation
+ctr {DONE expr}
+fun (Done expr) {
+  (Done expr) = {DONE expr}
+}
+
+// TAKE recovers an app's stored state
+ctr {TAKE cont}
+fun (Take) {
+  (Take) = @cont {TAKE cont}
+}
+
+// SAVE stores the app's state
+ctr {SAVE expr cont}
+fun (Save expr) {
+  (Save expr) = @cont {SAVE expr cont}
+}
+
+// CALL calls another IO operation, assigning
+// the caller name to the current subject name
+ctr {CALL name argm cont}
+fun (Call name argm) {
+  (Call name argm) = @cont {CALL name argm cont}
+}
+
+// SUBJ returns the name of the current subject
+ctr {SUBJ cont}
+fun (Subj) {
+  (Subj) = @cont {SUBJ cont}
+}
+
+// FROM returns the name of the current caller
+ctr {FROM cont}
+fun (From) {
+  (From) = @cont {FROM cont}
+}
+
+// TICK returns the current block number
+ctr {TICK cont}
+fun (Tick) {
+  (Tick) = @cont {TICK cont}
+}
+
+// GIDX returns the block number and statement index inside the block
+// of a function, register or constructor.
+// Returns in the form of a U120:
+// - most significant 60 bits are the block index
+// - less signficiant 60 bits are the statement index
+ctr {GIDX name cont}
+fun (GetIdx name) {
+  (GetIdx name) = @cont {GIDX name cont}
+}
+
+// STH0 returns the less significant 120 bits hash of the statement at index idx
+ctr {STH0 idx cont}
+fun (GetStmHash0 idx) {
+  (GetStmHash0 idx) = @cont {STH0 idx cont}
+}
+
+// STH0 returns the less significant 120 bits hash of the statement at index idx
+ctr {STH1 idx cont}
+fun (GetStmHash1 idx) {
+  (GetStmHash1 idx) = @cont {STH1 idx cont}
+}
+
+// TIME returns the current block timestamp
+ctr {TIME cont}
+fun (Time) {
+  (Time) = @cont {TIME cont}
+}
+
+// META returns the current block metadata
+ctr {META cont}
+fun (Meta) {
+  (Meta) = @cont {META cont}
+}
+
+// HAX0 returns the current block metadata
+ctr {HAX0 cont}
+fun (Hax0) {
+  (Hax0) = @cont {HAX0 cont}
+}
+
+// HAX1 returns the current block metadata
+ctr {HAX1 cont}
+fun (Hax1) {
+  (Hax1) = @cont {HAX1 cont}
+}
+
+// FAIL fails a run statement
+ctr {FAIL err}
+fun (Fail err) {
+  (Fail err) = {FAIL err}
+}
+
+// NORM fully normalizes a term
+ctr {NORM term cont}
+fun (Norm term) {
+  (Norm term) = @cont {NORM term cont}
+}
+
+// LOAD works like TAKE, but clones the state
+fun (Load) {
+  (Load) = @cont {TAKE @x dup x0 x1 = x; {SAVE x0 @~ (!cont x1)}}
+}
+
+// This is here for debugging. Will be removed.
+ctr {Inc}
+ctr {Get}
+fun (Count action) {
+  (Count {Inc}) = {TAKE @x {SAVE (+ x #1) @~ {DONE #0}}}
+  (Count {Get}) = (!(Load) @x {DONE x})
+} with {
+  #0
+}
+
+// Registers the empty namespace.
+reg {
+  #x7e5f4552091a69125d5dfcb7b8c265 // secret_key = 0x1
+}

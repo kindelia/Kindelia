@@ -50,7 +50,10 @@ where
     }
     if let (Some(prop_path), Some(config_values)) = (self.prop, config_values) {
       // If config file and argument prop path are set, read from config file
-      return Self::resolve_from_config_aux(config_values, &prop_path);
+      if let Some(v) = Self::resolve_from_config_aux(config_values, &prop_path)?
+      {
+        return Ok(v);
+      }
     }
     (self.default_value)()
   }
@@ -66,10 +69,13 @@ where
   {
     if let Some(prop_path) = self.prop {
       if let Some(config_values) = config_values {
-        Self::resolve_from_config_aux(config_values, &prop_path)
-      } else {
-        (self.default_value)()
+        if let Some(v) =
+          Self::resolve_from_config_aux(config_values, &prop_path)?
+        {
+          return Ok(v);
+        }
       }
+      (self.default_value)()
     } else {
       Err(anyhow!(
         "Cannot resolve from config file config without 'prop' field set"
@@ -105,18 +111,17 @@ where
   fn resolve_from_config_aux(
     config_values: &toml::Value,
     prop_path: &str,
-  ) -> anyhow::Result<T>
+  ) -> anyhow::Result<Option<T>>
   where
     T: ArgumentFrom<toml::Value>,
   {
-    let value = Self::get_prop(config_values, prop_path).context(anyhow!(
-      "Could not find prop '{}' in config file.",
-      prop_path
-    ))?;
-    T::arg_from(value).context(anyhow!(
-      "Could not convert value of '{}' into desired type",
-      prop_path,
-    ))
+    match Self::get_prop(config_values, prop_path) {
+      Some(value) => Ok(Some(T::arg_from(value).context(anyhow!(
+        "Could not convert value of '{}' into desired type",
+        prop_path,
+      ))?)),
+      None => Ok(None),
+    }
   }
 
   fn get_prop(mut value: &toml::Value, prop_path: &str) -> Option<toml::Value> {

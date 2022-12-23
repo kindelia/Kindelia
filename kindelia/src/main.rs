@@ -1,12 +1,13 @@
 mod cli;
 mod config;
 mod files;
+mod genesis;
 mod util;
 
 use anyhow::{anyhow, Context};
 use std::future::Future;
 use std::net::{SocketAddr, UdpSocket};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
@@ -41,6 +42,7 @@ use util::{
 };
 
 use crate::cli::{GetStatsKind, NodeCleanBlocksCommand, NodeCleanCommand};
+use crate::genesis::{genesis_code, GenesisCodeError};
 use crate::util::init_config_file;
 
 fn main() -> anyhow::Result<()> {
@@ -125,10 +127,21 @@ pub fn run_cli() -> anyhow::Result<()> {
   );
 
   match parsed.command {
-    CliCommand::Test { file, sudo } => {
-      let code: String = file.read_to_string()?;
-      test_code(&code, sudo);
-      Ok(())
+    CliCommand::Test { file, sudo, genesis } => {
+      let genesis_code = match genesis {
+        Some(p) => std::fs::read_to_string(&p).context(anyhow!(
+          "reading user-provided genesis prelude in {}",
+          p.display()
+        ))?,
+        None => {
+          include_str!("../../kindelia_core/genesis-tests.kdl").to_string()
+        }
+      };
+      let code = file
+        .read_to_string()
+        .context(anyhow!("reading user-provided code in {}", file))?;
+
+      test_code(&genesis_code, &code, sudo)
     }
     CliCommand::Check { file, encoded, command } => {
       let code = file.read_to_string()?;
@@ -232,7 +245,7 @@ pub fn run_cli() -> anyhow::Result<()> {
       init_config_file(&path).map_err(|e| anyhow!(e))?;
       Ok(())
     }
-    CliCommand::Node { command, data_dir, network_id } => {
+    CliCommand::Node { command, data_dir, network_id, genesis } => {
       let config = handle_config_file(&config_path).map_err(|e| anyhow!(e))?;
       let config = Some(&config);
 
@@ -241,6 +254,14 @@ pub fn run_cli() -> anyhow::Result<()> {
         prop = "node.network.network_id".to_string(),
         no_default = anyhow!("Missing `network_id` parameter."),
         cli_val = network_id,
+        cfg = config,
+      );
+
+      let genesis_path = resolve_cfg!(
+        env = "KINDELIA_GENESIS",
+        prop = format!("node.network.{:#02X}.genesis", network_id),
+        default = PathBuf::new(),
+        cli_val = genesis,
         cfg = config,
       );
 
@@ -264,7 +285,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
           let initial_peers = resolve_cfg!(
             env = "KINDELIA_NODE_INITIAL_PEERS",
-            prop = format!("node.networks.{:#02X}.initial_peers", network_id),
+            prop = format!("node.network.{:#02X}.initial_peers", network_id),
             default = vec![],
             cli_val = initial_peers,
             cfg = config,
@@ -318,7 +339,13 @@ pub fn run_cli() -> anyhow::Result<()> {
           };
 
           let api_config = Some(api_config);
-          start_node(node_cfg, api_config, node_comm, initial_peers)
+          start_node(
+            node_cfg,
+            api_config,
+            &genesis_path,
+            node_comm,
+            initial_peers,
+          )
         }
       }
     }
@@ -664,8 +691,17 @@ async fn join_all(
   Ok(())
 }
 
-pub fn test_code(code: &str, sudo: bool) {
-  runtime::test_statements_from_code(code, sudo);
+pub fn test_code(
+  genesis_code: &str,
+  code: &str,
+  sudo: bool,
+) -> Result<(), anyhow::Error> {
+  let genesis_stmts = parser::parse_code(genesis_code)
+    .map_err(|e| anyhow!(e))
+    .context("Parsing genesis code")?;
+
+  runtime::test_statements_from_code(&genesis_stmts, code, sudo);
+  Ok(())
 }
 
 fn init_socket() -> Option<UdpSocket> {
@@ -802,6 +838,7 @@ pub fn spawn_event_handlers<A: net::ProtoAddr + 'static>(
 pub fn start_node<C: ProtoComm + 'static>(
   node_config: NodeConfig,
   api_config: Option<ApiConfig>,
+  genesis_path: &PathBuf,
   comm: C,
   initial_peers: Vec<C::Address>,
 ) -> anyhow::Result<()> {
@@ -834,11 +871,14 @@ pub fn start_node<C: ProtoComm + 'static>(
   // File writter
   let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
+  let genesis_stmts = genesis_statements(genesis_path, node_config.network_id)?;
+
   // Node state object
   let (node_query_sender, node) = Node::new(
     node_config.data_path,
     node_config.network_id,
     addr,
+    &genesis_stmts,
     initial_peers,
     comm,
     miner_comm,
@@ -902,6 +942,37 @@ pub fn start_node<C: ProtoComm + 'static>(
   }
 
   Ok(())
+}
+
+fn genesis_statements(
+  genesis_path: &PathBuf,
+  network_id: u32,
+) -> Result<Vec<ast::Statement>, anyhow::Error> {
+  if genesis_path.as_os_str().is_empty() {
+    parser::parse_code(
+      genesis_code(network_id).context("loading genesis code")?,
+    )
+    .map_err(|e| anyhow!(e))
+  } else {
+    // User-provided genesis statements are not allowed for networks that
+    // have a genesis block compiled into the executable.
+    // To enforce this, we attempt to retrieve the built-in code for
+    // provided network_id, and if that fails with UnknownNetwork error
+    // then the statements are allowed.
+    match genesis_code(network_id) {
+      Ok(_) => Err(anyhow!(
+        "Genesis statements cannot override built-in network {:#02X}",
+        network_id
+      )),
+      Err(GenesisCodeError::UnknownNetwork(_n)) => {
+        let genesis_code = std::fs::read_to_string(genesis_path)?;
+        parser::parse_code(&genesis_code)
+          .map_err(|e| anyhow!(e))
+          .context("parsing user-provided genesis code")
+      }
+      Err(e) => Err(e.into()),
+    }
+  }
 }
 
 // Shell completion

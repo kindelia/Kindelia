@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use rstest::fixture;
 
-use crate::constants;
 use crate::node;
 use crate::runtime::debug::show_term;
 use crate::runtime::{
@@ -16,10 +15,12 @@ use kindelia_common::{Name, U120};
 use kindelia_lang::{ast, parser};
 
 pub fn init_runtime(path: &PathBuf) -> runtime::Runtime {
+  const GENESIS_CODE: &str = include_str!("../../genesis-tests.kdl");
   let genesis_stmts =
-    parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses.");
+    parser::parse_code(GENESIS_CODE).expect("Genesis code parses.");
   runtime::init_runtime(path.clone(), &genesis_stmts)
 }
+
 
 // ===========================================================
 // Aux types

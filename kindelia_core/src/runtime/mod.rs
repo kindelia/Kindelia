@@ -110,10 +110,9 @@ use kindelia_common::nohash_hasher::NoHashHasher;
 use kindelia_common::{crypto, nohash_hasher, Name, U120};
 use kindelia_lang::ast;
 use kindelia_lang::ast::{Oper, Statement, Term};
-use kindelia_lang::parser::{parse_code, parse_statements, ParseErr};
+use kindelia_lang::parser::{parse_statements, ParseErr};
 
 use crate::bits::ProtoSerialize;
-use crate::constants;
 use crate::persistence::DiskSer;
 use crate::runtime::functions::compile_func;
 use crate::util::{self, U128_SIZE};
@@ -3218,7 +3217,7 @@ pub fn print_io_consts() {
 }
 
 // Serializes, deserializes and evaluates statements
-pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
+pub fn test_statements(genesis_stmts: &[Statement], statements: &Vec<Statement>, debug: bool) {
   let str_0 = ast::view_statements(statements);
   let statements = &Vec::proto_deserialized(&statements.proto_serialized()).unwrap();
   let str_1 = ast::view_statements(statements);
@@ -3229,8 +3228,7 @@ pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
 
   // TODO: code below does not need heaps_path at all. extract heap persistence out of Runtime.
   let heaps_path = dirs::home_dir().unwrap().join(".kindelia").join("state").join("heaps");
-  let genesis_smts = parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
-  let mut rt = init_runtime(heaps_path, &genesis_smts);
+  let mut rt = init_runtime(heaps_path, genesis_stmts);
   let init = Instant::now();
   rt.run_statements(&statements, false, debug);
   println!();
@@ -3245,14 +3243,14 @@ pub fn test_statements(statements: &Vec<Statement>, debug: bool) {
   println!("[time] {} ms", init.elapsed().as_millis());
 }
 
-pub fn test_statements_from_code(code: &str, debug: bool) {
+pub fn test_statements_from_code(genesis_stmts: &[Statement], code: &str, debug: bool) {
   let statments = parse_statements(code);
   match statments {
-    Ok((.., statements)) => test_statements(&statements, debug),
+    Ok((.., statements)) => test_statements(genesis_stmts, &statements, debug),
     Err(ParseErr { code, erro }) => println!("{}", erro),
   }
 }
 
-pub fn test_statements_from_file(file: &str, debug: bool) {
-  test_statements_from_code(&std::fs::read_to_string(file).expect("file not found"), debug);
+pub fn test_statements_from_file(genesis_stmts: &[Statement], file: &str, debug: bool) {
+  test_statements_from_code(genesis_stmts, &std::fs::read_to_string(file).expect("file not found"), debug);
 }
