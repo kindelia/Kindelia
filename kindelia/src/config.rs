@@ -110,7 +110,7 @@ where
     T: ArgumentFrom<toml::Value>,
   {
     let value = Self::get_prop(config_values, prop_path).context(anyhow!(
-      "Could not find prop '{}' in config file.",
+      "Could not find prop '{}' in config file, please check if this property exists or try running `kindelia init` to create a new default configuration file.",
       prop_path
     ))?;
     T::arg_from(value).context(anyhow!(

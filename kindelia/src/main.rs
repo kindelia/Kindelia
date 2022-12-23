@@ -118,6 +118,8 @@ pub fn run_cli() -> anyhow::Result<()> {
     cli_val = parsed.config,
   );
 
+  println!("INFO: Trying to read config values from {}", config_path.display());
+
   let api_url = resolve_cfg!(
     env = "KINDELIA_API_URL",
     default_fn = default_api_url,
