@@ -3,6 +3,7 @@
 #[allow(non_snake_case)]
 pub mod api;
 pub mod bits;
+pub mod builder;
 pub mod config;
 pub mod constants;
 pub mod runtime;

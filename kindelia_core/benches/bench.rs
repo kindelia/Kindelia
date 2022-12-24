@@ -4,6 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use kindelia_common::crypto::Keccakable;
 use kindelia_core::persistence;
 use kindelia_core::persistence::BlockStorage;
+use kindelia_core::builder::NodeBuilder;
 use kindelia_lang::parser;
 use primitive_types::U256;
 
@@ -155,19 +156,13 @@ fn block_loading(c: &mut Criterion) {
 
   // create Node
   let genesis_code = include_str!("../genesis.kdl");
-  let (_query_sender, mut node) = node::NodeBuilder::default()
-    // .network_id(node_config.network_id)
+  let (_query_sender, mut node) = NodeBuilder::default()
     .comm(comm)
-    // .miner_comm(miner_comm)
     .addr(addr)
     .storage(storage)
-    .genesis_code(dir.clone(), genesis_code)
-    .unwrap()
-    .build(
-      &[],
-      #[cfg(feature = "events")]
-      None,
-    )
+    .genesis_code(genesis_code.to_string())
+    .data_path(dir.clone())
+    .build()
     .unwrap();
 
   // benchmark block loading

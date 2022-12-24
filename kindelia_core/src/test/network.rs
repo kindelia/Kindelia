@@ -118,20 +118,20 @@ fn start_simulation<C: ProtoComm + 'static>(
   // Node
   let node_thread = {
     let genesis_code = include_str!("../../genesis.kdl");
-    let (node_query_sender, node) = node::NodeBuilder::default()
+    let builder = crate::builder::NodeBuilder::default()
       .network_id(node_config.network_id)
       .comm(comm)
-      .miner_comm(miner_comm)
       .addr(addr)
       .storage(storage)
-      .genesis_code(node_config.data_path, genesis_code)
-      .unwrap()
-      .build(
-        &initial_peers,
-        #[cfg(feature = "events")]
-        Some(event_tx),
-      )
-      .unwrap();
+      .genesis_code(genesis_code.to_string())
+      .data_path(node_config.data_path)
+      .peers(initial_peers)
+      .miner_comm(miner_comm);
+
+    #[cfg(feature = "events")]
+    let builder = builder.event_emitter(event_tx);
+
+    let (node_query_sender, node) = builder.build().unwrap();
 
     // Spawns the node thread
     std::thread::spawn(move || {
