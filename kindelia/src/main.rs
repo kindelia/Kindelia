@@ -1,3 +1,10 @@
+// High assurance software should not panic.
+// We flip the clippy default to 'warn', so you should think very
+// carefully. If you absolutely cannot avoid it then it has to
+// be explicitly allowed with #[allow(clippy::x)]
+// See https://github.com/Kindelia/Kindelia-Chain/issues/247
+#![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 mod cli;
 mod config;
 mod files;
