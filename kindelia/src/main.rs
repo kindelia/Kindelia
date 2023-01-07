@@ -30,13 +30,12 @@ use kindelia_client::ApiClient;
 use kindelia_common::{crypto, Name};
 use kindelia_core::api::{Hash, HexStatement};
 use kindelia_core::bits::ProtoSerialize;
+use kindelia_core::builder::NodeBuilder;
 use kindelia_core::config::{
   ApiConfig, MineConfig, NodeConfig, UiConfig, WsConfig,
 };
 use kindelia_core::net::{Address, ProtoComm};
-use kindelia_core::node::{
-  spawn_miner, Node, Transaction, MAX_TRANSACTION_SIZE,
-};
+use kindelia_core::node::{spawn_miner, Transaction, MAX_TRANSACTION_SIZE};
 use kindelia_core::persistence::{
   get_ordered_blocks_path, SimpleFileStorage, BLOCKS_DIR,
 };
@@ -844,17 +843,21 @@ pub fn start_node<C: ProtoComm + 'static>(
   let file_writter = SimpleFileStorage::new(node_config.data_path.clone())?;
 
   // Node state object
-  let (node_query_sender, node) = Node::new(
-    node_config.data_path,
-    node_config.network_id,
-    addr,
-    initial_peers,
-    comm,
-    miner_comm,
-    file_writter,
-    #[cfg(feature = "events")]
-    Some(event_tx),
-  );
+  let genesis_code = include_str!("../../kindelia_core/genesis.kdl");
+  let builder = NodeBuilder::default()
+    .network_id(node_config.network_id)
+    .comm(comm)
+    .miner_comm(miner_comm)
+    .addr(addr)
+    .storage(file_writter)
+    .genesis_code(genesis_code.to_string())
+    .data_path(node_config.data_path)
+    .peers(initial_peers);
+
+  #[cfg(feature = "events")]
+  let builder = builder.event_emitter(event_tx);
+
+  let (node_query_sender, node) = builder.build()?;
 
   // WebSocket API router
   let ws_router = kindelia_ws::ws_router::<

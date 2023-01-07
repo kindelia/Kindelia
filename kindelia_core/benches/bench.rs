@@ -4,12 +4,13 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use kindelia_common::crypto::Keccakable;
 use kindelia_core::persistence;
 use kindelia_core::persistence::BlockStorage;
+use kindelia_core::builder::NodeBuilder;
 use kindelia_lang::parser;
 use primitive_types::U256;
 
 use kindelia_core::bits::ProtoSerialize;
-use kindelia_core::{constants, runtime, net, node, util};
 use kindelia_core::net::ProtoComm;
+use kindelia_core::{constants, net, node, runtime, util};
 
 // KHVM
 // ====
@@ -154,8 +155,15 @@ fn block_loading(c: &mut Criterion) {
   let addr = comm.get_addr().unwrap();
 
   // create Node
-  let (_, mut node) =
-    node::Node::new(dir.clone(), 0, addr, vec![], comm, None, storage, None);
+  let genesis_code = include_str!("../genesis.kdl");
+  let (_query_sender, mut node) = NodeBuilder::default()
+    .comm(comm)
+    .addr(addr)
+    .storage(storage)
+    .genesis_code(genesis_code.to_string())
+    .data_path(dir.clone())
+    .build()
+    .unwrap();
 
   // benchmark block loading
   c.bench_function("block_loading", |b| b.iter(|| node.load_blocks()));

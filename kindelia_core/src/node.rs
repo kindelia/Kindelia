@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -24,7 +23,6 @@ use crate::api::{BlockInfo, FuncInfo, NodeRequest};
 use crate::bits;
 use crate::bits::ProtoSerialize;
 use crate::config::MineConfig;
-use crate::constants;
 use crate::net::{ProtoAddr, ProtoComm};
 use crate::persistence::{BlockStorage, BlockStorageError};
 use crate::runtime::*;
@@ -290,7 +288,13 @@ pub enum InclusionState {
   INCLUDED,
 }
 
+/// Represents a kindelia p2p node
+/// 
+/// Node should be instantiated using builder::NodeBuilder
+//
 // TODO: refactor .block as map to struct? Better safety. Why not?
+//
+// note: any changes here should be reflected in NodeBuilder also.
 #[rustfmt::skip]
 pub struct Node<C: ProtoComm, S: BlockStorage> {
   pub network_id : u32,                               // Network ID / magic number
@@ -301,6 +305,7 @@ pub struct Node<C: ProtoComm, S: BlockStorage> {
   pub query_recv   : mpsc::Receiver<NodeRequest<C>>,    // Receives an API request
   pub pool         : PriorityQueue<Transaction, u64>,   // transactions to be mined
   pub peers        : PeersStore<C::Address>,            // peers store and state control
+
   pub genesis_hash : U256,
   pub tip        : U256,                           // current tip
   pub block      : U256Map<HashedBlock>,           // block hash -> block
@@ -828,79 +833,6 @@ pub enum BlockLookupError {
 }
 
 impl<C: ProtoComm, S: BlockStorage> Node<C, S> {
-  #[allow(clippy::too_many_arguments)]
-  pub fn new(
-    data_path: PathBuf,
-    network_id: u32,
-    addr: C::Address, // todo: review?  https://github.com/Kindelia/Kindelia-Chain/pull/252#discussion_r1037732536
-    initial_peers: Vec<C::Address>,
-    comm: C,
-    miner_comm: Option<MinerCommunication>,
-    storage: S,
-    #[cfg(feature = "events")] event_emitter: Option<
-      mpsc::Sender<NodeEventEmittedInfo>,
-    >,
-  ) -> (mpsc::SyncSender<NodeRequest<C>>, Self) {
-    let (query_sender, query_receiver) = mpsc::sync_channel(1);
-
-    let genesis_stmts =
-      parser::parse_code(constants::GENESIS_CODE).expect("Genesis code parses");
-    let genesis_block =
-      build_genesis_block(&genesis_stmts).expect("Genesis block builds");
-    let genesis_block = genesis_block.hashed();
-    let genesis_hash = genesis_block.get_hash().into();
-
-    let runtime = init_runtime(data_path.join("heaps"), &genesis_stmts);
-
-    #[rustfmt::skip]
-    let mut node = Node {
-      network_id,
-      addr,
-      comm,
-      runtime,
-      pool     : PriorityQueue:: new(),
-      peers    : PeersStore:: new(),
-
-      genesis_hash,
-      tip      : genesis_hash,
-      block    : u256map_from([(genesis_hash, genesis_block)]),
-      pending  : u256map_new(),
-      ancestor : u256map_new(),
-      wait_list: u256map_new(),
-      children : u256map_from([(genesis_hash, vec![]          )]),
-      work     : u256map_from([(genesis_hash, u256(0)         )]),
-      height   : u256map_from([(genesis_hash, 0               )]),
-      target   : u256map_from([(genesis_hash, initial_target())]),
-      results  : u256map_from([(genesis_hash, vec![]          )]),
-
-      #[cfg(feature = "events")]
-      event_emitter: event_emitter.clone(),
-      storage,
-      query_recv : query_receiver,
-      miner_comm,
-    };
-
-    let now = get_time();
-
-    initial_peers.iter().for_each(|address| {
-      return node.peers.see_peer(
-        Peer { address: *address, seen_at: now },
-        #[cfg(feature = "events")] // TODO: remove (implement on Node)
-        event_emitter.clone(),
-      );
-    });
-
-    // TODO: For testing purposes. Remove later.
-    // for &peer_port in try_ports.iter() {
-    //   if peer_port != port {
-    //     let address = Address::IPv4 { val0: 127, val1: 0, val2: 0, val3: 1, port: peer_port };
-    //     node.peers.see_peer(Peer { address: address, seen_at: now })
-    //   }
-    // }
-
-    (query_sender, node)
-  }
-
   pub fn add_transaction(
     &mut self,
     transaction: Transaction,
