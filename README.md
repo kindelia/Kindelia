@@ -1,3 +1,5 @@
+----- **Development on hold** -----
+
 Kindelia: a minimal peer-to-peer computer that isn't a cryptocurrency
 ---------------------------------------------------------------------
 
